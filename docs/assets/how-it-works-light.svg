@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720" role="img" aria-label="How jukecord works. You and your friends use slash commands in Discord, the panel, the jukecord command or the HTTP API, and every one of them goes through the same actions and the same DJ role check. jukecord fetches tracks from YouTube, SoundCloud and the other sites yt-dlp reads, through its own proxy that connects only to public addresses, evens out their loudness once and keeps them as Opus. One player per Discord server is the clock: the bot plays the track in the voice channel from the clock&#x27;s place, and a browser that presses Listen here plays the same file and stays within 0.3 seconds of the clock. Rainbow lines are the music people hear; grey lines are everything else." font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title>How jukecord works. You and your friends use slash commands in Discord, the panel, the jukecord command or the HTTP API, and every one of them goes through the same actions and the same DJ role check. jukecord fetches tracks from YouTube, SoundCloud and the other sites yt-dlp reads, through its own proxy that connects only to public addresses, evens out their loudness once and keeps them as Opus. One player per Discord server is the clock: the bot plays the track in the voice channel from the clock&#x27;s place, and a browser that presses Listen here plays the same file and stays within 0.3 seconds of the clock. Rainbow lines are the music people hear; grey lines are everything else.</title>
+<defs><linearGradient id="bar0" gradientUnits="userSpaceOnUse" x1="548" y1="0" x2="868" y2="0"><stop offset="0.00" stop-color="#ff6f61"/><stop offset="0.25" stop-color="#ffb84d"/><stop offset="0.50" stop-color="#4fcf86"/><stop offset="0.75" stop-color="#4aa3ff"/><stop offset="1.00" stop-color="#a77bff"/></linearGradient><linearGradient id="rb1" gradientUnits="userSpaceOnUse" x1="888" y1="163" x2="1032" y2="163"><stop offset="0.00" stop-color="#ff6f61"/><stop offset="0.25" stop-color="#ffb84d"/><stop offset="0.50" stop-color="#4fcf86"/><stop offset="0.75" stop-color="#4aa3ff"/><stop offset="1.00" stop-color="#a77bff"/></linearGradient><linearGradient id="rb2" gradientUnits="userSpaceOnUse" x1="888" y1="475" x2="1032" y2="475"><stop offset="0.00" stop-color="#ff6f61"/><stop offset="0.25" stop-color="#ffb84d"/><stop offset="0.50" stop-color="#4fcf86"/><stop offset="0.75" stop-color="#4aa3ff"/><stop offset="1.00" stop-color="#a77bff"/></linearGradient><linearGradient id="lg3" gradientUnits="userSpaceOnUse" x1="36" y1="0" x2="80" y2="0"><stop offset="0.00" stop-color="#ff6f61"/><stop offset="0.25" stop-color="#ffb84d"/><stop offset="0.50" stop-color="#4fcf86"/><stop offset="0.75" stop-color="#4aa3ff"/><stop offset="1.00" stop-color="#a77bff"/></linearGradient></defs>
+<rect x="0.5" y="0.5" width="1399" height="719" rx="8" fill="#fafafa" stroke="#ebebeb"/>
+<rect x="36" y="48" width="336" height="196" rx="2" fill="#ffffff" stroke="#ebebeb"/>
+<line x1="36" y1="102" x2="372" y2="102" stroke="#ebebeb"/>
+<text x="56" y="82" font-size="21" font-weight="600" fill="#171717" text-anchor="start" data-box="44,50,320,192">Sites</text>
+<text x="56" y="138" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,50,320,192">YouTube, SoundCloud and</text>
+<text x="56" y="166" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,50,320,192">the other sites yt-dlp reads</text>
+<rect x="36" y="330" width="336" height="290" rx="2" fill="#ffffff" stroke="#ebebeb"/>
+<line x1="36" y1="384" x2="372" y2="384" stroke="#ebebeb"/>
+<text x="56" y="364" font-size="21" font-weight="600" fill="#171717" text-anchor="start" data-box="44,332,320,286">You and your friends</text>
+<text x="56" y="420" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,332,320,286">/play and the other slash</text>
+<text x="56" y="448" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,332,320,286">commands in Discord</text>
+<text x="56" y="476" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,332,320,286">the panel in a browser</text>
+<text x="56" y="504" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,332,320,286">the jukecord command</text>
+<text x="56" y="532" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="44,332,320,286">the HTTP API</text>
+<rect x="528" y="48" width="360" height="572" rx="2" fill="#ffffff" stroke="#ebebeb"/>
+<line x1="528" y1="102" x2="888" y2="102" stroke="#ebebeb"/>
+<text x="548" y="82" font-size="21" font-weight="600" fill="#171717" text-anchor="start" data-box="536,50,344,568">jukecord</text>
+<rect x="654.8" y="62" width="92.19999999999999" height="26" rx="2" fill="#e4f0e9"/>
+<circle cx="667.8" cy="75" r="4" fill="#05773b"/>
+<text x="678.8" y="80" font-size="14" font-weight="500" fill="#05773b" text-anchor="start" data-box="536,50,344,568">Playing</text>
+<text x="548" y="138" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">one queue and one player</text>
+<text x="548" y="166" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">for each Discord server</text>
+<text x="548" y="222" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">one list of actions,</text>
+<text x="548" y="250" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">one permission check</text>
+<text x="548" y="306" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">fetches from public</text>
+<text x="548" y="334" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">addresses only</text>
+<text x="548" y="390" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">evens out the loudness</text>
+<text x="548" y="418" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="536,50,344,568">once, keeps Opus</text>
+<rect x="548" y="550" width="320" height="5" rx="2.5" fill="#ebebeb"/>
+<rect x="548" y="550" width="115.2" height="5" rx="2.5" fill="url(#bar0)"/>
+<circle cx="663.2" cy="552.5" r="8" fill="url(#bar0)" stroke="#ffffff" stroke-width="2.5"/>
+<text x="548" y="582" font-size="15" font-weight="400" fill="#666666" text-anchor="start" data-box="536,50,344,568">1:05</text>
+<text x="868" y="582" font-size="15" font-weight="400" fill="#666666" text-anchor="end" data-box="536,50,344,568">3:00</text>
+<text x="708.0" y="582" font-size="15" font-weight="400" fill="#666666" text-anchor="middle" data-box="536,50,344,568">the player is the clock</text>
+<rect x="1036" y="48" width="328" height="230" rx="2" fill="#ffffff" stroke="#ebebeb"/>
+<line x1="1036" y1="102" x2="1364" y2="102" stroke="#ebebeb"/>
+<text x="1056" y="82" font-size="21" font-weight="600" fill="#171717" text-anchor="start" data-box="1044,50,312,226">Voice channel</text>
+<rect x="1220.8" y="62" width="109.39999999999999" height="26" rx="2" fill="#e4f0e9"/>
+<circle cx="1233.8" cy="75" r="4" fill="#05773b"/>
+<text x="1244.8" y="80" font-size="14" font-weight="500" fill="#05773b" text-anchor="start" data-box="1044,50,312,226">Connected</text>
+<text x="1056" y="138" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="1044,50,312,226">the bot plays the track</text>
+<text x="1056" y="166" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="1044,50,312,226">from the clock&#x27;s place</text>
+<circle cx="1070" cy="236" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1070" y="241" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,50,312,226">M</text>
+<circle cx="1092" cy="236" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1092" y="241" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,50,312,226">J</text>
+<circle cx="1114" cy="236" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1114" y="241" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,50,312,226">S</text>
+<circle cx="1136" cy="236" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1136" y="241" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,50,312,226">H</text>
+<text x="1168" y="242" font-size="17" font-weight="400" fill="#666666" text-anchor="start" data-box="1044,50,312,226">4 in Lounge</text>
+<rect x="1036" y="330" width="328" height="290" rx="2" fill="#ffffff" stroke="#ebebeb"/>
+<line x1="1036" y1="384" x2="1364" y2="384" stroke="#ebebeb"/>
+<text x="1056" y="364" font-size="21" font-weight="600" fill="#171717" text-anchor="start" data-box="1044,332,312,286">Browsers</text>
+<rect x="1207.2" y="340" width="142.8" height="34" rx="2" fill="#f3f3f3" stroke="#d4d4d4"/>
+<path d="M1217.2 360 v-4 a6 6 0 0 1 12 0 v4" fill="none" stroke="#171717" stroke-width="1.6"/><rect x="1216.2" y="357" width="3.5" height="6" rx="1" fill="#171717"/><rect x="1226.7" y="357" width="3.5" height="6" rx="1" fill="#171717"/>
+<text x="1237.2" y="362" font-size="15" font-weight="500" fill="#171717" text-anchor="start" data-box="1044,332,312,286">Listen here</text>
+<text x="1056" y="420" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="1044,332,312,286">the same file, kept</text>
+<text x="1056" y="448" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="1044,332,312,286">within 0.3 s of the</text>
+<text x="1056" y="476" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="1044,332,312,286">clock, at each browser&#x27;s</text>
+<text x="1056" y="504" font-size="19" font-weight="400" fill="#4d4d4d" text-anchor="start" data-box="1044,332,312,286">own volume</text>
+<circle cx="1070" cy="578" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1070" y="583" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,332,312,286">M</text>
+<circle cx="1092" cy="578" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1092" y="583" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,332,312,286">J</text>
+<circle cx="1114" cy="578" r="14" fill="#f3f3f3" stroke="#ffffff" stroke-width="2.5"/>
+<text x="1114" y="583" font-size="13" font-weight="600" fill="#4d4d4d" text-anchor="middle" data-box="1044,332,312,286">S</text>
+<text x="1146" y="584" font-size="17" font-weight="400" fill="#666666" text-anchor="start" data-box="1044,332,312,286">3 listening</text>
+<line x1="372" y1="146" x2="511.0" y2="146.0" stroke="#666666" stroke-width="2" stroke-linecap="round"/>
+<polygon points="524.0,146.0 511.0,153.0 511.0,139.0" fill="#666666"/>
+<text x="450" y="104" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="374,78,152,140">tracks, through</text>
+<text x="450" y="126" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="374,78,152,140">jukecord&#x27;s proxy</text>
+<line x1="372" y1="475" x2="511.0" y2="475.0" stroke="#666666" stroke-width="2" stroke-linecap="round"/>
+<polygon points="524.0,475.0 511.0,482.0 511.0,468.0" fill="#666666"/>
+<text x="450" y="433" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="374,406,152,140">add, skip, seek,</text>
+<text x="450" y="455" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="374,406,152,140">DJ role checked</text>
+<line x1="888" y1="163" x2="1019.0" y2="163.0" stroke="url(#rb1)" stroke-width="5" stroke-linecap="round"/>
+<polygon points="1032.0,163.0 1019.0,170.0 1019.0,156.0" fill="#a77bff"/>
+<text x="960" y="141" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="890,112,144,110">Opus, live</text>
+<line x1="888" y1="475" x2="1019.0" y2="475.0" stroke="url(#rb2)" stroke-width="5" stroke-linecap="round"/>
+<polygon points="1032.0,475.0 1019.0,482.0 1019.0,468.0" fill="#a77bff"/>
+<text x="960" y="433" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="890,406,144,140">the same file,</text>
+<text x="960" y="455" font-size="17" font-weight="400" fill="#666666" text-anchor="middle" data-box="890,406,144,140">the clock</text>
+<line x1="36" y1="668" x2="80" y2="668" stroke="url(#lg3)" stroke-width="5" stroke-linecap="round"/>
+<text x="94" y="674" font-size="17" font-weight="400" fill="#666666" text-anchor="start" data-box="90,650,280,34">the music people hear</text>
+<line x1="340" y1="668" x2="384" y2="668" stroke="#666666" stroke-width="2"/>
+<text x="398" y="674" font-size="17" font-weight="400" fill="#666666" text-anchor="start" data-box="394,650,220,34">everything else</text>
+</svg>

@@ -1,0 +1,9 @@
+# A blank issue stays possible, for anything the two forms do not fit.
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/kanggu12/jukecord/security
+    about: Report it privately on the Security tab (SECURITY.md).
+  - name: Setting it up
+    url: https://github.com/kanggu12/jukecord/blob/main/docs/TROUBLESHOOTING.md
+    about: Most problems with a first setup are answered here.

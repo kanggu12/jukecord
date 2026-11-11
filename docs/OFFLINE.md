@@ -13,8 +13,8 @@ Without a bot token jukecord runs browser-only, which needs no Discord at all; t
 
 ## Building the image without the internet
 
-The image build downloads the Node base image, Debian's ffmpeg, the npm packages and yt-dlp's release. To build on a
-machine without access, build on one with access and move the image:
+The image build downloads the Node base image, Debian's ffmpeg, the npm packages and yt-dlp's release. To run it on a
+machine without access, build on one with access and move the image, with a copy of this repository:
 
 ```bash
 docker build -f deploy/docker/Dockerfile -t jukecord:local .
@@ -25,6 +25,27 @@ gunzip -c jukecord.tar.gz | docker load
 ```
 
 `compose.yaml` uses `jukecord:local` by default, so `./jukecord up` uses the loaded image without building.
+
+A released image works the same way: `docker pull ghcr.io/kanggu12/jukecord:0.1.0` on the machine with access, save
+and load it as above, and set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.1.0` in `.env`. The image is built for amd64
+and arm64; to carry it to a machine of the other kind, pull it with `--platform linux/arm64` (or `linux/amd64`).
+
+## On Kubernetes without the internet
+
+Fetch the chart and the image where there is access, and put the image in a registry the cluster can reach:
+
+```bash
+# on a machine with access
+helm pull oci://ghcr.io/kanggu12/charts/jukecord --version 0.1.0
+docker pull ghcr.io/kanggu12/jukecord:0.1.0
+docker save ghcr.io/kanggu12/jukecord:0.1.0 | gzip > jukecord-image.tar.gz
+# inside, where the cluster's registry is
+gunzip -c jukecord-image.tar.gz | docker load
+docker tag ghcr.io/kanggu12/jukecord:0.1.0 registry.example.internal/jukecord:0.1.0
+docker push registry.example.internal/jukecord:0.1.0
+helm install jukecord ./jukecord-0.1.0.tgz -n jukecord --create-namespace \
+  --set image.repository=registry.example.internal/jukecord
+```
 
 ## Moving the data
 

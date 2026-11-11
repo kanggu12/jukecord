@@ -1,0 +1,54 @@
+name: Something does not work
+description: The bot, the panel, the jukecord command or the API does something wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. English or Korean are both fine.
+        A security problem goes to the Security tab instead (SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How jukecord runs
+      options:
+        - Docker Compose (./jukecord up)
+        - Kubernetes (Helm)
+        - From source (npm start)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: jukecord version
+      description: Beside the logo in the panel, /version in Discord, or what ./jukecord status says.
+      placeholder: 0.1.0
+  - type: input
+    id: where
+    attributes:
+      label: Where it happened
+      description: Discord, the panel (with the browser and the device), the jukecord command or the API.
+      placeholder: the panel, Safari on an iPhone
+  - type: textarea
+    id: doctor
+    attributes:
+      label: What jukecord's own check says
+      description: >-
+        Docker Compose: ./jukecord doctor. Kubernetes: kubectl -n jukecord exec deploy/jukecord -- jukecord doctor.
+        From source: node src/cli/main.ts doctor.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        The lines around the problem: ./jukecord logs, or the Log page in the panel. Remove server names, addresses and
+        anything else you do not want to share.
+      render: text

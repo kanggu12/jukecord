@@ -12,7 +12,9 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   seek, and the keys: play or pause, skip, stop, repeat (off, the queue, this track) and remove (drops the track
   without counting it as played).
 - **Queue**: drag a track by its handle to move it, or use its keys: play now, play next, remove. Above the list:
-  search, shuffle, remove duplicates, save as a playlist, load a playlist, clear.
+  search, shuffle, remove duplicates, save as a playlist, load a playlist, clear. On a phone or in a narrow window, a
+  track's keys and moves wait behind its **⋯** key, and the queue's tools behind the one beside **Shuffle**. A long
+  queue shows a hundred tracks at a time (**Show more** brings the next hundred); search covers all of it.
 - **Add**: paste an address (a video, a playlist, a SoundCloud page ...) or type search words. **Add** puts it at the end
   of the queue; **Play now** plays it at once.
 - **Voice channel**: where the bot is, the channels it may join (with how many people are in each), and who is
@@ -29,7 +31,8 @@ browser's own. The page title shows what is playing, and the media keys and the 
 control jukecord.
 
 Keyboard shortcuts: <kbd>Space</kbd> play or pause, <kbd>←</kbd> <kbd>→</kbd> 10 seconds back or forward, <kbd>N</kbd>
-next track, <kbd>/</kbd> add a track, <kbd>?</kbd> the list.
+next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in focus, <kbd>/</kbd> add a track,
+<kbd>?</kbd> the list.
 
 ## Who may do what
 

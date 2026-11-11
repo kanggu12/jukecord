@@ -52,5 +52,7 @@ To release:
 3. Tag `vX.Y.Z` and push the tag. `release.yml` checks the versions and the notes, runs the tests and the chart test,
    publishes the image for amd64 and arm64 and the chart to ghcr.io with signed build provenance, and makes the GitHub
    release.
-4. The first time only: on GitHub, make the `jukecord` and `charts/jukecord` packages public (a new package starts
-   private, and `docker pull` and `helm install` need it public).
+4. Check that the image and the chart answer without logging in, as `docker pull` and `helm install` need:
+   `docker manifest inspect ghcr.io/kanggu12/jukecord:X.Y.Z` and
+   `helm show chart oci://ghcr.io/kanggu12/charts/jukecord --version X.Y.Z`, on a machine not logged in to ghcr.io.
+   A package that is private answers "unauthorized"; make it public on its page under the repository's **Packages**.
