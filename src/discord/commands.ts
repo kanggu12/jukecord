@@ -7,6 +7,7 @@
 import {
   ChannelType,
   InteractionContextType,
+  PermissionFlagsBits,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
   SlashCommandBuilder,
   type SlashCommandStringOption,
@@ -39,6 +40,11 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   'playlist-delete': '/playlist delete',
   join: '/join',
   leave: '/leave',
+  // Discord's own channel picker in /join lists the voice channels.
+  'voice-channels': '/join',
+  stats: '/stats',
+  settings: '/dj show',
+  'dj-role': '/dj set',
   status: '/version',
 };
 
@@ -257,6 +263,48 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       '같이듣기',
       '브라우저에서 같이 듣기(패널 열기)',
     ),
+    command('stats', 'Listening figures of this server', '통계', '이 서버에서 들은 기록 통계').addIntegerOption(
+      (option) =>
+        option
+          .setName('days')
+          .setDescription('How many days back (default 30)')
+          .setNameLocalizations({ ko: '기간' })
+          .setDescriptionLocalizations({ ko: '며칠 전까지(기본 30일)' })
+          .setMinValue(1)
+          .setMaxValue(366),
+    ),
+    command('dj', 'Who may change the music here', '디제이', '이 서버에서 음악을 바꿀 수 있는 사람')
+      // Shown in the command list only to people who can manage the server; Discord also enforces it.
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addSubcommand((sub) =>
+        sub
+          .setName('show')
+          .setDescription('Show the DJ role')
+          .setNameLocalizations({ ko: '보기' })
+          .setDescriptionLocalizations({ ko: 'DJ 역할 보기' }),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('set')
+          .setDescription('Only members with this role may change the music')
+          .setNameLocalizations({ ko: '정하기' })
+          .setDescriptionLocalizations({ ko: '이 역할이 있는 사람만 음악을 바꿈' })
+          .addRoleOption((option) =>
+            option
+              .setName('role')
+              .setDescription('The DJ role')
+              .setNameLocalizations({ ko: '역할' })
+              .setDescriptionLocalizations({ ko: 'DJ 역할' })
+              .setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('clear')
+          .setDescription('Everyone may change the music again')
+          .setNameLocalizations({ ko: '풀기' })
+          .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
+      ),
     command('version', 'The jukecord version and its connection', '버전', 'jukecord 판과 연결 상태'),
   ];
   return commands.map((builder) => builder.toJSON());

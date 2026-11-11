@@ -105,4 +105,43 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX history_by_guild_id ON history(guild_id, id);
     `,
   },
+  {
+    version: 3,
+    sql: `
+      -- Discord people jukecord has met (through a command or a panel login), so the panel can show who added a
+      -- track by name. Only what Discord shows everyone: the display name and the avatar's hash.
+      CREATE TABLE users (
+        id         TEXT    PRIMARY KEY,
+        name       TEXT    NOT NULL,
+        avatar     TEXT,
+        updated_at INTEGER NOT NULL
+      );
+
+      -- Panel logins. The cookie holds a random secret; only its SHA-256 is stored, so a copy of the database does not
+      -- log anyone in. "kind" is host (a login link from the machine running jukecord) or user (Discord login).
+      CREATE TABLE sessions (
+        id_hash    TEXT    PRIMARY KEY,
+        kind       TEXT    NOT NULL,
+        user_id    TEXT,
+        csrf       TEXT    NOT NULL,
+        created_at INTEGER NOT NULL,
+        seen_at    INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX sessions_by_expiry ON sessions(expires_at);
+
+      -- API tokens for the CLI and scripts, stored as SHA-256 hashes like the sessions. "scope" is read, control or
+      -- admin; "kind" and "user_id" say whose token it is (the host's, or a Discord user's).
+      CREATE TABLE api_tokens (
+        id         INTEGER PRIMARY KEY,
+        hash       TEXT    NOT NULL UNIQUE,
+        name       TEXT    NOT NULL,
+        kind       TEXT    NOT NULL,
+        user_id    TEXT,
+        scope      TEXT    NOT NULL,
+        created_at INTEGER NOT NULL,
+        used_at    INTEGER
+      );
+    `,
+  },
 ];

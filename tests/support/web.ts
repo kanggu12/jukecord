@@ -1,0 +1,248 @@
+/**
+ * A whole jukecord web server for tests: a throwaway database, a fake Discord directory, a resolver that answers
+ * from a table, fake media, and the real server, routes and logins on top.
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Access } from '../../src/app/access.ts';
+import {
+  Actions,
+  type Directory,
+  type GuildInfo,
+  type MemberInfo,
+  type RoleInfo,
+  type VoiceControl,
+} from '../../src/app/actions.ts';
+import { Bus } from '../../src/core/bus.ts';
+import { Players } from '../../src/core/players.ts';
+import { QueueService } from '../../src/core/queue.ts';
+import type { NewTrack } from '../../src/core/types.ts';
+import { createLogger, MemorySink } from '../../src/log.ts';
+import { MediaCache } from '../../src/media/cache.ts';
+import type { Resolver } from '../../src/media/resolver.ts';
+import type { Store } from '../../src/store/store.ts';
+import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
+import { Presenter } from '../../src/web/present.ts';
+import { createWebServer, type WebServer } from '../../src/web/server.ts';
+import { FakeClock, FakeMedia } from './fakes.ts';
+import { memoryStore } from './store.ts';
+
+export const GUILD = '100000000000000001';
+export const OTHER_GUILD = '100000000000000002';
+export const ALICE = '300000000000000001';
+export const BOB = '300000000000000002';
+export const DJ_ROLE = '500000000000000001';
+/** The host token of every test server. */
+export const HOST_TOKEN = 'jkc_test-host-token-0123456789abcdef';
+
+/** Discord as tests want it: two servers, a DJ role, and members set per test. */
+export class FakeDirectory implements Directory {
+  guildList: GuildInfo[] = [
+    { id: GUILD, name: 'Example Server', icon: null },
+    { id: OTHER_GUILD, name: 'Second Server', icon: null },
+  ];
+  readonly members = new Map<string, MemberInfo>();
+  /** How many times members were asked about (to see the cache work). */
+  asked = 0;
+  /** When set, member questions fail as if Discord were down. */
+  down = false;
+
+  self() {
+    return { id: '200000000000000001', name: 'jukecord', avatar: null };
+  }
+
+  guilds(): GuildInfo[] {
+    return this.guildList;
+  }
+
+  roles(guildId: string): RoleInfo[] {
+    return guildId === GUILD ? [{ id: DJ_ROLE, name: 'DJ', color: 0x3d7be0 }] : [];
+  }
+
+  async member(guildId: string, userId: string): Promise<MemberInfo | null> {
+    this.asked += 1;
+    if (this.down) throw new Error('Discord is down');
+    return this.members.get(`${guildId}:${userId}`) ?? null;
+  }
+
+  /** Makes someone a member of a server. */
+  join(guildId: string, userId: string, member: Partial<MemberInfo> = {}): void {
+    this.members.set(`${guildId}:${userId}`, { roles: [], manage: false, ...member });
+  }
+}
+
+/** Voice as tests want it: joining always works and is remembered. */
+export class FakeVoice implements VoiceControl {
+  readonly current = new Map<string, { channelId: string; name: string }>();
+  async join(guildId: string, channelId: string | null) {
+    const joined = { channelId: channelId ?? '400000000000000001', name: 'Lounge' };
+    this.current.set(guildId, joined);
+    return joined;
+  }
+  leave(guildId: string): boolean {
+    return this.current.delete(guildId);
+  }
+  channel(guildId: string) {
+    return this.current.get(guildId) ?? null;
+  }
+  channels() {
+    return [{ id: '400000000000000001', name: 'Lounge', people: 1 }];
+  }
+}
+
+export interface TestServer {
+  readonly web: WebServer;
+  readonly store: Store;
+  readonly bus: Bus;
+  readonly clock: FakeClock;
+  readonly media: FakeMedia;
+  readonly directory: FakeDirectory;
+  readonly auth: Auth;
+  readonly actions: Actions;
+  readonly players: Players;
+  readonly queue: QueueService;
+  readonly cache: MediaCache;
+  readonly logs: MemorySink;
+  readonly dataDir: string;
+  /** The base address once listening (`listen: true`); empty otherwise. */
+  readonly url: string;
+  close(): Promise<void>;
+}
+
+export interface TestServerOptions {
+  /** Without Discord: browser-only mode. */
+  readonly browserOnly?: boolean;
+  /** Discord login with a fake Discord API. */
+  readonly oauth?: OAuthConfig;
+  readonly fetch?: typeof fetch;
+  /** Listen on a real port (for WebSocket and CLI tests); app.inject is enough otherwise. */
+  readonly listen?: boolean;
+  /** The panel directory to serve. */
+  readonly panelDir?: string | null;
+  /** What the resolver finds for each input. */
+  readonly found?: Record<string, NewTrack[]>;
+}
+
+/** Example tracks: example.com addresses only, so tests never point at real pages. */
+export function exampleTrack(name: string, durationMs = 180_000): NewTrack {
+  return {
+    source: `https://example.com/watch?v=${name}`,
+    url: `https://example.com/watch?v=${name}`,
+    title: `Track ${name}`,
+    uploader: 'Example',
+    durationMs,
+    thumbnail: null,
+  };
+}
+
+/** Starts a test server. */
+export async function testServer(options: TestServerOptions = {}): Promise<TestServer> {
+  const clock = new FakeClock();
+  const store = memoryStore(() => clock.now());
+  const bus = new Bus();
+  const queue = new QueueService(store.queue, bus);
+  const media = new FakeMedia();
+  const logs = new MemorySink();
+  const log = createLogger({ level: 'debug', sinks: [logs] });
+  const players = new Players({
+    queue,
+    media,
+    history: store.history,
+    state: store.playerState,
+    bus,
+    clock,
+    log,
+    fetchTimeoutMs: 60_000,
+  });
+  const found = options.found ?? {};
+  // The resolver looks inputs up in the table; anything else finds nothing.
+  const resolver = {
+    resolve: async (input: string) => {
+      const tracks = found[input];
+      if (!tracks) throw new Error(`nothing to add for "${input}"`);
+      return tracks.map((track) => store.tracks.upsert(track));
+    },
+  } as unknown as Resolver;
+  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now() });
+  const directory = new FakeDirectory();
+  const voice = new FakeVoice();
+  if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
+  const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
+  const auth = new Auth({
+    store,
+    hostToken: HOST_TOKEN,
+    secureCookies: false,
+    oauth: options.oauth ?? null,
+    log,
+    // Real time for logins: the session repository uses the store's clock, which the tests keep fixed.
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-web-'));
+  const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log });
+  cache.init();
+  const web = await createWebServer({
+    host: '127.0.0.1',
+    port: 0,
+    publicUrl: 'http://localhost:8795',
+    trustProxy: false,
+    panelDir: options.panelDir ?? null,
+    bus,
+    players,
+    queue,
+    cache,
+    mp3: async () => null,
+    log,
+    ready: () => true,
+    discordReady: () => !options.browserOnly,
+    deps: {
+      actions,
+      access,
+      auth,
+      store,
+      presenter: new Presenter(store.users),
+      directory: () => (options.browserOnly ? null : directory),
+      publicUrl: 'http://localhost:8795',
+      logDir: path.join(dataDir, 'logs'),
+      logFiles: 5,
+      backupDir: path.join(dataDir, 'backups'),
+      discordMode: !options.browserOnly,
+      doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
+    },
+  });
+  let url = '';
+  if (options.listen) url = await web.listen();
+  return {
+    web,
+    store,
+    bus,
+    clock,
+    media,
+    directory,
+    auth,
+    actions,
+    players,
+    queue,
+    cache,
+    logs,
+    dataDir,
+    url,
+    close: async () => {
+      await web.close();
+      store.close();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** The Authorization header of the host token. */
+export const asHost = { authorization: `Bearer ${HOST_TOKEN}` };
+
+/** Logs a Discord user in (as the OAuth callback would) and returns the headers a panel would send for changes. */
+export function sessionFor(server: TestServer, userId: string | null): { cookie: string; csrf: string } {
+  const setCookie = server.auth.startSession(userId === null ? { kind: 'host' } : { kind: 'user', userId });
+  const cookie = setCookie.split(';')[0] ?? '';
+  const caller = server.auth.identify({ cookie });
+  if (!caller?.csrf) throw new Error('the session just made does not log in');
+  return { cookie, csrf: caller.csrf };
+}

@@ -11,7 +11,7 @@ import { FakeClock, FakeMedia } from '../support/fakes.ts';
 import { memoryStore } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
-const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayControl: true };
+const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayControl: true, mayManage: false };
 
 // Tracks of the given lengths, found for any input.
 function setup(lengths: (number | null)[], limits: { queueMax: number; trackMaxMs: number }) {

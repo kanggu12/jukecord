@@ -8,7 +8,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { Actions } from './app/actions.ts';
+import { fileURLToPath } from 'node:url';
+import { Access } from './app/access.ts';
+import { Actions, type Directory } from './app/actions.ts';
+import { runDoctor } from './app/doctor.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -24,11 +27,19 @@ import { Resolver } from './media/resolver.ts';
 import { YtDlp } from './media/ytdlp.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
+import { Auth, ensureHostToken } from './web/auth.ts';
+import { Presenter } from './web/present.ts';
+import { createWebServer, type WebServer } from './web/server.ts';
 
 // The most tracks one playlist adds: enough for any party, small enough not to bury the queue.
 const MAX_PLAYLIST = 500;
 
+// The built panel, beside the source in a checkout and in the image (panel/dist, made by `npm run build`).
+const PANEL_DIR = fileURLToPath(new URL('../panel/dist', import.meta.url));
+
 async function main(): Promise<number> {
+  // Everything jukecord writes (the database, logins, logs, the cache) is for its own user only.
+  process.umask(0o077);
   let config: ReturnType<typeof loadConfig>;
   try {
     config = loadConfig(process.env, process.cwd());
@@ -133,23 +144,82 @@ async function main(): Promise<number> {
   if (restored > 0) log.info('restored what was playing before the restart, paused', { servers: restored });
   prefetcher.start();
 
-  let bot: Bot | null = null;
-  if (config.discord.token) {
-    bot = new Bot({
-      token: config.discord.token,
+  // The bot is made before the web server (whose logins ask it about members) and started after it, so the panel
+  // answers while Discord connects.
+  const bot = config.discord.token
+    ? new Bot({
+        token: config.discord.token,
+        actions,
+        players,
+        bus,
+        ffmpeg,
+        settings: store.settings,
+        discord: store.discord,
+        users: store.users,
+        voiceIdleMs: config.voice.idleMs,
+        log: log.child('discord'),
+        panelUrl: config.publicUrl,
+      })
+    : null;
+  const directory = (): Directory | null => bot;
+  if (bot) actions.setVoice(bot.voice, () => bot.ready(), bot);
+
+  // Logins. Without a public address the panel is reached on this machine, which is also where Discord sends people
+  // back to after logging in.
+  const publicUrl = config.publicUrl ?? `http://localhost:${config.port}`;
+  const access = new Access({ settings: store.settings, directory });
+  const { clientId, clientSecret } = config.discord;
+  const auth = new Auth({
+    store,
+    hostToken: ensureHostToken(config.dataDir),
+    secureCookies: publicUrl.startsWith('https://'),
+    oauth: clientId && clientSecret ? { clientId, clientSecret, redirectUri: `${publicUrl}/auth/callback` } : null,
+    log: log.child('auth'),
+  });
+  const web: WebServer = await createWebServer({
+    host: config.host,
+    port: config.port,
+    publicUrl,
+    trustProxy: config.trustProxy,
+    panelDir: PANEL_DIR,
+    bus,
+    players,
+    queue,
+    cache,
+    mp3: (track, signal) => media.mp3(track, signal),
+    log: log.child('web'),
+    ready: () => store.db.isOpen,
+    discordReady: () => bot?.ready() ?? false,
+    deps: {
       actions,
-      players,
-      bus,
-      ffmpeg,
-      settings: store.settings,
-      discord: store.discord,
-      voiceIdleMs: config.voice.idleMs,
-      log: log.child('discord'),
-      panelUrl: config.publicUrl,
-    });
-    const running = bot;
-    actions.setVoice(running.voice, () => running.ready());
-    await running.start();
+      access,
+      auth,
+      store,
+      presenter: new Presenter(store.users),
+      directory,
+      publicUrl,
+      logDir: path.join(config.dataDir, 'logs'),
+      logFiles: config.log.files,
+      backupDir: path.join(config.dataDir, 'backups'),
+      discordMode: bot !== null,
+      doctor: () =>
+        runDoctor({
+          config,
+          store,
+          cache,
+          ytdlp,
+          ffmpeg,
+          discordReady: () => bot?.ready() ?? false,
+          directory,
+          discordLogin: auth.discordLogin,
+        }),
+    },
+  });
+  await web.listen();
+  log.info('the panel and the API are up', { listen: `${config.host}:${config.port}`, open: publicUrl });
+
+  if (bot) {
+    await bot.start();
   } else {
     log.info('no Discord token (JUKECORD_DISCORD_TOKEN): running browser-only');
   }
@@ -167,10 +237,15 @@ async function main(): Promise<number> {
     }, 10_000).unref();
     prefetcher.stop();
     players.checkpointAll();
-    void (bot?.stop() ?? Promise.resolve()).finally(() => {
-      store.close();
-      process.exit(0);
-    });
+    // The panels are told first (they reconnect to the next jukecord), then Discord, then the database.
+    void web
+      .close()
+      .catch(() => {})
+      .then(() => bot?.stop())
+      .finally(() => {
+        store.close();
+        process.exit(0);
+      });
   };
   process.once('SIGTERM', () => stop('SIGTERM'));
   process.once('SIGINT', () => stop('SIGINT'));

@@ -5,7 +5,7 @@
  * (playing, paused, added, a problem), the one place colour means something in Discord's layout.
  */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
-import type { AddResult } from '../app/actions.ts';
+import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
@@ -47,6 +47,17 @@ const TEXT = {
   done: { en: 'Done', ko: '했음' },
   repeatTrack: { en: 'Repeating this track', ko: '지금 곡 반복' },
   repeatQueue: { en: 'Repeating the queue', ko: '대기열 반복' },
+  statsTitle: { en: (days: number) => `The last ${days} days`, ko: (days: number) => `최근 ${days}일` },
+  plays: { en: 'plays', ko: '재생' },
+  listened: { en: 'listened', ko: '들은 시간' },
+  distinct: { en: 'tracks', ko: '곡' },
+  topTracks: { en: 'Most played', ko: '많이 들은 곡' },
+  topPeople: { en: 'Added most', ko: '많이 넣은 사람' },
+  nobody: { en: 'the host', ko: '호스트' },
+  noStats: { en: 'Nothing was played in this time', ko: '이 기간에 들은 곡 없음' },
+  djRole: { en: 'DJ role', ko: 'DJ 역할' },
+  everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
+  onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -191,6 +202,56 @@ export function playlistsCard(playlists: readonly Playlist[], lang: Lang): Embed
     .setColor(COLOUR.neutral)
     .setTitle(TEXT.playlists[lang])
     .setDescription(playlists.map((playlist) => `**${playlist.name}** · ${playlist.size}`).join('\n'));
+}
+
+// Listening time as people say it: "3 h 12 min", "45 min".
+function hoursMinutes(ms: number, lang: Lang): string {
+  const minutes = Math.round(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (lang === 'ko') return hours > 0 ? `${hours}시간 ${rest}분` : `${rest}분`;
+  return hours > 0 ? `${hours} h ${rest} min` : `${rest} min`;
+}
+
+// Plays per day as a row of block characters (the tallest day is a full block), in a code span so it lines up.
+function sparkline(days: StatsView['days']): string {
+  const blocks = '▁▂▃▄▅▆▇█';
+  const top = Math.max(1, ...days.map((day) => day.plays));
+  // Zero days get a space, so a quiet week looks quiet instead of like a floor of low bars.
+  return days
+    .map((day) => (day.plays === 0 ? ' ' : blocks[Math.min(7, Math.floor((day.plays / top) * 7.999))]))
+    .join('');
+}
+
+/** Listening figures: totals, plays per day, the most played tracks and who added most. */
+export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
+  const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.statsTitle[lang](stats.span));
+  if (stats.plays === 0) return embed.setDescription(TEXT.noStats[lang]);
+  const lines = [
+    `**${stats.plays}** ${TEXT.plays[lang]} · ${TEXT.listened[lang]} **${hoursMinutes(stats.playedMs, lang)}** · **${stats.tracks}** ${TEXT.distinct[lang]}`,
+    // The last 30 days at most: a card is narrow, and longer spans are what the panel's chart is for.
+    `\`${sparkline(stats.days.slice(-30))}\``,
+  ];
+  if (stats.topTracks.length > 0) {
+    lines.push('', `**${TEXT.topTracks[lang]}**`);
+    for (const [index, entry] of stats.topTracks.slice(0, 5).entries()) {
+      lines.push(`${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${entry.plays}`);
+    }
+  }
+  if (stats.topPeople.length > 0) {
+    lines.push('', `**${TEXT.topPeople[lang]}**`);
+    for (const entry of stats.topPeople.slice(0, 3)) {
+      lines.push(`${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${entry.plays}`);
+    }
+  }
+  return embed.setDescription(lines.join('\n'));
+}
+
+/** The DJ role, or that everyone may change the music. */
+export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
+  const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
+  if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
+  return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
 }
 
 /** "Done" in the person's language. */

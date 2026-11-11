@@ -19,15 +19,24 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { type ActionContext, ActionError, type Actions } from '../app/actions.ts';
+import {
+  type ActionContext,
+  ActionError,
+  type Actions,
+  type Directory,
+  type GuildInfo,
+  type MemberInfo,
+  type RoleInfo,
+} from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
-import type { DiscordRepository, SettingsRepository } from '../store/store.ts';
+import type { DiscordRepository, SettingsRepository, UserRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
 import {
   addedCard,
+  djCard,
   done,
   historyCard,
   type Lang,
@@ -37,6 +46,7 @@ import {
   playlistsCard,
   problem,
   queueCard,
+  statsCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
 import { VoiceManager } from './voice.ts';
@@ -55,9 +65,11 @@ export interface BotOptions {
   readonly discord: DiscordRepository;
   /** How long the bot waits alone in a voice channel before leaving (0: never). */
   readonly voiceIdleMs: number;
+  /** Where the people who use commands are remembered, so the panel can show who added what. */
+  readonly users: UserRepository;
 }
 
-export class Bot {
+export class Bot implements Directory {
   readonly client: Client;
   readonly voice: VoiceManager;
   private readonly options: BotOptions;
@@ -71,7 +83,59 @@ export class Bot {
       ffmpeg: options.ffmpeg,
       log: options.log,
       idleMs: options.voiceIdleMs,
+      bus: options.bus,
     });
+  }
+
+  self(): { id: string; name: string; avatar: string | null } | null {
+    const user = this.client.user;
+    return user ? { id: user.id, name: user.displayName, avatar: user.avatar } : null;
+  }
+
+  guilds(): GuildInfo[] {
+    return [...this.client.guilds.cache.values()]
+      .map((guild) => ({ id: guild.id, name: guild.name, icon: guild.icon }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  roles(guildId: string): RoleInfo[] {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return [];
+    return (
+      [...guild.roles.cache.values()]
+        // @everyone is the "no DJ role" case, and bot-managed roles belong to their bots; neither is a DJ role.
+        .filter((role) => role.id !== guild.id && !role.managed)
+        // Highest first, the way Discord lists roles.
+        .sort((a, b) => b.position - a.position)
+        .map((role) => ({ id: role.id, name: role.name, color: role.color }))
+    );
+  }
+
+  async member(guildId: string, userId: string): Promise<MemberInfo | null> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return null;
+    try {
+      // Fetched afresh: without the members intent Discord does not tell the bot when roles change.
+      const member = await guild.members.fetch({ user: userId, force: true });
+      return { roles: [...member.roles.cache.keys()], manage: member.permissions.has(PermissionFlagsBits.ManageGuild) };
+    } catch (error) {
+      // 10007 is Discord's "Unknown Member": not in the server. Anything else is a failure worth passing on.
+      if ((error as { code?: number }).code === 10007) return null;
+      throw error;
+    }
+  }
+
+  // Remembers the name and avatar of whoever used a command, for the panel's "added by".
+  private remember(interaction: ChatInputCommandInteraction | ButtonInteraction): void {
+    try {
+      this.options.users.upsert({
+        id: interaction.user.id,
+        name: interaction.user.displayName,
+        avatar: interaction.user.avatar,
+      });
+    } catch (error) {
+      this.options.log.debug('could not remember a user', { error });
+    }
   }
 
   // The "listening to" line under the bot's name. Discord limits presence updates, so changes are sent at most every
@@ -164,13 +228,19 @@ export class Bot {
     const roles = interaction.member.roles;
     const hasRole = role === null || (Array.isArray(roles) ? roles.includes(role) : roles.cache.has(role));
     const manager = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
-    return { guildId: interaction.guildId, userId: interaction.user.id, mayControl: hasRole || manager };
+    return {
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      mayControl: hasRole || manager,
+      mayManage: manager,
+    };
   }
 
   private async onCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     const lang = langOf(interaction.locale);
     const context = this.context(interaction);
     if (!context) return;
+    this.remember(interaction);
     const actions = this.options.actions;
     const options = interaction.options;
     try {
@@ -289,6 +359,22 @@ export class Bot {
             ],
           });
           return;
+        case 'stats':
+          await interaction.editReply({
+            embeds: [
+              statsCard(actions.stats(context, options.getInteger('days') ?? 30, offsetOf(interaction.locale)), lang),
+            ],
+          });
+          return;
+        case 'dj': {
+          const sub = options.getSubcommand();
+          const settings =
+            sub === 'show'
+              ? actions.settings(context)
+              : actions.djRole(context, sub === 'set' ? options.getRole('role', true).id : null);
+          await interaction.editReply({ embeds: [djCard(settings, lang)] });
+          return;
+        }
         case 'version': {
           const status = actions.status();
           await interaction.editReply({
@@ -354,6 +440,7 @@ export class Bot {
     const lang = langOf(interaction.locale);
     const context = this.context(interaction);
     if (!context || !interaction.customId.startsWith('jukecord:')) return;
+    this.remember(interaction);
     const actions = this.options.actions;
     try {
       const snapshot =
@@ -374,7 +461,7 @@ export class Bot {
     if (!interaction.inGuild()) return;
     const typed = interaction.options.getFocused().toLowerCase();
     const names = this.options.actions
-      .playlists({ guildId: interaction.guildId, userId: interaction.user.id, mayControl: false })
+      .playlists({ guildId: interaction.guildId, userId: interaction.user.id, mayControl: false, mayManage: false })
       .map((playlist) => playlist.name)
       .filter((name) => name.toLowerCase().includes(typed))
       .slice(0, 25);
@@ -400,4 +487,10 @@ export class Bot {
       // The interaction expired (15 min) or the channel is gone; nothing left to tell.
     }
   }
+}
+
+// Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets UTC,
+// which the card's day boundaries make visible only around midnight.
+function offsetOf(locale: string): number {
+  return locale.toLowerCase().startsWith('ko') ? 540 : 0;
 }

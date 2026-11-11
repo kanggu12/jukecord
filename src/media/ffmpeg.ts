@@ -5,7 +5,7 @@
  * playing) and what browsers that play Ogg Opus fetch. Loudness is evened out once, when the file is made.
  */
 import { spawn } from 'node:child_process';
-import { lastLines, ProcessError, watch } from './process.ts';
+import { lastLines, ProcessError, run, watch } from './process.ts';
 import { parseProgress, type YtDlp, ytdlpFailure } from './ytdlp.ts';
 
 // The sound of every cached file: loudness -14 LUFS (streaming services' level) with true peaks under -1 dB and a
@@ -58,6 +58,18 @@ export class Ffmpeg {
 
   constructor(binary: string) {
     this.binary = binary;
+  }
+
+  /** The installed ffmpeg's version line and whether it has the two encoders jukecord uses (for the doctor command). */
+  async about(): Promise<{ version: string; opus: boolean; mp3: boolean }> {
+    const version = await run(this.binary, ['-hide_banner', '-version'], { timeoutMs: 15_000 });
+    const encoders = await run(this.binary, ['-hide_banner', '-encoders'], { timeoutMs: 15_000, maxStdout: 1024 ** 2 });
+    return {
+      // "ffmpeg version 7.1.2-0+deb13u1 Copyright ..." -> the part before "Copyright".
+      version: (version.stdout.split('\n')[0] ?? '').replace(/\s+Copyright.*$/, '').trim(),
+      opus: /\blibopus\b/.test(encoders.stdout),
+      mp3: /\blibmp3lame\b/.test(encoders.stdout),
+    };
   }
 
   /**

@@ -81,6 +81,9 @@ export class Store {
   readonly playerState: PlayerStateRepository;
   readonly settings: SettingsRepository;
   readonly discord: DiscordRepository;
+  readonly users: UserRepository;
+  readonly sessions: SessionRepository;
+  readonly tokens: TokenRepository;
   // How deep the current transaction is nested; inner ones become savepoints.
   private depth = 0;
 
@@ -94,6 +97,9 @@ export class Store {
     this.playerState = new PlayerStateRepository(this, now);
     this.settings = new SettingsRepository(this, now);
     this.discord = new DiscordRepository(this, now);
+    this.users = new UserRepository(this, now);
+    this.sessions = new SessionRepository(this, now);
+    this.tokens = new TokenRepository(this, now);
   }
 
   /**
@@ -469,6 +475,90 @@ export class HistoryRepository {
       .all(guildId, beforeId ?? Number.MAX_SAFE_INTEGER, limit);
     return rows.map((row) => historyFrom(row as Row));
   }
+
+  /**
+   * Listening figures of a server since `since`: totals, plays per day and per hour of the day, the most played
+   * tracks and the people whose tracks were played most.
+   *
+   * Days and hours are in the viewer's time zone: `offsetMs` is added to every timestamp before it is cut into days,
+   * so "Tuesday" means the viewer's Tuesday. Only days with plays are listed; the caller fills the gaps.
+   */
+  stats(guildId: string, since: number, offsetMs: number, top = 10): HistoryStats {
+    const db = this.store.db;
+    const totals = db
+      .prepare(
+        `SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms,
+                COUNT(DISTINCT track_id) AS tracks, COUNT(DISTINCT added_by) AS people
+         FROM history WHERE guild_id = ? AND played_at >= ?`,
+      )
+      .get(guildId, since) as Row;
+    // The timestamps are milliseconds; unixepoch wants seconds, and integer division keeps whole seconds.
+    const days = db
+      .prepare(
+        `SELECT strftime('%Y-%m-%d', (played_at + ?) / 1000, 'unixepoch') AS day, COUNT(*) AS plays,
+                SUM(played_ms) AS played_ms
+         FROM history WHERE guild_id = ? AND played_at >= ? GROUP BY day ORDER BY day`,
+      )
+      .all(offsetMs, guildId, since) as Row[];
+    const hours = db
+      .prepare(
+        `SELECT CAST(strftime('%H', (played_at + ?) / 1000, 'unixepoch') AS INTEGER) AS hour, COUNT(*) AS plays
+         FROM history WHERE guild_id = ? AND played_at >= ? GROUP BY hour`,
+      )
+      .all(offsetMs, guildId, since) as Row[];
+    // Ties are broken by listening time, then by the track's ID, so the order is the same on every run.
+    const tracks = db
+      .prepare(
+        `SELECT COUNT(*) AS plays, SUM(h.played_ms) AS played_ms, ${TRACK_COLUMNS}
+         FROM history h JOIN tracks t ON t.id = h.track_id
+         WHERE h.guild_id = ? AND h.played_at >= ?
+         GROUP BY h.track_id ORDER BY plays DESC, played_ms DESC, h.track_id LIMIT ?`,
+      )
+      .all(guildId, since, top) as Row[];
+    const people = db
+      .prepare(
+        `SELECT added_by, COUNT(*) AS plays, SUM(played_ms) AS played_ms
+         FROM history WHERE guild_id = ? AND played_at >= ?
+         GROUP BY added_by ORDER BY plays DESC, played_ms DESC, added_by LIMIT ?`,
+      )
+      .all(guildId, since, top) as Row[];
+    // Twenty-four slots, zero where nothing played, so a chart can draw every hour.
+    const byHour = Array.from({ length: 24 }, () => 0);
+    for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
+    return {
+      plays: int(totals, 'plays'),
+      playedMs: int(totals, 'played_ms'),
+      tracks: int(totals, 'tracks'),
+      people: int(totals, 'people'),
+      days: days.map((row) => ({ day: text(row, 'day'), plays: int(row, 'plays'), playedMs: int(row, 'played_ms') })),
+      hours: byHour,
+      topTracks: tracks.map((row) => ({
+        track: trackFrom(row),
+        plays: int(row, 'plays'),
+        playedMs: int(row, 'played_ms'),
+      })),
+      topPeople: people.map((row) => ({
+        userId: textOrNull(row, 'added_by'),
+        plays: int(row, 'plays'),
+        playedMs: int(row, 'played_ms'),
+      })),
+    };
+  }
+}
+
+/** Listening figures for the statistics screen (see HistoryRepository.stats). */
+export interface HistoryStats {
+  readonly plays: number;
+  readonly playedMs: number;
+  /** Distinct tracks played. */
+  readonly tracks: number;
+  /** Distinct people whose tracks were played (tracks from the CLI count as nobody). */
+  readonly people: number;
+  readonly days: readonly { readonly day: string; readonly plays: number; readonly playedMs: number }[];
+  /** Plays per hour of the day, index 0 being midnight to one. */
+  readonly hours: readonly number[];
+  readonly topTracks: readonly { readonly track: Track; readonly plays: number; readonly playedMs: number }[];
+  readonly topPeople: readonly { readonly userId: string | null; readonly plays: number; readonly playedMs: number }[];
 }
 
 function historyFrom(row: Row): HistoryEntry {
@@ -738,4 +828,225 @@ export class DiscordRepository {
       )
       .run(guildId, hash, this.now());
   }
+}
+
+/** Someone from Discord, as the panel shows them. */
+export interface Person {
+  readonly id: string;
+  /** The display name (server nickname aside): global name, else user name. */
+  readonly name: string;
+  /** The avatar's hash, from which the panel builds the picture's address; null for the default avatar. */
+  readonly avatar: string | null;
+}
+
+/** People jukecord has met, by Discord user ID. */
+export class UserRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** Records or refreshes a person; names and avatars change, so the newest wins. */
+  upsert(person: Person): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO users (id, name, avatar, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar, updated_at = excluded.updated_at`,
+      )
+      .run(person.id, person.name, person.avatar, this.now());
+  }
+
+  get(id: string): Person | null {
+    const row = this.store.db.prepare('SELECT id, name, avatar FROM users WHERE id = ?').get(id) as Row | undefined;
+    return row ? { id: text(row, 'id'), name: text(row, 'name'), avatar: textOrNull(row, 'avatar') } : null;
+  }
+
+  /** The people among `ids` that are known; unknown IDs are simply absent from the map. */
+  many(ids: Iterable<string>): Map<string, Person> {
+    const people = new Map<string, Person>();
+    // One lookup per distinct ID: a queue of a thousand tracks is added by a handful of people.
+    for (const id of new Set(ids)) {
+      const person = this.get(id);
+      if (person) people.set(id, person);
+    }
+    return people;
+  }
+}
+
+/** Whose login or token it is: the host (the machine running jukecord) or a Discord user. */
+export type PrincipalKind = 'host' | 'user';
+
+/** One panel login. */
+export interface SessionRow {
+  /** SHA-256 of the cookie's secret, in hex. */
+  readonly idHash: string;
+  readonly kind: PrincipalKind;
+  /** The Discord user, for kind "user". */
+  readonly userId: string | null;
+  /** The token the panel sends with every change, so another site cannot make changes with the cookie. */
+  readonly csrf: string;
+  readonly createdAt: number;
+  readonly seenAt: number;
+  readonly expiresAt: number;
+}
+
+/** Panel logins, looked up by the hash of the cookie's secret. */
+export class SessionRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  create(session: Omit<SessionRow, 'createdAt' | 'seenAt'>): SessionRow {
+    const now = this.now();
+    this.store.db
+      .prepare(
+        `INSERT INTO sessions (id_hash, kind, user_id, csrf, created_at, seen_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(session.idHash, session.kind, session.userId, session.csrf, now, now, session.expiresAt);
+    return { ...session, createdAt: now, seenAt: now };
+  }
+
+  /** The login with this hash, or null when there is none or it has expired (an expired one is removed). */
+  get(idHash: string): SessionRow | null {
+    const row = this.store.db.prepare('SELECT * FROM sessions WHERE id_hash = ?').get(idHash) as Row | undefined;
+    if (!row) return null;
+    const session = sessionFrom(row);
+    if (session.expiresAt <= this.now()) {
+      this.remove(idHash);
+      return null;
+    }
+    return session;
+  }
+
+  /** Notes that the login was used now (shown nowhere yet; kept for pruning logins nobody uses). */
+  touch(idHash: string): void {
+    this.store.db.prepare('UPDATE sessions SET seen_at = ? WHERE id_hash = ?').run(this.now(), idHash);
+  }
+
+  remove(idHash: string): boolean {
+    return Number(this.store.db.prepare('DELETE FROM sessions WHERE id_hash = ?').run(idHash).changes) > 0;
+  }
+
+  /** Deletes expired logins and returns how many went. */
+  prune(): number {
+    return Number(this.store.db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(this.now()).changes);
+  }
+}
+
+function sessionFrom(row: Row): SessionRow {
+  return {
+    idHash: text(row, 'id_hash'),
+    // Anything but "host" is read as a user: a stored row cannot widen itself into host rights.
+    kind: text(row, 'kind') === 'host' ? 'host' : 'user',
+    userId: textOrNull(row, 'user_id'),
+    csrf: text(row, 'csrf'),
+    createdAt: int(row, 'created_at'),
+    seenAt: int(row, 'seen_at'),
+    expiresAt: int(row, 'expires_at'),
+  };
+}
+
+/** What an API token may do: look, change the music, or also manage settings and tokens. */
+export type TokenScope = 'read' | 'control' | 'admin';
+
+/** An API token as it is listed (never with its secret or hash). */
+export interface TokenRow {
+  readonly id: number;
+  readonly name: string;
+  readonly kind: PrincipalKind;
+  readonly userId: string | null;
+  readonly scope: TokenScope;
+  readonly createdAt: number;
+  readonly usedAt: number | null;
+}
+
+/** API tokens, looked up by the hash of the secret. */
+export class TokenRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  create(token: {
+    hash: string;
+    name: string;
+    kind: PrincipalKind;
+    userId: string | null;
+    scope: TokenScope;
+  }): TokenRow {
+    const name = token.name.trim();
+    if (name.length === 0 || name.length > 100) throw new StoreError('a token name is 1 to 100 characters');
+    const row = this.store.db
+      .prepare(
+        `INSERT INTO api_tokens (hash, name, kind, user_id, scope, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         RETURNING id, name, kind, user_id, scope, created_at, used_at`,
+      )
+      .get(token.hash, name, token.kind, token.userId, token.scope, this.now()) as Row;
+    return tokenFrom(row);
+  }
+
+  /** The token with this hash, or null. */
+  byHash(hash: string): TokenRow | null {
+    const row = this.store.db
+      .prepare('SELECT id, name, kind, user_id, scope, created_at, used_at FROM api_tokens WHERE hash = ?')
+      .get(hash) as Row | undefined;
+    return row ? tokenFrom(row) : null;
+  }
+
+  get(id: number): TokenRow | null {
+    const row = this.store.db
+      .prepare('SELECT id, name, kind, user_id, scope, created_at, used_at FROM api_tokens WHERE id = ?')
+      .get(id) as Row | undefined;
+    return row ? tokenFrom(row) : null;
+  }
+
+  /** Every token (for the host), or the tokens of one user. Newest first. */
+  list(userId?: string): TokenRow[] {
+    const rows =
+      userId === undefined
+        ? this.store.db
+            .prepare('SELECT id, name, kind, user_id, scope, created_at, used_at FROM api_tokens ORDER BY id DESC')
+            .all()
+        : this.store.db
+            .prepare(
+              `SELECT id, name, kind, user_id, scope, created_at, used_at FROM api_tokens
+               WHERE kind = 'user' AND user_id = ? ORDER BY id DESC`,
+            )
+            .all(userId);
+    return rows.map((row) => tokenFrom(row as Row));
+  }
+
+  /** Notes that the token was used now, so a list can show tokens nobody uses any more. */
+  touch(id: number): void {
+    this.store.db.prepare('UPDATE api_tokens SET used_at = ? WHERE id = ?').run(this.now(), id);
+  }
+
+  remove(id: number): boolean {
+    return Number(this.store.db.prepare('DELETE FROM api_tokens WHERE id = ?').run(id).changes) > 0;
+  }
+}
+
+function tokenFrom(row: Row): TokenRow {
+  const scope = text(row, 'scope');
+  return {
+    id: int(row, 'id'),
+    name: text(row, 'name'),
+    kind: text(row, 'kind') === 'host' ? 'host' : 'user',
+    userId: textOrNull(row, 'user_id'),
+    // An unknown scope (a hand edit) is read as the narrowest one.
+    scope: scope === 'admin' || scope === 'control' ? scope : 'read',
+    createdAt: int(row, 'created_at'),
+    usedAt: intOrNull(row, 'used_at'),
+  };
 }

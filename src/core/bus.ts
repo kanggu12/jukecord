@@ -13,10 +13,17 @@ export interface QueueChanged {
   readonly version: number;
 }
 
+/** The bot joined, moved or left a server's voice channel (`channel` is null after leaving). */
+export interface VoiceChanged {
+  readonly guildId: string;
+  readonly channel: { readonly channelId: string; readonly name: string } | null;
+}
+
 /** Every event and its payload. */
 export interface BusEvents {
   queue: [QueueChanged];
   player: [PlayerSnapshot];
+  voice: [VoiceChanged];
 }
 
 /** Node's EventEmitter, typed with the events above so a misspelt event name or payload fails the type check. */

@@ -21,6 +21,8 @@ export interface Config {
   readonly port: number;
   /** The address people reach the panel at, when it is not this machine (used for login and links). */
   readonly publicUrl: string | null;
+  /** Whether to believe X-Forwarded-* headers: false, true (any proxy), a hop count, or the proxies' addresses. */
+  readonly trustProxy: boolean | number | string;
   readonly discord: {
     /** The bot's token; without it jukecord runs browser-only (the panel plays, nothing joins voice). */
     readonly token: string | null;
@@ -100,6 +102,7 @@ const KNOWN = new Set([
   'JUKECORD_YTDLP_COOKIES',
   'JUKECORD_QUEUE_MAX',
   'JUKECORD_VOICE_IDLE',
+  'JUKECORD_TRUST_PROXY',
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
@@ -185,6 +188,18 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(`"${text}" must start with http(s)://`);
     // Kept without a trailing slash so paths can be appended as `${publicUrl}/auth/callback`.
     return url.href.replace(/\/+$/, '');
+  });
+
+  // Behind a reverse proxy or an Ingress the client's address and https come in X-Forwarded-* headers, which are
+  // believed only when this says so: otherwise anyone could claim any address and dodge the login limiter.
+  const trustProxy = read('JUKECORD_TRUST_PROXY', false as boolean | number | string, (text) => {
+    const value = text.toLowerCase();
+    if (value === 'true' || value === 'yes') return true;
+    if (value === 'false' || value === 'no') return false;
+    if (/^\d+$/.test(value)) return integer(1, 10)(value);
+    // Otherwise a list of addresses or ranges, which proxy-addr checks; refuse anything with characters it cannot be.
+    if (!/^[0-9a-f.:/,\s]+$/i.test(value)) throw new Error(`"${text}" is not true, false, a hop count or addresses`);
+    return text.replace(/\s+/g, '');
   });
 
   // A secret comes either from the variable or from a file named by <VARIABLE>_FILE, the way Docker and Kubernetes
@@ -293,6 +308,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     host,
     port,
     publicUrl,
+    trustProxy,
     discord: { token, clientId, clientSecret },
     media,
     queueMax,
@@ -314,6 +330,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'data directory': config.dataDir,
     listen: `${config.host}:${config.port}`,
     'public address': config.publicUrl ?? 'not set',
+    'trust proxy headers': String(config.trustProxy),
     'discord token': secret(config.discord.token),
     'discord application': config.discord.clientId ?? 'not set',
     'discord oauth secret': secret(config.discord.clientSecret),

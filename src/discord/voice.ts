@@ -22,7 +22,8 @@ import {
   VoiceConnectionStatus,
 } from '@discordjs/voice';
 import { type Client, PermissionFlagsBits } from 'discord.js';
-import { ActionError, type VoiceControl } from '../app/actions.ts';
+import { ActionError, type VoiceChannelInfo, type VoiceControl } from '../app/actions.ts';
+import type { Bus } from '../core/bus.ts';
 import { type Clock, systemClock } from '../core/clock.ts';
 import { Countdowns } from '../core/countdowns.ts';
 import type { PlayerOutput, PreparedMedia } from '../core/player.ts';
@@ -142,6 +143,8 @@ export class VoiceManager implements VoiceControl {
   // How long the bot stays alone in a channel, and the countdowns running per server.
   private readonly idleMs: number;
   private readonly idle: Countdowns;
+  // Where joining and leaving are announced (the panel shows the channel); absent in tests that do not care.
+  private readonly bus: Bus | null;
 
   constructor(options: {
     client: Client;
@@ -150,7 +153,9 @@ export class VoiceManager implements VoiceControl {
     log: Logger;
     idleMs: number;
     clock?: Clock;
+    bus?: Bus;
   }) {
+    this.bus = options.bus ?? null;
     this.client = options.client;
     this.players = options.players;
     this.ffmpeg = options.ffmpeg;
@@ -182,6 +187,25 @@ export class VoiceManager implements VoiceControl {
   channel(guildId: string): { channelId: string; name: string } | null {
     const joined = this.joined.get(guildId);
     return joined ? { channelId: joined.channelId, name: joined.name } : null;
+  }
+
+  channels(guildId: string): VoiceChannelInfo[] {
+    const guild = this.client.guilds.cache.get(guildId);
+    const me = guild?.members.me;
+    if (!guild || !me) return [];
+    return (
+      [...guild.channels.cache.values()]
+        // Voice and stage channels the bot may enter and speak in; the others would only fail on join.
+        .filter((channel) => channel.isVoiceBased())
+        .filter((channel) => channel.permissionsFor(me)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]))
+        // Discord's own order: by position, then by ID for channels at the same position.
+        .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+        .map((channel) => ({
+          id: channel.id,
+          name: channel.name,
+          people: channel.members.filter((member) => !member.user.bot).size,
+        }))
+    );
   }
 
   async join(
@@ -241,6 +265,7 @@ export class VoiceManager implements VoiceControl {
     this.joined.set(guildId, { connection, output, channelId: target, name: channel.name });
     this.players.get(guildId).attach(output);
     this.log.info('joined voice', { guild: guildId, channel: channel.name });
+    this.bus?.emit('voice', { guildId, channel: { channelId: target, name: channel.name } });
     // Joined a channel that is already empty (the person left meanwhile): the countdown starts now.
     this.voiceStateChanged(guildId);
     return { channelId: target, name: channel.name };
@@ -270,6 +295,7 @@ export class VoiceManager implements VoiceControl {
     this.joined.delete(guildId);
     this.idle.disarm(guildId);
     this.players.get(guildId).detach(joined.output);
+    this.bus?.emit('voice', { guildId, channel: null });
     return joined;
   }
 }

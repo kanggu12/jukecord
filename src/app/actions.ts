@@ -11,7 +11,7 @@ import type { InsertAt, QueueService } from '../core/queue.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { Resolver } from '../media/resolver.ts';
-import type { RepeatMode, Store } from '../store/store.ts';
+import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 
@@ -44,6 +44,10 @@ export const ACTIONS = [
   'playlist-delete',
   'join',
   'leave',
+  'voice-channels',
+  'stats',
+  'settings',
+  'dj-role',
   'status',
 ] as const;
 
@@ -56,6 +60,8 @@ export interface ActionContext {
   readonly userId: string | null;
   /** Whether this person may change the queue (the server's DJ role, when one is set, decides). */
   readonly mayControl: boolean;
+  /** Whether this person may change the server's jukecord settings (Manage Server in Discord, or the host). */
+  readonly mayManage: boolean;
 }
 
 /** Why an action could not be done; the ways in turn the code into an HTTP status, an ephemeral reply or an exit code. */
@@ -79,6 +85,65 @@ export interface VoiceControl {
   leave(guildId: string): boolean;
   /** The voice channel the bot is in, or null. */
   channel(guildId: string): { channelId: string; name: string } | null;
+  /** The server's voice channels the bot may join, in Discord's order. */
+  channels(guildId: string): VoiceChannelInfo[];
+}
+
+/** A voice channel, for choosing where the bot goes. */
+export interface VoiceChannelInfo {
+  readonly id: string;
+  readonly name: string;
+  /** How many people (not bots) are in it now. */
+  readonly people: number;
+}
+
+/** A Discord server the bot is in. */
+export interface GuildInfo {
+  readonly id: string;
+  readonly name: string;
+  /** The icon's hash (the panel builds the address), or null. */
+  readonly icon: string | null;
+}
+
+/** A role of a server, for choosing the DJ role. */
+export interface RoleInfo {
+  readonly id: string;
+  readonly name: string;
+  /** The role's colour as a number (0 for none), shown beside its name. */
+  readonly color: number;
+}
+
+/** What jukecord needs to know about a member to decide what they may do. */
+export interface MemberInfo {
+  readonly roles: readonly string[];
+  /** Whether they have Manage Server (or are the owner, or an administrator). */
+  readonly manage: boolean;
+}
+
+/** What jukecord can learn from Discord: the servers, their roles, and who is a member. Absent in browser-only mode. */
+export interface Directory {
+  /** The bot's own account (name and avatar for the panel's header), or null before it has logged in. */
+  self(): { readonly id: string; readonly name: string; readonly avatar: string | null } | null;
+  guilds(): GuildInfo[];
+  roles(guildId: string): RoleInfo[];
+  /** The member's roles and rights, or null when they are not in the server. */
+  member(guildId: string, userId: string): Promise<MemberInfo | null>;
+}
+
+/** A server's jukecord settings as the panel and the commands show them. */
+export interface SettingsView {
+  /** The role that may change the music, or null for everyone. */
+  readonly djRoleId: string | null;
+  /** The server's roles to choose from (empty in browser-only mode). */
+  readonly roles: readonly RoleInfo[];
+}
+
+/** Listening figures over a span of days, with every day present (days without plays count zero). */
+export interface StatsView extends Omit<HistoryStats, 'days'> {
+  readonly days: readonly { readonly day: string; readonly plays: number; readonly playedMs: number }[];
+  /** The span, in days, and the first day of it (YYYY-MM-DD in the viewer's time zone). */
+  readonly span: number;
+  readonly from: string;
 }
 
 /** What the status action reports. */
@@ -97,6 +162,8 @@ export interface ActionsOptions {
   readonly log: Logger;
   /** Set once the bot logs in; null in browser-only mode. */
   voice?: VoiceControl | null;
+  /** What Discord says about servers, roles and members; null in browser-only mode. */
+  directory?: Directory | null;
   /** Whether the bot is connected right now. */
   discordReady?: () => boolean;
   readonly startedAt?: number;
@@ -126,9 +193,10 @@ export class Actions {
   }
 
   /** Called by the Discord side once it is up, so join and leave start working. */
-  setVoice(voice: VoiceControl | null, ready: () => boolean): void {
+  setVoice(voice: VoiceControl | null, ready: () => boolean, directory: Directory | null = null): void {
     this.options.voice = voice;
     this.options.discordReady = ready;
+    this.options.directory = directory;
   }
 
   // Refuses a change from someone who may not make it.
@@ -356,6 +424,64 @@ export class Actions {
     this.control(context);
     const voice = this.options.voice;
     if (!voice?.leave(context.guildId)) throw new ActionError('conflict', 'the bot is not in a voice channel');
+  }
+
+  /** The voice channels the bot could join, and which one it is in (anyone may look). */
+  voiceChannels(context: ActionContext): {
+    current: { channelId: string; name: string } | null;
+    channels: VoiceChannelInfo[];
+  } {
+    const voice = this.options.voice;
+    // Browser-only: there are no channels, which is an answer, not an error (the panel shows "no Discord").
+    if (!voice) return { current: null, channels: [] };
+    return { current: voice.channel(context.guildId), channels: voice.channels(context.guildId) };
+  }
+
+  /**
+   * Listening figures for the last `days` days in the viewer's time zone (`offsetMinutes` east of UTC, the way
+   * JavaScript's getTimezoneOffset() reports it but with the sign flipped). Anyone may look.
+   */
+  stats(context: ActionContext, days = 30, offsetMinutes = 0, now = Date.now()): StatsView {
+    if (!Number.isInteger(days) || days < 1 || days > 366) throw new ActionError('invalid', 'days is 1 to 366');
+    // Real time zones lie between UTC-12 and UTC+14.
+    if (!Number.isInteger(offsetMinutes) || offsetMinutes < -720 || offsetMinutes > 840) {
+      throw new ActionError('invalid', 'the time zone offset is -720 to 840 minutes');
+    }
+    const offsetMs = offsetMinutes * 60_000;
+    // The span starts at the viewer's midnight `days - 1` days ago, so "7 days" is today and the six before it.
+    const today = Math.floor((now + offsetMs) / 86_400_000);
+    const firstDay = today - (days - 1);
+    const since = firstDay * 86_400_000 - offsetMs;
+    const raw = this.options.store.history.stats(context.guildId, since, offsetMs);
+    const byDay = new Map(raw.days.map((entry) => [entry.day, entry]));
+    // Every day of the span, zero where nothing played, so a chart's bars line up with the calendar.
+    const filled = Array.from({ length: days }, (_, index) => {
+      const day = new Date((firstDay + index) * 86_400_000).toISOString().slice(0, 10);
+      return byDay.get(day) ?? { day, plays: 0, playedMs: 0 };
+    });
+    return { ...raw, days: filled, span: days, from: filled[0]?.day ?? '' };
+  }
+
+  /** The server's settings and the roles to choose the DJ role from (anyone may look). */
+  settings(context: ActionContext): SettingsView {
+    const roles = this.options.directory?.roles(context.guildId) ?? [];
+    return { djRoleId: this.options.store.settings.get(context.guildId).djRoleId, roles };
+  }
+
+  /** Sets (or clears, with null) the role that may change the music. Needs Manage Server. */
+  djRole(context: ActionContext, roleId: string | null): SettingsView {
+    if (!context.mayManage)
+      throw new ActionError('forbidden', 'only people who can manage the server can set the DJ role');
+    if (roleId !== null) {
+      // A role that does not exist would lock everyone but the managers out; refuse it. Browser-only mode has no roles.
+      const roles = this.options.directory?.roles(context.guildId);
+      if (!roles)
+        throw new ActionError('unavailable', 'jukecord runs without a Discord bot here, so there are no roles');
+      if (!roles.some((role) => role.id === roleId))
+        throw new ActionError('not-found', 'that role is not in this server');
+    }
+    this.options.store.settings.setDjRole(context.guildId, roleId);
+    return this.settings(context);
   }
 
   /** The version and whether Discord is connected (anyone may look; no server needed). */

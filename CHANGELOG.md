@@ -52,5 +52,33 @@ All notable changes to jukecord are documented here. The format is based on
   "listening to" line under the bot's name changes at most every 15 s.
 - The history keeps the newest 10,000 plays of each server.
 - An error nothing handled is logged with its stack, and stopping gets 10 s before the process exits anyway.
+- The HTTP API under `/api/v1`: every action and the operations of a login (who am I, servers, tokens, logs, login
+  links, backups, the self-check), described in an OpenAPI 3.1 document at `/api/v1/openapi.json`. Errors are
+  `{"error":{"code","message"}}` with the matching status.
+- Live updates over WebSocket (`/api/v1/events`): a server's whole state on subscribe, then every change in the
+  order it happened, who is listening in a browser, and a clock exchange so browsers play the same second.
+- The audio of the playing track for browsers, with Range requests, and an MP3 copy for browsers without Opus.
+- Logging in to the panel with Discord (OAuth2 with the identify scope only; membership and roles are asked through
+  the bot), and one-time login links for the host (`jukecord link`). API tokens with read, control or admin scope.
+- The `jukecord` command: a command for every API operation, the host token found in the data directory, 1-based
+  queue numbers as people see them, `--json` for scripts, and exit codes 0, 1 (refused), 2 (typing) and 3 (no answer).
+- Listening statistics: plays per day and per hour in your time zone, the most played tracks, who added most, and
+  the time listened (`/stats` in Discord, the stats operation in the API and the CLI).
+- The DJ role can be set from Discord (`/dj set`), the API and the CLI by people who can manage the server.
+- `jukecord doctor` checks the data directory, the database, ffmpeg, yt-dlp (and whether a newer one is out), the
+  cache, Discord and the login; `jukecord backup` writes a copy of the database; `jukecord logs` reads the log.
+- `/healthz`, `/readyz` and `/metrics` (Prometheus text) for containers and monitoring.
+- `JUKECORD_TRUST_PROXY` for running behind a reverse proxy or an Ingress.
+
+### Security
+
+- Logins, API tokens and login links are 32 random bytes; only their SHA-256 hashes are stored, so a copy of the
+  database logs nobody in. The host token is a file only jukecord's user can read.
+- A change made from the panel must carry the session's CSRF token; the session cookie is httpOnly and SameSite=Lax,
+  and Secure when the public address is https. WebSocket connections with a cookie are accepted from the panel's own
+  origin only.
+- Twenty failed logins from one address within ten minutes block that address for a while.
+- Pages carry a content security policy (scripts and styles from jukecord only), and nothing may frame them.
+- Everything jukecord writes (the database, the cache, the logs) is readable by its own user only.
 
 [Unreleased]: https://github.com/kanggu12/jukecord/commits/main

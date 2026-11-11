@@ -11,8 +11,8 @@ import { FakeClock, FakeMedia, flush } from '../support/fakes.ts';
 import { addTracks, memoryStore } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
-const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayControl: true };
-const LISTENER: ActionContext = { guildId: GUILD, userId: '300000000000000002', mayControl: false };
+const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayControl: true, mayManage: false };
+const LISTENER: ActionContext = { guildId: GUILD, userId: '300000000000000002', mayControl: false, mayManage: false };
 
 // Actions over a real queue and players, with a resolver that answers from a fixed table.
 function setup() {
@@ -136,6 +136,7 @@ describe('Actions', () => {
         return true;
       },
       channel: () => null,
+      channels: () => [{ id: '400000000000000001', name: 'Lounge', people: 2 }],
     };
     actions.setVoice(voice, () => true);
     assert.equal((await actions.join(DJ, null)).name, 'Lounge');
