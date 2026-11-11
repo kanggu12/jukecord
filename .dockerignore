@@ -1,0 +1,6 @@
+# Only what the image needs goes into the build context: the Dockerfile copies package files, LICENSE and src.
+**
+!package.json
+!package-lock.json
+!LICENSE
+!src/**

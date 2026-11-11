@@ -1,0 +1,167 @@
+/**
+ * yt-dlp: looking tracks up (title, length, picture) and downloading their audio.
+ *
+ * yt-dlp needs a JavaScript runtime for YouTube's player code. The image has Node (jukecord runs on it), so yt-dlp is
+ * told to use Node instead of Deno, which it would look for by default and which the image does not carry.
+ * User and system yt-dlp config files are ignored, so a stray ~/.config/yt-dlp/config cannot change what jukecord does.
+ */
+import { type ChildProcess, spawn } from 'node:child_process';
+import type { NewTrack } from '../core/types.ts';
+import { ProcessError, run } from './process.ts';
+import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
+
+export interface YtDlpOptions {
+  /** The yt-dlp program. */
+  readonly binary: string;
+  /** The JavaScript runtime yt-dlp uses for YouTube ("node", or "node:/path/to/node"). */
+  readonly jsRuntime: string;
+  /** How long a lookup may take. */
+  readonly timeoutMs: number;
+  /** The most tracks one playlist adds; a 5,000-track playlist would bury the queue. */
+  readonly maxPlaylist: number;
+}
+
+// Titles YouTube gives entries that cannot be played; they are left out of an added playlist.
+const UNPLAYABLE_TITLE = /^\[(private|deleted) video\]$/i;
+
+// Narrowing helpers for yt-dlp's JSON, whose fields vary by site and by version.
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+function number(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+// The largest thumbnail of a flat playlist entry (they come as a list, smallest first).
+function lastThumbnail(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    const url = text(record(value[index])?.url);
+    if (url) return url;
+  }
+  return null;
+}
+
+/**
+ * Turns one entry of yt-dlp's JSON (a video, or a flat playlist entry) into a track, or null when it cannot be
+ * played: private or deleted, live or upcoming (a stream with no end would hold the queue), or without an address.
+ */
+export function trackFromEntry(entry: Record<string, unknown>): NewTrack | null {
+  const id = text(entry.id);
+  // A flat YouTube entry may have only an ID; build its address from it.
+  const page =
+    text(entry.webpage_url) ??
+    text(entry.url) ??
+    (entry.ie_key === 'Youtube' && id ? `https://www.youtube.com/watch?v=${id}` : null);
+  if (!page) return null;
+  const title = text(entry.title);
+  if (!title || UNPLAYABLE_TITLE.test(title)) return null;
+  if (entry.is_live === true || entry.live_status === 'is_live' || entry.live_status === 'is_upcoming') return null;
+  let url: URL;
+  try {
+    url = new URL(page);
+  } catch {
+    return null;
+  }
+  const source = canonicalSource(url);
+  const seconds = number(entry.duration);
+  return {
+    source,
+    // YouTube addresses are shown in their clean form; other sites keep the page address they gave.
+    url: youtubeVideoId(url) ? source : page,
+    title: title.trim(),
+    uploader: text(entry.uploader) ?? text(entry.channel) ?? text(entry.artist) ?? null,
+    durationMs: seconds === null ? null : Math.round(seconds * 1000),
+    thumbnail: text(entry.thumbnail) ?? lastThumbnail(entry.thumbnails),
+  };
+}
+
+/** Turns yt-dlp's -J output (one video, a playlist, or search results) into tracks, at most `limit` of them. */
+export function tracksFromInfo(info: unknown, limit: number): NewTrack[] {
+  const root = record(info);
+  if (!root) return [];
+  // Playlists and searches have entries; a single video is the root itself.
+  const entries = Array.isArray(root.entries) ? root.entries : [root];
+  const tracks: NewTrack[] = [];
+  for (const entry of entries) {
+    const item = record(entry);
+    const track = item ? trackFromEntry(item) : null;
+    if (track) tracks.push(track);
+    if (tracks.length >= limit) break;
+  }
+  return tracks;
+}
+
+export class YtDlp {
+  private readonly options: YtDlpOptions;
+
+  constructor(options: YtDlpOptions) {
+    this.options = options;
+  }
+
+  // Arguments every run shares: no config files, no warnings in the output we parse, Node as the JS runtime.
+  private common(): string[] {
+    return ['--ignore-config', '--no-warnings', '--js-runtimes', this.options.jsRuntime];
+  }
+
+  /** The installed yt-dlp version, for the doctor command and the update check. */
+  async version(signal?: AbortSignal): Promise<string> {
+    const result = await run(this.options.binary, ['--version'], { timeoutMs: 15_000, ...(signal ? { signal } : {}) });
+    return result.stdout.trim();
+  }
+
+  /**
+   * Looks up what an input adds: one track for a video or a search, all of them (up to the limit) for a playlist.
+   * Flat listing keeps a 300-track playlist to one request instead of 300.
+   */
+  async lookup(input: Input, signal?: AbortSignal): Promise<NewTrack[]> {
+    const args = [...this.common(), '-J', '--flat-playlist', '--playlist-end', String(this.options.maxPlaylist)];
+    if (input.kind === 'search') {
+      // The first result only: a search that adds ten tracks surprises people.
+      args.push(`ytsearch1:${input.query}`);
+    } else {
+      // A video address with list= is that one video; only real playlist pages add the whole list.
+      if (!isPlaylistAddress(input.url)) args.push('--no-playlist');
+      args.push(input.url.href);
+    }
+    const result = await run(this.options.binary, args, {
+      timeoutMs: this.options.timeoutMs,
+      ...(signal ? { signal } : {}),
+    });
+    let info: unknown;
+    try {
+      info = JSON.parse(result.stdout);
+    } catch {
+      throw new ProcessError('yt-dlp printed something that is not JSON', result);
+    }
+    const tracks = tracksFromInfo(info, this.options.maxPlaylist);
+    if (tracks.length === 0) {
+      throw new ProcessError(input.kind === 'search' ? 'nothing was found' : 'there is nothing playable there', result);
+    }
+    return tracks;
+  }
+
+  /**
+   * Starts downloading a track's best audio to stdout. The caller pipes stdout into ffmpeg and watches both
+   * processes (see ffmpeg.ts); keeping the download in a pipe means no second temporary file.
+   */
+  audio(url: string): ChildProcess {
+    const args = [
+      ...this.common(),
+      // WebM/Opus is what YouTube serves best and ffmpeg reads it from a pipe; anything else as a fallback.
+      '--format',
+      'bestaudio[ext=webm]/bestaudio/best',
+      '--no-playlist',
+      '--no-progress',
+      '--output',
+      '-',
+      url,
+    ];
+    return spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  }
+}
