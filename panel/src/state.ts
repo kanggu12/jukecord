@@ -1,0 +1,137 @@
+/**
+ * What the panel knows, in one object, and who to tell when part of it changes.
+ *
+ * Views subscribe to the keys they draw. A change names its keys, so the queue redrawing does not redraw the disc,
+ * and a snapshot that arrives twice does not repaint anything.
+ */
+import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Status, Voice } from './api.ts';
+import { type Lang, pickLang, type Words, words } from './i18n.ts';
+import type { LiveStatus } from './live.ts';
+
+export interface State {
+  me: Me | null;
+  status: Status | null;
+  guilds: Guild[];
+  guild: Guild | null;
+  player: Player | null;
+  queue: Queue | null;
+  voice: Voice | null;
+  listeners: Listeners;
+  history: HistoryEntry[];
+  live: LiveStatus;
+  lang: Lang;
+  /** The menu's choices, kept in this browser. */
+  theme: 'system' | 'light' | 'dark';
+  langChoice: 'auto' | 'en' | 'ko';
+  motion: boolean;
+  /** Whether this browser plays along, and how loud (0 to 1). */
+  listening: boolean;
+  volume: number;
+}
+
+type Key = keyof State;
+type Listener = (changed: ReadonlySet<Key>) => void;
+
+// Settings kept in this browser, read with care: private windows can refuse storage.
+function stored(name: string): string | null {
+  try {
+    return localStorage.getItem(`jukecord.${name}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Saves a setting in this browser (silently skipped where storage is refused). */
+export function keep(name: string, value: string): void {
+  try {
+    localStorage.setItem(`jukecord.${name}`, value);
+  } catch {
+    // Not kept; it still applies until the page closes.
+  }
+}
+
+const langChoice = (stored('lang') ?? 'auto') as State['langChoice'];
+const volume = Number(stored('volume') ?? '0.6');
+
+export const state: State = {
+  me: null,
+  status: null,
+  guilds: [],
+  guild: null,
+  player: null,
+  queue: null,
+  voice: null,
+  listeners: { people: [], count: 0 },
+  history: [],
+  live: 'connecting',
+  lang: pickLang(langChoice === 'auto' ? null : langChoice),
+  theme: (stored('theme') ?? 'system') as State['theme'],
+  langChoice,
+  motion: stored('motion') !== 'off',
+  listening: false,
+  volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6,
+};
+
+const listeners = new Set<Listener>();
+
+// While a page is being built, the watches it makes are collected here, so leaving the page can stop them.
+let collector: (() => void)[] | null = null;
+
+/** Builds a page and returns it with a function that stops everything it watches. */
+export function collect<T>(build: () => T): { value: T; dispose: () => void } {
+  const previous = collector;
+  const stops: (() => void)[] = [];
+  collector = stops;
+  try {
+    return {
+      value: build(),
+      dispose: () => {
+        for (const stop of stops) stop();
+      },
+    };
+  } finally {
+    collector = previous;
+  }
+}
+
+/** Changes part of the state and tells the views that draw it. */
+export function update(changes: Partial<State>): void {
+  const changed = new Set<Key>();
+  for (const [key, value] of Object.entries(changes) as [Key, unknown][]) {
+    if (state[key] === value) continue;
+    (state as unknown as Record<Key, unknown>)[key] = value;
+    changed.add(key);
+  }
+  if (changed.size === 0) return;
+  for (const listener of listeners) listener(changed);
+}
+
+/** Calls `fn` when any of `keys` changes; returns the way to stop. */
+export function watch(keys: readonly Key[], fn: () => void): () => void {
+  const listener: Listener = (changed) => {
+    if (keys.some((key) => changed.has(key))) fn();
+  };
+  listeners.add(listener);
+  const stop = () => {
+    listeners.delete(listener);
+  };
+  collector?.push(stop);
+  return stop;
+}
+
+/** The words of the language in use. */
+export function t(): Words {
+  return words(state.lang);
+}
+
+/** Whether the person may change the music in the server shown. */
+export function mayControl(): boolean {
+  return Boolean(state.guild?.mayControl) && state.me?.scope !== 'read';
+}
+
+/** The track's position now: the snapshot's place plus the time since, while playing (in the server's time). */
+export function positionNow(player: Player, serverNow: number): number {
+  const moving = player.status === 'playing' ? Math.max(0, serverNow - player.at) : 0;
+  const position = player.positionMs + moving;
+  return player.durationMs ? Math.min(position, player.durationMs) : position;
+}

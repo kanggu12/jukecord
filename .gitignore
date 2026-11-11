@@ -12,3 +12,6 @@ coverage/
 
 # Local plans and scratch work, never committed
 /_work/
+
+# The built panel (npm run build)
+panel/dist/

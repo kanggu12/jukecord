@@ -1,0 +1,1841 @@
+/*
+ * jukecord's panel. Flat glass: panels are near-opaque sheets with a hairline edge, a 1px light along the top and
+ * one soft shadow; corners are 2px except on things that are round by nature (the disc, avatars, dots, switches).
+ * Surfaces are neutral grey; colour is kept for meaning: the state of the player and the connection, what a key
+ * does (the main key, removing), and the bars of the statistics. The rainbow means one thing, "playing now": the
+ * disc's rim and the progress bar's knob, and they turn white when paused.
+ */
+
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("./fonts/PretendardVariable.woff2") format("woff2-variations");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---- tokens: dark (the default) ----------------------------------------------------------------------------- */
+:root {
+  color-scheme: dark;
+  --bg: #161719;
+  --bg-top: #1a1b1e;
+  --panel: rgba(31, 32, 35, 0.94);
+  --panel-solid: #1f2023;
+  --raised: #27282c;
+  --raised-2: #2f3035;
+  --sunk: #131416;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.15);
+  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 20px 44px -26px rgba(0, 0, 0, 0.9);
+  --ink: #e3e4e5;
+  --ink-2: #b9bbbf;
+  --ink-3: #9a9da3;
+  --key: #ececed;
+  --key-hi: #ffffff;
+  --key-ink: #161719;
+  --play: oklch(0.79 0.15 152);
+  --load: oklch(0.79 0.12 244);
+  --pause: oklch(0.83 0.13 82);
+  --bad: oklch(0.74 0.15 24);
+  --bad-key: oklch(0.56 0.17 25);
+  --bad-key-hi: oklch(0.6 0.17 25);
+  --soft: 16%;
+  --scrim: rgba(0, 0, 0, 0.62);
+  --focus: oklch(0.8 0.11 244);
+  --groove: rgba(255, 255, 255, 0.045);
+  --disc: #101113;
+  --series: #3987e5;
+  /* The mark's colours: the same rainbow on the arch, the disc's rim and the progress bar. */
+  --rainbow: #ff6f61, #ffb84d, #4fcf86, #4aa3ff, #a77bff, #ff6f61;
+}
+
+/* ---- tokens: light -------------------------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fafafa;
+  --bg-top: #ffffff;
+  --panel: rgba(255, 255, 255, 0.95);
+  --panel-solid: #ffffff;
+  --raised: #f3f3f3;
+  --raised-2: #ebebeb;
+  --sunk: #ffffff;
+  --line: #ebebeb;
+  --line-2: #d4d4d4;
+  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -22px rgba(0, 0, 0, 0.22);
+  --ink: #171717;
+  --ink-2: #4d4d4d;
+  --ink-3: #666666;
+  --key: #171717;
+  --key-hi: #333333;
+  --key-ink: #ffffff;
+  --play: oklch(0.5 0.13 152);
+  --load: oklch(0.5 0.13 250);
+  --pause: oklch(0.5 0.12 70);
+  --bad: oklch(0.52 0.18 25);
+  --bad-key: oklch(0.55 0.19 25);
+  --bad-key-hi: oklch(0.5 0.19 25);
+  --soft: 11%;
+  --scrim: rgba(10, 10, 10, 0.42);
+  --focus: oklch(0.55 0.15 250);
+  --groove: rgba(255, 255, 255, 0.06);
+  --disc: #1c1d20;
+  --series: #2a78d6;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #fafafa;
+    --bg-top: #ffffff;
+    --panel: rgba(255, 255, 255, 0.95);
+    --panel-solid: #ffffff;
+    --raised: #f3f3f3;
+    --raised-2: #ebebeb;
+    --sunk: #ffffff;
+    --line: #ebebeb;
+    --line-2: #d4d4d4;
+    --rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -22px rgba(0, 0, 0, 0.22);
+    --ink: #171717;
+    --ink-2: #4d4d4d;
+    --ink-3: #666666;
+    --key: #171717;
+    --key-hi: #333333;
+    --key-ink: #ffffff;
+    --play: oklch(0.5 0.13 152);
+    --load: oklch(0.5 0.13 250);
+    --pause: oklch(0.5 0.12 70);
+    --bad: oklch(0.52 0.18 25);
+    --bad-key: oklch(0.55 0.19 25);
+    --bad-key-hi: oklch(0.5 0.19 25);
+    --soft: 11%;
+    --scrim: rgba(10, 10, 10, 0.42);
+    --focus: oklch(0.55 0.15 250);
+    --groove: rgba(255, 255, 255, 0.06);
+    --disc: #1c1d20;
+    --series: #2a78d6;
+  }
+}
+
+/* ---- sizes ---------------------------------------------------------------------------------------------------- */
+:root {
+  --font:
+    "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+    "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --r: 2px;
+  --bar-h: 52px;
+  --listen-h: 56px;
+  --control: 32px;
+  --control-sm: 28px;
+  --gap: 12px;
+  --pad: 16px;
+  --side-w: clamp(320px, 27vw, 500px);
+}
+@media (pointer: coarse) {
+  /* Fingers need 44px, the small controls included. */
+  :root {
+    --control: 44px;
+    --control-sm: 44px;
+  }
+}
+
+/* ---- base ----------------------------------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Something scrolled into view (by the keyboard, a link, a search) stops clear of the top and bottom bars. */
+  scroll-padding: var(--bar-h) 0 var(--listen-h);
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  background-image: linear-gradient(180deg, var(--bg-top), var(--bg) 320px);
+  background-attachment: fixed;
+  color: var(--ink);
+  font: 400 13px / 1.45 var(--font);
+  font-feature-settings: "ss06";
+  -webkit-font-smoothing: antialiased;
+  overflow-wrap: anywhere;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+a {
+  color: inherit;
+}
+img {
+  display: block;
+}
+::selection {
+  background: color-mix(in oklch, var(--load) 35%, transparent);
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.muted {
+  color: var(--ink-2);
+}
+.text-bad {
+  color: var(--bad);
+}
+.faint {
+  color: var(--ink-3);
+}
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon.lg {
+  width: 18px;
+  height: 18px;
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: the hidden attribute must win over any display a class sets. */
+  display: none !important;
+}
+
+/* Thin scrollbars that match the surfaces, on the inner lists that scroll. */
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+  overscroll-behavior: contain;
+}
+
+/* ---- the frame: bar, main, listening bar ------------------------------------------------------------------- */
+.app {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: var(--bar-h) 1fr var(--listen-h);
+}
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: var(--bar-h);
+  background: color-mix(in oklch, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border-bottom: 1px solid var(--line);
+}
+/* The mark, the name in heavy tight letters, and the version beside them. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  text-decoration: none;
+  color: var(--ink);
+}
+.brand .mark {
+  flex: none;
+  /* The arch stands on the text's baseline rather than floating in the middle of the bar. */
+  margin-top: -2px;
+}
+.brand b {
+  font-size: 18px;
+  font-weight: 760;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+.version {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+.divider {
+  width: 1px;
+  height: 24px;
+  background: var(--line-2);
+  flex: none;
+}
+.server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control);
+  padding: 0 8px 0 4px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: none;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 320px;
+}
+.server:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--line);
+}
+.server:disabled {
+  cursor: default;
+}
+.server .label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.guild-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--raised-2);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  overflow: hidden;
+}
+.guild-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--tone, var(--ink-2));
+  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone, var(--ink-3));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--tone, var(--ink-3)) 22%, transparent);
+  flex: none;
+}
+.tone-play {
+  --tone: var(--play);
+}
+.tone-load {
+  --tone: var(--load);
+}
+.tone-pause {
+  --tone: var(--pause);
+}
+.tone-bad {
+  --tone: var(--bad);
+}
+.tone-idle {
+  --tone: var(--ink-3);
+}
+.bar .spacer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.nav {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control);
+  padding: 0 10px;
+  border-radius: var(--r);
+  text-decoration: none;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.nav a:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+.nav a[aria-current="page"] {
+  color: var(--ink);
+  background: var(--raised-2);
+}
+.account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control);
+  padding: 0 8px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--raised);
+  cursor: pointer;
+  flex: none;
+}
+.account:hover {
+  background: var(--raised-2);
+}
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex: none;
+  object-fit: cover;
+  background: var(--raised-2);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  overflow: hidden;
+}
+.avatar.sm {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+
+/* Toasts live inside the bar, never over the cards (they would cut across their edges). */
+.toasts {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: color-mix(in oklch, var(--panel-solid) 72%, transparent);
+  backdrop-filter: blur(10px) saturate(170%);
+  -webkit-backdrop-filter: blur(10px) saturate(170%);
+  box-shadow: var(--rim);
+  color: var(--ink);
+  font-weight: 500;
+  animation: toast-in 180ms ease-out;
+}
+.toast .icon {
+  color: var(--tone, var(--ink-2));
+}
+.toast span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  gap: var(--gap);
+  padding: var(--gap) 16px;
+  min-height: 0;
+  height: calc(100dvh - var(--bar-h) - var(--listen-h));
+}
+.main.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ---- cards ----------------------------------------------------------------------------------------------------- */
+.card {
+  /* Cards answer to their own width (the queue's tools lose their words when the card is narrow). */
+  container-type: inline-size;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--rim), var(--shadow);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.card.fill {
+  flex: 1;
+  min-height: 0;
+}
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 12px 8px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.card-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.card-head .count {
+  color: var(--ink-3);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.card-head .head-search {
+  flex: 0 1 220px;
+  margin-left: auto;
+}
+.card-head .tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.card-head .head-search + .tools {
+  margin-left: 0;
+}
+.card-body {
+  padding: var(--pad);
+}
+.empty {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--ink-3);
+}
+.empty .icon {
+  width: 22px;
+  height: 22px;
+  color: var(--ink-3);
+}
+
+/* ---- keys ----------------------------------------------------------------------------------------------------- */
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control);
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--raised);
+  color: var(--ink);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  flex: none;
+}
+.key:hover {
+  background: var(--raised-2);
+}
+.key:active {
+  background: var(--line-2);
+}
+.key.primary {
+  background: var(--key);
+  border-color: var(--key);
+  color: var(--key-ink);
+}
+.key.primary:hover {
+  background: var(--key-hi);
+  border-color: var(--key-hi);
+}
+.key.danger {
+  background: var(--bad-key);
+  border-color: var(--bad-key);
+  color: #fff;
+}
+.key.danger:hover {
+  background: var(--bad-key-hi);
+}
+.key.quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+.key.quiet:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.key.quiet.bad:hover {
+  color: var(--bad);
+}
+.key.sm {
+  height: var(--control-sm);
+  padding: 0 8px;
+}
+.key.square {
+  width: var(--control);
+  padding: 0;
+}
+.key.sm.square {
+  width: var(--control-sm);
+}
+.key[aria-pressed="true"] {
+  background: color-mix(in oklch, var(--load) var(--soft), var(--raised));
+  border-color: color-mix(in oklch, var(--load) 45%, transparent);
+  color: var(--ink);
+}
+.key:disabled,
+.key[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.spin {
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- inputs ----------------------------------------------------------------------------------------------------- */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control);
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--sunk);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  min-width: 0;
+  flex: 1;
+  color: var(--ink-3);
+}
+.field:hover {
+  border-color: color-mix(in oklch, var(--ink) 30%, transparent);
+}
+.field:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+}
+.field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+}
+.field input::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+.field input::-webkit-search-cancel-button {
+  display: none;
+}
+@media (max-width: 900px) {
+  /* Smaller text in an input makes Safari zoom the page. */
+  .field input {
+    font-size: 16px;
+  }
+}
+
+/* Segmented choice (theme, language, ranges). */
+.seg {
+  display: inline-flex;
+  height: var(--control);
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--r);
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+@media (pointer: coarse) {
+  /* Each choice gets the whole 44px. */
+  .seg {
+    padding: 0;
+  }
+}
+.seg button {
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  color: var(--ink-2);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg button:hover {
+  color: var(--ink);
+}
+.seg button[aria-pressed="true"] {
+  background: var(--raised-2);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* On/off switch. */
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--raised-2);
+  cursor: pointer;
+  flex: none;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 160ms ease;
+}
+.switch[aria-checked="true"] {
+  background: var(--play);
+}
+.switch[aria-checked="true"]::after {
+  transform: translateX(14px);
+}
+
+/* ---- the disc --------------------------------------------------------------------------------------------------- */
+.disc {
+  --size: 152px;
+  position: relative;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  flex: none;
+  background:
+    radial-gradient(
+      circle,
+      transparent 30%,
+      var(--groove) 30.6%,
+      transparent 31.4%,
+      transparent 38%,
+      var(--groove) 38.6%,
+      transparent 39.4%,
+      transparent 46%,
+      var(--groove) 46.6%,
+      transparent 47.4%,
+      transparent 54%,
+      var(--groove) 54.6%,
+      transparent 55.4%,
+      transparent 62%,
+      var(--groove) 62.6%,
+      transparent 63.4%
+    ),
+    conic-gradient(from 30deg, #ffffff10, #ffffff02 25%, #ffffff10 50%, #ffffff02 75%, #ffffff10), var(--disc);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 10px 28px -14px rgba(0, 0, 0, 0.7);
+}
+.disc .label {
+  position: absolute;
+  inset: 26%;
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(135deg, #3a3b40, #26272b);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.disc .label img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.disc .hole {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9%;
+  height: 9%;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+/* The rim: the rainbow while playing, white while paused, nothing otherwise. */
+.disc::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  padding: 3px;
+  background: transparent;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.disc.playing::before {
+  background: conic-gradient(var(--rainbow));
+}
+.disc.paused::before {
+  background: #f4f4f5;
+}
+.disc .spinner {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+.disc.playing .spinner,
+.disc.paused .spinner {
+  animation: spin 18s linear infinite;
+}
+.disc.paused .spinner {
+  animation-play-state: paused;
+}
+.disc.sm {
+  --size: 36px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.disc.sm::before {
+  inset: -2px;
+  padding: 2px;
+}
+.disc.sm .label {
+  inset: 20%;
+}
+.disc.sm .hole {
+  width: 12%;
+  height: 12%;
+}
+
+/* ---- now playing ------------------------------------------------------------------------------------------------ */
+.now {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  padding: var(--pad) var(--pad) var(--pad) 20px;
+}
+.now .title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.now .title a {
+  text-decoration: none;
+}
+.now .title a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.now .meta {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--ink-2);
+}
+.now .meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.now .error {
+  margin-top: 6px;
+  color: var(--bad);
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.now .keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
+.progress {
+  margin-top: 14px;
+}
+.track {
+  position: relative;
+  height: 16px;
+  cursor: pointer;
+  touch-action: none;
+}
+.track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--raised-2);
+}
+.track .fill {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ink-2);
+}
+.track .knob {
+  position: absolute;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.playing .track .fill {
+  background: linear-gradient(90deg, var(--rainbow));
+  background-size: var(--track-w, 600px) 100%;
+}
+.playing .track .knob {
+  background: conic-gradient(var(--rainbow));
+}
+.paused .track .knob {
+  background: #f4f4f5;
+}
+.track[aria-disabled="true"] {
+  cursor: default;
+}
+.track .tip {
+  position: absolute;
+  bottom: 18px;
+  translate: -50% 0;
+  padding: 2px 6px;
+  border-radius: var(--r);
+  background: var(--panel-solid);
+  border: 1px solid var(--line-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- queue and history rows ------------------------------------------------------------------------------------- */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 16px 28px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 6px 6px 4px;
+  border-radius: var(--r);
+  border: 1px solid transparent;
+}
+.row:hover,
+.row:focus-within {
+  background: var(--raised);
+  border-color: var(--line);
+}
+.row .grip {
+  color: var(--ink-3);
+  cursor: grab;
+  display: grid;
+  place-items: center;
+}
+.row .pos {
+  color: var(--ink-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.row .text {
+  min-width: 0;
+}
+.row .name {
+  font-weight: 500;
+  line-height: 1.35;
+}
+.row .name a {
+  text-decoration: none;
+}
+.row .name a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.row .sub {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.row .acts {
+  display: flex;
+  gap: 2px;
+}
+/* The one key of a narrow card's row (shown by the container rule below). */
+.row .acts > .more-key {
+  display: none;
+}
+/* A row's keys as a list (trackMenu), in a dialog. */
+.menu-list {
+  display: grid;
+  gap: 2px;
+  min-width: min(320px, 78vw);
+}
+/* What Copy did, under the token in its dialog. */
+.copy-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.copy-result:empty {
+  display: none;
+}
+.row.next {
+  background: color-mix(in oklch, var(--load) 7%, transparent);
+  border-color: color-mix(in oklch, var(--load) 22%, transparent);
+}
+.row.dragging {
+  opacity: 0.45;
+}
+.row.drop-before {
+  box-shadow: inset 0 2px 0 var(--focus);
+}
+.row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--focus);
+}
+.history .row {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  padding-left: 6px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tone, var(--ink-2));
+  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
+}
+
+/* ---- add -------------------------------------------------------------------------------------------------------- */
+.add {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+}
+
+/* ---- voice ------------------------------------------------------------------------------------------------------ */
+.voice-now {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.voice-now .where {
+  flex: 1;
+  min-width: 0;
+}
+.voice-now .where b {
+  font-weight: 600;
+}
+.channels {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 214px;
+}
+.channel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--r);
+}
+.channel:hover {
+  background: var(--raised);
+}
+.channel .name {
+  flex: 1;
+  min-width: 0;
+}
+.channel.current .name {
+  font-weight: 600;
+}
+.listeners {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--pad);
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  min-height: 44px;
+}
+.faces {
+  display: flex;
+}
+.faces .avatar {
+  margin-left: -4px;
+  box-shadow: 0 0 0 2px var(--panel-solid);
+}
+.faces .avatar:first-child {
+  margin-left: 0;
+}
+
+/* ---- the listening bar (the browser playing along) -------------------------------------------------------------- */
+.listen {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--listen-h);
+  padding: 0 16px;
+  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border-top: 1px solid var(--line);
+}
+.listen .state {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.listen .what {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.listen .what b {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.listen .what span {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.listen .mini {
+  display: none;
+  gap: 4px;
+}
+.faces-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+}
+.volume input {
+  width: 120px;
+  accent-color: var(--ink);
+}
+.volume .num {
+  width: 34px;
+  text-align: right;
+  font-size: 12px;
+}
+
+/* ---- sheets, dialogs and the scrim ------------------------------------------------------------------------------- */
+/* The scrim sits under the bar (the bar stays clickable and readable); sheets hang from the bar to the window's end. */
+.scrim {
+  position: fixed;
+  inset: var(--bar-h) 0 var(--listen-h) 0;
+  z-index: 29;
+  background: var(--scrim);
+  animation: fade 160ms ease-out;
+}
+.scrim.full {
+  inset: 0;
+  z-index: 40;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+/* The sheet covers the right column exactly, its edge in the gap between the columns, so it crosses no card. */
+.sheet {
+  position: fixed;
+  top: var(--bar-h);
+  bottom: var(--listen-h);
+  right: 0;
+  z-index: 31;
+  width: min(calc(var(--side-w) + 16px + var(--gap) / 2), 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border-left: 1px solid var(--line);
+  box-shadow:
+    var(--rim),
+    -24px 0 48px -32px rgba(0, 0, 0, 0.6);
+  animation: sheet-in 180ms ease-out;
+}
+.sheet.left {
+  right: auto;
+  left: 0;
+  border-left: 0;
+  border-right: 1px solid var(--line);
+  animation-name: sheet-in-left;
+}
+@keyframes sheet-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+@keyframes sheet-in-left {
+  from {
+    transform: translateX(-16px);
+    opacity: 0;
+  }
+}
+@media (min-width: 901px) {
+  .sheet .pages {
+    display: none;
+  }
+}
+.sheet .sheet-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 0 16px;
+}
+.section {
+  padding: 12px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.section:last-child {
+  border-bottom: 0;
+}
+.section h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+.line .grow {
+  flex: 1;
+  min-width: 0;
+}
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.choice:hover {
+  background: var(--raised);
+}
+.choice[aria-checked="true"] {
+  border-color: var(--line-2);
+  background: var(--raised);
+  font-weight: 600;
+}
+.choice .check {
+  margin-left: auto;
+  color: var(--play);
+  visibility: hidden;
+}
+.choice[aria-checked="true"] .check {
+  visibility: visible;
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+.dialog {
+  position: fixed;
+  z-index: 41;
+  left: 50%;
+  top: 18vh;
+  translate: -50% 0;
+  width: min(440px, calc(100vw - 32px));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow:
+    var(--rim),
+    0 30px 80px -30px rgba(0, 0, 0, 0.8);
+  animation: dialog-in 160ms ease-out;
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.dialog h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.dialog .dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px var(--pad) 10px;
+}
+.dialog .dialog-text {
+  padding: 0 var(--pad);
+  color: var(--ink-2);
+}
+.dialog .dialog-content {
+  padding: 12px var(--pad);
+  min-height: 0;
+}
+.dialog .dialog-keys {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px var(--pad) var(--pad);
+}
+.secret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--sunk);
+  word-break: break-all;
+}
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: var(--r);
+  font: 500 12px / 1 var(--font);
+  color: var(--ink);
+  background: var(--raised);
+}
+
+/* ---- statistics ----------------------------------------------------------------------------------------------- */
+.page {
+  padding: var(--gap) 16px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+}
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-head h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.page-head .page-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--gap);
+}
+.tile {
+  padding: 14px var(--pad);
+}
+.tile .k {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.tile .v {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.tile .v small {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  margin-left: 2px;
+}
+.charts {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--gap);
+}
+.chart {
+  padding: 12px var(--pad) var(--pad);
+}
+/* Columns: at most 24px wide, rounded at the data end and square on the baseline, 2px apart. The whole slot is the
+   hover target (wider than the mark), and the hovered mark lifts. */
+.plot {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+}
+.yaxis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 160px;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.bars {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 160px;
+  border-bottom: 1px solid var(--line-2);
+  background:
+    linear-gradient(var(--line), var(--line)) 0 0 / 100% 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) 0 50% / 100% 1px no-repeat;
+}
+.bars .slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  outline-offset: -2px;
+}
+.bars .b {
+  width: min(100%, 24px);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--series);
+}
+.bars .slot.zero .b {
+  background: transparent;
+}
+.bars .slot:hover .b,
+.bars .slot:focus-visible .b {
+  filter: brightness(1.18);
+}
+.chart-tip {
+  position: absolute;
+  z-index: 2;
+  translate: -50% -100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chart-tip .value {
+  display: block;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.chart-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.chart-table th,
+.chart-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.chart-table td.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ranks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rank {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.rank .meter {
+  grid-column: 2 / 4;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--raised-2);
+  overflow: hidden;
+}
+.rank .meter i {
+  display: block;
+  height: 100%;
+  background: var(--series);
+  border-radius: 3px;
+}
+.rank .n {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.rank .who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ---- logs ------------------------------------------------------------------------------------------------------- */
+.logs {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.log {
+  display: grid;
+  grid-template-columns: 172px 52px 96px minmax(0, 1fr);
+  gap: 10px;
+  padding: 5px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.log:last-child {
+  border-bottom: 0;
+}
+.log .fields {
+  color: var(--ink-3);
+}
+
+/* ---- login ------------------------------------------------------------------------------------------------------ */
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+.login .card {
+  width: min(420px, 100%);
+  padding: 28px 24px 24px;
+  gap: 16px;
+}
+.login .brand {
+  gap: 12px;
+}
+.login .brand b {
+  font-size: 26px;
+}
+.login p {
+  margin: 0;
+  color: var(--ink-2);
+}
+.login code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--sunk);
+  color: var(--ink);
+}
+.notice {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  color: var(--tone, var(--ink-2));
+  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
+}
+
+/* ---- narrower windows ---------------------------------------------------------------------------------------- */
+@media (max-width: 1100px) {
+  :root {
+    --side-w: 320px;
+  }
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .nav a .label {
+    display: none;
+  }
+}
+/* One column: the page scrolls as a whole; long lists scroll inside their card, so the page keeps a sane length. */
+@media (max-width: 900px), (max-height: 620px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .card.fill {
+    flex: none;
+  }
+  .card.fill .scroll {
+    max-height: min(68vh, 620px);
+  }
+}
+/* A narrow card shows its tools as icons (their names stay in the tooltip and for screen readers). */
+@container (max-width: 760px) {
+  .card-head .tools .key:has(.label) .label {
+    display: none;
+  }
+  .card-head .tools .key.sm:has(.label) {
+    width: var(--control-sm);
+    padding: 0;
+  }
+}
+/* Narrower still: the search goes to its own line under the title, and a queued track has two keys, not three. */
+@container (max-width: 560px) {
+  .card-head .head-search {
+    order: 3;
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  .card-head .head-search + .tools {
+    margin-left: auto;
+  }
+  /* A narrow card (a phone) shows one key per row, which lists the others (see trackMenu). */
+  .row .acts > :not(.more-key) {
+    display: none;
+  }
+  .row .acts > .more-key {
+    display: inline-flex;
+  }
+}
+/* The now-playing keys keep their words while there is room; on a narrow card only the main key does. */
+@container (max-width: 520px) {
+  .now .keys .key:has(.label) .label {
+    display: none;
+  }
+  .now .keys .key:has(.label) {
+    width: var(--control);
+    padding: 0;
+  }
+}
+@media (max-width: 900px) {
+  .sheet {
+    width: 100vw;
+  }
+  .divider,
+  .bar .nav {
+    display: none;
+  }
+  .now {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+    gap: 14px;
+  }
+  .now .disc {
+    --size: 112px;
+  }
+  .listen .mini {
+    display: flex;
+  }
+  .listen .what .long {
+    display: none;
+  }
+  .listen .volume input {
+    width: 84px;
+  }
+  .row .grip {
+    display: none;
+  }
+  /* No dragging here (the grip is gone): the row's list key carries the moves up and down. */
+  .row .acts > .more-key {
+    display: inline-flex;
+  }
+  .row {
+    grid-template-columns: 24px 36px minmax(0, 1fr) auto;
+  }
+  .log {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+@media (max-width: 560px) {
+  .bar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+  /* On a phone the bar keeps the mark and the version; the login page keeps the name too. */
+  .bar .brand b {
+    display: none;
+  }
+  .account .name {
+    display: none;
+  }
+  .listen .volume,
+  .listen .faces-box,
+  .listen .key .label {
+    display: none;
+  }
+  .listen > .key {
+    width: var(--control);
+    padding: 0;
+  }
+  .tiles {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .add {
+    flex-wrap: wrap;
+  }
+  .add .field {
+    flex-basis: 100%;
+  }
+  .add .key {
+    flex: 1;
+  }
+}
+
+/* ---- motion -------------------------------------------------------------------------------------------------------- */
+/* People who ask their system for less motion get none, and the menu can turn it off too. */
+/* biome-ignore-start lint/complexity/noImportantStyles: turning motion off must win over every animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+/* biome-ignore-end lint/complexity/noImportantStyles: the end of the motion rules. */
+
+/* ---- touch ------------------------------------------------------------------------------------------------------ */
+/* Last in the file, so they win over the rules above: every control at least 44 by 44 for a finger. */
+@media (pointer: coarse) {
+  .switch {
+    width: 46px;
+    height: 28px;
+    border-radius: 14px;
+  }
+  .switch::after {
+    width: 24px;
+    height: 24px;
+  }
+  .switch[aria-checked="true"]::after {
+    transform: translateX(18px);
+  }
+  .seg button {
+    min-width: 44px;
+  }
+  .choice {
+    min-height: 44px;
+  }
+}
