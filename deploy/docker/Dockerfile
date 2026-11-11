@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# The jukecord image, for linux/amd64 and linux/arm64: Node 24 on Debian, Debian's ffmpeg (libopus, libmp3lame), and
+# The jukecord image, for linux/amd64 and linux/arm64: Node 26 LTS on Debian 13, Debian's ffmpeg (libopus, libmp3lame), and
 # the official yt-dlp build for the image's architecture, checked against the release's published checksum.
 #
 # yt-dlp's official builds carry everything yt-dlp needs, including the scripts it runs for YouTube; they run those
@@ -8,7 +8,10 @@
 #
 #   docker build -f deploy/docker/Dockerfile -t jukecord .
 
-ARG NODE_IMAGE=node:24-bookworm-slim
+# Node 26 is the current LTS (from 2026-10-28) and Debian 13 (trixie) the current stable release. Pinned by the
+# multi-platform index digest, so a rebuild gets the same base on both architectures until it is bumped on purpose.
+# Debian (glibc), not Alpine: musl's resolver has failed lookups in Kubernetes clusters, which the Helm chart targets.
+ARG NODE_IMAGE=node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
 
 # ---- yt-dlp ---------------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS ytdlp
@@ -48,6 +51,15 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && mkdir -p node_mod
 
 # ---- the image ------------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
+# Labels the registries and scanners read; the version and revision are passed by the release workflow.
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="jukecord" \
+      org.opencontainers.image.description="A self-hosted Discord music bot: one queue, heard in a voice channel and in the browser" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/kanggu12/jukecord" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 # tini as PID 1 forwards SIGTERM to Node and reaps the yt-dlp and ffmpeg processes jukecord starts.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates tini \
@@ -68,5 +80,5 @@ USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8795
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# Node's SQLite driver prints an "experimental" warning on every start in Node 24; it is known and expected.
+# Node's SQLite driver prints an "experimental" warning on every start (Node 24 and 26); it is known and expected.
 CMD ["node", "--disable-warning=ExperimentalWarning", "src/main.ts"]
