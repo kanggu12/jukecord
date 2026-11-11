@@ -7,7 +7,7 @@
  */
 import { type ChildProcess, spawn } from 'node:child_process';
 import type { NewTrack } from '../core/types.ts';
-import { ProcessError, run } from './process.ts';
+import { lastLines, ProcessError, type RunOptions, type RunResult, run } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
 
 export interface YtDlpOptions {
@@ -19,6 +19,8 @@ export interface YtDlpOptions {
   readonly timeoutMs: number;
   /** The most tracks one playlist adds; a 5,000-track playlist would bury the queue. */
   readonly maxPlaylist: number;
+  /** A Netscape cookies file passed to yt-dlp (needed when YouTube asks the server to sign in), or null. */
+  readonly cookies?: string | null;
 }
 
 // Titles YouTube gives entries that cannot be played; they are left out of an added playlist.
@@ -97,6 +99,45 @@ export function tracksFromInfo(info: unknown, limit: number): NewTrack[] {
   return tracks;
 }
 
+// The progress line yt-dlp is asked to print: a marker, bytes so far, total bytes, and the estimate when the total is
+// not known yet ("NA" for missing values).
+export const PROGRESS_TEMPLATE =
+  'download:[jukecord-progress] %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s';
+
+/** Reads one of those lines into a fraction from 0 to 1, or null for any other line. */
+export function parseProgress(line: string): number | null {
+  const match = /\[jukecord-progress\] (\S+) (\S+) (\S+)/.exec(line);
+  if (!match) return null;
+  const done = Number(match[1]);
+  // The real total when the site gave one, otherwise yt-dlp's estimate.
+  const total = Number(match[2]) || Number(match[3]);
+  if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return null;
+  return Math.min(1, done / total);
+}
+
+// What YouTube says when it wants this address to sign in before serving it.
+const BOT_CHECK = /sign in to confirm|confirm you.?re not a bot/i;
+
+/** The message for a failed yt-dlp run: its last lines, or what to do when YouTube is asking for a sign-in. */
+export function ytdlpFailure(stderr: string, code: number | null): string {
+  if (BOT_CHECK.test(stderr)) {
+    return 'YouTube asks this server to sign in to prove it is not a bot; give jukecord a cookies file (JUKECORD_YTDLP_COOKIES)';
+  }
+  return `yt-dlp failed: ${lastLines(stderr) || `exit ${code}`}`;
+}
+
+// run() for yt-dlp, with its failures explained (see ytdlpFailure).
+async function runExplained(binary: string, args: readonly string[], options: RunOptions): Promise<RunResult> {
+  try {
+    return await run(binary, args, options);
+  } catch (error) {
+    if (error instanceof ProcessError && error.result && error.result.code !== 0 && error.result.signal === null) {
+      throw new ProcessError(ytdlpFailure(error.result.stderr, error.result.code), error.result);
+    }
+    throw error;
+  }
+}
+
 export class YtDlp {
   private readonly options: YtDlpOptions;
 
@@ -106,7 +147,10 @@ export class YtDlp {
 
   // Arguments every run shares: no config files, no warnings in the output we parse, Node as the JS runtime.
   private common(): string[] {
-    return ['--ignore-config', '--no-warnings', '--js-runtimes', this.options.jsRuntime];
+    const args = ['--ignore-config', '--no-warnings', '--js-runtimes', this.options.jsRuntime];
+    // The cookies of a signed-in browser get past YouTube's bot check on a server it distrusts.
+    if (this.options.cookies) args.push('--cookies', this.options.cookies);
+    return args;
   }
 
   /** The installed yt-dlp version, for the doctor command and the update check. */
@@ -129,7 +173,7 @@ export class YtDlp {
       if (!isPlaylistAddress(input.url)) args.push('--no-playlist');
       args.push(input.url.href);
     }
-    const result = await run(this.options.binary, args, {
+    const result = await runExplained(this.options.binary, args, {
       timeoutMs: this.options.timeoutMs,
       ...(signal ? { signal } : {}),
     });
@@ -157,7 +201,11 @@ export class YtDlp {
       '--format',
       'bestaudio[ext=webm]/bestaudio/best',
       '--no-playlist',
-      '--no-progress',
+      // One progress line per update on stderr (stdout carries the audio), in a form parseProgress reads.
+      '--progress',
+      '--newline',
+      '--progress-template',
+      PROGRESS_TEMPLATE,
       '--output',
       '-',
       url,

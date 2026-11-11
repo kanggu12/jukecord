@@ -5,6 +5,7 @@
  * (playing, paused, added, a problem), the one place colour means something in Discord's layout.
  */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import type { AddResult } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
@@ -44,6 +45,8 @@ const TEXT = {
   skip: { en: 'Skip', ko: '건너뛰기' },
   panel: { en: 'Open the panel', ko: '패널 열기' },
   done: { en: 'Done', ko: '했음' },
+  repeatTrack: { en: 'Repeating this track', ko: '지금 곡 반복' },
+  repeatQueue: { en: 'Repeating the queue', ko: '대기열 반복' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -65,7 +68,8 @@ function line(title: string, url: string, durationMs: number | null, addedBy: st
 }
 
 /** What was added, and where it landed in the queue. */
-export function addedCard(items: readonly QueueItem[], lang: Lang): EmbedBuilder {
+export function addedCard(result: AddResult, lang: Lang): EmbedBuilder {
+  const items = result.items;
   const first = items[0];
   const embed = new EmbedBuilder().setColor(COLOUR.added).setTitle(TEXT.added[lang](items.length));
   if (items.length === 1 && first) {
@@ -83,6 +87,19 @@ export function addedCard(items: readonly QueueItem[], lang: Lang): EmbedBuilder
     if (items.length > 5) shown.push(`+${items.length - 5}`);
     embed.setDescription(shown.join('\n'));
   }
+  // What was left out, and why, so a short count is not a mystery.
+  const left: string[] = [];
+  if (result.skippedTooLong > 0)
+    left.push(
+      lang === 'ko' ? `너무 긴 곡 ${result.skippedTooLong}곡 뺌` : `${result.skippedTooLong} too long, left out`,
+    );
+  if (result.skippedFull > 0)
+    left.push(
+      lang === 'ko'
+        ? `대기열이 차서 ${result.skippedFull}곡 못 넣음`
+        : `${result.skippedFull} did not fit, the queue is full`,
+    );
+  if (left.length > 0) embed.setFooter({ text: left.join(' · ') });
   return embed;
 }
 
@@ -114,6 +131,9 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
+  // The repeat mode, when one is on, under the bar.
+  if (snapshot.repeat !== 'off')
+    embed.setFooter({ text: snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang] });
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(snapshot.status === 'paused' ? 'jukecord:resume' : 'jukecord:pause')

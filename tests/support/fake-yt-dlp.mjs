@@ -15,6 +15,16 @@ if (args.includes('--version')) {
   process.stdout.write('2026.10.26\n');
   process.exit(0);
 }
+// FAKE_YTDLP_FAIL_ONCE: fail the first run with this message (a marker file remembers the run), then work.
+if (
+  process.env.FAKE_YTDLP_FAIL_ONCE &&
+  process.env.FAKE_YTDLP_MARKER &&
+  !fs.existsSync(process.env.FAKE_YTDLP_MARKER)
+) {
+  fs.writeFileSync(process.env.FAKE_YTDLP_MARKER, 'failed once');
+  process.stderr.write(`ERROR: ${process.env.FAKE_YTDLP_FAIL_ONCE}\n`);
+  process.exit(1);
+}
 if (process.env.FAKE_YTDLP_FAIL) {
   // yt-dlp's errors start with "ERROR:" on stderr.
   process.stderr.write(`ERROR: ${process.env.FAKE_YTDLP_FAIL}\n`);
@@ -26,6 +36,14 @@ if (args.includes('-J')) {
 }
 const output = args.indexOf('--output');
 if (output !== -1 && args[output + 1] === '-') {
+  // Progress lines in the template's shape when one was asked for, the way yt-dlp prints them on stderr.
+  const template = args.indexOf('--progress-template');
+  if (template !== -1) {
+    const total = fs.statSync(process.env.FAKE_YTDLP_AUDIO ?? '').size;
+    for (const part of [0.25, 0.5, 1]) {
+      process.stderr.write(`[jukecord-progress] ${Math.round(total * part)} ${total} NA\n`);
+    }
+  }
   // Stream the file like a download, and exit 0 once it is all written.
   fs.createReadStream(process.env.FAKE_YTDLP_AUDIO ?? '')
     .on('error', (error) => {

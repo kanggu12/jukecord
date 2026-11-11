@@ -11,7 +11,7 @@
  * flags the old code used to tell its own seeks apart from real changes.
  */
 import type { Logger } from '../log.ts';
-import type { HistoryRepository, PlayerStateRepository } from '../store/store.ts';
+import type { HistoryRepository, PlayerStateRepository, RepeatMode } from '../store/store.ts';
 import type { Bus } from './bus.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { QueueService } from './queue.ts';
@@ -31,7 +31,7 @@ export interface PreparedMedia {
 /** Gets a track ready (fetch, convert, measure). Implemented by the media module; faked in tests. */
 export interface MediaPreparer {
   /** Must stop work and reject soon after `signal` aborts: a skipped track should not keep downloading. */
-  prepare(track: Track, signal: AbortSignal): Promise<PreparedMedia>;
+  prepare(track: Track, signal: AbortSignal, onProgress?: (fraction: number) => void): Promise<PreparedMedia>;
 }
 
 /**
@@ -61,6 +61,10 @@ export interface PlayerSnapshot {
   readonly durationMs: number | null;
   /** The last failure ("could not fetch ..."), cleared when a track starts playing. */
   readonly error: string | null;
+  /** What happens at the end of a track (see Player.setRepeat). */
+  readonly repeat: RepeatMode;
+  /** How much of the current track is downloaded (0 to 1) while it is loading; null otherwise or when unknown. */
+  readonly progress: number | null;
   /** Grows by one with every snapshot, so clients can ignore one that arrives out of order. */
   readonly version: number;
 }
@@ -113,6 +117,10 @@ export class Player {
   private session = 0;
   private version = 0;
   private error: string | null = null;
+  private repeat: RepeatMode = 'off';
+  // Download progress of the loading track, and the timer that sends it at most four times a second.
+  private progress: number | null = null;
+  private progressTimer: TimerHandle | null = null;
 
   // Loading: the running fetch, its timeout, and how to start once it is done.
   private loadAbort: AbortController | null = null;
@@ -162,6 +170,8 @@ export class Player {
       at: this.options.clock.now(),
       durationMs: this.media?.durationMs ?? this.current?.track.durationMs ?? null,
       error: this.error,
+      repeat: this.repeat,
+      progress: this.status === 'loading' ? this.progress : null,
       version: this.version,
     };
   }
@@ -288,11 +298,22 @@ export class Player {
   outputEnded(session: number): void {
     if (session !== this.session || this.status !== 'playing') return;
     this.options.log.debug('the output reported the end of the track', { guild: this.guildId, session });
-    this.advance(true);
+    this.ended();
   }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Saving and restoring
+
+  /**
+   * Sets what happens when a track ends by itself: 'off' moves on, 'track' plays the same track again, 'queue' puts
+   * it back at the end of the queue (so the queue loops). Skipping always moves on, whatever the mode.
+   */
+  setRepeat(mode: RepeatMode): boolean {
+    if (mode === this.repeat) return false;
+    this.repeat = mode;
+    this.emit();
+    return true;
+  }
 
   /** Writes the current position, so a restart comes back here. Called on shutdown. */
   checkpoint(): void {
@@ -326,22 +347,46 @@ export class Player {
     return true;
   }
 
+  // A track ended by itself: the repeat mode decides what comes next.
+  private ended(): void {
+    const current = this.current;
+    if (this.repeat === 'track' && current && this.media) {
+      // The same track again from the top: it is still prepared, so nothing is fetched.
+      this.record();
+      current.startedAt = this.options.clock.now();
+      this.offsetMs = 0;
+      this.anchor = this.options.clock.now();
+      this.session += 1;
+      for (const output of this.outputs.keys()) this.startOutput(output);
+      this.scheduleEnd();
+      this.emit();
+      return;
+    }
+    // The queue loops: the finished track goes back to the end, added by the same person.
+    if (this.repeat === 'queue' && current)
+      this.options.queue.add(this.guildId, [current.track.id], 'end', current.addedBy);
+    this.advance(true);
+  }
+
+  // Writes the current track into the history if it was listened to (see MIN_HISTORY_MS).
+  private record(): void {
+    const current = this.current;
+    if (!current || current.startedAt === null) return;
+    const playedMs = Math.round(this.position());
+    if (playedMs < MIN_HISTORY_MS) return;
+    this.options.history.add({
+      guildId: this.guildId,
+      trackId: current.track.id,
+      addedBy: current.addedBy,
+      playedAt: current.startedAt,
+      playedMs,
+    });
+  }
+
   // Ends the current track: stops loading or sound, cancels timers, and records it if it was listened to.
   private finishCurrent(record: boolean): void {
     const current = this.current;
-    if (current && record && current.startedAt !== null) {
-      const playedMs = Math.round(this.position());
-      // Only real listens: see MIN_HISTORY_MS.
-      if (playedMs >= MIN_HISTORY_MS) {
-        this.options.history.add({
-          guildId: this.guildId,
-          trackId: current.track.id,
-          addedBy: current.addedBy,
-          playedAt: current.startedAt,
-          playedMs,
-        });
-      }
-    }
+    if (record) this.record();
     this.cancelLoad();
     this.cancelEndTimer();
     this.cancelSeek();
@@ -371,6 +416,7 @@ export class Player {
     this.startPaused = paused;
     this.media = null;
     this.offsetMs = startAtMs;
+    this.progress = null;
     const session = ++this.session;
     const controller = new AbortController();
     this.loadAbort = controller;
@@ -384,7 +430,17 @@ export class Player {
       );
     }, this.options.fetchTimeoutMs);
     this.emit();
-    this.options.media.prepare(current.track, controller.signal).then(
+    // Progress is shown while loading; a burst of reports is sent at most four times a second.
+    const onProgress = (fraction: number): void => {
+      if (session !== this.session || this.status !== 'loading') return;
+      this.progress = Math.max(0, Math.min(1, fraction));
+      if (this.progressTimer !== null) return;
+      this.progressTimer = this.options.clock.setTimeout(() => {
+        this.progressTimer = null;
+        if (session === this.session && this.status === 'loading') this.emit();
+      }, 250);
+    };
+    this.options.media.prepare(current.track, controller.signal, onProgress).then(
       (media) => {
         // Skipped, stopped or timed out meanwhile: this result belongs to a load that no longer matters.
         if (session !== this.session || controller.signal.aborted) return;
@@ -480,7 +536,7 @@ export class Player {
           guild: this.guildId,
         });
       }
-      this.advance(true);
+      this.ended();
     }, remaining + grace);
   }
 
@@ -494,6 +550,9 @@ export class Player {
     this.loadTimer = null;
     this.loadAbort?.abort();
     this.loadAbort = null;
+    if (this.progressTimer !== null) this.options.clock.clearTimeout(this.progressTimer);
+    this.progressTimer = null;
+    this.progress = null;
   }
 
   private cancelSeek(): void {
@@ -511,6 +570,7 @@ export class Player {
       // A loading track is saved as paused: it was meant to play, and restore always brings it back paused anyway.
       status: this.status === 'idle' ? 'idle' : this.status === 'playing' ? 'playing' : 'paused',
       positionMs: this.position(),
+      repeat: this.repeat,
     });
   }
 

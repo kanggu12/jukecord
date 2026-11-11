@@ -223,13 +223,21 @@ describe('PlayerStateRepository and SettingsRepository', () => {
     const store = memoryStore();
     const [a] = addTracks(store, 1);
     assert.ok(a);
-    store.playerState.save({ guildId: GUILD, trackId: a.id, addedBy: 'u1', status: 'playing', positionMs: 1234.6 });
+    store.playerState.save({
+      guildId: GUILD,
+      trackId: a.id,
+      addedBy: 'u1',
+      status: 'playing',
+      positionMs: 1234.6,
+      repeat: 'off',
+    });
     assert.deepEqual(store.playerState.load(GUILD), {
       guildId: GUILD,
       trackId: a.id,
       addedBy: 'u1',
       status: 'playing',
       positionMs: 1235,
+      repeat: 'off',
       updatedAt: Date.UTC(2026, 10, 11),
     });
     assert.equal(store.playerState.all().length, 1);

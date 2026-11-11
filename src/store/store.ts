@@ -80,6 +80,7 @@ export class Store {
   readonly playlists: PlaylistRepository;
   readonly playerState: PlayerStateRepository;
   readonly settings: SettingsRepository;
+  readonly discord: DiscordRepository;
   // How deep the current transaction is nested; inner ones become savepoints.
   private depth = 0;
 
@@ -92,6 +93,7 @@ export class Store {
     this.playlists = new PlaylistRepository(this, now);
     this.playerState = new PlayerStateRepository(this, now);
     this.settings = new SettingsRepository(this, now);
+    this.discord = new DiscordRepository(this, now);
   }
 
   /**
@@ -400,6 +402,9 @@ export class QueueRepository {
   }
 }
 
+// The most history rows kept per server: years of listening for a group of friends, and a bound on the database.
+export const HISTORY_KEEP = 10_000;
+
 /** Played tracks, newest first. */
 export class HistoryRepository {
   private readonly store: Store;
@@ -421,9 +426,23 @@ export class HistoryRepository {
         'INSERT INTO history (guild_id, track_id, added_by, played_at, played_ms) VALUES (?, ?, ?, ?, ?) RETURNING id',
       )
       .get(entry.guildId, entry.trackId, entry.addedBy, entry.playedAt, entry.playedMs) as Row;
-    const stored = this.get(int(row, 'id'));
+    const id = int(row, 'id');
+    // Pruned every hundred plays, not every play: the delete walks a server's history.
+    if (id % 100 === 0) this.prune(entry.guildId);
+    const stored = this.get(id);
     if (!stored) throw new StoreError('the history entry just written cannot be read back');
     return stored;
+  }
+
+  /** Deletes a server's oldest entries beyond `keep` and returns how many went. */
+  prune(guildId: string, keep = HISTORY_KEEP): number {
+    const result = this.store.db
+      .prepare(
+        `DELETE FROM history WHERE guild_id = ? AND id < (
+           SELECT id FROM history WHERE guild_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)`,
+      )
+      .run(guildId, guildId, keep - 1);
+    return Number(result.changes);
   }
 
   /** One entry by ID, or null. */
@@ -581,6 +600,9 @@ function playlistFrom(row: Row): Playlist {
   };
 }
 
+/** The repeat modes of a player. */
+export type RepeatMode = 'off' | 'track' | 'queue';
+
 /** What a server was playing when it was last saved. */
 export interface SavedPlayerState {
   readonly guildId: string;
@@ -590,6 +612,8 @@ export interface SavedPlayerState {
   /** "playing", "paused" or "idle"; a restart brings "playing" back as paused, so nobody is surprised by sound. */
   readonly status: 'playing' | 'paused' | 'idle';
   readonly positionMs: number;
+  /** What happens at the end of a track: nothing special, the same track again, or the track back to the queue's end. */
+  readonly repeat: RepeatMode;
   readonly updatedAt: number;
 }
 
@@ -606,9 +630,11 @@ export class PlayerStateRepository {
   save(state: Omit<SavedPlayerState, 'updatedAt'>): void {
     this.store.db
       .prepare(
-        `INSERT INTO player_state (guild_id, track_id, added_by, status, position_ms, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO player_state (guild_id, track_id, added_by, status, position_ms, repeat, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (guild_id) DO UPDATE SET track_id = excluded.track_id, added_by = excluded.added_by,
-           status = excluded.status, position_ms = excluded.position_ms, updated_at = excluded.updated_at`,
+           status = excluded.status, position_ms = excluded.position_ms, repeat = excluded.repeat,
+           updated_at = excluded.updated_at`,
       )
       .run(
         state.guildId,
@@ -616,6 +642,7 @@ export class PlayerStateRepository {
         state.addedBy,
         state.status,
         Math.max(0, Math.round(state.positionMs)),
+        state.repeat,
         this.now(),
       );
   }
@@ -638,12 +665,15 @@ function savedStateFrom(row: Row): SavedPlayerState {
   const status = text(row, 'status');
   // An unknown status (a newer version's, or a hand edit) is read as idle rather than trusted.
   const known = status === 'playing' || status === 'paused' ? status : 'idle';
+  const repeat = text(row, 'repeat');
   return {
     guildId: text(row, 'guild_id'),
     trackId: intOrNull(row, 'track_id'),
     addedBy: textOrNull(row, 'added_by'),
     status: known,
     positionMs: int(row, 'position_ms'),
+    // Read like the status: an unknown value falls back to the safe default.
+    repeat: repeat === 'track' || repeat === 'queue' ? repeat : 'off',
     updatedAt: int(row, 'updated_at'),
   };
 }
@@ -679,5 +709,33 @@ export class SettingsRepository {
          ON CONFLICT (guild_id) DO UPDATE SET dj_role_id = excluded.dj_role_id, updated_at = excluded.updated_at`,
       )
       .run(guildId, roleId, this.now());
+  }
+}
+
+/** What jukecord remembers about Discord per server: the fingerprint of the commands it registered there. */
+export class DiscordRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** The fingerprint of the commands registered in a server, or null when none were. */
+  commandsHash(guildId: string): string | null {
+    const row = this.store.db.prepare('SELECT hash FROM discord_commands WHERE guild_id = ?').get(guildId) as
+      | Row
+      | undefined;
+    return row ? text(row, 'hash') : null;
+  }
+
+  setCommandsHash(guildId: string, hash: string): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO discord_commands (guild_id, hash, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (guild_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at`,
+      )
+      .run(guildId, hash, this.now());
   }
 }

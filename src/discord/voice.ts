@@ -23,6 +23,8 @@ import {
 } from '@discordjs/voice';
 import { type Client, PermissionFlagsBits } from 'discord.js';
 import { ActionError, type VoiceControl } from '../app/actions.ts';
+import { type Clock, systemClock } from '../core/clock.ts';
+import { Countdowns } from '../core/countdowns.ts';
 import type { PlayerOutput, PreparedMedia } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
@@ -137,12 +139,44 @@ export class VoiceManager implements VoiceControl {
   private readonly ffmpeg: Ffmpeg;
   private readonly log: Logger;
   private readonly joined = new Map<string, Joined>();
+  // How long the bot stays alone in a channel, and the countdowns running per server.
+  private readonly idleMs: number;
+  private readonly idle: Countdowns;
 
-  constructor(options: { client: Client; players: Players; ffmpeg: Ffmpeg; log: Logger }) {
+  constructor(options: {
+    client: Client;
+    players: Players;
+    ffmpeg: Ffmpeg;
+    log: Logger;
+    idleMs: number;
+    clock?: Clock;
+  }) {
     this.client = options.client;
     this.players = options.players;
     this.ffmpeg = options.ffmpeg;
     this.log = options.log;
+    this.idleMs = options.idleMs;
+    this.idle = new Countdowns(options.clock ?? systemClock, options.idleMs, (guildId) => {
+      this.log.info('left voice: nobody was in the channel', {
+        guild: guildId,
+        channel: this.joined.get(guildId)?.name,
+      });
+      this.drop(guildId);
+    });
+  }
+
+  /**
+   * Called on every voice change in a server. When nobody but bots is left in the bot's channel, the bot leaves after
+   * the idle time (JUKECORD_VOICE_IDLE); someone coming back cancels that. The music goes on for the browsers either
+   * way: leaving voice only stops sending sound nobody is there to hear.
+   */
+  voiceStateChanged(guildId: string): void {
+    const joined = this.joined.get(guildId);
+    if (!joined || this.idleMs === 0) return;
+    const channel = this.client.guilds.cache.get(guildId)?.channels.cache.get(joined.channelId);
+    const people = channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
+    if (people > 0) this.idle.disarm(guildId);
+    else this.idle.arm(guildId);
   }
 
   channel(guildId: string): { channelId: string; name: string } | null {
@@ -207,6 +241,8 @@ export class VoiceManager implements VoiceControl {
     this.joined.set(guildId, { connection, output, channelId: target, name: channel.name });
     this.players.get(guildId).attach(output);
     this.log.info('joined voice', { guild: guildId, channel: channel.name });
+    // Joined a channel that is already empty (the person left meanwhile): the countdown starts now.
+    this.voiceStateChanged(guildId);
     return { channelId: target, name: channel.name };
   }
 
@@ -232,6 +268,7 @@ export class VoiceManager implements VoiceControl {
     const joined = this.joined.get(guildId);
     if (!joined) return undefined;
     this.joined.delete(guildId);
+    this.idle.disarm(guildId);
     this.players.get(guildId).detach(joined.output);
     return joined;
   }

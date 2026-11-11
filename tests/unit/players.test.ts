@@ -40,8 +40,15 @@ describe('Players', () => {
     const { store, media, players } = setup();
     const [track] = addTracks(store, 1);
     assert.ok(track);
-    store.playerState.save({ guildId: A, trackId: track.id, addedBy: 'u1', status: 'playing', positionMs: 30_000 });
-    store.playerState.save({ guildId: B, trackId: null, addedBy: null, status: 'idle', positionMs: 0 });
+    store.playerState.save({
+      guildId: A,
+      trackId: track.id,
+      addedBy: 'u1',
+      status: 'playing',
+      positionMs: 30_000,
+      repeat: 'off',
+    });
+    store.playerState.save({ guildId: B, trackId: null, addedBy: null, status: 'idle', positionMs: 0, repeat: 'off' });
     assert.equal(players.restoreAll(store.tracks, store.playerState), 1);
     media.finish(180_000);
     await flush();

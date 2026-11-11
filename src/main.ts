@@ -6,6 +6,7 @@
  * are restored before the bot starts, so a slash command never meets a half-restored player, and on shutdown the
  * positions are saved before the database closes.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { Actions } from './app/actions.ts';
 import { ConfigError, loadConfig } from './config.ts';
@@ -53,6 +54,16 @@ async function main(): Promise<number> {
     discord: config.discord.token ? 'yes' : 'browser-only',
   });
 
+  // A crash anywhere is logged with its stack before the process goes down; a stray rejected promise is logged and the
+  // music goes on (each part already handles its own failures; this catches what slipped through).
+  process.on('unhandledRejection', (reason) =>
+    log.error('a promise was rejected and nobody handled it', { reason: String(reason) }),
+  );
+  process.on('uncaughtException', (error) => {
+    log.error('jukecord stopped on an error it did not expect', { error });
+    process.exit(1);
+  });
+
   const store = Store.open(path.join(config.dataDir, 'jukecord.db'));
   const bus = new Bus();
   const queue = new QueueService(store.queue, bus);
@@ -62,8 +73,16 @@ async function main(): Promise<number> {
     log: log.child('cache'),
   });
   cache.init();
+  // yt-dlp writes cookies back to the file it was given; it gets a private copy, so a read-only mounted secret works.
+  let cookies: string | null = null;
+  if (config.media.cookies) {
+    cookies = path.join(config.dataDir, 'yt-dlp-cookies.txt');
+    fs.copyFileSync(config.media.cookies, cookies);
+    fs.chmodSync(cookies, 0o600);
+  }
   // yt-dlp runs YouTube's scripts with this very Node binary (the image has no other JavaScript runtime).
   const ytdlp = new YtDlp({
+    cookies,
     binary: config.media.ytdlp,
     jsRuntime: `node:${process.execPath}`,
     timeoutMs: config.media.fetchTimeoutMs,
@@ -99,7 +118,16 @@ async function main(): Promise<number> {
     count: config.media.prefetch,
   });
   const resolver = new Resolver({ ytdlp, tracks: store.tracks, log: log.child('lookup') });
-  const actions = new Actions({ store, queue, players, resolver, log: log.child('actions'), startedAt: Date.now() });
+  const actions = new Actions({
+    store,
+    queue,
+    players,
+    resolver,
+    log: log.child('actions'),
+    startedAt: Date.now(),
+    queueMax: config.queueMax,
+    trackMaxMs: config.media.trackMaxMs,
+  });
 
   const restored = players.restoreAll(store.tracks, store.playerState);
   if (restored > 0) log.info('restored what was playing before the restart, paused', { servers: restored });
@@ -114,6 +142,8 @@ async function main(): Promise<number> {
       bus,
       ffmpeg,
       settings: store.settings,
+      discord: store.discord,
+      voiceIdleMs: config.voice.idleMs,
       log: log.child('discord'),
       panelUrl: config.publicUrl,
     });
@@ -130,6 +160,11 @@ async function main(): Promise<number> {
     if (stopping) return;
     stopping = true;
     log.info('stopping', { signal });
+    // Ten seconds to stop cleanly; a stuck network call must not keep a container from restarting.
+    setTimeout(() => {
+      log.error('stopping took longer than 10 s; exiting anyway');
+      process.exit(1);
+    }, 10_000).unref();
     prefetcher.stop();
     players.checkpointAll();
     void (bot?.stop() ?? Promise.resolve()).finally(() => {

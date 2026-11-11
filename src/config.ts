@@ -4,6 +4,7 @@
  * Every problem is collected before anything starts, so a person fixing their .env sees the whole list in one run
  * instead of one error per restart. Secrets are kept out of anything this module prints.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
@@ -39,6 +40,16 @@ export interface Config {
     readonly fetchTimeoutMs: number;
     /** How many of the next tracks are fetched ahead of time. */
     readonly prefetch: number;
+    /** The longest track that may be added, in milliseconds (a ten-hour mix would fill the cache). */
+    readonly trackMaxMs: number;
+    /** A cookies file yt-dlp uses for YouTube's sign-in check, or null. */
+    readonly cookies: string | null;
+  };
+  /** The most tracks one server's queue may hold. */
+  readonly queueMax: number;
+  readonly voice: {
+    /** How long the bot stays alone in a voice channel before it leaves (0: it does not leave by itself). */
+    readonly idleMs: number;
   };
   readonly log: {
     readonly level: LogLevel;
@@ -83,7 +94,31 @@ const KNOWN = new Set([
   'JUKECORD_LOG_LEVEL',
   'JUKECORD_LOG_MAX',
   'JUKECORD_LOG_FILES',
+  'JUKECORD_DISCORD_TOKEN_FILE',
+  'JUKECORD_DISCORD_CLIENT_SECRET_FILE',
+  'JUKECORD_TRACK_MAX',
+  'JUKECORD_YTDLP_COOKIES',
+  'JUKECORD_QUEUE_MAX',
+  'JUKECORD_VOICE_IDLE',
 ]);
+
+/** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
+export interface ConfigFiles {
+  read(file: string): string;
+  readable(file: string): boolean;
+}
+
+const diskFiles: ConfigFiles = {
+  read: (file) => fs.readFileSync(file, 'utf8'),
+  readable: (file) => {
+    try {
+      fs.accessSync(file, fs.constants.R_OK);
+      return fs.statSync(file).isFile();
+    } catch {
+      return false;
+    }
+  },
+};
 
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
@@ -93,7 +128,7 @@ const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
  * `env` is passed in (not read from process.env here) so tests can give exact environments; `cwd` anchors a
  * relative data directory, which is how a checkout run by hand keeps its data in ./data.
  */
-export function loadConfig(env: NodeJS.ProcessEnv, cwd: string): Config {
+export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFiles = diskFiles): Config {
   // Problems are gathered instead of thrown one by one (see the module comment).
   const problems: string[] = [];
   const warnings: string[] = [];
@@ -152,14 +187,35 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string): Config {
     return url.href.replace(/\/+$/, '');
   });
 
+  // A secret comes either from the variable or from a file named by <VARIABLE>_FILE, the way Docker and Kubernetes
+  // secrets are mounted; giving both is ambiguous, so it is refused.
+  const secret = (name: string): string | null => {
+    const value = get(name);
+    const file = get(`${name}_FILE`);
+    if (file === null) return value;
+    if (value !== null) {
+      problems.push(`set ${name} or ${name}_FILE, not both`);
+      return value;
+    }
+    const full = path.resolve(cwd, file);
+    if (!files.readable(full)) {
+      problems.push(`${name}_FILE: ${full} cannot be read`);
+      return null;
+    }
+    // Files written by editors end with a newline; a token never contains spaces.
+    const content = files.read(full).trim();
+    if (content === '') problems.push(`${name}_FILE: ${full} is empty`);
+    return content || null;
+  };
+
   // Discord settings. Each is optional on its own; the combinations are checked below.
-  const token = get('JUKECORD_DISCORD_TOKEN');
+  const token = secret('JUKECORD_DISCORD_TOKEN');
   const clientId = read('JUKECORD_DISCORD_CLIENT_ID', null as string | null, (text) => {
     // Application IDs are Discord snowflakes: 17 to 20 digits.
     if (!/^\d{17,20}$/.test(text)) throw new Error('an application ID is 17 to 20 digits');
     return text;
   });
-  const clientSecret = get('JUKECORD_DISCORD_CLIENT_SECRET');
+  const clientSecret = secret('JUKECORD_DISCORD_CLIENT_SECRET');
   // A secret without the ID it belongs to cannot be used for anything, so it is a mistake worth stopping for.
   if (clientSecret !== null && clientId === null) {
     problems.push('JUKECORD_DISCORD_CLIENT_SECRET is set but JUKECORD_DISCORD_CLIENT_ID is not');
@@ -182,6 +238,30 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string): Config {
       return ms;
     }),
     prefetch: read('JUKECORD_PREFETCH', 2, integer(0, 5)),
+    trackMaxMs: read('JUKECORD_TRACK_MAX', 3 * 3_600_000, (text) => {
+      const ms = parseDuration(text);
+      // Under a minute refuses ordinary songs; over a day is no limit at all.
+      if (ms < 60_000 || ms > 86_400_000) throw new Error(`${text} is outside 1m-24h`);
+      return ms;
+    }),
+    cookies: read('JUKECORD_YTDLP_COOKIES', null as string | null, (text) => {
+      const full = path.resolve(cwd, text);
+      if (!files.readable(full)) throw new Error(`${full} cannot be read`);
+      return full;
+    }),
+  };
+
+  // The queue limit keeps a pasted 5,000-track playlist (or a script) from making the panel and the database crawl.
+  const queueMax = read('JUKECORD_QUEUE_MAX', 1000, integer(10, 100_000));
+
+  // How long the bot waits alone in a voice channel; "0" turns leaving by itself off.
+  const voice = {
+    idleMs: read('JUKECORD_VOICE_IDLE', 5 * 60_000, (text) => {
+      if (text.trim() === '0') return 0;
+      const ms = parseDuration(text);
+      if (ms < 10_000 || ms > 86_400_000) throw new Error(`${text} is outside 10s-24h (or 0 to never leave)`);
+      return ms;
+    }),
   };
 
   // Log settings: rotation keeps the log from growing without end (every log has a size limit and a count).
@@ -215,6 +295,8 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string): Config {
     publicUrl,
     discord: { token, clientId, clientSecret },
     media,
+    queueMax,
+    voice,
     log,
     warnings,
   };
@@ -242,5 +324,9 @@ export function describeConfig(config: Config): Record<string, string> {
     prefetch: String(config.media.prefetch),
     'log level': config.log.level,
     'log rotation': `${config.log.files} files of ${config.log.maxBytes} bytes`,
+    'longest track': `${config.media.trackMaxMs} ms`,
+    'yt-dlp cookies': config.media.cookies ?? 'not set',
+    'queue limit': String(config.queueMax),
+    'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
   };
 }

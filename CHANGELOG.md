@@ -25,8 +25,9 @@ All notable changes to jukecord are documented here. The format is based on
 - The next tracks are fetched while the current one plays, one at a time, and a fetch the queue no longer needs stops.
   The player and the prefetcher share one download of the same track.
 - An MP3 copy of a track is made for browsers that cannot play Opus (Safari), the first time one asks.
-- A container image for linux/amd64 and linux/arm64 with ffmpeg and the official yt-dlp build, checked against its
-  published checksum. yt-dlp runs YouTube's scripts with the image's Node; no Python or Deno in the image.
+- A container image for linux/amd64 and linux/arm64 on Node 26 LTS and Debian 13 (ffmpeg 7.1), pinned by digest,
+  with the official yt-dlp build checked against its published checksum. yt-dlp runs YouTube's scripts with the
+  image's Node; no Python or Deno in the image.
 - The Discord bot: slash commands for every action, with Korean names and descriptions (Discord shows each person
   their own language), answers as short cards with pause and skip buttons, and playlist names suggested as you type.
   It asks Discord only for the Guilds and GuildVoiceStates intents. Without a token jukecord runs browser-only.
@@ -34,5 +35,22 @@ All notable changes to jukecord are documented here. The format is based on
   that place, voice is end-to-end encrypted (DAVE), and a dropped connection that recovers within 5 s is kept.
 - Every action (add, play now, skip, pause, seek, queue edits, playlists, join, leave, status) lives in one place that
   the bot, the panel, the API and the CLI all call; a server's DJ role, when set, decides who may change the music.
+- Repeat: off, this track (played again without fetching it again) or the queue (a finished track goes back to the
+  end). The mode is kept across restarts.
+- Download progress while a track loads, reported at most four times a second.
+- Limits: tracks longer than `JUKECORD_TRACK_MAX` (3 hours) are left out and a server's queue holds at most
+  `JUKECORD_QUEUE_MAX` (1000) tracks; the answer says how many were left out and why.
+- A download that fails in a way that looks passing (a 5xx answer, a timeout, a reset connection) is tried once more
+  after 2 s.
+- When YouTube asks the server to sign in to prove it is not a bot, the error says so and how to give jukecord a
+  cookies file (`JUKECORD_YTDLP_COOKIES`); yt-dlp works on a private copy, so the file can be mounted read-only.
+- Secrets can come from files (`JUKECORD_DISCORD_TOKEN_FILE`, `JUKECORD_DISCORD_CLIENT_SECRET_FILE`), the way Docker
+  and Kubernetes mount them.
+- The bot joins your voice channel when you play something from Discord and it is not in one, and leaves a channel
+  nobody is in after `JUKECORD_VOICE_IDLE` (5 minutes); the music goes on for the browsers.
+- Slash commands are registered only when they change (Discord allows 200 registrations per server a day), and the
+  "listening to" line under the bot's name changes at most every 15 s.
+- The history keeps the newest 10,000 plays of each server.
+- An error nothing handled is logged with its stack, and stopping gets 10 s before the process exits anyway.
 
 [Unreleased]: https://github.com/kanggu12/jukecord/commits/main

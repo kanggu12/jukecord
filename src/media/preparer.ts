@@ -30,6 +30,31 @@ interface Job {
   readonly promise: Promise<PreparedMedia>;
   readonly abort: AbortController;
   waiters: number;
+  /** Everyone who wants to hear about the download's progress. */
+  readonly listeners: Set<(fraction: number) => void>;
+}
+
+// Failures worth one more try: the network or the site stumbled, not "this video does not exist".
+const TRANSIENT =
+  /HTTP Error 5\d\d|timed out|Connection reset|Temporary failure|Remote end closed|IncompleteRead|Read timed out/i;
+
+// Waits `ms` unless the download is cancelled meanwhile.
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('cancelled'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('cancelled'));
+      },
+      { once: true },
+    );
+  });
 }
 
 // A promise that rejects when `signal` aborts, so one caller can stop waiting without stopping a shared download.
@@ -55,7 +80,7 @@ export class Media implements MediaPreparer {
     return this.options.cache;
   }
 
-  async prepare(track: Track, signal: AbortSignal): Promise<PreparedMedia> {
+  async prepare(track: Track, signal: AbortSignal, onProgress?: (fraction: number) => void): Promise<PreparedMedia> {
     const key = MediaCache.keyOf(track.source);
     const cached = this.options.cache.get(key);
     if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs };
@@ -66,6 +91,7 @@ export class Media implements MediaPreparer {
     }
     const shared = job;
     shared.waiters += 1;
+    if (onProgress) shared.listeners.add(onProgress);
     // When this caller gives up, it stops waiting; the download stops only if it was the last one waiting.
     const leave = (): void => {
       shared.waiters -= 1;
@@ -76,6 +102,7 @@ export class Media implements MediaPreparer {
       return await Promise.race([shared.promise, whenAborted(signal)]);
     } finally {
       signal.removeEventListener('abort', leave);
+      if (onProgress) shared.listeners.delete(onProgress);
       // A caller that got its answer is no longer waiting either.
       if (!signal.aborted) shared.waiters -= 1;
     }
@@ -86,16 +113,43 @@ export class Media implements MediaPreparer {
     const abort = new AbortController();
     const cache = this.options.cache;
     const tmp = cache.tmpPath(key);
+    const listeners = new Set<(fraction: number) => void>();
+    // Progress goes to everyone waiting; a listener that throws must not break the download.
+    const report = (fraction: number): void => {
+      for (const listener of listeners) {
+        try {
+          listener(fraction);
+        } catch {
+          // Progress is a display; ignore.
+        }
+      }
+    };
     const promise = (async (): Promise<PreparedMedia> => {
       const started = Date.now();
       try {
-        const { loudness } = await this.options.ffmpeg.fromYtDlp(
-          this.options.ytdlp,
-          track.url,
-          tmp,
-          abort.signal,
-          this.options.timeoutMs,
-        );
+        // One retry after 2 s for a transient failure (see TRANSIENT); anything else fails at once.
+        let loudness: number | null = null;
+        for (let attempt = 1; ; attempt += 1) {
+          try {
+            ({ loudness } = await this.options.ffmpeg.fromYtDlp(
+              this.options.ytdlp,
+              track.url,
+              tmp,
+              abort.signal,
+              this.options.timeoutMs,
+              report,
+            ));
+            break;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (attempt > 1 || abort.signal.aborted || !TRANSIENT.test(message)) throw error;
+            this.options.log.info('retrying a download after a transient failure', {
+              title: track.title,
+              reason: message,
+            });
+            await pause(2000, abort.signal);
+          }
+        }
         // The real length comes from the file: sites round, and some say nothing.
         const durationMs = await oggOpusDurationMs(tmp);
         if (durationMs < 500) throw new Error('the downloaded audio is empty');
@@ -117,7 +171,7 @@ export class Media implements MediaPreparer {
     })();
     // Nobody may be waiting when it fails (everyone left); the rejection is handled here so it is not "unhandled".
     promise.catch(() => {});
-    return { promise, abort, waiters: 0 };
+    return { promise, abort, waiters: 0, listeners };
   }
 
   /**

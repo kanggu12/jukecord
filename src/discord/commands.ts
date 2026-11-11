@@ -22,6 +22,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   pause: '/pause',
   resume: '/resume',
   seek: '/seek',
+  repeat: '/repeat',
   stop: '/stop',
   'now-playing': '/np',
   queue: '/queue',
@@ -121,6 +122,24 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
         .setDescriptionLocalizations({ ko: '예: 83, 1:23, 1m23s' })
         .setRequired(true)
         .setMaxLength(20),
+    ),
+    command(
+      'repeat',
+      'Repeat the current track or the whole queue',
+      '반복',
+      '지금 곡 또는 대기열 전체 반복',
+    ).addStringOption((option) =>
+      option
+        .setName('mode')
+        .setDescription('What to repeat')
+        .setNameLocalizations({ ko: '방식' })
+        .setDescriptionLocalizations({ ko: '무엇을 반복할지' })
+        .setRequired(true)
+        .addChoices(
+          { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+          { name: 'This track', value: 'track', name_localizations: { ko: '지금 곡' } },
+          { name: 'The queue', value: 'queue', name_localizations: { ko: '대기열' } },
+        ),
     ),
     command('stop', 'Stop playing (the queue stays)', '정지', '재생 멈춤(대기열은 그대로)'),
     command('np', 'What is playing now', '지금곡', '지금 재생 중인 곡'),

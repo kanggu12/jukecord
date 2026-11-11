@@ -6,7 +6,9 @@
  * privileged and which a music bot does not need. Commands are registered per server, where Discord applies them at
  * once (global ones can take a while to reach every server).
  */
+import { createHash } from 'node:crypto';
 import {
+  ActivityType,
   type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
@@ -22,7 +24,7 @@ import type { Bus } from '../core/bus.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
-import type { SettingsRepository } from '../store/store.ts';
+import type { DiscordRepository, SettingsRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
 import {
   addedCard,
@@ -49,6 +51,10 @@ export interface BotOptions {
   readonly log: Logger;
   /** The panel's address, for the "listen along" link; null when no public address is set. */
   readonly panelUrl: string | null;
+  /** Where the fingerprint of the registered commands is kept. */
+  readonly discord: DiscordRepository;
+  /** How long the bot waits alone in a voice channel before leaving (0: never). */
+  readonly voiceIdleMs: number;
 }
 
 export class Bot {
@@ -64,7 +70,38 @@ export class Bot {
       players: options.players,
       ffmpeg: options.ffmpeg,
       log: options.log,
+      idleMs: options.voiceIdleMs,
     });
+  }
+
+  // The "listening to" line under the bot's name. Discord limits presence updates, so changes are sent at most every
+  // 15 s, the newest one winning.
+  private activity: string | null = null;
+  private activityTimer: NodeJS.Timeout | null = null;
+  private activitySentAt = 0;
+  private showActivity(title: string | null): void {
+    this.activity = title;
+    if (this.activityTimer !== null) return;
+    const wait = Math.max(0, this.activitySentAt + 15_000 - Date.now());
+    this.activityTimer = setTimeout(() => {
+      this.activityTimer = null;
+      this.activitySentAt = Date.now();
+      const name = this.activity;
+      this.client.user?.setActivity(name ? { name: name.slice(0, 120), type: ActivityType.Listening } : undefined);
+    }, wait);
+    this.activityTimer.unref();
+  }
+
+  // After a play from Discord, joins the person's voice channel when the bot is not in one yet, as people expect from
+  // a music bot. A failure here (no permission, say) does not undo the add; the person can still /join.
+  private async autoJoin(interaction: ChatInputCommandInteraction, context: ActionContext): Promise<void> {
+    if (!interaction.inCachedGuild() || this.voice.channel(context.guildId)) return;
+    if (!interaction.guild.voiceStates.cache.get(interaction.user.id)?.channelId) return;
+    try {
+      await this.options.actions.join(context, null);
+    } catch (error) {
+      this.options.log.debug('could not join the voice channel after a play', { error });
+    }
   }
 
   /** Whether the bot is logged in and receiving events. */
@@ -88,9 +125,13 @@ export class Bot {
     });
     // The "listening to" line under the bot's name follows the last server that changed.
     this.options.bus.on('player', (snapshot) => {
-      const title = snapshot.status === 'playing' ? snapshot.track?.title : null;
-      this.client.user?.setActivity(title ? { name: title.slice(0, 120), type: 2 } : undefined);
+      const title = snapshot.status === 'playing' ? (snapshot.track?.title ?? null) : null;
+      this.showActivity(title);
     });
+    // People coming and going in voice decide whether the bot is alone in its channel (see VoiceManager).
+    this.client.on(Events.VoiceStateUpdate, (before, after) =>
+      this.voice.voiceStateChanged(after.guild.id ?? before.guild.id),
+    );
     await this.client.login(this.options.token);
   }
 
@@ -103,7 +144,12 @@ export class Bot {
   // Puts this version's commands in a server (replacing whatever an older version registered).
   private async register(guild: Guild): Promise<void> {
     try {
-      await guild.commands.set(commandDefinitions());
+      const definitions = commandDefinitions();
+      // Discord allows 200 registrations per server a day; a restart with unchanged commands registers nothing.
+      const hash = createHash('sha256').update(JSON.stringify(definitions)).digest('hex');
+      if (this.options.discord.commandsHash(guild.id) === hash) return;
+      await guild.commands.set(definitions);
+      this.options.discord.setCommandsHash(guild.id, hash);
       this.options.log.info('registered commands', { server: guild.name });
     } catch (error) {
       this.options.log.warn('could not register commands', { server: guild.name, error });
@@ -133,13 +179,15 @@ export class Bot {
       switch (interaction.commandName) {
         case 'add': {
           const at = options.getString('where') === 'next' ? 'next' : 'end';
-          const items = await actions.add(context, options.getString('input', true), at);
-          await interaction.editReply({ embeds: [addedCard(items, lang)] });
+          const result = await actions.add(context, options.getString('input', true), at);
+          await interaction.editReply({ embeds: [addedCard(result, lang)] });
+          await this.autoJoin(interaction, context);
           return;
         }
         case 'play': {
-          const items = await actions.playNow(context, options.getString('input', true));
-          await interaction.editReply({ embeds: [addedCard(items, lang)] });
+          const result = await actions.playNow(context, options.getString('input', true));
+          await interaction.editReply({ embeds: [addedCard(result, lang)] });
+          await this.autoJoin(interaction, context);
           return;
         }
         case 'skip':
@@ -153,6 +201,11 @@ export class Bot {
           return;
         case 'resume':
           await interaction.editReply(nowCard(actions.resume(context), lang, this.options.panelUrl));
+          return;
+        case 'repeat':
+          await interaction.editReply(
+            nowCard(actions.repeat(context, options.getString('mode', true)), lang, this.options.panelUrl),
+          );
           return;
         case 'seek': {
           let at: number;
@@ -273,8 +326,9 @@ export class Bot {
         return;
       }
       case 'load': {
-        const items = actions.playlistLoad(context, options.getString('name', true));
-        await interaction.editReply({ embeds: [addedCard(items, lang)] });
+        const result = actions.playlistLoad(context, options.getString('name', true));
+        await interaction.editReply({ embeds: [addedCard(result, lang)] });
+        await this.autoJoin(interaction, context);
         return;
       }
       case 'rename': {

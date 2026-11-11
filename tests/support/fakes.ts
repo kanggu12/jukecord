@@ -66,6 +66,8 @@ export class FakeClock implements Clock {
 export interface PendingPrepare {
   readonly track: Track;
   readonly signal: AbortSignal;
+  /** The progress callback the caller passed, if any. */
+  readonly onProgress: ((fraction: number) => void) | undefined;
   resolve(media: PreparedMedia): void;
   reject(error: Error): void;
 }
@@ -74,9 +76,9 @@ export interface PendingPrepare {
 export class FakeMedia implements MediaPreparer {
   readonly calls: PendingPrepare[] = [];
 
-  prepare(track: Track, signal: AbortSignal): Promise<PreparedMedia> {
+  prepare(track: Track, signal: AbortSignal, onProgress?: (fraction: number) => void): Promise<PreparedMedia> {
     return new Promise<PreparedMedia>((resolve, reject) => {
-      this.calls.push({ track, signal, resolve, reject });
+      this.calls.push({ track, signal, onProgress, resolve, reject });
       // Like the real preparer: an abort ends the fetch with an error.
       signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     });

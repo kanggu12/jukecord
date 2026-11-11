@@ -6,7 +6,7 @@
  */
 import { spawn } from 'node:child_process';
 import { lastLines, ProcessError, watch } from './process.ts';
-import type { YtDlp } from './ytdlp.ts';
+import { parseProgress, type YtDlp, ytdlpFailure } from './ytdlp.ts';
 
 // The sound of every cached file: loudness -14 LUFS (streaming services' level) with true peaks under -1 dB and a
 // loudness range of 11 LU, a 3 s fade in at the very start, 48 kHz stereo Opus at 128 kbit/s in 20 ms frames (what
@@ -72,8 +72,22 @@ export class Ffmpeg {
     outFile: string,
     signal: AbortSignal,
     timeoutMs: number,
+    onProgress?: (fraction: number) => void,
   ): Promise<EncodeResult> {
     const download = ytdlp.audio(url);
+    // yt-dlp prints a progress line per update on stderr; each one is passed on as a fraction.
+    if (onProgress && download.stderr) {
+      let pending = '';
+      download.stderr.on('data', (chunk: Buffer) => {
+        pending += chunk.toString('utf8');
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          const fraction = parseProgress(line);
+          if (fraction !== null) onProgress(fraction);
+        }
+      });
+    }
     // info level (with -nostats) is needed for loudnorm's report; the progress line is left out.
     const encode = spawn(
       this.binary,
@@ -95,10 +109,7 @@ export class Ffmpeg {
     if (downloaded.status === 'rejected') throw downloaded.reason;
     if (encoded.status === 'rejected') throw encoded.reason;
     if (downloaded.value.code !== 0) {
-      throw new ProcessError(
-        `yt-dlp failed: ${lastLines(downloaded.value.stderr) || `exit ${downloaded.value.code}`}`,
-        downloaded.value,
-      );
+      throw new ProcessError(ytdlpFailure(downloaded.value.stderr, downloaded.value.code), downloaded.value);
     }
     if (encoded.value.code !== 0) {
       throw new ProcessError(

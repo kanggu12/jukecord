@@ -11,7 +11,7 @@ import type { InsertAt, QueueService } from '../core/queue.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { Resolver } from '../media/resolver.ts';
-import type { Store } from '../store/store.ts';
+import type { RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 
@@ -27,6 +27,7 @@ export const ACTIONS = [
   'pause',
   'resume',
   'seek',
+  'repeat',
   'stop',
   'now-playing',
   'queue',
@@ -99,7 +100,23 @@ export interface ActionsOptions {
   /** Whether the bot is connected right now. */
   discordReady?: () => boolean;
   readonly startedAt?: number;
+  /** The most tracks a server's queue may hold (default 1000). */
+  readonly queueMax?: number;
+  /** The longest track that may be added, in milliseconds (default 3 hours). */
+  readonly trackMaxMs?: number;
 }
+
+/** What an add did: the new queue items, and how many tracks were left out and why. */
+export interface AddResult {
+  readonly items: QueueItem[];
+  /** Tracks longer than the limit (JUKECORD_TRACK_MAX). */
+  readonly skippedTooLong: number;
+  /** Tracks that did not fit because the queue reached its limit (JUKECORD_QUEUE_MAX). */
+  readonly skippedFull: number;
+}
+
+/** The repeat modes, for checking input from the panel, the API and the CLI. */
+export const REPEAT_MODES: readonly RepeatMode[] = ['off', 'track', 'queue'];
 
 export class Actions {
   private readonly options: ActionsOptions;
@@ -131,33 +148,55 @@ export class Actions {
   }
 
   /** Adds what an address or search finds (all of a playlist) and starts playing if nothing was. */
-  async add(context: ActionContext, input: string, at: InsertAt = 'end', signal?: AbortSignal): Promise<QueueItem[]> {
+  async add(context: ActionContext, input: string, at: InsertAt = 'end', signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
-    const tracks = await this.lookup(input, signal);
+    const result = this.enqueue(context, await this.lookup(input, signal), at);
+    this.options.players.get(context.guildId).play();
+    return result;
+  }
+
+  // Queues what fits: tracks over the length limit are left out, and the rest up to the queue limit. Nothing fitting
+  // at all is an error, so a person does not see "added" for an add that did nothing.
+  private enqueue(context: ActionContext, tracks: readonly Track[], at: InsertAt): AddResult {
+    const trackMax = this.options.trackMaxMs ?? 3 * 3_600_000;
+    const queueMax = this.options.queueMax ?? 1000;
+    // Unknown lengths pass: most such tracks are ordinary songs from sites that do not say.
+    const short = tracks.filter((track) => track.durationMs === null || track.durationMs <= trackMax);
+    const room = Math.max(0, queueMax - this.options.queue.size(context.guildId));
+    const fitting = short.slice(0, room);
+    const skippedTooLong = tracks.length - short.length;
+    const skippedFull = short.length - fitting.length;
+    if (fitting.length === 0) {
+      if (skippedFull > 0) throw new ActionError('conflict', `the queue is full (${queueMax} tracks)`);
+      throw new ActionError('invalid', `longer than the ${Math.round(trackMax / 60_000)} minute limit`);
+    }
     const items = this.options.queue.add(
       context.guildId,
-      tracks.map((track) => track.id),
+      fitting.map((track) => track.id),
       at,
       context.userId,
     );
-    this.options.players.get(context.guildId).play();
-    return items;
+    return { items, skippedTooLong, skippedFull };
   }
 
   /** Puts what an input finds first and plays it now; the current track is skipped. */
-  async playNow(context: ActionContext, input: string, signal?: AbortSignal): Promise<QueueItem[]> {
+  async playNow(context: ActionContext, input: string, signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
-    const tracks = await this.lookup(input, signal);
-    const items = this.options.queue.add(
-      context.guildId,
-      tracks.map((track) => track.id),
-      'next',
-      context.userId,
-    );
+    const result = this.enqueue(context, await this.lookup(input, signal), 'next');
     const player = this.options.players.get(context.guildId);
     // Idle: play starts the first of the new items. Otherwise skipping moves on to it.
     if (!player.play()) player.skip();
-    return items;
+    return result;
+  }
+
+  /** Sets what happens at the end of a track: off, the same track again, or the queue looping. */
+  repeat(context: ActionContext, mode: string): PlayerSnapshot {
+    this.control(context);
+    if (!REPEAT_MODES.includes(mode as RepeatMode))
+      throw new ActionError('invalid', `repeat is one of ${REPEAT_MODES.join(', ')}`);
+    const player = this.options.players.get(context.guildId);
+    player.setRepeat(mode as RepeatMode);
+    return player.snapshot();
   }
 
   skip(context: ActionContext): PlayerSnapshot {
@@ -276,14 +315,13 @@ export class Actions {
   }
 
   /** Adds a saved list to the queue and starts playing if nothing was. */
-  playlistLoad(context: ActionContext, name: string, at: InsertAt = 'end'): QueueItem[] {
+  playlistLoad(context: ActionContext, name: string, at: InsertAt = 'end'): AddResult {
     this.control(context);
     const playlist = this.options.store.playlists.find(context.guildId, name);
     if (!playlist) throw new ActionError('not-found', `there is no playlist named "${name.trim()}"`);
-    const ids = this.options.store.playlists.tracks(playlist.id).map((track) => track.id);
-    const items = this.options.queue.add(context.guildId, ids, at, context.userId);
+    const result = this.enqueue(context, this.options.store.playlists.tracks(playlist.id), at);
     this.options.players.get(context.guildId).play();
-    return items;
+    return result;
   }
 
   playlistRename(context: ActionContext, name: string, newName: string): Playlist {

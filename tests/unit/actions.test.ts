@@ -63,7 +63,9 @@ async function code(fn: () => unknown): Promise<string> {
 describe('Actions', () => {
   it('adds and starts playing when idle; a playlist adds all of its tracks', async () => {
     const { actions, media, queue } = setup();
-    const [item] = await actions.add(DJ, 'one');
+    const {
+      items: [item],
+    } = await actions.add(DJ, 'one');
     assert.equal(item?.addedBy, DJ.userId);
     // The first track became current at once and left the queue.
     assert.equal(media.last().track.title, 'Track 1');

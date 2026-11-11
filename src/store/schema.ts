@@ -87,4 +87,22 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    sql: `
+      -- The repeat mode of each server's player (off, track, queue), kept across restarts with the rest of its state.
+      ALTER TABLE player_state ADD COLUMN repeat TEXT NOT NULL DEFAULT 'off';
+
+      -- A fingerprint of the slash commands last registered in each server. Discord allows 200 command
+      -- registrations per server a day; registering only when the fingerprint changes keeps restarts free.
+      CREATE TABLE discord_commands (
+        guild_id   TEXT    PRIMARY KEY,
+        hash       TEXT    NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      -- History pruning deletes the oldest rows of a server; this index makes finding them cheap.
+      CREATE INDEX history_by_guild_id ON history(guild_id, id);
+    `,
+  },
 ];
