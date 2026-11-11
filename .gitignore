@@ -1,0 +1,14 @@
+# Dependencies, installed by npm
+node_modules/
+
+# What a running jukecord writes: the database, the media cache and the logs
+data/
+
+# Settings with secrets in them; .env.example is the one that is committed
+.env
+
+# Coverage reports from the test runner
+coverage/
+
+# Local plans and scratch work, never committed
+/_work/

@@ -1,0 +1,304 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { Bus } from '../../src/core/bus.ts';
+import { Player, type PlayerSnapshot } from '../../src/core/player.ts';
+import { QueueService } from '../../src/core/queue.ts';
+import { createLogger, MemorySink } from '../../src/log.ts';
+import { FakeClock, FakeMedia, FakeOutput, flush } from '../support/fakes.ts';
+import { addTracks, memoryStore } from '../support/store.ts';
+
+const GUILD = '100000000000000001';
+const SONG = 180_000;
+
+// A player over an in-memory database with three queued tracks, a fake clock and a fake media preparer.
+function setup(options: { fetchTimeoutMs?: number; queued?: number } = {}) {
+  const clock = new FakeClock();
+  const store = memoryStore(() => clock.now());
+  const bus = new Bus();
+  const queue = new QueueService(store.queue, bus);
+  const media = new FakeMedia();
+  const sink = new MemorySink();
+  const snapshots: PlayerSnapshot[] = [];
+  bus.on('player', (snapshot) => snapshots.push(snapshot));
+  const player = new Player({
+    guildId: GUILD,
+    queue,
+    media,
+    history: store.history,
+    state: store.playerState,
+    bus,
+    clock,
+    log: createLogger({ level: 'debug', sinks: [sink] }),
+    fetchTimeoutMs: options.fetchTimeoutMs ?? 60_000,
+  });
+  const tracks = addTracks(store, options.queued ?? 3);
+  queue.add(
+    GUILD,
+    tracks.map((track) => track.id),
+    'end',
+    'u1',
+  );
+  return { clock, store, bus, queue, media, sink, snapshots, player, tracks };
+}
+
+// Starts the first track and lets it get ready.
+async function startPlaying(context: ReturnType<typeof setup>, durationMs = SONG): Promise<void> {
+  assert.equal(context.player.play(), true);
+  context.media.finish(durationMs);
+  await flush();
+  assert.equal(context.player.snapshot().status, 'playing');
+}
+
+describe('Player', () => {
+  it('stays idle when there is nothing to play', () => {
+    const context = setup({ queued: 0 });
+    assert.equal(context.player.play(), false);
+    assert.equal(context.player.snapshot().status, 'idle');
+  });
+
+  it('loads the first track, plays it, and follows the clock', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    context.player.play();
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.media.last().track.title, 'Track 1');
+    // Taken out of the queue when it became current.
+    assert.equal(context.queue.size(GUILD), 2);
+    context.media.finish(SONG);
+    await flush();
+    assert.equal(context.player.snapshot().status, 'playing');
+    assert.deepEqual(output.of('start'), [
+      { kind: 'start', offsetMs: 0, session: output.lastSession(), file: '/cache/1.opus' },
+    ]);
+    await context.clock.advance(10_000);
+    assert.equal(context.player.snapshot().positionMs, 10_000);
+    // Each change produced one snapshot with a growing version.
+    const versions = context.snapshots.map((snapshot) => snapshot.version);
+    assert.deepEqual(
+      versions,
+      versions.map((_, index) => index + 1),
+    );
+  });
+
+  it('moves on by the clock at the end when no output is attached (browser-only)', async () => {
+    const context = setup();
+    await startPlaying(context);
+    await context.clock.advance(SONG);
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.media.last().track.title, 'Track 2');
+    const [entry] = context.store.history.list(GUILD);
+    assert.equal(entry?.track.title, 'Track 1');
+    assert.equal(entry?.playedMs, SONG);
+  });
+
+  it('moves on when the output reports the end, and ignores reports from an older session', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    const first = output.lastSession();
+    // A seek restarts the output with a new session; an "ended" from the old stream must not skip the song.
+    context.player.seek(30_000);
+    context.player.outputEnded(first);
+    assert.equal(context.player.snapshot().status, 'playing');
+    context.player.outputEnded(output.lastSession());
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.media.last().track.title, 'Track 2');
+  });
+
+  it('waits a grace period for the output before ending by the clock', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    await context.clock.advance(SONG);
+    assert.equal(context.player.snapshot().status, 'playing');
+    await context.clock.advance(5_000);
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.ok(context.sink.records.some((record) => record.msg.includes('no output reported the end')));
+  });
+
+  it('pauses and resumes at the same place', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    await context.clock.advance(20_000);
+    assert.equal(context.player.pause(), true);
+    assert.equal(context.player.pause(), false);
+    await context.clock.advance(60_000);
+    // The position does not move while paused, and the end timer does not fire.
+    assert.equal(context.player.snapshot().positionMs, 20_000);
+    assert.equal(context.player.resume(), true);
+    assert.deepEqual(
+      output.calls.map((call) => call.kind),
+      ['start', 'pause', 'resume'],
+    );
+    await context.clock.advance(SONG - 20_000 + 5_000);
+    assert.equal(context.media.last().track.title, 'Track 2');
+  });
+
+  it('runs the first seek at once and merges the ones that follow within the cooldown', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    context.player.seek(10_000);
+    context.player.seek(20_000);
+    context.player.seek(30_000);
+    assert.deepEqual(
+      output.of('start').map((call) => (call.kind === 'start' ? call.offsetMs : -1)),
+      [0, 10_000],
+    );
+    await context.clock.advance(400);
+    assert.deepEqual(
+      output.of('start').map((call) => (call.kind === 'start' ? call.offsetMs : -1)),
+      [0, 10_000, 30_000],
+    );
+    // Seeks stay inside the track.
+    await context.clock.advance(1000);
+    context.player.seek(SONG + 50_000);
+    assert.equal(context.player.snapshot().positionMs, SONG - 500);
+  });
+
+  it('moves the place while paused and restarts the output there on resume', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    context.player.pause();
+    context.player.seek(90_000);
+    context.player.resume();
+    assert.deepEqual(
+      output.calls.map((call) => (call.kind === 'start' ? `start@${call.offsetMs}` : call.kind)),
+      ['start@0', 'pause', 'stop', 'start@90000'],
+    );
+  });
+
+  it('records a skip after a real listen but not one right after the start', async () => {
+    const context = setup();
+    await startPlaying(context);
+    await context.clock.advance(500);
+    context.player.skip();
+    context.media.finish(SONG);
+    await flush();
+    await context.clock.advance(2000);
+    context.player.skip();
+    assert.deepEqual(
+      context.store.history.list(GUILD).map((entry) => [entry.track.title, entry.playedMs]),
+      [['Track 2', 2000]],
+    );
+  });
+
+  it('abandons a fetch that is skipped and does not let its late result start playing', async () => {
+    const context = setup();
+    context.player.play();
+    const first = context.media.last();
+    context.player.skip();
+    assert.equal(first.signal.aborted, true);
+    // A result arriving after the skip changes nothing.
+    first.resolve({ file: '/cache/late.opus', durationMs: SONG });
+    await flush();
+    assert.equal(context.player.snapshot().track?.title, 'Track 2');
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.store.history.list(GUILD).length, 0);
+  });
+
+  it('skips a track that fails, says why, and does not record it', async () => {
+    const context = setup();
+    context.player.play();
+    context.media.last().reject(new Error('Video unavailable'));
+    await flush();
+    const snapshot = context.player.snapshot();
+    assert.equal(snapshot.track?.title, 'Track 2');
+    assert.equal(snapshot.error, 'Track 1: Video unavailable');
+    // The error clears when the next track starts.
+    context.media.finish(SONG);
+    await flush();
+    assert.equal(context.player.snapshot().error, null);
+  });
+
+  it('gives up on a fetch that takes longer than the timeout', async () => {
+    const context = setup({ fetchTimeoutMs: 10_000 });
+    context.player.play();
+    const first = context.media.last();
+    await context.clock.advance(10_000);
+    assert.equal(first.signal.aborted, true);
+    assert.equal(context.player.snapshot().track?.title, 'Track 2');
+    assert.match(context.player.snapshot().error ?? '', /longer than 10 s/);
+  });
+
+  it('starts paused when paused while loading, and starts the output on resume', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    context.player.play();
+    assert.equal(context.player.pause(), true);
+    context.media.finish(SONG);
+    await flush();
+    assert.equal(context.player.snapshot().status, 'paused');
+    assert.equal(output.calls.length, 0);
+    context.player.resume();
+    assert.deepEqual(output.of('start').length, 1);
+  });
+
+  it('stops and keeps the queue', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    await context.clock.advance(3000);
+    assert.equal(context.player.stop(), true);
+    assert.equal(context.player.snapshot().status, 'idle');
+    assert.equal(output.calls.at(-1)?.kind, 'stop');
+    assert.equal(context.queue.size(GUILD), 2);
+    assert.equal(context.store.history.list(GUILD).length, 1);
+    // A stopped player leaves no timer running.
+    assert.equal(context.clock.pending(), 0);
+  });
+
+  it('starts an output attached in the middle of a track at the current place', async () => {
+    const context = setup();
+    await startPlaying(context);
+    await context.clock.advance(42_000);
+    const output = new FakeOutput();
+    context.player.attach(output);
+    assert.deepEqual(
+      output.of('start').map((call) => (call.kind === 'start' ? call.offsetMs : -1)),
+      [42_000],
+    );
+    context.player.detach(output);
+    assert.equal(output.calls.at(-1)?.kind, 'stop');
+  });
+
+  it('saves where it is and comes back paused there after a restart', async () => {
+    const context = setup();
+    await startPlaying(context);
+    await context.clock.advance(65_000);
+    context.player.checkpoint();
+    const saved = context.store.playerState.load(GUILD);
+    assert.equal(saved?.status, 'playing');
+    assert.equal(saved?.positionMs, 65_000);
+
+    // A new player over the same database, as after a restart.
+    const media = new FakeMedia();
+    const restarted = new Player({
+      guildId: GUILD,
+      queue: context.queue,
+      media,
+      history: context.store.history,
+      state: context.store.playerState,
+      bus: context.bus,
+      clock: context.clock,
+      log: createLogger({ level: 'debug', sinks: [] }),
+      fetchTimeoutMs: 60_000,
+    });
+    const track = context.store.tracks.get(saved?.trackId ?? -1);
+    restarted.restore(track, saved?.addedBy ?? null, saved?.positionMs ?? 0);
+    media.finish(SONG);
+    await flush();
+    assert.equal(restarted.snapshot().status, 'paused');
+    assert.equal(restarted.snapshot().positionMs, 65_000);
+  });
+});

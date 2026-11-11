@@ -1,0 +1,523 @@
+/**
+ * The player of one server: which track is current, where in it we are, and what happens next.
+ *
+ * It is the clock everyone follows. The voice connection and the browsers do not decide where the song is; they are
+ * told by this object, so a browser that joins late and the voice channel play the same second. Every change goes
+ * through one of the methods below and ends in emit(), which bumps the version, tells the bus and saves the state.
+ *
+ * States: idle (nothing current) -> loading (fetching the current track) -> playing <-> paused -> next track or idle.
+ * A failed load moves on to the next track. Each start of the outputs gets a new session number; anything that
+ * arrives for an older session (an "ended" from a stream already replaced) is ignored. That number replaces the
+ * flags the old code used to tell its own seeks apart from real changes.
+ */
+import type { Logger } from '../log.ts';
+import type { HistoryRepository, PlayerStateRepository } from '../store/store.ts';
+import type { Bus } from './bus.ts';
+import type { Clock, TimerHandle } from './clock.ts';
+import type { QueueService } from './queue.ts';
+import type { Track } from './types.ts';
+
+/** What the player is doing. */
+export type PlayerStatus = 'idle' | 'loading' | 'playing' | 'paused';
+
+/** A track made ready to play: a local file and its real length. */
+export interface PreparedMedia {
+  /** The Ogg/Opus file the outputs read. */
+  readonly file: string;
+  /** The length measured from the file; the site's figure can be missing or a little off. */
+  readonly durationMs: number;
+}
+
+/** Gets a track ready (fetch, convert, measure). Implemented by the media module; faked in tests. */
+export interface MediaPreparer {
+  /** Must stop work and reject soon after `signal` aborts: a skipped track should not keep downloading. */
+  prepare(track: Track, signal: AbortSignal): Promise<PreparedMedia>;
+}
+
+/**
+ * Something that makes sound from the player's media: the voice connection of the server.
+ *
+ * Browsers are not outputs; they follow the snapshots on the bus and fetch the stream themselves. An output calls
+ * Player.outputEnded(session) when its stream finishes, with the session number it was started with.
+ */
+export interface PlayerOutput {
+  readonly name: string;
+  start(media: PreparedMedia, offsetMs: number, session: number): void;
+  pause(): void;
+  resume(): void;
+  stop(): void;
+}
+
+/** What the panel, the bot and the API are told after every change. */
+export interface PlayerSnapshot {
+  readonly guildId: string;
+  readonly status: PlayerStatus;
+  readonly track: Track | null;
+  readonly addedBy: string | null;
+  /** Where the track was at time `at`. While playing, a client adds the time passed since `at`. */
+  readonly positionMs: number;
+  readonly at: number;
+  /** The length of the current track when known. */
+  readonly durationMs: number | null;
+  /** The last failure ("could not fetch ..."), cleared when a track starts playing. */
+  readonly error: string | null;
+  /** Grows by one with every snapshot, so clients can ignore one that arrives out of order. */
+  readonly version: number;
+}
+
+export interface PlayerOptions {
+  readonly guildId: string;
+  readonly queue: QueueService;
+  readonly media: MediaPreparer;
+  readonly history: HistoryRepository;
+  readonly state: PlayerStateRepository;
+  readonly bus: Bus;
+  readonly clock: Clock;
+  readonly log: Logger;
+  /** Longest a track may take to get ready before it is skipped. */
+  readonly fetchTimeoutMs: number;
+  /** Seeks closer together than this are merged into the last one (dragging the bar sends dozens). */
+  readonly seekCooldownMs?: number;
+  /** How long past the end the player waits for an output to report the end before moving on by itself. */
+  readonly endGraceMs?: number;
+}
+
+// A track counts as listened to (and goes into the history) once it has played this long; a skip right after the
+// start is a "not this one", not a listen.
+const MIN_HISTORY_MS = 1000;
+
+// Seeking to the very end would start a stream that ends at once; the last half second is the latest place allowed.
+const SEEK_END_MARGIN_MS = 500;
+
+// The track currently held by the player, with when it started for the history.
+interface Current {
+  readonly track: Track;
+  readonly addedBy: string | null;
+  /** When it first started playing; null while it is still loading for the first time. */
+  startedAt: number | null;
+}
+
+export class Player {
+  readonly guildId: string;
+  private readonly options: PlayerOptions;
+  private readonly seekCooldownMs: number;
+  private readonly endGraceMs: number;
+
+  private status: PlayerStatus = 'idle';
+  private current: Current | null = null;
+  private media: PreparedMedia | null = null;
+  // The position at clock time `anchor`. While playing the position is offsetMs + (now - anchor); otherwise offsetMs.
+  private offsetMs = 0;
+  private anchor = 0;
+  // Bumped on every start of the outputs and every change of track; see the module comment.
+  private session = 0;
+  private version = 0;
+  private error: string | null = null;
+
+  // Loading: the running fetch, its timeout, and how to start once it is done.
+  private loadAbort: AbortController | null = null;
+  private loadTimer: TimerHandle | null = null;
+  private startAtMs = 0;
+  private startPaused = false;
+
+  // Playing: the timer that ends the track if no output reports the end.
+  private endTimer: TimerHandle | null = null;
+
+  // Seeking: when the last seek ran, and the target waiting for the cooldown to pass.
+  private lastSeekAt = Number.NEGATIVE_INFINITY;
+  private pendingSeekMs: number | null = null;
+  private seekTimer: TimerHandle | null = null;
+
+  // Outputs and the session each was last started with. An output whose session is older than the player's
+  // (attached while paused, or paused through a seek) is started afresh on resume instead of resumed.
+  private readonly outputs = new Map<PlayerOutput, number>();
+
+  constructor(options: PlayerOptions) {
+    this.options = options;
+    this.guildId = options.guildId;
+    this.seekCooldownMs = options.seekCooldownMs ?? 400;
+    this.endGraceMs = options.endGraceMs ?? 5000;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Reading
+
+  /** Where the current track is now, in milliseconds. */
+  position(): number {
+    if (this.status !== 'playing') return this.offsetMs;
+    const elapsed = this.options.clock.now() - this.anchor;
+    // Never past the end: between the end and the moment the next track starts, the bar stays full.
+    const end = this.media?.durationMs ?? Number.POSITIVE_INFINITY;
+    return Math.min(this.offsetMs + elapsed, end);
+  }
+
+  /** The state as clients see it. */
+  snapshot(): PlayerSnapshot {
+    return {
+      guildId: this.guildId,
+      status: this.status,
+      track: this.current?.track ?? null,
+      addedBy: this.current?.addedBy ?? null,
+      positionMs: Math.round(this.position()),
+      at: this.options.clock.now(),
+      durationMs: this.media?.durationMs ?? this.current?.track.durationMs ?? null,
+      error: this.error,
+      version: this.version,
+    };
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Commands (each returns whether it changed anything, so the API can say "nothing was playing")
+
+  /** Starts the next track if nothing is current; called after tracks are added. */
+  play(): boolean {
+    if (this.status !== 'idle') return false;
+    // Nothing queued: nothing starts, and no snapshot is sent for a change that did not happen.
+    if (this.options.queue.size(this.guildId) === 0) return false;
+    return this.advance(false);
+  }
+
+  /** Moves to the next track; the current one goes into the history if it played long enough. */
+  skip(): boolean {
+    if (this.status === 'idle') return false;
+    return this.advance(true);
+  }
+
+  /** Drops the current track without recording it (the "this was a mistake" button) and moves on. */
+  removeCurrent(): boolean {
+    if (this.status === 'idle') return false;
+    return this.advance(false);
+  }
+
+  /** Stops playing; the queue stays as it is. */
+  stop(): boolean {
+    if (this.status === 'idle') return false;
+    this.finishCurrent(true);
+    this.goIdle();
+    return true;
+  }
+
+  /** Pauses. While loading, the track will start paused when it is ready. */
+  pause(): boolean {
+    if (this.status === 'loading') {
+      if (this.startPaused) return false;
+      this.startPaused = true;
+      this.emit();
+      return true;
+    }
+    if (this.status !== 'playing') return false;
+    // Freeze the position first, then stop the clock-driven timer and the sound.
+    this.offsetMs = this.position();
+    this.status = 'paused';
+    this.cancelEndTimer();
+    for (const output of this.outputs.keys()) output.pause();
+    this.emit();
+    return true;
+  }
+
+  /** Resumes after a pause (or cancels the "start paused" of a loading track). */
+  resume(): boolean {
+    if (this.status === 'loading') {
+      if (!this.startPaused) return false;
+      this.startPaused = false;
+      this.emit();
+      return true;
+    }
+    if (this.status !== 'paused' || !this.media) return false;
+    this.status = 'playing';
+    this.anchor = this.options.clock.now();
+    // Outputs started with this session pick up where they paused; any other output starts at the position now.
+    for (const [output, session] of this.outputs) {
+      if (session === this.session) output.resume();
+      else this.startOutput(output);
+    }
+    this.scheduleEnd();
+    this.emit();
+    return true;
+  }
+
+  /**
+   * Moves to a place in the current track.
+   *
+   * The first seek runs at once; seeks that follow within the cooldown are merged and only the last one runs when
+   * the cooldown ends. Dragging the bar sends a seek per pixel, and each one restarts ffmpeg for the voice stream.
+   */
+  seek(targetMs: number): boolean {
+    if (this.status === 'idle') return false;
+    const now = this.options.clock.now();
+    const wait = this.lastSeekAt + this.seekCooldownMs - now;
+    if (wait <= 0) {
+      this.applySeek(targetMs);
+      return true;
+    }
+    // Inside the cooldown: remember the newest target and run it when the cooldown is over.
+    this.pendingSeekMs = targetMs;
+    if (this.seekTimer === null) {
+      this.seekTimer = this.options.clock.setTimeout(() => {
+        this.seekTimer = null;
+        const pending = this.pendingSeekMs;
+        this.pendingSeekMs = null;
+        if (pending !== null && this.status !== 'idle') this.applySeek(pending);
+      }, wait);
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Outputs
+
+  /** Adds an output (the bot joined a voice channel). It starts at once if a track is playing. */
+  attach(output: PlayerOutput): void {
+    if (this.outputs.has(output)) return;
+    // Session -1 marks "never started", so a later resume starts it rather than resuming nothing.
+    this.outputs.set(output, -1);
+    if (this.status === 'playing') this.startOutput(output);
+    // With an output the end timer waits a grace period for the output's own end; reschedule with that.
+    if (this.status === 'playing') this.scheduleEnd();
+  }
+
+  /** Removes an output (the bot left the channel); the player keeps going for the browsers. */
+  detach(output: PlayerOutput): void {
+    if (!this.outputs.delete(output)) return;
+    output.stop();
+    // Without outputs the end timer is the only thing that ends the track; it should fire exactly at the end now.
+    if (this.status === 'playing') this.scheduleEnd();
+  }
+
+  /** Called by an output when its stream finished. Only the current session counts. */
+  outputEnded(session: number): void {
+    if (session !== this.session || this.status !== 'playing') return;
+    this.options.log.debug('the output reported the end of the track', { guild: this.guildId, session });
+    this.advance(true);
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Saving and restoring
+
+  /** Writes the current position, so a restart comes back here. Called on shutdown. */
+  checkpoint(): void {
+    this.persist();
+  }
+
+  /**
+   * Brings back what this server was playing before a restart: the same track, paused at the saved place.
+   *
+   * Never comes back playing: sound starting by itself after an update or a reboot surprises people in the channel.
+   */
+  restore(track: Track | null, addedBy: string | null, positionMs: number): void {
+    if (!track) return;
+    this.current = { track, addedBy, startedAt: null };
+    this.load(positionMs, true);
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Internals
+
+  // Finishes the current track and starts the next one in the queue, or goes idle when there is none.
+  private advance(record: boolean): boolean {
+    this.finishCurrent(record);
+    const next = this.options.queue.shift(this.guildId);
+    if (!next) {
+      this.goIdle();
+      return true;
+    }
+    this.current = { track: next.track, addedBy: next.addedBy, startedAt: null };
+    this.load(0, false);
+    return true;
+  }
+
+  // Ends the current track: stops loading or sound, cancels timers, and records it if it was listened to.
+  private finishCurrent(record: boolean): void {
+    const current = this.current;
+    if (current && record && current.startedAt !== null) {
+      const playedMs = Math.round(this.position());
+      // Only real listens: see MIN_HISTORY_MS.
+      if (playedMs >= MIN_HISTORY_MS) {
+        this.options.history.add({
+          guildId: this.guildId,
+          trackId: current.track.id,
+          addedBy: current.addedBy,
+          playedAt: current.startedAt,
+          playedMs,
+        });
+      }
+    }
+    this.cancelLoad();
+    this.cancelEndTimer();
+    this.cancelSeek();
+    // A new session makes any late "ended" from the old stream harmless.
+    this.session += 1;
+    // Only a track that was current has a stream to stop; an idle output is left alone.
+    if (current) for (const output of this.outputs.keys()) output.stop();
+    this.current = null;
+    this.media = null;
+    this.offsetMs = 0;
+  }
+
+  // Nothing to play: the outputs are already stopped by finishCurrent.
+  private goIdle(): void {
+    this.status = 'idle';
+    this.startPaused = false;
+    this.emit();
+  }
+
+  // Fetches the current track and starts it at `startAtMs`, paused if `paused`.
+  private load(startAtMs: number, paused: boolean): void {
+    const current = this.current;
+    if (!current) return;
+    this.cancelLoad();
+    this.status = 'loading';
+    this.startAtMs = startAtMs;
+    this.startPaused = paused;
+    this.media = null;
+    this.offsetMs = startAtMs;
+    const session = ++this.session;
+    const controller = new AbortController();
+    this.loadAbort = controller;
+    // Give up on a fetch that takes too long: a stuck download must not block the queue.
+    this.loadTimer = this.options.clock.setTimeout(() => {
+      this.loadTimer = null;
+      controller.abort();
+      this.failed(
+        current.track,
+        `getting the track took longer than ${Math.round(this.options.fetchTimeoutMs / 1000)} s`,
+      );
+    }, this.options.fetchTimeoutMs);
+    this.emit();
+    this.options.media.prepare(current.track, controller.signal).then(
+      (media) => {
+        // Skipped, stopped or timed out meanwhile: this result belongs to a load that no longer matters.
+        if (session !== this.session || controller.signal.aborted) return;
+        this.ready(media);
+      },
+      (error: unknown) => {
+        if (session !== this.session || controller.signal.aborted) return;
+        this.failed(current.track, error instanceof Error ? error.message : String(error));
+      },
+    );
+  }
+
+  // The current track is ready: start it (or hold it paused) at the place asked for.
+  private ready(media: PreparedMedia): void {
+    this.cancelLoad();
+    this.media = media;
+    // A restored position past the end of the file (the file changed) starts from the top instead.
+    this.offsetMs = this.startAtMs < media.durationMs ? this.startAtMs : 0;
+    this.error = null;
+    if (this.current && this.current.startedAt === null) this.current.startedAt = this.options.clock.now();
+    if (this.startPaused) {
+      // Held paused: outputs are started on resume (their session stays older than the player's).
+      this.status = 'paused';
+      this.startPaused = false;
+      this.emit();
+      return;
+    }
+    this.status = 'playing';
+    this.anchor = this.options.clock.now();
+    this.session += 1;
+    for (const output of this.outputs.keys()) this.startOutput(output);
+    this.scheduleEnd();
+    this.emit();
+  }
+
+  // A track could not be got ready: say why and move on (the failed track is not recorded as played).
+  private failed(track: Track, reason: string): void {
+    this.options.log.warn('skipping a track that could not be got ready', {
+      guild: this.guildId,
+      track: track.url,
+      reason,
+    });
+    this.error = `${track.title}: ${reason}`;
+    this.advance(false);
+  }
+
+  // Runs a seek: restarts the sound at the new place while playing, or just moves the place otherwise.
+  private applySeek(targetMs: number): void {
+    this.lastSeekAt = this.options.clock.now();
+    const duration = this.media?.durationMs ?? this.current?.track.durationMs ?? null;
+    // Keep the target inside the track (see SEEK_END_MARGIN_MS).
+    const max = duration === null ? Number.POSITIVE_INFINITY : Math.max(0, duration - SEEK_END_MARGIN_MS);
+    const target = Math.min(Math.max(0, Math.round(targetMs)), max);
+    if (this.status === 'loading') {
+      // Not ready yet: start there when it is.
+      this.startAtMs = target;
+      this.offsetMs = target;
+    } else if (this.status === 'paused') {
+      // Paused: move the place; the outputs restart there on resume because the session changes now.
+      this.offsetMs = target;
+      this.session += 1;
+      for (const output of this.outputs.keys()) output.stop();
+    } else if (this.status === 'playing' && this.media) {
+      this.offsetMs = target;
+      this.anchor = this.options.clock.now();
+      this.session += 1;
+      for (const output of this.outputs.keys()) this.startOutput(output);
+      this.scheduleEnd();
+    }
+    this.emit();
+  }
+
+  // Starts one output at the current position with the current session.
+  private startOutput(output: PlayerOutput): void {
+    if (!this.media) return;
+    this.outputs.set(output, this.session);
+    output.start(this.media, this.position(), this.session);
+  }
+
+  // Ends the track by the clock if nothing else does: at the end exactly without outputs (the browsers follow the
+  // clock), or a grace period later with outputs, whose own end report is more accurate.
+  private scheduleEnd(): void {
+    this.cancelEndTimer();
+    if (!this.media) return;
+    const remaining = Math.max(0, this.media.durationMs - this.position());
+    const grace = this.outputs.size > 0 ? this.endGraceMs : 0;
+    const session = this.session;
+    this.endTimer = this.options.clock.setTimeout(() => {
+      this.endTimer = null;
+      if (session !== this.session || this.status !== 'playing') return;
+      if (this.outputs.size > 0) {
+        this.options.log.warn('no output reported the end of the track; moving on by the clock', {
+          guild: this.guildId,
+        });
+      }
+      this.advance(true);
+    }, remaining + grace);
+  }
+
+  private cancelEndTimer(): void {
+    if (this.endTimer !== null) this.options.clock.clearTimeout(this.endTimer);
+    this.endTimer = null;
+  }
+
+  private cancelLoad(): void {
+    if (this.loadTimer !== null) this.options.clock.clearTimeout(this.loadTimer);
+    this.loadTimer = null;
+    this.loadAbort?.abort();
+    this.loadAbort = null;
+  }
+
+  private cancelSeek(): void {
+    if (this.seekTimer !== null) this.options.clock.clearTimeout(this.seekTimer);
+    this.seekTimer = null;
+    this.pendingSeekMs = null;
+  }
+
+  // Saves the state for a restart (see restore): the track, whether it played, and where.
+  private persist(): void {
+    this.options.state.save({
+      guildId: this.guildId,
+      trackId: this.current?.track.id ?? null,
+      addedBy: this.current?.addedBy ?? null,
+      // A loading track is saved as paused: it was meant to play, and restore always brings it back paused anyway.
+      status: this.status === 'idle' ? 'idle' : this.status === 'playing' ? 'playing' : 'paused',
+      positionMs: this.position(),
+    });
+  }
+
+  // Every change ends here: one version step, one event, one save.
+  private emit(): void {
+    this.version += 1;
+    this.persist();
+    this.options.bus.emit('player', this.snapshot());
+  }
+}
