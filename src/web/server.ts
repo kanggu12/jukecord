@@ -181,8 +181,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     options: {
       maxPayload: 4096,
       // Messages over 1 KiB go compressed to a browser that offers it: a queue of a thousand tracks is about 330 KiB as
-      // JSON and 60 KiB compressed, sent to every listener whenever the queue changes. No zlib context is kept between
-      // messages, so a connection holds no compression memory while it waits.
+      // JSON and 60 KiB compressed, sent to every listener whenever the queue changes. No context is carried from one
+      // message to the next; each connection keeps its zlib state (about 0.2 MiB) while it is open, and compressing
+      // such a queue takes about 2 ms per connection.
       perMessageDeflate: { threshold: 1024, serverNoContextTakeover: true, clientNoContextTakeover: true },
     },
   });
@@ -196,11 +197,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     // Each file is a route; anything else falls through to the panel's page (see the not-found handler).
     wildcard: false,
     index: false,
-    // Revalidated on every load (ETag), so a new version is seen at once without renaming files.
     cacheControl: false,
     // The build's .br and .gz copies, sent to a browser that takes them (scripts/build-panel.ts makes them).
     preCompressed: true,
-    setHeaders: (reply) => reply.header('cache-control', 'no-cache'),
+    // The font's pieces carry their content's hash in their names, so a browser keeps them for a year; everything else
+    // is revalidated on every load (ETag), so a new version is seen at once. A route that set its own (the audio,
+    // through sendFile) keeps it.
+    setHeaders: (reply, file) => {
+      if (reply.getHeader('cache-control')) return;
+      reply.header('cache-control', /[\\/]fonts[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache');
+    },
   });
 
   // Who is calling. A credential that does not work counts as a failed login for its address, and a dead session

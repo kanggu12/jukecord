@@ -29,6 +29,11 @@ export class Players {
     return player;
   }
 
+  /** The player of a server if it has one, without making one. */
+  existing(guildId: string): Player | undefined {
+    return this.players.get(guildId);
+  }
+
   /** Every player created so far. */
   all(): Player[] {
     return [...this.players.values()];

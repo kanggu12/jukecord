@@ -284,6 +284,8 @@ describe('the HTTP API', () => {
     assert.equal(whole.statusCode, 200);
     assert.match(String(whole.headers['content-type']), /^audio\/ogg/);
     assert.equal(whole.rawPayload.length, 1000);
+    // A track's file never changes: browsers keep it for a day (the panel files' "no-cache" must not replace it).
+    assert.equal(whole.headers['cache-control'], 'private, max-age=86400');
     const part = await inject({ method: 'GET', url, headers: { ...asHost, range: 'bytes=100-199' } });
     assert.equal(part.statusCode, 206);
     assert.equal(part.rawPayload.length, 100);

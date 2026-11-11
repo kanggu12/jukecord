@@ -855,6 +855,11 @@ export class DiscordRepository {
     return row ? text(row, 'hash') : null;
   }
 
+  /** Forgets that commands were registered in a server (the bot left it, and Discord removed them). */
+  clearCommandsHash(guildId: string): void {
+    this.store.db.prepare('DELETE FROM discord_commands WHERE guild_id = ?').run(guildId);
+  }
+
   setCommandsHash(guildId: string, hash: string): void {
     this.store.db
       .prepare(

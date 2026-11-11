@@ -69,8 +69,15 @@ RUN set -eu; \
       --disable-encoders --enable-encoder=libopus,libmp3lame,pcm_s16le,pcm_f32le \
       --enable-version3 --enable-openssl --enable-zlib --enable-libopus --enable-libmp3lame; \
     make -j"$(nproc)"; \
-    make install; \
+    # The program alone (make install would add the static libraries and headers, 56 MB of build cache), stripped, and
+    # its licence with where its source is, as the image carries it.
+    install -D -m 0755 ffmpeg /opt/ffmpeg/bin/ffmpeg; \
     strip /opt/ffmpeg/bin/ffmpeg; \
+    install -D -m 0644 LICENSE.md /opt/ffmpeg/share/doc/ffmpeg/LICENSE.md; \
+    install -D -m 0644 COPYING.LGPLv3 /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv3; \
+    printf 'FFmpeg %s, built for jukecord from https://ffmpeg.org/releases/ffmpeg-%s.tar.xz (sha256 %s).\n%s\n' \
+      "$FFMPEG_VERSION" "$FFMPEG_VERSION" "$FFMPEG_SHA256" "$(/opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep '^configuration:')" \
+      > /opt/ffmpeg/share/doc/ffmpeg/SOURCE; \
     rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -q libopus; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -q libmp3lame; \
@@ -112,6 +119,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini libopus0 libmp3lame0 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg /opt/ffmpeg/share/doc/ffmpeg /usr/local/share/doc/ffmpeg
 # The program starts with the libraries this stage has (a missing one fails the build here, not at the first track).
 RUN ffmpeg -hide_banner -encoders | grep -q libopus
 COPY --from=ytdlp /opt/yt-dlp /opt/yt-dlp

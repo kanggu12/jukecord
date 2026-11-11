@@ -65,7 +65,7 @@ export class Ffmpeg {
     const version = await run(this.binary, ['-hide_banner', '-version'], { timeoutMs: 15_000 });
     const encoders = await run(this.binary, ['-hide_banner', '-encoders'], { timeoutMs: 15_000, maxStdout: 1024 ** 2 });
     return {
-      // "ffmpeg version 7.1.2-0+deb13u1 Copyright ..." -> the part before "Copyright".
+      // "ffmpeg version 7.1.5 Copyright ..." -> the part before "Copyright".
       version: (version.stdout.split('\n')[0] ?? '').replace(/\s+Copyright.*$/, '').trim(),
       opus: /\blibopus\b/.test(encoders.stdout),
       mp3: /\blibmp3lame\b/.test(encoders.stdout),

@@ -12,7 +12,9 @@ git clone https://github.com/kanggu12/jukecord.git && cd jukecord
 ./jukecord up
 ```
 
-The first `up` builds the image (a few minutes) and makes `.env` from `.env.example`. The panel opens on this machine
+The first `up` builds the image, compiling FFmpeg for audio (about a minute on a fast desktop, longer on a small
+machine), and makes `.env` from `.env.example`. The build leaves about 400 MB of build cache, which
+`docker builder prune` removes. The panel opens on this machine
 only; `./jukecord open` makes a login link and opens it. Put the bot's token in `.env` (the [README](../README.md#the-discord-bot)
 says how to make the bot) and run `./jukecord up` again.
 
@@ -68,7 +70,8 @@ sudo systemctl daemon-reload && sudo systemctl enable --now jukecord
 ### Raspberry Pi and other arm64 machines
 
 The same commands work on a Raspberry Pi 4 or 5 with a 64-bit OS and on ARM servers: the image is built for arm64
-too. The first build on a Pi takes a while; a released image (`JUKECORD_IMAGE`) avoids it. Give the cache a size that
+too. Building it on a Pi compiles FFmpeg, which takes a long while; a released image (`JUKECORD_IMAGE` in `.env`)
+avoids it. Give the cache a size that
 fits the card or disk (`JUKECORD_CACHE_MAX`).
 
 ## From source

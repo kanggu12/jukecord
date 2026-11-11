@@ -9,7 +9,8 @@ Say what an attacker can do, how to reproduce it, and which version you ran (a r
 maintainer will reply, agree on a fix with you, and publish an advisory with the fixed release. The advisory credits
 you unless you ask not to be named.
 
-The latest release and `main` get security fixes.
+The latest release and `main` get security fixes. The image's FFmpeg is built from a pinned FFmpeg release; a weekly
+check flags a newer release of that line, and a patch release of jukecord brings it.
 
 ## What matters most
 

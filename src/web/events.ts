@@ -23,8 +23,10 @@ export const EVENTS_VERSION = 1;
 
 // A browser that has not answered two pings (60 s) is gone, even if its connection never said so.
 const HEARTBEAT_MS = 30_000;
-// A browser that reads so slowly that 1 MiB waits for it is cut off rather than allowed to use up memory.
-const MAX_BUFFERED = 1024 ** 2;
+// A browser that reads so slowly that 8 MiB waits for it is cut off rather than allowed to use up memory. The count
+// includes messages still waiting for compression, at their full size: several changes of a thousand-track queue in
+// one moment (three failed tracks put back, say) are over 1 MiB before zlib has run, for a browser that keeps up.
+const MAX_BUFFERED = 8 * 1024 ** 2;
 
 /** Someone listening in a browser, as the panel shows them. */
 export interface Listener {

@@ -6,14 +6,17 @@
  * User and system yt-dlp config files are ignored, so a stray ~/.config/yt-dlp/config cannot change what jukecord does.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
+import fs from 'node:fs';
 // YouTube's bot check is shared with the reasons people are shown (core/reasons.ts).
 import { BOT_CHECK } from '../core/reasons.ts';
 import type { NewTrack } from '../core/types.ts';
-import { lastLines, ProcessError, type RunOptions, type RunResult, run } from './process.ts';
+import { lastLines, ProcessError, type RunOptions, type RunResult, run, watch } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
 
 // WebM/Opus is what YouTube serves best and ffmpeg reads it from a pipe; anything else as a fallback.
 const AUDIO_FORMAT = 'bestaudio[ext=webm]/bestaudio/best';
+// The largest file fetched whole (see audioToFile): three hours of audio at 320 kbit/s is about 430 MB.
+const WHOLE_FILE_MAX = '512M';
 
 export interface YtDlpOptions {
   /** The yt-dlp program. */
@@ -209,30 +212,59 @@ export class YtDlp {
   /**
    * Downloads a track's best audio (the same choice as audio()) into a file. For the few files ffmpeg cannot read as
    * they arrive, an MP4 whose index comes at its end: ffmpeg then reads it from the disk, where it can look ahead.
+   * Progress is reported as audio() reports it; a file over WHOLE_FILE_MAX (a site with only a long video, say) is
+   * not fetched.
    */
-  async audioToFile(url: string, file: string, signal: AbortSignal, timeoutMs: number): Promise<void> {
+  async audioToFile(
+    url: string,
+    file: string,
+    signal: AbortSignal,
+    timeoutMs: number,
+    onProgress?: (fraction: number) => void,
+  ): Promise<void> {
     const args = [
       ...this.common(),
       '--format',
       AUDIO_FORMAT,
       '--no-playlist',
-      // Straight into the file named, with no progress on stdout (which would only fill the output buffer).
+      '--max-filesize',
+      WHOLE_FILE_MAX,
+      // Straight into the file named, writing over a leftover, with one progress line per update.
       '--no-part',
       '--force-overwrites',
-      '--quiet',
-      '--no-progress',
+      '--progress',
+      '--newline',
+      '--progress-template',
+      PROGRESS_TEMPLATE,
       '--output',
       file,
       url,
     ];
-    try {
-      await run(this.options.binary, args, { signal, timeoutMs });
-    } catch (error) {
-      // The same short reason as a failed stream gives (a removed video, YouTube's bot check ...).
-      if (error instanceof ProcessError && error.result) {
-        throw new ProcessError(ytdlpFailure(error.result.stderr, error.result.code), error.result);
+    // Its own process group, so a kill ends what yt-dlp started too (see process.ts).
+    const child = spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const watching = watch(child, 'yt-dlp', { signal, timeoutMs });
+    // Progress lines come on stdout when the audio goes to a file; both streams are read, line by line.
+    if (onProgress) {
+      for (const stream of [child.stdout, child.stderr]) {
+        let pending = '';
+        stream?.on('data', (chunk: Buffer) => {
+          pending += chunk.toString('utf8');
+          const lines = pending.split(/\r?\n/);
+          pending = lines.pop() ?? '';
+          for (const line of lines) {
+            const fraction = parseProgress(line);
+            if (fraction !== null) onProgress(fraction);
+          }
+        });
       }
-      throw error;
+    }
+    // A cancel or the time limit rejects here with its own reason ("cancelled", "took longer than ..."); a failure of
+    // yt-dlp's own gets the same short reason a stream gives (a removed video, YouTube's bot check ...).
+    const result = await watching;
+    if (result.code !== 0) throw new ProcessError(ytdlpFailure(result.stderr, result.code), result);
+    // yt-dlp skips a file over --max-filesize and still ends well.
+    if (!fs.existsSync(file)) {
+      throw new ProcessError(`the file is larger than jukecord fetches whole (${WHOLE_FILE_MAX}B)`, result);
     }
   }
 

@@ -26,11 +26,42 @@ export interface BusEvents {
   voice: [VoiceChanged];
 }
 
-/** Node's EventEmitter, typed with the events above so a misspelt event name or payload fails the type check. */
+/** Hears about a listener that threw: the event, the server it was about, and the error. */
+export type ListenerFailure = (event: keyof BusEvents, guildId: string | null, error: unknown) => void;
+
+/**
+ * Node's EventEmitter, typed with the events above so a misspelt event name or payload fails the type check, and
+ * calling every listener even when one throws. A failing listener (a panel's message, a card) must not keep the others
+ * from hearing about the change, nor reach the code that emitted it: that is often a player's timer, where the error
+ * would end the process and the music of every server with it.
+ */
 export class Bus extends EventEmitter<BusEvents> {
-  constructor() {
+  private readonly failed: ListenerFailure;
+
+  constructor(failed?: ListenerFailure) {
     // Listeners include one per open panel tab; the default warning at 10 would fire on an ordinary evening.
     super();
     this.setMaxListeners(0);
+    this.failed =
+      failed ??
+      ((event, guildId, error) => {
+        process.stderr.write(
+          `jukecord: a listener of "${event}" (${guildId ?? 'no server'}) failed: ${String(error)}\n`,
+        );
+      });
+  }
+
+  override emit<K extends keyof BusEvents>(event: K, ...args: BusEvents[K]): boolean {
+    // rawListeners keeps once() wrappers, which remove themselves when called, as emit would.
+    const listeners = this.rawListeners(event) as ((...values: BusEvents[K]) => void)[];
+    for (const listener of listeners) {
+      try {
+        listener.apply(this, args);
+      } catch (error) {
+        const guildId = (args[0] as { guildId?: unknown } | undefined)?.guildId;
+        this.failed(event, typeof guildId === 'string' ? guildId : null, error);
+      }
+    }
+    return listeners.length > 0;
   }
 }

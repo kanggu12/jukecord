@@ -31,8 +31,16 @@ export interface PreparedMedia {
 
 /** Gets a track ready (fetch, convert, measure). Implemented by the media module; faked in tests. */
 export interface MediaPreparer {
-  /** Must stop work and reject soon after `signal` aborts: a skipped track should not keep downloading. */
-  prepare(track: Track, signal: AbortSignal, onProgress?: (fraction: number) => void): Promise<PreparedMedia>;
+  /**
+   * Must stop work and reject soon after `signal` aborts: a skipped track should not keep downloading. `priority` says
+   * whether somebody waits for the track ('now', the default) or it is fetched ahead of time ('ahead').
+   */
+  prepare(
+    track: Track,
+    signal: AbortSignal,
+    onProgress?: (fraction: number) => void,
+    priority?: 'now' | 'ahead',
+  ): Promise<PreparedMedia>;
 }
 
 /**

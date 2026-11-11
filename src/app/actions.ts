@@ -216,9 +216,10 @@ export class Actions {
   }
 
   // Looks up an input and turns lookup failures into errors people can act on.
-  private async lookup(input: string, signal: AbortSignal | undefined, who: string | null): Promise<Track[]> {
+  private async lookup(input: string, signal: AbortSignal | undefined, context: ActionContext): Promise<Track[]> {
     try {
-      return await this.options.resolver.resolve(input, signal, who);
+      // Counted against the person's share and the server's share of the lookups (see Resolver).
+      return await this.options.resolver.resolve(input, signal, context.userId, context.guildId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork);
@@ -232,7 +233,7 @@ export class Actions {
   /** Adds what an address or search finds (all of a playlist) and starts playing if nothing was. */
   async add(context: ActionContext, input: string, at: InsertAt = 'end', signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
-    const result = this.enqueue(context, await this.lookup(input, signal, context.userId), at);
+    const result = this.enqueue(context, await this.lookup(input, signal, context), at);
     this.options.players.get(context.guildId).play();
     return result;
   }
@@ -264,7 +265,7 @@ export class Actions {
   /** Puts what an input finds first and plays it now; the current track is skipped. */
   async playNow(context: ActionContext, input: string, signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
-    const result = this.enqueue(context, await this.lookup(input, signal, context.userId), 'next');
+    const result = this.enqueue(context, await this.lookup(input, signal, context), 'next');
     const player = this.options.players.get(context.guildId);
     // Idle: play starts the first of the new items. Otherwise skipping moves on to it.
     if (!player.play()) player.skip();

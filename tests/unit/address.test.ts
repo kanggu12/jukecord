@@ -147,4 +147,31 @@ describe('Resolver limits', () => {
     waiting.at(-1)?.();
     await again;
   });
+
+  it('lets one server have three lookups running, so another server still gets one', async () => {
+    const store = memoryStore();
+    const waiting: (() => void)[] = [];
+    const ytdlp = {
+      lookup: () => new Promise((resolve) => waiting.push(() => resolve([]))),
+    } as unknown as YtDlp;
+    const resolver = new Resolver({ ytdlp, tracks: store.tracks, log: createLogger({ level: 'error', sinks: [] }) });
+    // Three people of one busy server, each within their own share.
+    const busy = [
+      resolver.resolve('a', undefined, 'alice', 'server-1'),
+      resolver.resolve('b', undefined, 'bob', 'server-1'),
+      resolver.resolve('c', undefined, 'carol', 'server-1'),
+    ];
+    await new Promise((resolve) => setImmediate(resolve));
+    await assert.rejects(resolver.resolve('d', undefined, 'dave', 'server-1'), BusyError);
+    // The fourth place is left for another server.
+    const other = resolver.resolve('e', undefined, 'erin', 'server-2');
+    await new Promise((resolve) => setImmediate(resolve));
+    for (const release of waiting) release();
+    await Promise.all([...busy, other]);
+    // The busy server's share comes back once its lookups are done.
+    const again = resolver.resolve('f', undefined, 'dave', 'server-1');
+    await new Promise((resolve) => setImmediate(resolve));
+    waiting.at(-1)?.();
+    await again;
+  });
 });

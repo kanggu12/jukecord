@@ -16,14 +16,27 @@ All notable changes to jukecord are documented here. The format is based on
   (Pretendard's own dynamic subset), and the scripts and styles are sent compressed, made so once by the build.
 - Live updates go compressed to browsers: a queue of a thousand tracks is about 60 KiB on the wire instead of
   330 KiB, sent to every listener whenever the queue changes.
+- Browsers keep the font's pieces for a year (their names carry a hash of their content), so a page asks for none of
+  them again.
+- Tracks fetched ahead of time take turns across every server: at most half the processors' worth at once (2 to 6),
+  after any track somebody is waiting for, which always starts at once. A few servers fetching ahead can no longer take
+  a small machine over and hold up the track someone wants now.
+- One server can have at most three of the four lookups at a time, so a busy server leaves room for another.
 
 ### Fixed
 
 - A track whose file cannot be read as it arrives (an MP4 with its index at the end, as some sites serve it) is
   fetched whole and plays, instead of failing as "the downloaded audio is empty".
-- Accessibility: the logo link has a name on phones, each page has one main landmark and one level-one heading, and
-  the menu's sheet is a valid dialog. The panel walk runs axe-core on the pages it photographs and fails on any rule
-  broken.
+- Accessibility: the logo link has a name on phones, each page has one main landmark and one level-one heading, the
+  menu's sheet is a valid dialog, the log can be scrolled from the keyboard, and the player's heading is not read out
+  empty before the first state. The panel walk runs axe-core on the pages it photographs and fails on any rule broken.
+- A server that removes the bot: its player stops (nothing more is fetched for it), the bot leaves its voice channel,
+  and the commands are registered again if the server adds the bot back; before, a remembered fingerprint skipped them.
+- A part that fails while hearing about a change (a panel's message, a card) no longer keeps the others from hearing
+  it, nor takes the process down with every server's music when the change came from a player's timer.
+- Audio files keep their day-long browser cache; the panel files' "no-cache" had replaced it.
+- A track fetched whole after the stream could not be read: a time limit or a cancel says so, the download shows its
+  progress, a file over 512 MB is not fetched, and what yt-dlp leaves beside the file is removed.
 
 ## [0.1.0] - 2026-11-12
 

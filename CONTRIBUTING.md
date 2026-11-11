@@ -43,7 +43,8 @@ needs `docker build -f deploy/docker/Dockerfile -t jukecord:dev .` once); a chan
 The image builds FFmpeg from its release source (the `ffmpeg` stage of `deploy/docker/Dockerfile`), for audio only. To
 move to a newer release, check the `.tar.xz` against its signature with FFmpeg's release key
 (https://ffmpeg.org/ffmpeg-devel.asc), set `FFMPEG_VERSION` and `FFMPEG_SHA256`, and build: the stage fails when the
-Opus or MP3 encoder or https is missing, and CI runs jukecord's three FFmpeg commands in the image.
+Opus or MP3 encoder or https is missing, and CI runs jukecord's three FFmpeg commands in the image. A weekly check
+(`ffmpeg-release.yml`) fails when a newer release of the pinned line (7.1) is out; that is the reminder to bump it.
 
 ## Versions and releases
 

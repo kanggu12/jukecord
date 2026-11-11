@@ -86,7 +86,8 @@ async function main(): Promise<number> {
   });
 
   const store = Store.open(path.join(config.dataDir, 'jukecord.db'));
-  const bus = new Bus();
+  // A listener that fails is logged with its server; the others still hear the change (see Bus).
+  const bus = new Bus((event, guildId, error) => log.error('a listener failed', { event, guild: guildId, error }));
   const queue = new QueueService(store.queue, bus);
   const cache = new MediaCache({
     dir: path.join(config.dataDir, 'cache'),

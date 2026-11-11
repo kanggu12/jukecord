@@ -1,11 +1,12 @@
 /**
- * Builds the panel into panel/dist: the TypeScript bundled into one script, the CSS into one stylesheet (with the
- * font beside it), and the page and the icon copied over.
+ * Builds the panel into panel/dist: the TypeScript bundled into one script, the CSS into one stylesheet, the font's
+ * pieces into fonts/, the page and the icon copied over, and a Brotli and a gzip copy of each text file.
  *
  *   npm run build
  *
- * One file each keeps the first load to four requests. Names do not carry hashes: the server sends the files with
- * "no-cache", so browsers check for a new version (a cheap 304) and never run an old script against a new API.
+ * The script and the stylesheet keep their names: the server sends them with "no-cache", so browsers check for a new
+ * version (a cheap 304) and never run an old script against a new API. The font's pieces carry a hash of their content
+ * in their names, so browsers keep them for good and fetch only the pieces a page's characters need.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,9 +31,9 @@ await build({
   format: 'esm',
   // Every browser the panel supports (the last two years of Chrome, Edge, Firefox and Safari).
   target: ['chrome120', 'edge120', 'firefox121', 'safari17'],
-  // The font's pieces are copied into fonts/ under their own names.
+  // The font's pieces go into fonts/ with their content's hash in their names, so browsers may keep them for good.
   loader: { '.woff2': 'file' },
-  assetNames: 'fonts/[name]',
+  assetNames: 'fonts/[name]-[hash]',
   logLevel: 'warning',
 });
 

@@ -130,7 +130,8 @@ export class Prefetcher {
       const key = MediaCache.keyOf(next.source);
       plan.fetching = key;
       try {
-        await this.options.media.prepare(next, abort.signal);
+        // Ahead of time: it takes its turn among every server's fetches, after any track somebody waits for.
+        await this.options.media.prepare(next, abort.signal, undefined, 'ahead');
         done.add(key);
       } catch (error) {
         if (abort.signal.aborted) return;

@@ -64,6 +64,11 @@ describe('Prefetcher', () => {
       media.calls.map((call) => call.track.title),
       ['Track 1', 'Track 2'],
     );
+    // Ahead of time: they take their turn after any track somebody waits for, across every server.
+    assert.deepEqual(
+      media.calls.map((call) => call.priority),
+      ['ahead', 'ahead'],
+    );
   });
 
   it('keeps fetching the next track through a pause, a seek or a track added at the end', async () => {

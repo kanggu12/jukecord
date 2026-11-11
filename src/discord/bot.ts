@@ -202,6 +202,8 @@ export class Bot implements Directory {
     });
     // A server that adds the bot later gets the commands at once.
     this.client.on(Events.GuildCreate, (guild) => void this.register(guild));
+    // A server that removes the bot (an outage comes as GuildUnavailable instead, and needs nothing).
+    this.client.on(Events.GuildDelete, (guild) => this.removed(guild.id));
     this.client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand()) void this.onCommand(interaction);
       else if (interaction.isButton()) void this.onButton(interaction);
@@ -217,6 +219,19 @@ export class Bot implements Directory {
       this.voice.voiceStateChanged(after.guild.id ?? before.guild.id),
     );
     await this.client.login(this.options.token);
+  }
+
+  /**
+   * The bot was removed from a server (kicked, or the server deleted). Its player stops, so nothing is fetched for a
+   * server nobody can reach any more; the bot is out of its voice channel; and the commands are registered again if
+   * the server adds the bot back: Discord removed them with the bot, and the stored fingerprint would say they are
+   * there. The queue, the history and the playlists stay, for that day.
+   */
+  removed(guildId: string): void {
+    this.options.log.info('removed from a server', { guild: guildId });
+    this.options.discord.clearCommandsHash(guildId);
+    this.voice.leave(guildId);
+    this.options.players.existing(guildId)?.stop();
   }
 
   /** Leaves voice everywhere and logs out. */

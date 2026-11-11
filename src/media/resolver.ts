@@ -23,13 +23,16 @@ export interface ResolverOptions {
   readonly concurrency?: number;
   /** How many of those one person may have running (default 2), so one person cannot take them all. */
   readonly perPerson?: number;
+  /** How many of those one server may have running (default 3), so one busy server leaves room for the others. */
+  readonly perServer?: number;
 }
 
 export class Resolver {
   private readonly options: ResolverOptions;
-  // Lookups running now, in all and per person.
+  // Lookups running now, in all, per person and per server.
   private active = 0;
   private readonly byPerson = new Map<string, number>();
+  private readonly byServer = new Map<string, number>();
 
   constructor(options: ResolverOptions) {
     this.options = options;
@@ -37,9 +40,15 @@ export class Resolver {
 
   /**
    * The tracks an input adds (one for a video or a search, several for a playlist), stored in the database. `who` is
-   * the person asking (a Discord user ID), counted against the per-person limit; the host has none.
+   * the person asking (a Discord user ID), counted against the per-person limit (the host has none); `server` is the
+   * Discord server it is for, counted against the per-server limit.
    */
-  async resolve(text: string, signal?: AbortSignal, who: string | null = null): Promise<Track[]> {
+  async resolve(
+    text: string,
+    signal?: AbortSignal,
+    who: string | null = null,
+    server: string | null = null,
+  ): Promise<Track[]> {
     const input = parseInput(text);
     if (input.kind === 'url' && !isPlaylistAddress(input.url)) {
       // A single address seen before: answered from the database, with nothing fetched now (playing it later goes
@@ -48,12 +57,18 @@ export class Resolver {
       if (known) return [known];
     }
     const mine = who ? (this.byPerson.get(who) ?? 0) : 0;
-    if (this.active >= (this.options.concurrency ?? 4) || (who && mine >= (this.options.perPerson ?? 2))) {
+    const ours = server ? (this.byServer.get(server) ?? 0) : 0;
+    if (
+      this.active >= (this.options.concurrency ?? 4) ||
+      (who && mine >= (this.options.perPerson ?? 2)) ||
+      (server && ours >= (this.options.perServer ?? 3))
+    ) {
       throw new BusyError('jukecord is looking up other tracks right now; try again in a moment');
     }
     // The slot is taken before anything touches the network, the address check's DNS question included.
     this.active += 1;
     if (who) this.byPerson.set(who, mine + 1);
+    if (server) this.byServer.set(server, ours + 1);
     let found: Awaited<ReturnType<YtDlp['lookup']>>;
     try {
       // An address on a private network is refused before yt-dlp starts (address.ts), which says so more plainly
@@ -73,6 +88,11 @@ export class Resolver {
         const left = (this.byPerson.get(who) ?? 1) - 1;
         if (left > 0) this.byPerson.set(who, left);
         else this.byPerson.delete(who);
+      }
+      if (server) {
+        const left = (this.byServer.get(server) ?? 1) - 1;
+        if (left > 0) this.byServer.set(server, left);
+        else this.byServer.delete(server);
       }
     }
     // A playlist's entries point wherever the playlist says; each must pass the same check as a typed address.

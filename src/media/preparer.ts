@@ -4,8 +4,13 @@
  * Two callers asking for the same track (the player and the prefetcher, typically) share one download. The download
  * is cancelled only when every caller has given up on it, so a skipped track that the prefetcher still wants keeps
  * downloading, and a track nobody wants any more stops at once.
+ *
+ * Across every server, a track somebody waits for starts at once, and tracks fetched ahead of time take turns within a
+ * limit (see slots.ts), so a few servers fetching ahead cannot take a small machine over.
  */
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fetchLimitMs, type MediaPreparer, type PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
@@ -14,6 +19,7 @@ import { BusyError } from './busy.ts';
 import { MediaCache } from './cache.ts';
 import type { Ffmpeg } from './ffmpeg.ts';
 import { oggOpusDurationMs } from './ogg.ts';
+import { defaultLimit, type Priority, Slots, type Ticket } from './slots.ts';
 import type { YtDlp } from './ytdlp.ts';
 
 export interface MediaOptions {
@@ -24,6 +30,8 @@ export interface MediaOptions {
   readonly log: Logger;
   /** How long one download and encode may take. */
   readonly timeoutMs: number;
+  /** How many fetches ahead of time may run at once, across every server (default: half the processors, 2 to 6). */
+  readonly fetchLimit?: number;
 }
 
 // A download in progress, shared by everyone waiting for the same track.
@@ -33,6 +41,8 @@ interface Job {
   waiters: number;
   /** Everyone who wants to hear about the download's progress. */
   readonly listeners: Set<(fraction: number) => void>;
+  /** Its place among the fetches of every server. */
+  readonly ticket: Ticket;
 }
 
 // Failures worth one more try: the network or the site stumbled, not "this video does not exist".
@@ -71,9 +81,11 @@ export class Media implements MediaPreparer {
   private readonly jobs = new Map<string, Job>();
   // MP3 copies being made, so two Safari listeners do not start two conversions.
   private readonly mp3Jobs = new Map<string, Promise<string>>();
+  private readonly slots: Slots;
 
   constructor(options: MediaOptions) {
     this.options = options;
+    this.slots = new Slots(options.fetchLimit ?? defaultLimit(os.availableParallelism()));
   }
 
   /** The cache this preparer fills (the web layer serves files from it). */
@@ -81,15 +93,23 @@ export class Media implements MediaPreparer {
     return this.options.cache;
   }
 
-  async prepare(track: Track, signal: AbortSignal, onProgress?: (fraction: number) => void): Promise<PreparedMedia> {
+  async prepare(
+    track: Track,
+    signal: AbortSignal,
+    onProgress?: (fraction: number) => void,
+    priority: Priority = 'now',
+  ): Promise<PreparedMedia> {
     const key = MediaCache.keyOf(track.source);
     const cached = this.options.cache.get(key);
     if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs };
     let job = this.jobs.get(key);
     // A download being stopped (everyone left it) is not joined: it can only end in "cancelled". A new one starts.
     if (!job || job.abort.signal.aborted) {
-      job = this.start(track, key);
+      job = this.start(track, key, priority);
       this.jobs.set(key, job);
+    } else if (priority === 'now') {
+      // A fetch ahead of time that somebody now waits for starts at once, if it was still waiting its turn.
+      job.ticket.promote();
     }
     const shared = job;
     shared.waiters += 1;
@@ -113,14 +133,15 @@ export class Media implements MediaPreparer {
     }
   }
 
-  // Downloads and encodes one track into the cache.
-  private start(track: Track, key: string): Job {
+  // Downloads and encodes one track into the cache, when its turn comes (at once for a track somebody waits for).
+  private start(track: Track, key: string, priority: Priority): Job {
     const abort = new AbortController();
     const cache = this.options.cache;
     const tmp = cache.tmpPath(key);
     const listeners = new Set<(fraction: number) => void>();
+    const ticket = this.slots.request(priority, abort.signal);
     // The job exists before its work starts, so the work can tell whether the list still points at it when it ends.
-    const job: Job = { promise: Promise.reject(new Error('not started')), abort, waiters: 0, listeners };
+    const job: Job = { promise: Promise.reject(new Error('not started')), abort, waiters: 0, listeners, ticket };
     job.promise.catch(() => {});
     // Progress goes to everyone waiting; a listener that throws must not break the download.
     const report = (fraction: number): void => {
@@ -133,8 +154,11 @@ export class Media implements MediaPreparer {
       }
     };
     const promise = (async (): Promise<PreparedMedia> => {
-      const started = Date.now();
+      let started = Date.now();
       try {
+        // Its turn among the fetches of every server; the time it took counts from here.
+        await ticket.granted;
+        started = Date.now();
         // One retry after 2 s for a transient failure (see TRANSIENT); anything else fails at once.
         let loudness: number | null = null;
         for (let attempt = 1; ; attempt += 1) {
@@ -167,10 +191,16 @@ export class Media implements MediaPreparer {
           const source = cache.tmpPath(key, 'source');
           const limit = fetchLimitMs(this.options.timeoutMs, track.durationMs);
           try {
-            await this.options.ytdlp.audioToFile(track.url, source, abort.signal, limit);
+            // Progress starts again for the second download.
+            report(0);
+            await this.options.ytdlp.audioToFile(track.url, source, abort.signal, limit, report);
             ({ loudness } = await this.options.ffmpeg.fromFile(source, tmp, abort.signal, limit));
           } finally {
-            fs.rmSync(source, { force: true });
+            // The file and anything yt-dlp left beside it (its .ytdl state, fragments), whatever happened.
+            const name = path.basename(source);
+            for (const entry of fs.readdirSync(path.dirname(source))) {
+              if (entry.startsWith(name)) fs.rmSync(path.join(path.dirname(source), entry), { force: true });
+            }
           }
           durationMs = await oggOpusDurationMs(tmp);
           if (durationMs < 500) throw new Error('the downloaded audio is empty');
@@ -189,6 +219,8 @@ export class Media implements MediaPreparer {
         fs.rmSync(tmp, { force: true });
         throw error;
       } finally {
+        // Its place goes to the next fetch waiting, if any.
+        ticket.release();
         // Only this job's own entry: a newer download of the same track may have taken its place.
         if (this.jobs.get(key) === job) this.jobs.delete(key);
       }

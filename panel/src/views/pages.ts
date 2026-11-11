@@ -484,6 +484,8 @@ export function waitingPage(status: Status | null, text: string): HTMLElement {
         h('b', null, 'jukecord'),
         status ? h('span', { class: 'version' }, `v${status.version}`) : null,
       ),
+      // The page's level-one heading, for screen readers: the name the mark and the words beside it show.
+      h('h1', { class: 'sr' }, 'jukecord'),
       h('div', { class: 'notice tone-load', role: 'status' }, icon('loader-circle', 'spin'), text),
     ),
   );
