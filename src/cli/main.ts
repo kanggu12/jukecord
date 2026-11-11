@@ -14,6 +14,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec } from '../web/api.ts';
 import { COMMANDS, type Command, needsGuild, type Request, UsageError, type Words } from './commands.ts';
 
@@ -32,8 +33,19 @@ class Unreachable extends Error {
   override name = 'Unreachable';
 }
 
-// Options that take a value; everything else starting with -- is a switch.
+// Options that take a value, and the switches; anything else starting with -- is a typing mistake.
 const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope']);
+const SWITCHES = new Set(['json', 'help', 'version', 'next']);
+
+// What people type from Discord's names, to the command it means here.
+const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [
+  [['dj', 'show'], ['settings']],
+  [
+    ['dj', 'clear'],
+    ['dj', 'none'],
+  ],
+  [['playlist', 'list'], ['playlists']],
+];
 
 /** Splits the command line into options and words. "--name value" and "--name=value" both work. */
 export function parseLine(argv: readonly string[]): Words {
@@ -60,8 +72,11 @@ export function parseLine(argv: readonly string[]): Words {
 
 /** Finds the command the words start with (the longest name wins: "playlist save" over a "playlist"). */
 export function findCommand(
-  args: readonly string[],
+  typed: readonly string[],
 ): { operation: OperationName; command: Command; rest: string[] } | null {
+  // Discord's names ("dj show", "playlist list") mean the commands that do the same here.
+  const alias = ALIASES.find(([from]) => from.every((word, index) => typed[index] === word));
+  const args = alias ? [...alias[1], ...typed.slice(alias[0].length)] : typed;
   let best: { operation: OperationName; command: Command; rest: string[] } | null = null;
   for (const operation of OPERATIONS) {
     const command = COMMANDS[operation];
@@ -89,15 +104,18 @@ export function helpText(): string {
     'Usage: jukecord [--url URL] [--token TOKEN] [--guild ID] [--json] <command>',
     '',
   ];
+  // Two columns while they fit an 80-column terminal; a long command line puts its summary on the next line.
+  const column = Math.min(width + 2, 34);
   for (const operation of OPERATIONS) {
     const command = COMMANDS[operation];
     const left = `${command.name}${command.usage ? ` ${command.usage}` : ''}`;
-    lines.push(`  ${left.padEnd(width + 2)}${command.summary}`);
+    if (left.length + 2 <= column) lines.push(`  ${left.padEnd(column)}${command.summary}`);
+    else lines.push(`  ${left}`, `  ${' '.repeat(column)}${command.summary}`);
   }
   lines.push(
     '',
-    'Settings: JUKECORD_URL, JUKECORD_TOKEN, JUKECORD_GUILD (or the options above); the host token in the data',
-    'directory is used when no token is given.',
+    'Settings: JUKECORD_URL, JUKECORD_TOKEN, JUKECORD_GUILD (or the options above).',
+    'Without a token, the host token in the data directory is used.',
   );
   return lines.join('\n');
 }
@@ -191,10 +209,31 @@ export async function run(
   env: NodeJS.ProcessEnv,
   print: (text: string, error?: boolean) => void,
 ): Promise<number> {
-  const words = parseLine(argv);
+  // -h is --help, as in most commands: as an option only, before any "--" (after it, "-h" is something to search for).
+  const end = argv.indexOf('--');
+  const words = parseLine(argv.map((word, index) => (word === '-h' && (end < 0 || index < end) ? '--help' : word)));
+  if (words.flags.has('version')) {
+    print(`jukecord ${VERSION}`);
+    return 0;
+  }
   if (words.flags.has('help') || words.args.length === 0 || words.args[0] === 'help') {
     print(helpText());
     return words.args.length === 0 && !words.flags.has('help') ? 2 : 0;
+  }
+  // A mistyped option is said at once, not silently left out ("--jsno"); so is one that needs a value and has none.
+  for (const [name, value] of words.flags) {
+    if (!VALUED.has(name) && !SWITCHES.has(name)) {
+      print(`jukecord: there is no option --${name} (see jukecord --help)`, true);
+      return 2;
+    }
+    if (VALUED.has(name) && (value === true || value === '')) {
+      print(`jukecord: --${name} needs a value`, true);
+      return 2;
+    }
+    if (SWITCHES.has(name) && value !== true) {
+      print(`jukecord: --${name} takes no value`, true);
+      return 2;
+    }
   }
   const found = findCommand(words.args);
   if (!found) {
@@ -205,12 +244,18 @@ export async function run(
   const { url, token } = connection(words.flags, env);
   const client = new Client(url, token);
   try {
+    // The server is asked for only when something needs it, so a typing mistake is said before any connection.
     let guild: string | null = null;
-    if (needsGuild(operation)) guild = await chooseGuild(client, words.flags, env);
+    const guildOf = async (): Promise<string> => {
+      guild ??= await chooseGuild(client, words.flags, env);
+      return guild;
+    };
     const lookups = {
       // The queue as it is now, to turn a 1-based number into an item ID.
       queueItemId: async (position: number) => {
-        const queue = (await client.call('queue', { params: { guild: guild ?? '' } })) as { items: { id: number }[] };
+        const queue = (await client.call('queue', { params: { guild: await guildOf() } })) as {
+          items: { id: number }[];
+        };
         const item = queue.items[position - 1];
         if (!item)
           throw new UsageError(`there is no track number ${position} in the queue (it has ${queue.items.length})`);
@@ -218,11 +263,17 @@ export async function run(
       },
     };
     const request = await command.request({ args: rest, flags: words.flags }, lookups);
+    if (needsGuild(operation)) await guildOf();
     const answer = await client.call(operation, {
       ...request,
       params: { ...(guild ? { guild } : {}), ...(request.params ?? {}) },
     });
     print(words.flags.has('json') ? JSON.stringify(answer, null, 2) : command.show(answer));
+    // The self-check fails the command when a check failed, so scripts and monitors can tell.
+    if (operation === 'doctor') {
+      const checks = (answer as { checks?: { status: string }[] }).checks ?? [];
+      if (checks.some((check) => check.status === 'fail')) return 1;
+    }
     return 0;
   } catch (error) {
     if (error instanceof UsageError) {
@@ -235,6 +286,16 @@ export async function run(
     if (error instanceof Unreachable) {
       print(error.message, true);
       return 3;
+    }
+    // Refused for want of a login: no token at all says how to give one; a token that did not work says so.
+    if (error instanceof ApiError && error.code === 'unauthorized') {
+      print(
+        token
+          ? 'jukecord: the token was refused (revoked, or made for another jukecord)'
+          : 'jukecord: needs a token: --token or JUKECORD_TOKEN (make one with jukecord token create <name>)',
+        true,
+      );
+      return 1;
     }
     print(`jukecord: ${error instanceof Error ? error.message : String(error)}`, true);
     return 1;

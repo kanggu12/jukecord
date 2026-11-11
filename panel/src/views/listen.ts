@@ -245,13 +245,18 @@ export function listenBar(live: Live): HTMLElement {
         message,
       ),
     );
-    // On a phone the now-playing card is far up the page: pause and skip are here too.
-    const paused = player?.status === 'paused';
-    label(pauseKey, paused ? 'play' : 'pause', paused ? words.resume : words.pause, false);
+    // On a phone the now-playing card is far up the page: pause and skip are here too, with the main key's rule:
+    // playing or loading shows pause; paused or idle shows play, which also starts a waiting queue.
+    const moving = player?.status === 'playing' || player?.status === 'loading';
+    const queued = (state.queue?.items.length ?? 0) > 0;
+    const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
+    label(pauseKey, moving ? 'pause' : 'play', pauseWords, false);
     skipKey.title = words.skip;
     skipKey.setAttribute('aria-label', words.skip);
-    pauseKey.disabled = !mayControl() || !player?.track;
+    pauseKey.disabled = !player || !mayControl() || (!player.track && !queued);
     skipKey.disabled = !mayControl() || !player?.track;
+    // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
+    bar.classList.toggle('idle', !player?.track);
     // Who else listens.
     const people = state.listeners.people;
     fill(faces, ...people.slice(0, 5).map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')));
@@ -261,8 +266,11 @@ export function listenBar(live: Live): HTMLElement {
     level.textContent = `${Math.round(state.volume * 100)}%`;
   };
 
-  pauseKey.onclick = () =>
-    void act(pauseKey, () => (state.player?.status === 'paused' ? api.resume(guild()) : api.pause(guild())));
+  pauseKey.onclick = () => {
+    const status = state.player?.status ?? 'idle';
+    // Paused or idle: play on (or start the queue). Playing or loading: pause.
+    void act(pauseKey, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
+  };
   skipKey.onclick = () => void act(skipKey, () => api.skip(guild()));
 
   toggle.onclick = () => {
@@ -291,7 +299,7 @@ export function listenBar(live: Live): HTMLElement {
     describe();
     align();
   });
-  watch(['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status'], draw);
+  watch(['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue'], draw);
   // Drift is checked every two seconds while listening.
   window.setInterval(() => {
     if (state.listening) align();

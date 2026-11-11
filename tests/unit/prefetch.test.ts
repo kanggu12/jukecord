@@ -66,6 +66,21 @@ describe('Prefetcher', () => {
     );
   });
 
+  it('keeps fetching the next track through a pause, a seek or a track added at the end', async () => {
+    const { clock, queue, media, tracks } = setup(1);
+    const [first, second, third] = tracks;
+    assert.ok(first && second && third);
+    queue.add(GUILD, [first.id, second.id], 'end', null);
+    await clock.advance(300);
+    const fetching = media.last();
+    assert.equal(fetching.track.id, first.id);
+    // A change that leaves the plan's first track where it was: another track at the end.
+    queue.add(GUILD, [third.id], 'end', null);
+    await clock.advance(300);
+    assert.equal(fetching.signal.aborted, false, 'the running download was thrown away');
+    assert.equal(media.calls.length, 1, 'the same track was asked for twice');
+  });
+
   it('pins what it plans to keep and drops a fetch the queue no longer wants', async () => {
     const { clock, queue, media, cache, tracks } = setup(1);
     const [first, second] = tracks;

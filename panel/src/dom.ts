@@ -60,8 +60,14 @@ export function keepingFocus(list: HTMLElement, rebuild: () => void): void {
   if (!id) return;
   const again = [...list.querySelectorAll<HTMLElement>('[data-id]')].find((element) => element.dataset.id === id);
   if (!again) return;
-  // Shown on the page: a key hidden by the layout (display: none) cannot take the focus.
-  const shown = (element: HTMLElement | null) => (element && element.getClientRects().length > 0 ? element : null);
+  // A key that can take the focus: on the page (not display: none), not held invisible, not disabled.
+  const shown = (element: HTMLElement | null) =>
+    element &&
+    element.getClientRects().length > 0 &&
+    getComputedStyle(element).visibility !== 'hidden' &&
+    !(element as HTMLButtonElement).disabled
+      ? element
+      : null;
   const same = key ? shown(again.querySelector<HTMLElement>(`[data-key="${key}"]`)) : null;
   (same ?? shown(again.querySelector<HTMLElement>('a')))?.focus({ preventScroll: true });
 }

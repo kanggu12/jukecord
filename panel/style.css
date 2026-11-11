@@ -77,7 +77,7 @@
   --bad-key: oklch(0.55 0.19 25);
   --bad-key-hi: oklch(0.5 0.19 25);
   --soft: 11%;
-  --scrim: rgba(10, 10, 10, 0.42);
+  --scrim: rgba(10, 10, 10, 0.58);
   --focus: oklch(0.55 0.15 250);
   --groove: rgba(255, 255, 255, 0.06);
   --disc: #1c1d20;
@@ -110,7 +110,7 @@
     --bad-key: oklch(0.55 0.19 25);
     --bad-key-hi: oklch(0.5 0.19 25);
     --soft: 11%;
-    --scrim: rgba(10, 10, 10, 0.42);
+    --scrim: rgba(10, 10, 10, 0.58);
     --focus: oklch(0.55 0.15 250);
     --groove: rgba(255, 255, 255, 0.06);
     --disc: #1c1d20;
@@ -162,6 +162,10 @@ body {
   font-feature-settings: "ss06";
   -webkit-font-smoothing: antialiased;
   overflow-wrap: anywhere;
+}
+/* Korean breaks between words, not inside them ("컴퓨/터"); a long address with no spaces still breaks (above). */
+:root:lang(ko) body {
+  word-break: keep-all;
 }
 button,
 input,
@@ -510,6 +514,8 @@ img {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  /* Never squeezed by a card of fixed height: a head that wraps grows, and the list under it gives up the room. */
+  flex: none;
   min-height: 48px;
   padding: 8px 12px 8px var(--pad);
   border-bottom: 1px solid var(--line);
@@ -1036,6 +1042,20 @@ img {
 .row .acts {
   display: flex;
   gap: 2px;
+}
+/* A key that holds its column without being there (Play next on the row that is next already). */
+.ghost {
+  visibility: hidden;
+}
+/* The queue's last row when more tracks wait: one key that draws the next hundred. */
+.more-rows {
+  display: flex;
+  justify-content: center;
+  padding: 10px var(--pad);
+}
+/* The queue tools' list key, for narrow cards only (the container rule below shows it). */
+.card-head .tools .tools-more {
+  display: none;
 }
 /* The one key of a narrow card's row (shown by the container rule below). */
 .row .acts > .more-key {
@@ -1616,6 +1636,14 @@ kbd {
 .log .fields {
   color: var(--ink-3);
 }
+.log-filter {
+  width: 240px;
+  flex: none;
+}
+/* Older records come in above: the key for them sits on top of the list. */
+.card-head.log-older {
+  justify-content: center;
+}
 
 /* ---- login ------------------------------------------------------------------------------------------------------ */
 .login {
@@ -1634,6 +1662,20 @@ kbd {
 }
 .login .brand b {
   font-size: 26px;
+}
+/* Which command gives a login link, by how jukecord runs. */
+.login-commands {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  align-items: baseline;
+}
+.login-commands dt {
+  color: var(--ink-3);
+}
+.login-commands dd {
+  margin: 0;
 }
 .login p {
   margin: 0;
@@ -1685,12 +1727,13 @@ kbd {
     max-height: min(68vh, 620px);
   }
 }
-/* A narrow card shows its tools as icons (their names stay in the tooltip and for screen readers). */
-@container (max-width: 760px) {
-  .card-head .tools .key:has(.label) .label {
+/* A narrow card shows its tools as icons (their names stay in the tooltip and for screen readers); a chart's Table
+   key keeps its word, so every chart says it the same way. */
+@container (max-width: 980px) {
+  .card-head .tools .key:not(.table-key):has(.label) .label {
     display: none;
   }
-  .card-head .tools .key.sm:has(.label) {
+  .card-head .tools .key.sm:not(.table-key):has(.label) {
     width: var(--control-sm);
     padding: 0;
   }
@@ -1705,12 +1748,29 @@ kbd {
   .card-head .head-search + .tools {
     margin-left: auto;
   }
-  /* A narrow card (a phone) shows one key per row, which lists the others (see trackMenu). */
-  .row .acts > :not(.more-key) {
+  /* A narrow card (a phone) shows one key per queue row, which lists the others (see trackMenu). Rows without that
+     key (recently played) keep theirs. */
+  .row .acts:has(> .more-key) > :not(.more-key) {
     display: none;
   }
   .row .acts > .more-key {
     display: inline-flex;
+  }
+  /* The queue's tools: Shuffle with its word, the rest behind one key. */
+  .card-head
+    .tools:has(> .tools-more)
+    > :is([data-act="dedupe"], [data-act="save"], [data-act="load"], [data-act="clear"]) {
+    display: none;
+  }
+  .card-head .tools .tools-more {
+    display: inline-flex;
+  }
+  .card-head .tools .key.sm[data-act="shuffle"] {
+    width: auto;
+    padding: 0 10px;
+  }
+  .card-head .tools .key.sm:not(.table-key)[data-act="shuffle"]:has(.label) .label {
+    display: inline;
   }
 }
 /* The now-playing keys keep their words while there is room; on a narrow card only the main key does. */
@@ -1758,9 +1818,13 @@ kbd {
   .row {
     grid-template-columns: 24px 36px minmax(0, 1fr) auto;
   }
+  /* A log record on a narrow window: time, level and component on one line, the message under them. */
   .log {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    gap: 2px 8px;
+  }
+  .log > :last-child {
+    grid-column: 1 / -1;
   }
 }
 @media (max-width: 560px) {
@@ -1783,6 +1847,23 @@ kbd {
   .listen > .key {
     width: var(--control);
     padding: 0;
+  }
+  /* Nothing playing leaves the bar room: the Listen key says its name, the way into listening in the browser. */
+  .listen.idle > .key[data-act="listen"] {
+    width: auto;
+    padding: 0 12px;
+  }
+  .listen.idle > .key[data-act="listen"] .label {
+    display: inline;
+  }
+  /* The log's tools: the levels and Refresh on one line, the filter across the next. */
+  .page-head .page-tools {
+    flex-wrap: wrap;
+  }
+  .page-tools .log-filter {
+    order: 3;
+    flex: 1 1 100%;
+    width: auto;
   }
   .tiles {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1837,5 +1918,11 @@ kbd {
   }
   .choice {
     min-height: 44px;
+  }
+}
+/* Keyboard shortcuts mean nothing on a touch screen without a keyboard. */
+@media (hover: none) and (pointer: coarse) {
+  .choice[data-act="shortcuts"] {
+    display: none;
   }
 }

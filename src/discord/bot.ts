@@ -37,7 +37,6 @@ import { parseTimestamp } from '../util/time.ts';
 import {
   addedCard,
   djCard,
-  done,
   historyCard,
   type Lang,
   langOf,
@@ -49,6 +48,7 @@ import {
   statsCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
+import { sayError } from './errors.ts';
 import { VoiceManager } from './voice.ts';
 
 export interface BotOptions {
@@ -150,7 +150,8 @@ export class Bot implements Directory {
   private activityTimer: NodeJS.Timeout | null = null;
   private activitySentAt = 0;
   private showActivity(title: string | null): void {
-    this.activity = title;
+    // "Listening to" is the same line in every server; with more than one it would show one server's track to all.
+    this.activity = this.client.guilds.cache.size === 1 ? title : null;
     if (this.activityTimer !== null) return;
     const wait = Math.max(0, this.activitySentAt + 15_000 - Date.now());
     this.activityTimer = setTimeout(() => {
@@ -164,14 +165,26 @@ export class Bot implements Directory {
 
   // After a play from Discord, joins the person's voice channel when the bot is not in one yet, as people expect from
   // a music bot. A failure here (no permission, say) does not undo the add; the person can still /join.
-  private async autoJoin(interaction: ChatInputCommandInteraction, context: ActionContext): Promise<void> {
+  // When the bot cannot join (the person is in no voice channel, or a permission is missing), the person is told,
+  // privately: the track is in the queue, but nothing sounds in Discord yet.
+  private async autoJoin(interaction: ChatInputCommandInteraction, context: ActionContext, lang: Lang): Promise<void> {
     if (!interaction.inCachedGuild() || this.voice.channel(context.guildId)) return;
-    if (!interaction.guild.voiceStates.cache.get(interaction.user.id)?.channelId) return;
-    try {
-      await this.options.actions.join(context, null);
-    } catch (error) {
-      this.options.log.debug('could not join the voice channel after a play', { error });
+    let reason: string;
+    if (!interaction.guild.voiceStates.cache.get(interaction.user.id)?.channelId) {
+      reason =
+        lang === 'ko'
+          ? '봇이 음성 채널에 없음: 음성 채널에 들어가 /참가'
+          : 'The bot is not in a voice channel: join one and use /join';
+    } else {
+      try {
+        await this.options.actions.join(context, null);
+        return;
+      } catch (error) {
+        this.options.log.debug('could not join the voice channel after a play', { error });
+        reason = sayError(error instanceof Error ? error.message : String(error), lang);
+      }
     }
+    await interaction.followUp({ embeds: [note(lang, reason, reason)], flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 
   /** Whether the bot is logged in and receiving events. */
@@ -251,20 +264,26 @@ export class Bot implements Directory {
     const actions = this.options.actions;
     const options = interaction.options;
     try {
-      // Lookups can take seconds; answer "thinking" first so Discord does not time the command out (3 s).
-      await interaction.deferReply();
+      // Lookups can take seconds; answer "thinking" first so Discord does not time the command out (3 s). Commands
+      // that only look something up answer the person alone, so the channel keeps the music, not the questions.
+      const sub = interaction.options.getSubcommand(false);
+      const lookup =
+        ['version', 'queue'].includes(interaction.commandName) ||
+        (interaction.commandName === 'dj' && sub === 'show') ||
+        (interaction.commandName === 'playlist' && sub === 'list');
+      await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
       switch (interaction.commandName) {
         case 'add': {
           const at = options.getString('where') === 'next' ? 'next' : 'end';
           const result = await actions.add(context, options.getString('input', true), at);
           await interaction.editReply({ embeds: [addedCard(result, lang)] });
-          await this.autoJoin(interaction, context);
+          await this.autoJoin(interaction, context, lang);
           return;
         }
         case 'play': {
           const result = await actions.playNow(context, options.getString('input', true));
-          await interaction.editReply({ embeds: [addedCard(result, lang)] });
-          await this.autoJoin(interaction, context);
+          await interaction.editReply({ embeds: [addedCard(result, lang, true)] });
+          await this.autoJoin(interaction, context, lang);
           return;
         }
         case 'skip':
@@ -296,7 +315,9 @@ export class Bot implements Directory {
         }
         case 'stop':
           actions.stop(context);
-          await interaction.editReply({ embeds: [done(lang)] });
+          await interaction.editReply({
+            embeds: [note(lang, 'Stopped (the queue stays)', '재생 멈춤(대기열은 그대로)')],
+          });
           return;
         case 'np':
           await interaction.editReply(nowCard(actions.nowPlaying(context), lang, this.options.panelUrl));
@@ -311,15 +332,20 @@ export class Bot implements Directory {
           const item = actions.queue(context).items[options.getInteger('position', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
           actions.remove(context, item.id);
-          await interaction.editReply({ embeds: [done(lang)] });
+          const title = item.track.title;
+          await interaction.editReply({ embeds: [note(lang, `Removed "${title}"`, `"${title}" 뺌`)] });
           return;
         }
         case 'move': {
           const items = actions.queue(context).items;
           const item = items[options.getInteger('from', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
-          actions.move(context, item.id, Math.min(options.getInteger('to', true), items.length) - 1);
-          await interaction.editReply({ embeds: [done(lang)] });
+          const to = Math.min(options.getInteger('to', true), items.length);
+          actions.move(context, item.id, to - 1);
+          const title = item.track.title;
+          await interaction.editReply({
+            embeds: [note(lang, `Moved "${title}" to ${to}`, `"${title}" ${to}번으로 옮김`)],
+          });
           return;
         }
         case 'jump': {
@@ -330,12 +356,20 @@ export class Bot implements Directory {
         }
         case 'shuffle':
           actions.shuffle(context);
-          await interaction.editReply({ embeds: [done(lang)] });
+          await interaction.editReply({ embeds: [note(lang, 'Shuffled the queue', '대기열 섞음')] });
           return;
         case 'dedupe': {
           const removed = actions.dedupe(context);
           await interaction.editReply({
-            embeds: [note(lang, `Removed ${removed} duplicates`, `중복 ${removed}곡 뺌`)],
+            embeds: [
+              removed === 0
+                ? note(lang, 'No duplicates', '중복 없음')
+                : note(
+                    lang,
+                    removed === 1 ? 'Removed 1 duplicate' : `Removed ${removed} duplicates`,
+                    `중복 ${removed}곡 뺌`,
+                  ),
+            ],
           });
           return;
         }
@@ -355,20 +389,19 @@ export class Bot implements Directory {
           await interaction.editReply({ embeds: [note(lang, `Joined ${joined.name}`, `${joined.name}에 들어옴`)] });
           return;
         }
-        case 'leave':
+        case 'leave': {
+          // The channel's name, read before leaving it.
+          const left = this.voice.channel(context.guildId)?.name ?? '';
           actions.leave(context);
-          await interaction.editReply({ embeds: [done(lang)] });
+          await interaction.editReply({ embeds: [note(lang, `Left ${left}`, `${left}에서 나감`)] });
           return;
+        }
         case 'listen':
           await interaction.editReply({
             embeds: [
               this.options.panelUrl
                 ? note(lang, `Listen along: ${this.options.panelUrl}`, `같이 듣기: ${this.options.panelUrl}`)
-                : note(
-                    lang,
-                    'The panel has no public address set (JUKECORD_PUBLIC_URL)',
-                    '패널 공개 주소가 정해지지 않음(JUKECORD_PUBLIC_URL)',
-                  ),
+                : note(lang, 'The panel has no address people can open', '아직 열 수 있는 패널 주소가 없음'),
             ],
           });
           return;
@@ -398,7 +431,7 @@ export class Bot implements Directory {
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
-            embeds: [problem(lang === 'ko' ? '지금 판에는 없는 명령' : 'This command no longer exists')],
+            embeds: [problem(lang === 'ko' ? '없어진 명령' : 'This command no longer exists')],
           });
       }
     } catch (error) {
@@ -427,7 +460,7 @@ export class Bot implements Directory {
       case 'load': {
         const result = actions.playlistLoad(context, options.getString('name', true));
         await interaction.editReply({ embeds: [addedCard(result, lang)] });
-        await this.autoJoin(interaction, context);
+        await this.autoJoin(interaction, context, lang);
         return;
       }
       case 'rename': {
@@ -441,29 +474,33 @@ export class Bot implements Directory {
         });
         return;
       }
-      case 'delete':
-        actions.playlistDelete(context, options.getString('name', true));
-        await interaction.editReply({ embeds: [done(lang)] });
+      case 'delete': {
+        const name = options.getString('name', true);
+        actions.playlistDelete(context, name);
+        await interaction.editReply({ embeds: [note(lang, `Deleted "${name}"`, `"${name}" 지움`)] });
         return;
+      }
     }
   }
 
   // The pause, resume and skip buttons on a "now playing" card.
   private async onButton(interaction: ButtonInteraction): Promise<void> {
-    const lang = langOf(interaction.locale);
     const context = this.context(interaction);
     if (!context || !interaction.customId.startsWith('jukecord:')) return;
     this.remember(interaction);
     const actions = this.options.actions;
+    // "jukecord:pause:ko": the action, and the language the card was made in (older cards have none: the presser's).
+    const [, action, made] = interaction.customId.split(':');
+    const cardLang: Lang = made === 'ko' || made === 'en' ? made : langOf(interaction.locale);
     try {
       const snapshot =
-        interaction.customId === 'jukecord:pause'
+        action === 'pause'
           ? actions.pause(context)
-          : interaction.customId === 'jukecord:resume'
+          : action === 'resume'
             ? actions.resume(context)
             : actions.skip(context);
       // The card itself is updated in place, so the channel does not fill with copies.
-      await interaction.update(nowCard(snapshot, lang, this.options.panelUrl));
+      await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl));
     } catch (error) {
       await this.fail(interaction, error);
     }
@@ -483,7 +520,15 @@ export class Bot implements Directory {
 
   // A failed command: the reason goes to the person who asked only (an ephemeral follow-up keeps the channel clean).
   private async fail(interaction: ChatInputCommandInteraction | ButtonInteraction, error: unknown): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
+    const lang = langOf(interaction.locale);
+    // A refusal from the actions, in the person's language; anything else is jukecord's own fault, logged in full
+    // and shown as one plain line.
+    const message =
+      error instanceof ActionError
+        ? sayError(error.message, lang)
+        : lang === 'ko'
+          ? '문제가 생김: 이유는 jukecord 로그에'
+          : 'Something went wrong: the reason is in the log';
     if (!(error instanceof ActionError))
       this.options.log.warn('a command failed', {
         command: interaction.isButton() ? interaction.customId : interaction.commandName,

@@ -54,7 +54,12 @@ spec:
               value: "8795"
             - name: JUKECORD_DATA_DIR
               value: /data
-            {{- with .Values.publicUrl }}
+            {{- /* The public address: as set, or the Ingress's host (https when it has TLS), which login and links need. */}}
+            {{- $publicUrl := .Values.publicUrl }}
+            {{- if and (not $publicUrl) .Values.ingress.enabled .Values.ingress.host (not (hasPrefix "*" .Values.ingress.host)) }}
+            {{- $publicUrl = printf "%s://%s" (ternary "https" "http" (gt (len (default list .Values.ingress.tls)) 0)) .Values.ingress.host }}
+            {{- end }}
+            {{- with $publicUrl }}
             - name: JUKECORD_PUBLIC_URL
               value: {{ . | quote }}
             {{- end }}

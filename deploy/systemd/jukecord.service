@@ -1,8 +1,4 @@
-# Starts jukecord's Compose project when the machine starts, and stops it cleanly when it shuts down.
-#
-# Optional: Docker's restart policy (unless-stopped) already brings jukecord back after a crash or a Docker restart.
-# This unit is for machines where Docker itself is not started at boot, or where shutting down must wait for
-# jukecord to save where every server was. docs/INSTALL.md has the commands to install it.
+# Starts jukecord's Compose project with the machine and stops it at shutdown. docs/INSTALL.md has the commands.
 [Unit]
 Description=jukecord (Docker Compose)
 Requires=docker.service

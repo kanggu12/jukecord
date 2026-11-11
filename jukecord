@@ -121,7 +121,7 @@ wait_ready() {
 
 command=${1:-help}
 case "$command" in
-  up | start)
+  up)
     # Settings start from the example, readable by this user only (the bot's token goes in there).
     if [ ! -f .env ]; then
       cp .env.example .env
@@ -133,7 +133,7 @@ case "$command" in
     printf 'jukecord is up: %s\n' "$(panel_url)"
     printf 'Log in with: ./jukecord open\n'
     ;;
-  down | stop)
+  down)
     compose down "${@:2}"
     ;;
   restart)
@@ -150,8 +150,13 @@ case "$command" in
     open_url "$url"
     ;;
   status)
-    compose ps "$service"
-    if running; then inside status; fi
+    if running; then
+      compose ps "$service"
+      inside status
+    else
+      say "jukecord is not running (./jukecord up)"
+      exit 1
+    fi
     ;;
   logs)
     if [ "${2:-}" = "-f" ] || [ "${2:-}" = "--follow" ]; then
@@ -226,6 +231,11 @@ mv jukecord.db.restoring jukecord.db'
   help | -h | --help)
     # This file by its full path: the directory changed above, so a relative $0 would point nowhere.
     sed -n '2,15p' "$here/${BASH_SOURCE[0]##*/}" | sed 's/^# \{0,1\}//'
+    # The jukecord command's own list, when it is running to ask.
+    if running; then
+      printf '\n'
+      inside --help
+    fi
     ;;
   *)
     inside "$@"

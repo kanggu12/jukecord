@@ -17,7 +17,7 @@ discord:
   existingSecret: ""
   # The bot's token. Without one (and without existingSecret) jukecord runs browser-only.
   token: ""
-  # The application's ID, for the slash commands and logging in with Discord.
+  # The application's ID, for logging in with Discord.
   clientId: ""
   # The application's OAuth2 secret, for logging in to the panel with Discord.
   clientSecret: ""

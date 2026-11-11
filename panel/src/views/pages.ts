@@ -109,13 +109,15 @@ function columns(
 // A chart card with a key that switches between the chart and its table.
 function chartCard(title: string, chart: { plot: HTMLElement; table: HTMLElement }): HTMLElement {
   const body = h('div', { class: 'chart' }, chart.plot);
+  const words = t();
+  // Labelled in every chart (style.css keeps the label even in narrow cards), with the same icon.
   const table = h(
     'button',
-    { class: 'key sm quiet', type: 'button', 'aria-pressed': 'false' },
-    icon('list-music'),
-    h('span', { class: 'label' }, state.lang === 'ko' ? '표' : 'Table'),
+    { class: 'key sm quiet table-key', type: 'button', 'aria-pressed': 'false' },
+    icon('table'),
+    h('span', { class: 'label' }, words.table),
   );
-  table.title = state.lang === 'ko' ? '표로 보기' : 'Show as a table';
+  table.title = words.tableHint;
   table.onclick = () => {
     const showing = table.getAttribute('aria-pressed') === 'true';
     table.setAttribute('aria-pressed', String(!showing));
@@ -196,17 +198,36 @@ export function statsPage(): HTMLElement {
       );
       return;
     }
-    // Per day: labels at the start, the middle and the end of the span.
-    const dayValues = stats.days.map((day) => ({
-      label: day.day,
-      tip: `${shortDay(day.day)} · ${clock(day.playedMs)}`,
-      value: day.plays,
+    // Per day, or per week over a year (365 bars would be hairlines): labels at the start, the middle and the end.
+    const span = days >= 365 ? 7 : 1;
+    const buckets: { first: string; last: string; plays: number; playedMs: number }[] = [];
+    // Counted back from today, so the newest bar is a whole week and a short one, if any, is the oldest.
+    for (let end = stats.days.length; end > 0; end -= span) {
+      const chunk = stats.days.slice(Math.max(0, end - span), end);
+      buckets.unshift({
+        first: chunk[0]?.day ?? '',
+        last: chunk.at(-1)?.day ?? '',
+        plays: chunk.reduce((sum, day) => sum + day.plays, 0),
+        playedMs: chunk.reduce((sum, day) => sum + day.playedMs, 0),
+      });
+    }
+    // A week is written as a range that cannot be read as one date ("11-05 – 11-11", Korean "11.5~11.11"): short in
+    // the tooltip, with the year in the table and for screen readers (a year of weeks has two of each month and day).
+    const range = (bucket: (typeof buckets)[number], write: (day: string) => string) =>
+      span > 1 && bucket.first !== bucket.last
+        ? `${write(bucket.first)}${state.lang === 'ko' ? '~' : ' – '}${write(bucket.last)}`
+        : write(bucket.first);
+    const dayValues = buckets.map((bucket) => ({
+      label: range(bucket, (day) => day),
+      tip: `${range(bucket, shortDay)} · ${clock(bucket.playedMs)}`,
+      value: bucket.plays,
     }));
-    const middle = stats.days[Math.floor(stats.days.length / 2)]?.day ?? '';
+    const middle = buckets[Math.floor(buckets.length / 2)]?.first ?? '';
+    const perDayTitle = span > 1 ? words.perWeek : words.perDay;
     const perDay = columns(
       dayValues,
-      [shortDay(stats.days[0]?.day ?? ''), shortDay(middle), shortDay(stats.days.at(-1)?.day ?? '')],
-      [words.perDay, words.playsUnit],
+      [shortDay(buckets[0]?.first ?? ''), shortDay(middle), shortDay(buckets.at(-1)?.first ?? '')],
+      [perDayTitle, words.playsUnit],
     );
     const hourValues = stats.hours.map((value, hour) => ({
       label: `${hour}:00`,
@@ -271,7 +292,7 @@ export function statsPage(): HTMLElement {
     fill(
       content,
       tiles,
-      h('div', { class: 'charts' }, chartCard(words.perDay, perDay), chartCard(words.perHour, perHour)),
+      h('div', { class: 'charts' }, chartCard(perDayTitle, perDay), chartCard(words.perHour, perHour)),
       h(
         'div',
         { class: 'charts' },
@@ -325,12 +346,10 @@ export function logsPage(): HTMLElement {
   const refresh = h('button', { class: 'key', type: 'button' });
   const older = h('button', { class: 'key', type: 'button' });
   const list = h('div', { class: 'logs scroll', style: 'flex:1;min-height:0' });
-  const card = h(
-    'section',
-    { class: 'card fill' },
-    list,
-    h('div', { class: 'card-head', style: 'border-top:1px solid var(--line);border-bottom:0' }, older),
-  );
+  // Older records go above the ones shown, so the key that brings them sits at the top of the list (its row is hidden
+  // when there is nothing older).
+  const olderHead = h('div', { class: 'card-head log-older', hidden: true }, older);
+  const card = h('section', { class: 'card fill' }, olderHead, list);
   const page = h(
     'div',
     { class: 'page', style: 'height:calc(100dvh - var(--bar-h) - var(--listen-h))' },
@@ -342,7 +361,7 @@ export function logsPage(): HTMLElement {
         'div',
         { class: 'page-tools' },
         levels,
-        h('label', { class: 'field', style: 'width:240px;flex:none' }, icon('search'), component),
+        h('label', { class: 'field log-filter' }, icon('search'), component),
         refresh,
       ),
     ),
@@ -351,14 +370,20 @@ export function logsPage(): HTMLElement {
 
   const row = (record: LogRecord) => {
     const tone = { debug: 'idle', info: 'load', warn: 'pause', error: 'bad' }[record.level];
+    const words = t();
+    // The level in the panel's words; debug has none of its own.
+    const levelName = { debug: 'debug', info: words.levelInfo, warn: words.levelWarn, error: words.levelError }[
+      record.level
+    ];
     const fields = Object.entries(record.fields)
       .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
       .join(' ');
     return h(
       'div',
       { class: 'log' },
-      h('span', { class: 'faint' }, new Date(record.time).toLocaleString()),
-      h('span', null, h('span', { class: `badge tone-${tone}` }, record.level)),
+      // Times in the panel's language, whatever the browser's.
+      h('span', { class: 'faint' }, new Date(record.time).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-GB')),
+      h('span', null, h('span', { class: `badge tone-${tone}` }, levelName)),
       h('span', { class: 'muted' }, record.component),
       h('span', null, record.msg, fields ? h('span', { class: 'fields' }, ` ${fields}`) : null),
     );
@@ -367,7 +392,12 @@ export function logsPage(): HTMLElement {
     if (records.length === 0) fill(list, h('div', { class: 'empty' }, icon('scroll-text'), t().noLogs));
     else fill(list, ...records.map(row));
   };
+  // Each request is numbered: only the latest one draws (typing in the filter sends one per pause, and an older,
+  // slower answer must not replace the list for what is typed now).
+  let asked = 0;
   const load = async (before?: string) => {
+    asked += 1;
+    const mine = asked;
     try {
       const page = await api.logs({
         level,
@@ -375,11 +405,16 @@ export function logsPage(): HTMLElement {
         limit: 200,
         ...(before ? { before } : {}),
       });
+      if (mine !== asked) return;
+      // Older records go on top; the ones being read stay where they were on the screen.
+      const fromBottom = list.scrollHeight - list.scrollTop;
       records = before ? [...page, ...records] : page;
+      // A page shorter than asked for was the last one: there is nothing older to bring.
+      olderHead.hidden = page.length < 200 || records.length === 0;
       drawList();
-      if (!before) list.scrollTop = list.scrollHeight;
+      list.scrollTop = before ? list.scrollHeight - fromBottom : list.scrollHeight;
     } catch (error) {
-      problem(error);
+      if (mine === asked) problem(error);
     }
   };
   const draw = () => {
@@ -409,7 +444,12 @@ export function logsPage(): HTMLElement {
     fill(refresh, icon('refresh-cw'), words.refresh);
     fill(older, icon('history'), words.older);
   };
-  component.onchange = () => void load();
+  // The filter follows the typing, a moment after the last key.
+  let typing = 0;
+  component.oninput = () => {
+    window.clearTimeout(typing);
+    typing = window.setTimeout(() => void load(), 300);
+  };
   refresh.onclick = () => void load();
   older.onclick = () => void load(records[0]?.time);
   draw();
@@ -473,12 +513,14 @@ export function loginPage(status: Status | null, error: string | null): HTMLElem
           )
         : null,
       h('p', null, words.loginHost),
+      // Which command, by how jukecord was installed.
       h(
-        'p',
-        null,
-        h('code', null, 'jukecord link'),
-        state.lang === 'ko' ? ' 또는 ' : ' or ',
-        h('code', null, './jukecord open'),
+        'dl',
+        { class: 'login-commands' },
+        h('dt', null, words.loginCompose),
+        h('dd', null, h('code', null, './jukecord open')),
+        h('dt', null, words.loginElsewhere),
+        h('dd', null, h('code', null, 'jukecord link')),
       ),
     ),
   );

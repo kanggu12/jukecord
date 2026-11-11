@@ -44,6 +44,8 @@ describe('listening statistics', () => {
       );
       assert.equal(seoul.plays, 3);
       assert.equal(seoul.playedMs, 420_000);
+      // Alice and the host (a track added without a Discord login): two people, as the list below shows two.
+      assert.equal(seoul.people, 2);
       // Hours in Seoul: 08:30, 19:00 and 14:00.
       assert.deepEqual(
         seoul.hours.flatMap((count, hour) => (count ? [hour] : [])),

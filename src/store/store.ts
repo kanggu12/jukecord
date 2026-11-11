@@ -172,21 +172,45 @@ export class Store {
    * Nested calls become savepoints, so a repository method that uses a transaction can be called from inside another.
    */
   transaction<T>(fn: () => T): T {
+    const outer = this.depth === 0;
     const name = `sp${this.depth}`;
     // The outermost level takes the write lock at once (IMMEDIATE), so two writers queue up instead of deadlocking.
-    this.db.exec(this.depth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${name}`);
+    this.db.exec(outer ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${name}`);
     this.depth += 1;
+    let result: T;
     try {
-      const result = fn();
-      this.depth -= 1;
-      this.db.exec(this.depth === 0 ? 'COMMIT' : `RELEASE ${name}`);
-      return result;
+      result = fn();
     } catch (error) {
-      this.depth -= 1;
-      // Roll back only this level; an outer level decides for itself what to do with the error.
-      this.db.exec(this.depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${name}; RELEASE ${name}`);
+      // Roll back only this level; an outer level decides for itself what to do with the error. SQLite may have
+      // rolled back by itself already (a full disk, an I/O error); then there is nothing to undo, and the error that
+      // happened is the one reported, not the rollback's. The level is left either way.
+      try {
+        if (!outer) this.db.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
+        else if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      } catch {
+        // Nothing left to roll back.
+      } finally {
+        this.depth -= 1;
+      }
       throw error;
     }
+    try {
+      this.db.exec(outer ? 'COMMIT' : `RELEASE ${name}`);
+    } catch (error) {
+      // The commit itself failed (a full disk shows up here in WAL mode): undo what is left of the transaction, so the
+      // next one starts clean, and report the commit's own error.
+      if (outer && this.db.isTransaction) {
+        try {
+          this.db.exec('ROLLBACK');
+        } catch {
+          // Already rolled back by SQLite; nothing more to undo.
+        }
+      }
+      this.depth -= 1;
+      throw error;
+    }
+    this.depth -= 1;
+    return result;
   }
 
   /** Writes a consistent copy of the database to `target` (an online backup; the bot keeps running). */
@@ -499,7 +523,7 @@ export class HistoryRepository {
     const totals = db
       .prepare(
         `SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms,
-                COUNT(DISTINCT track_id) AS tracks, COUNT(DISTINCT added_by) AS people
+                COUNT(DISTINCT track_id) AS tracks, COUNT(DISTINCT COALESCE(added_by, '')) AS people
          FROM history WHERE guild_id = ? AND played_at >= ?`,
       )
       .get(guildId, since) as Row;
@@ -563,7 +587,7 @@ export interface HistoryStats {
   readonly playedMs: number;
   /** Distinct tracks played. */
   readonly tracks: number;
-  /** Distinct people whose tracks were played (tracks from the CLI count as nobody). */
+  /** Distinct people whose tracks were played; the host (tracks added without a Discord login) counts as one. */
   readonly people: number;
   readonly days: readonly { readonly day: string; readonly plays: number; readonly playedMs: number }[];
   /** Plays per hour of the day, index 0 being midnight to one. */

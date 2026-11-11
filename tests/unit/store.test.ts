@@ -269,3 +269,50 @@ describe('Store.open and file modes', () => {
     }
   });
 });
+
+describe('Store.transaction when the commit fails', () => {
+  it('reports the commit error, rolls back, and leaves the next transaction working', () => {
+    const store = memoryStore();
+    const db = (store as unknown as { db: { exec(sql: string): void; isTransaction: boolean } }).db;
+    // A COMMIT that fails once, as a full disk does in WAL mode.
+    const exec = db.exec.bind(db);
+    let failNext = true;
+    db.exec = (sql: string) => {
+      if (sql === 'COMMIT' && failNext) {
+        failNext = false;
+        throw new Error('database or disk is full');
+      }
+      exec(sql);
+    };
+    assert.throws(
+      () =>
+        store.transaction(() =>
+          store.tracks.upsert({
+            source: 'https://example.com/a',
+            url: 'https://example.com/a',
+            title: 'A',
+            uploader: null,
+            durationMs: 1000,
+            thumbnail: null,
+          }),
+        ),
+      /disk is full/,
+    );
+    assert.equal(db.isTransaction, false);
+    // The next transaction (and a nested one inside it) works as before.
+    const track = store.transaction(() =>
+      store.transaction(() =>
+        store.tracks.upsert({
+          source: 'https://example.com/b',
+          url: 'https://example.com/b',
+          title: 'B',
+          uploader: null,
+          durationMs: 1000,
+          thumbnail: null,
+        }),
+      ),
+    );
+    assert.equal(track.title, 'B');
+    assert.equal(store.tracks.bySource('https://example.com/a'), null);
+  });
+});

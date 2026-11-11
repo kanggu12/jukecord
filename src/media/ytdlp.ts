@@ -6,6 +6,8 @@
  * User and system yt-dlp config files are ignored, so a stray ~/.config/yt-dlp/config cannot change what jukecord does.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
+// YouTube's bot check is shared with the reasons people are shown (core/reasons.ts).
+import { BOT_CHECK } from '../core/reasons.ts';
 import type { NewTrack } from '../core/types.ts';
 import { lastLines, ProcessError, type RunOptions, type RunResult, run } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
@@ -125,7 +127,6 @@ export function parseProgress(line: string): number | null {
 }
 
 // What YouTube says when it wants this address to sign in before serving it.
-const BOT_CHECK = /sign in to confirm|confirm you.?re not a bot/i;
 
 /** The message for a failed yt-dlp run: its last lines, or what to do when YouTube is asking for a sign-in. */
 export function ytdlpFailure(stderr: string, code: number | null): string {
@@ -222,6 +223,7 @@ export class YtDlp {
       '-',
       url,
     ];
-    return spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Its own process group, so a kill ends what yt-dlp started too (ffmpeg, for sites that stream in pieces).
+    return spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   }
 }

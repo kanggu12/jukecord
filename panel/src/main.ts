@@ -233,12 +233,14 @@ function frame(): void {
       ),
     );
     const me = state.me;
+    // The host has no Discord name: "Host" in the panel's language.
+    const name = me?.kind === 'host' ? words.host : (me?.name ?? '');
     if (me)
       refill(
         account,
-        `${me.id}|${me.name}|${me.avatar}`,
-        face(me.name, avatarUrl(me.id, me.avatar), 'sm'),
-        h('span', { class: 'name' }, me.name),
+        `${me.id}|${name}|${me.avatar}`,
+        face(name, avatarUrl(me.id, me.avatar), 'sm'),
+        h('span', { class: 'name' }, name),
         icon('menu'),
       );
     account.setAttribute('aria-label', words.menu);
@@ -367,7 +369,10 @@ function shortcuts(): void {
       return;
     }
     if (!mayControl() || !player?.track) return;
-    if (event.key === ' ' && !target.closest('button, a, [role="slider"]')) {
+    // Space on a key the keyboard reached presses that key (as everywhere); on a key last clicked with the mouse it
+    // plays or pauses, rather than pressing Skip or Shuffle again.
+    const keyboardKey = target.closest('button, a, [role="slider"]')?.matches(':focus-visible') ?? false;
+    if (event.key === ' ' && !keyboardKey) {
       event.preventDefault();
       void act(null, () => (player.status === 'paused' ? api.resume(guild) : api.pause(guild)));
     } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && !target.closest('[role="slider"]')) {

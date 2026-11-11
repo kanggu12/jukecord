@@ -15,6 +15,7 @@ import type { HistoryRepository, PlayerStateRepository, RepeatMode } from '../st
 import type { Bus } from './bus.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { QueueService } from './queue.ts';
+import { plainReason } from './reasons.ts';
 import type { Track } from './types.ts';
 
 /** What the player is doing. */
@@ -93,6 +94,19 @@ const MIN_HISTORY_MS = 1000;
 // Seeking to the very end would start a stream that ends at once; the last half second is the latest place allowed.
 const SEEK_END_MARGIN_MS = 500;
 
+// An output that reports its end this long before the clock's end has failed (a file gone, an ffmpeg that died), it
+// has not finished; see outputEnded.
+const EARLY_END_MS = 2000;
+
+/** The time limit for getting a track ready: the base limit, and a tenth of the track's length on top. */
+export function fetchLimitMs(baseMs: number, durationMs: number | null): number {
+  return baseMs + Math.round((durationMs ?? 0) / 10);
+}
+
+// After this many tracks in a row could not be got ready, the player stops instead of emptying the queue through a
+// network outage or a site that refuses the server.
+const FAILURES_BEFORE_STOP = 3;
+
 // The track currently held by the player, with when it started for the history.
 interface Current {
   readonly track: Track;
@@ -127,6 +141,12 @@ export class Player {
   private loadTimer: TimerHandle | null = null;
   private startAtMs = 0;
   private startPaused = false;
+  // The tracks in a row that could not be got ready (see FAILURES_BEFORE_STOP), with who added them, so a stop can
+  // put them back. A person's action (play, skip, stop ...) starts the count again.
+  private failedInRow: { track: Track; addedBy: string | null }[] = [];
+  // Restarts of outputs that ended early, counted per session (see outputEnded).
+  private earlySession = -1;
+  private earlyRestarts = 0;
 
   // Playing: the timer that ends the track if no output reports the end.
   private endTimer: TimerHandle | null = null;
@@ -184,24 +204,32 @@ export class Player {
     if (this.status !== 'idle') return false;
     // Nothing queued: nothing starts, and no snapshot is sent for a change that did not happen.
     if (this.options.queue.size(this.guildId) === 0) return false;
+    this.failedInRow = [];
     return this.advance(false);
   }
 
   /** Moves to the next track; the current one goes into the history if it played long enough. */
   skip(): boolean {
     if (this.status === 'idle') return false;
+    this.failedInRow = [];
+    // With the queue on repeat, a skipped track stays in the loop: it goes back to the end like a finished one.
+    const current = this.current;
+    if (this.repeat === 'queue' && current)
+      this.options.queue.add(this.guildId, [current.track.id], 'end', current.addedBy);
     return this.advance(true);
   }
 
   /** Drops the current track without recording it (the "this was a mistake" button) and moves on. */
   removeCurrent(): boolean {
     if (this.status === 'idle') return false;
+    this.failedInRow = [];
     return this.advance(false);
   }
 
   /** Stops playing; the queue stays as it is. */
   stop(): boolean {
     if (this.status === 'idle') return false;
+    this.failedInRow = [];
     this.finishCurrent(true);
     this.goIdle();
     return true;
@@ -294,9 +322,32 @@ export class Player {
     if (this.status === 'playing') this.scheduleEnd();
   }
 
-  /** Called by an output when its stream finished. Only the current session counts. */
-  outputEnded(session: number): void {
+  /**
+   * Called by an output when its stream finished. Only the current session counts, and only an end near the clock's
+   * end ends the track: an output that stops earlier has failed (a file gone, an ffmpeg that died), and the track is
+   * not over for the browsers. That output is started again where the clock is, twice at most per session; after that
+   * the clock alone ends the track (the end timer), so a broken output can never make tracks fly by.
+   */
+  outputEnded(session: number, output?: PlayerOutput): void {
     if (session !== this.session || this.status !== 'playing') return;
+    const duration = this.media?.durationMs ?? 0;
+    const left = duration - this.position();
+    if (duration > 0 && left > EARLY_END_MS) {
+      if (this.earlySession !== session) {
+        this.earlySession = session;
+        this.earlyRestarts = 0;
+      }
+      this.options.log.warn('an output stopped before the end of the track', {
+        guild: this.guildId,
+        output: output?.name ?? 'unknown',
+        leftMs: Math.round(left),
+      });
+      if (output && this.outputs.has(output) && this.earlyRestarts < 2) {
+        this.earlyRestarts += 1;
+        this.startOutput(output);
+      }
+      return;
+    }
     this.options.log.debug('the output reported the end of the track', { guild: this.guildId, session });
     this.ended();
   }
@@ -306,7 +357,8 @@ export class Player {
 
   /**
    * Sets what happens when a track ends by itself: 'off' moves on, 'track' plays the same track again, 'queue' puts
-   * it back at the end of the queue (so the queue loops). Skipping always moves on, whatever the mode.
+   * it back at the end of the queue (so the queue loops). Skipping always moves on, whatever the mode; with 'queue'
+   * the skipped track goes back to the end too, so it stays in the loop.
    */
   setRepeat(mode: RepeatMode): boolean {
     if (mode === this.repeat) return false;
@@ -327,6 +379,7 @@ export class Player {
    */
   restore(track: Track | null, addedBy: string | null, positionMs: number): void {
     if (!track) return;
+    this.failedInRow = [];
     this.current = { track, addedBy, startedAt: null };
     this.load(positionMs, true);
   }
@@ -334,8 +387,9 @@ export class Player {
   // ---------------------------------------------------------------------------------------------------------------
   // Internals
 
-  // Finishes the current track and starts the next one in the queue, or goes idle when there is none.
-  private advance(record: boolean): boolean {
+  // Finishes the current track and starts the next one in the queue (held paused if `paused`), or goes idle when
+  // there is none.
+  private advance(record: boolean, paused = false): boolean {
     this.finishCurrent(record);
     const next = this.options.queue.shift(this.guildId);
     if (!next) {
@@ -343,7 +397,7 @@ export class Player {
       return true;
     }
     this.current = { track: next.track, addedBy: next.addedBy, startedAt: null };
-    this.load(0, false);
+    this.load(0, paused);
     return true;
   }
 
@@ -420,15 +474,14 @@ export class Player {
     const session = ++this.session;
     const controller = new AbortController();
     this.loadAbort = controller;
-    // Give up on a fetch that takes too long: a stuck download must not block the queue.
+    // Give up on a fetch that takes too long: a stuck download must not block the queue. A long track takes longer to
+    // download and encode, so it gets a tenth of its length on top (three hours: 18 more minutes).
+    const limitMs = fetchLimitMs(this.options.fetchTimeoutMs, current.track.durationMs);
     this.loadTimer = this.options.clock.setTimeout(() => {
       this.loadTimer = null;
       controller.abort();
-      this.failed(
-        current.track,
-        `getting the track took longer than ${Math.round(this.options.fetchTimeoutMs / 1000)} s`,
-      );
-    }, this.options.fetchTimeoutMs);
+      this.failed(current.track, 'getting it took too long');
+    }, limitMs);
     this.emit();
     // Progress is shown while loading; a burst of reports is sent at most four times a second.
     const onProgress = (fraction: number): void => {
@@ -457,6 +510,8 @@ export class Player {
   private ready(media: PreparedMedia): void {
     this.cancelLoad();
     this.media = media;
+    // A track got ready: the count of failures in a row starts again.
+    this.failedInRow = [];
     // A restored position past the end of the file (the file changed) starts from the top instead.
     this.offsetMs = this.startAtMs < media.durationMs ? this.startAtMs : 0;
     this.error = null;
@@ -476,15 +531,34 @@ export class Player {
     this.emit();
   }
 
-  // A track could not be got ready: say why and move on (the failed track is not recorded as played).
+  // A track could not be got ready: say why and move on (the failed track is not recorded as played). A track that
+  // was to start paused (after a restart, or paused while loading) passes that on to the next one. Several failures
+  // in a row stop the player and leave the queue as it is: the cause is then the network or the site, not the track.
   private failed(track: Track, reason: string): void {
     this.options.log.warn('skipping a track that could not be got ready', {
       guild: this.guildId,
       track: track.url,
       reason,
     });
-    this.error = `${track.title}: ${reason}`;
-    this.advance(false);
+    // People see the title and a short reason (core/reasons.ts); the full text is in the line logged above.
+    this.error = `${track.title}: ${plainReason(reason)}`;
+    this.failedInRow.push({ track, addedBy: this.current?.addedBy ?? null });
+    if (this.failedInRow.length >= FAILURES_BEFORE_STOP) {
+      this.options.log.warn('stopped after tracks in a row could not be got ready', {
+        guild: this.guildId,
+        failures: this.failedInRow.length,
+      });
+      // The cause is the network or the site, not these tracks: they go back to the front of the queue, in their
+      // order, for when it works again.
+      const failed = this.failedInRow;
+      this.failedInRow = [];
+      for (const entry of [...failed].reverse())
+        this.options.queue.add(this.guildId, [entry.track.id], 'next', entry.addedBy);
+      this.finishCurrent(false);
+      this.goIdle();
+      return;
+    }
+    this.advance(false, this.startPaused);
   }
 
   // Runs a seek: restarts the sound at the new place while playing, or just moves the place otherwise.

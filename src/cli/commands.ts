@@ -80,7 +80,7 @@ function rest(words: Words, what: string): string {
 
 // A whole number argument, at least 1.
 function number(text: string | undefined, what: string): number {
-  if (!text || !/^\d+$/.test(text) || Number(text) < 1) throw new UsageError(`${what} is a number from 1`);
+  if (!text || !/^\d+$/.test(text) || Number(text) < 1) throw new UsageError(`say ${what} (1 or more)`);
   return Number(text);
 }
 
@@ -173,7 +173,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'remove-current': {
     name: 'drop',
     usage: '',
-    summary: 'Drop the current track without counting it as played',
+    summary: 'Remove this track (not kept in the history)',
     request: () => ({}),
     show: showPlayer,
   },
@@ -203,7 +203,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     },
     show: showPlayer,
   },
-  stop: { name: 'stop', usage: '', summary: 'Stop playing (the queue stays)', request: () => ({}), show: showPlayer },
+  stop: {
+    name: 'stop',
+    usage: '',
+    summary: 'Stop playing (the queue stays)',
+    request: () => ({}),
+    show: () => 'Stopped (the queue stays)',
+  },
 
   queue: {
     name: 'queue',
@@ -219,7 +225,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   add: {
     name: 'add',
     usage: '<address or words> [--next]',
-    summary: 'Add to the queue (it starts playing if nothing is)',
+    summary: 'Add to the queue (plays if nothing is)',
     request: (words) => ({ body: { input: rest(words, 'what to add'), at: words.flags.has('next') ? 'next' : 'end' } }),
     show: showAdded,
   },
@@ -227,7 +233,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   remove: {
     name: 'remove',
     usage: '<number>',
-    summary: 'Remove a track from the queue (its number in the queue)',
+    summary: 'Remove a track from the queue',
     request: async (words, lookups) => ({
       params: { item: await lookups.queueItemId(number(words.args[0], 'the number')) },
     }),
@@ -246,7 +252,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   jump: {
     name: 'jump',
     usage: '<number>',
-    summary: 'Play a queued track now (its number in the queue)',
+    summary: 'Play a queued track now',
     request: async (words, lookups) => ({
       params: { item: await lookups.queueItemId(number(words.args[0], 'the number')) },
     }),
@@ -332,7 +338,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'playlist-rename': {
     name: 'playlist rename',
     usage: '<name> <new name>',
-    summary: 'Rename a saved playlist (quote names with spaces)',
+    summary: 'Rename a saved playlist (quote spaced names)',
     request: (words) => {
       const [name, next] = words.args;
       if (!name || !next) throw new UsageError('say the playlist and its new name');
@@ -351,7 +357,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'voice-channels': {
     name: 'channels',
     usage: '',
-    summary: 'The voice channel the bot is in and the ones it could join',
+    summary: 'Where the bot is, and where it can go',
     request: () => ({}),
     show: showVoice,
   },
@@ -360,9 +366,18 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     usage: '[channel ID]',
     summary: 'Join a voice channel',
     request: (words) => ({ body: words.args[0] ? { channelId: words.args[0] } : {} }),
-    show: showVoice,
+    show: (answer) => {
+      const voice = answer as { current: { name: string } | null };
+      return voice.current ? `Joined ${voice.current.name || 'a channel you cannot see'}` : 'Not in a voice channel';
+    },
   },
-  leave: { name: 'leave', usage: '', summary: 'Leave the voice channel', request: () => ({}), show: showVoice },
+  leave: {
+    name: 'leave',
+    usage: '',
+    summary: 'Leave the voice channel',
+    request: () => ({}),
+    show: () => 'Left the voice channel',
+  },
 
   settings: {
     name: 'settings',
@@ -374,7 +389,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'dj-role': {
     name: 'dj',
     usage: '<role ID|none>',
-    summary: 'Only members with this role may change the music (none: everyone)',
+    summary: 'Who may change the music (none: everyone)',
     request: (words) => {
       const role = words.args[0];
       if (!role) throw new UsageError('say a role ID (see jukecord settings) or none');
@@ -410,10 +425,11 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     usage: '',
     summary: 'The servers you can use',
     request: () => ({}),
-    show: (answer) =>
-      (answer as { id: string; name: string; mayControl: boolean }[])
-        .map((guild) => `${guild.id}  ${guild.name}${guild.mayControl ? '' : ' (look only)'}`)
-        .join('\n'),
+    show: (answer) => {
+      const guilds = answer as { id: string; name: string; mayControl: boolean }[];
+      if (guilds.length === 0) return 'No servers';
+      return guilds.map((guild) => `${guild.id}  ${guild.name}${guild.mayControl ? '' : ' (view only)'}`).join('\n');
+    },
   },
   tokens: {
     name: 'token list',
@@ -468,20 +484,30 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
         },
       };
     },
-    show: (answer) =>
-      (answer as { time: string; level: string; component: string; msg: string; fields: Record<string, unknown> }[])
+    show: (answer) => {
+      const records = answer as {
+        time: string;
+        level: string;
+        component: string;
+        msg: string;
+        fields: Record<string, unknown>;
+      }[];
+      // An empty answer says so, rather than printing nothing.
+      if (records.length === 0) return 'No log records';
+      return records
         .map((record) => {
           const fields = Object.entries(record.fields)
             .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
             .join(' ');
           return `${record.time} ${record.level.padEnd(5)} ${record.component}: ${record.msg}${fields ? ` ${fields}` : ''}`;
         })
-        .join('\n'),
+        .join('\n');
+    },
   },
   'login-link': {
     name: 'link',
     usage: '',
-    summary: 'A one-time link that logs a browser in as the host (10 minutes)',
+    summary: 'A one-time host login link (10 minutes)',
     request: () => ({}),
     show: (answer) => (answer as { url: string }).url,
   },

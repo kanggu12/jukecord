@@ -43,7 +43,7 @@ a `jukecord` command.
   shuffle, remove duplicates, save and load playlists, play again from the history.
 - Listening statistics: plays per day and hour, the most played tracks, who added most.
 - Logging in with Discord (or one-time links from the machine it runs on), a DJ role per server, API tokens.
-- Runs on your own machine with Docker Compose, on a Raspberry Pi 5, or on Kubernetes with the Helm chart, on amd64 and
+- Runs on your own machine with Docker Compose, on a Raspberry Pi 4 or 5, or on Kubernetes with the Helm chart, on amd64 and
   arm64. Without a bot token it runs browser-only.
 
 ## Quick start
@@ -56,24 +56,31 @@ git clone https://github.com/kanggu12/jukecord.git && cd jukecord
 ./jukecord open
 ```
 
-Then make the Discord bot (once, below), put its token in `.env` as `JUKECORD_DISCORD_TOKEN=...`, and `./jukecord up`
-again. Until then jukecord plays in the browser only.
+Then make the Discord bot (once, below) and give jukecord its token. Until then jukecord plays in the browser only.
+
+```bash
+echo 'JUKECORD_DISCORD_TOKEN=YOUR_BOT_TOKEN' >> .env
+./jukecord up
+```
 
 **Kubernetes** with Helm (the token in a Secret of your own):
 
 ```bash
 kubectl create namespace jukecord
 kubectl -n jukecord create secret generic jukecord-discord --from-literal=token=YOUR_BOT_TOKEN
-helm install jukecord oci://ghcr.io/kanggu12/charts/jukecord -n jukecord --set discord.existingSecret=jukecord-discord
+helm install jukecord oci://ghcr.io/kanggu12/charts/jukecord -n jukecord --set discord.existingSecret=jukecord-discord --wait
+kubectl -n jukecord port-forward svc/jukecord 8795:8795 &
 kubectl -n jukecord exec deploy/jukecord -- jukecord link
 ```
 
-**From source** with Node 24 or newer, ffmpeg and yt-dlp installed:
+**From source** with Node 24.11 or newer, ffmpeg and yt-dlp installed:
 
 ```bash
 npm ci && npm run build
 JUKECORD_DISCORD_TOKEN=YOUR_BOT_TOKEN npm start
 ```
+
+Then, in another terminal, a login link: `node src/cli/main.ts link`.
 
 [Install](docs/INSTALL.md) has the details: a public address for friends, logging in with Discord, a reverse proxy,
 starting at boot, updates and backups.
@@ -93,12 +100,12 @@ are the ones people use most; the [user guide](docs/README.md) lists them all.
 
 ## What it runs on
 
-| Where                       | How                                                             |
-| :-------------------------- | :-------------------------------------------------------------- |
-| Linux, macOS, Windows (WSL) | Docker Compose: `./jukecord up`                                 |
-| Raspberry Pi 5, ARM servers | the same, on a 64-bit OS (the image is built for arm64)         |
-| Kubernetes, k3s             | the Helm chart: NetworkPolicy, probes, a non-root read-only pod |
-| Anywhere with Node 24+      | from source, with ffmpeg (with libopus) and yt-dlp              |
+| Where                            | How                                                             |
+| :------------------------------- | :-------------------------------------------------------------- |
+| Linux, macOS, Windows (WSL)      | Docker Compose: `./jukecord up`                                 |
+| Raspberry Pi 4 or 5, ARM servers | the same, on a 64-bit OS (the image is built for arm64)         |
+| Kubernetes, k3s                  | the Helm chart: NetworkPolicy, probes, a non-root read-only pod |
+| Anywhere with Node 24.11+        | from source, with ffmpeg (with libopus) and yt-dlp              |
 
 ## License
 

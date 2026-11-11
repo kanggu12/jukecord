@@ -39,6 +39,9 @@ const MAX_PLAYLIST = 500;
 // The built panel, beside the source in a checkout and in the image (panel/dist, made by `npm run build`).
 const PANEL_DIR = fileURLToPath(new URL('../panel/dist', import.meta.url));
 
+// What a crash runs before exiting: saving the players' positions, once they exist (see main).
+let crashCheckpoint: () => void = () => {};
+
 async function main(): Promise<number> {
   // Everything jukecord writes (the database, logins, logs, the cache) is for its own user only.
   process.umask(0o077);
@@ -74,6 +77,11 @@ async function main(): Promise<number> {
   );
   process.on('uncaughtException', (error) => {
     log.error('jukecord stopped on an error it did not expect', { error });
+    try {
+      crashCheckpoint();
+    } catch {
+      // The positions could not be saved; the restart starts where the last save left them.
+    }
     process.exit(1);
   });
 
@@ -177,7 +185,8 @@ async function main(): Promise<number> {
 
   // Logins. Without a public address the panel is reached on this machine, which is also where Discord sends people
   // back to after logging in.
-  const publicUrl = config.publicUrl ?? `http://localhost:${config.port}`;
+  // Without a public address: this machine, on the port the browser here uses (compose maps its own; see config).
+  const publicUrl = config.publicUrl ?? `http://localhost:${config.publishedPort}`;
   const access = new Access({ settings: store.settings, directory });
   const { clientId, clientSecret } = config.discord;
   const auth = new Auth({
@@ -226,16 +235,8 @@ async function main(): Promise<number> {
         }),
     },
   });
-  await web.listen();
-  log.info('the panel and the API are up', { listen: `${config.host}:${config.port}`, open: publicUrl });
-
-  if (bot) {
-    await bot.start();
-  } else {
-    log.info('no Discord token (JUKECORD_DISCORD_TOKEN): running browser-only');
-  }
-
-  // Stopping: save where every server is, leave voice, close the database, in that order.
+  // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
+  // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;
   const stop = (signal: string): void => {
     if (stopping) return;
@@ -261,6 +262,20 @@ async function main(): Promise<number> {
   };
   process.once('SIGTERM', () => stop('SIGTERM'));
   process.once('SIGINT', () => stop('SIGINT'));
+  // A crash saves where every server is too, so a restart comes back there (best effort: the crash may be in that).
+  crashCheckpoint = () => players.checkpointAll();
+
+  await web.listen();
+  log.info('the panel and the API are up', { listen: `${config.host}:${config.port}`, open: publicUrl });
+
+  if (bot) {
+    // A stop during the login ends the login too; that is the stop, not a failure to start.
+    await bot.start().catch((error: unknown) => {
+      if (!stopping) throw error;
+    });
+  } else {
+    log.info('no Discord token (JUKECORD_DISCORD_TOKEN): running browser-only');
+  }
   return 0;
 }
 

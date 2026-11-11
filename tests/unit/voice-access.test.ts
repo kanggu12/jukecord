@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PermissionFlagsBits } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import { ActionError } from '../../src/app/actions.ts';
 import { VoiceManager } from '../../src/discord/voice.ts';
 import { createLogger } from '../../src/log.ts';
@@ -15,6 +15,7 @@ function channel(id: string, name: string, position: number, rights: Record<stri
     id,
     name,
     position,
+    type: ChannelType.GuildVoice,
     isVoiceBased: () => true,
     members: { filter: () => ({ size: 2 }) },
     permissionsFor: (target: { id: string }) => ({

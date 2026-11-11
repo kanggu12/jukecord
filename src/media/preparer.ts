@@ -6,7 +6,7 @@
  * downloading, and a track nobody wants any more stops at once.
  */
 import fs from 'node:fs';
-import type { MediaPreparer, PreparedMedia } from '../core/player.ts';
+import { fetchLimitMs, type MediaPreparer, type PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { TrackRepository } from '../store/store.ts';
@@ -28,7 +28,7 @@ export interface MediaOptions {
 
 // A download in progress, shared by everyone waiting for the same track.
 interface Job {
-  readonly promise: Promise<PreparedMedia>;
+  promise: Promise<PreparedMedia>;
   readonly abort: AbortController;
   waiters: number;
   /** Everyone who wants to hear about the download's progress. */
@@ -86,17 +86,21 @@ export class Media implements MediaPreparer {
     const cached = this.options.cache.get(key);
     if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs };
     let job = this.jobs.get(key);
-    if (!job) {
+    // A download being stopped (everyone left it) is not joined: it can only end in "cancelled". A new one starts.
+    if (!job || job.abort.signal.aborted) {
       job = this.start(track, key);
       this.jobs.set(key, job);
     }
     const shared = job;
     shared.waiters += 1;
     if (onProgress) shared.listeners.add(onProgress);
-    // When this caller gives up, it stops waiting; the download stops only if it was the last one waiting.
+    // When this caller gives up, it stops waiting; the download stops only if it was the last one waiting, and then
+    // it leaves the list at once, so the next caller for the same track starts afresh instead of joining it.
     const leave = (): void => {
       shared.waiters -= 1;
-      if (shared.waiters === 0) shared.abort.abort();
+      if (shared.waiters > 0) return;
+      shared.abort.abort();
+      if (this.jobs.get(key) === shared) this.jobs.delete(key);
     };
     signal.addEventListener('abort', leave, { once: true });
     try {
@@ -115,6 +119,9 @@ export class Media implements MediaPreparer {
     const cache = this.options.cache;
     const tmp = cache.tmpPath(key);
     const listeners = new Set<(fraction: number) => void>();
+    // The job exists before its work starts, so the work can tell whether the list still points at it when it ends.
+    const job: Job = { promise: Promise.reject(new Error('not started')), abort, waiters: 0, listeners };
+    job.promise.catch(() => {});
     // Progress goes to everyone waiting; a listener that throws must not break the download.
     const report = (fraction: number): void => {
       for (const listener of listeners) {
@@ -137,7 +144,8 @@ export class Media implements MediaPreparer {
               track.url,
               tmp,
               abort.signal,
-              this.options.timeoutMs,
+              // The same limit as the player's: longer for long tracks (see fetchLimitMs).
+              fetchLimitMs(this.options.timeoutMs, track.durationMs),
               report,
             ));
             break;
@@ -167,12 +175,14 @@ export class Media implements MediaPreparer {
         fs.rmSync(tmp, { force: true });
         throw error;
       } finally {
-        this.jobs.delete(key);
+        // Only this job's own entry: a newer download of the same track may have taken its place.
+        if (this.jobs.get(key) === job) this.jobs.delete(key);
       }
     })();
     // Nobody may be waiting when it fails (everyone left); the rejection is handled here so it is not "unhandled".
     promise.catch(() => {});
-    return { promise, abort, waiters: 0, listeners };
+    job.promise = promise;
+    return job;
   }
 
   /**

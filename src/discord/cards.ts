@@ -38,13 +38,12 @@ const TEXT = {
   playlists: { en: 'Playlists', ko: '플레이리스트' },
   noPlaylists: { en: 'No saved playlists', ko: '저장한 플레이리스트 없음' },
   addedBy: { en: 'added by', ko: '넣은 사람' },
-  page: { en: 'page', ko: '쪽' },
+  page: { en: 'page', ko: '페이지' },
   total: { en: 'total', ko: '모두' },
   pause: { en: 'Pause', ko: '일시정지' },
-  resume: { en: 'Resume', ko: '다시재생' },
+  resume: { en: 'Resume', ko: '이어서 재생' },
   skip: { en: 'Skip', ko: '건너뛰기' },
   panel: { en: 'Open the panel', ko: '패널 열기' },
-  done: { en: 'Done', ko: '했음' },
   repeatTrack: { en: 'Repeating this track', ko: '지금 곡 반복' },
   repeatQueue: { en: 'Repeating the queue', ko: '대기열 반복' },
   statsTitle: { en: (days: number) => `The last ${days} days`, ko: (days: number) => `최근 ${days}일` },
@@ -78,11 +77,13 @@ function line(title: string, url: string, durationMs: number | null, addedBy: st
   return `[${title.replace(/[[\]]/g, '')}](${url})${length}${who}`;
 }
 
-/** What was added, and where it landed in the queue. */
-export function addedCard(result: AddResult, lang: Lang): EmbedBuilder {
+/** What was added, and where it landed in the queue; `playingNow` for /play, which plays it at once. */
+export function addedCard(result: AddResult, lang: Lang, playingNow = false): EmbedBuilder {
   const items = result.items;
   const first = items[0];
-  const embed = new EmbedBuilder().setColor(COLOUR.added).setTitle(TEXT.added[lang](items.length));
+  const embed = new EmbedBuilder()
+    .setColor(COLOUR.added)
+    .setTitle(playingNow ? TEXT.playingNow[lang] : TEXT.added[lang](items.length));
   if (items.length === 1 && first) {
     embed.setDescription(
       `${first.position + 1}. ${line(first.track.title, first.track.url, first.track.durationMs, first.addedBy, lang)}`,
@@ -145,12 +146,14 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
   // The repeat mode, when one is on, under the bar.
   if (snapshot.repeat !== 'off')
     embed.setFooter({ text: snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang] });
+  // The card's language travels in the buttons, so a press redraws the card in the language it was made in, not the
+  // presser's (a card in the channel is everyone's).
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(snapshot.status === 'paused' ? 'jukecord:resume' : 'jukecord:pause')
+      .setCustomId(`jukecord:${snapshot.status === 'paused' ? 'resume' : 'pause'}:${lang}`)
       .setLabel(snapshot.status === 'paused' ? TEXT.resume[lang] : TEXT.pause[lang])
       .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('jukecord:skip').setLabel(TEXT.skip[lang]).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`jukecord:skip:${lang}`).setLabel(TEXT.skip[lang]).setStyle(ButtonStyle.Secondary),
   );
   // The panel link only when there is an address people can reach.
   if (panelUrl)
@@ -201,7 +204,11 @@ export function playlistsCard(playlists: readonly Playlist[], lang: Lang): Embed
   return new EmbedBuilder()
     .setColor(COLOUR.neutral)
     .setTitle(TEXT.playlists[lang])
-    .setDescription(playlists.map((playlist) => `**${playlist.name}** · ${playlist.size}`).join('\n'));
+    .setDescription(
+      playlists
+        .map((playlist) => `**${playlist.name}** · ${lang === 'ko' ? `${playlist.size}곡` : playlist.size}`)
+        .join('\n'),
+    );
 }
 
 // Listening time as people say it: "3 h 12 min", "45 min".
@@ -227,8 +234,13 @@ function sparkline(days: StatsView['days']): string {
 export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.statsTitle[lang](stats.span));
   if (stats.plays === 0) return embed.setDescription(TEXT.noStats[lang]);
+  // The totals in each language's own order: "12 plays · listened 3 h · 9 tracks", "재생 12회 · 들은 시간 3시간 · 9곡".
+  const totals =
+    lang === 'ko'
+      ? `재생 **${stats.plays}**회 · 들은 시간 **${hoursMinutes(stats.playedMs, lang)}** · **${stats.tracks}**곡`
+      : `**${stats.plays}** ${TEXT.plays[lang]} · ${TEXT.listened[lang]} **${hoursMinutes(stats.playedMs, lang)}** · **${stats.tracks}** ${TEXT.distinct[lang]}`;
   const lines = [
-    `**${stats.plays}** ${TEXT.plays[lang]} · ${TEXT.listened[lang]} **${hoursMinutes(stats.playedMs, lang)}** · **${stats.tracks}** ${TEXT.distinct[lang]}`,
+    totals,
     // The last 30 days at most: a card is narrow, and longer spans are what the panel's chart is for.
     `\`${sparkline(stats.days.slice(-30))}\``,
   ];
@@ -252,9 +264,4 @@ export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
   if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
   return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
-}
-
-/** "Done" in the person's language. */
-export function done(lang: Lang): EmbedBuilder {
-  return note(lang, TEXT.done.en, TEXT.done.ko);
 }

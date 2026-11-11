@@ -33,7 +33,7 @@ To use a released image instead of building one, set `JUKECORD_IMAGE=ghcr.io/kan
 
 ### Friends on other machines
 
-The panel is published on 127.0.0.1 so nobody else reaches it by accident. For friends to log in and listen:
+The panel is published on 127.0.0.1. For friends to log in and listen:
 
 - **A reverse proxy with HTTPS** (Caddy, nginx, Traefik) in front of jukecord, with `JUKECORD_PUBLIC_URL` set to its
   address and `JUKECORD_TRUST_PROXY=1` (one proxy in front). It must pass WebSocket upgrades for `/api/v1/events` and allow a long read
@@ -52,7 +52,7 @@ The panel is published on 127.0.0.1 so nobody else reaches it by accident. For f
 
 The host logs in with `./jukecord open`. For everyone else, set `JUKECORD_DISCORD_CLIENT_ID` and
 `JUKECORD_DISCORD_CLIENT_SECRET` (the application's **OAuth2** page) and add `<JUKECORD_PUBLIC_URL>/auth/callback`
-(or `http://localhost:8795/auth/callback` without a public address) to the application's **Redirects**. jukecord asks
+(or `http://localhost:<JUKECORD_PORT>/auth/callback` without a public address) to the application's **Redirects**. jukecord asks
 Discord for the `identify` scope only; who is in which server is asked through the bot.
 
 ### Starting with the machine
@@ -67,13 +67,13 @@ sudo systemctl daemon-reload && sudo systemctl enable --now jukecord
 
 ### Raspberry Pi and other arm64 machines
 
-The same commands work on a Raspberry Pi 5 (or 4) with a 64-bit OS and on ARM servers: the image is built for arm64
+The same commands work on a Raspberry Pi 4 or 5 with a 64-bit OS and on ARM servers: the image is built for arm64
 too. The first build on a Pi takes a while; a released image (`JUKECORD_IMAGE`) avoids it. Give the cache a size that
 fits the card or disk (`JUKECORD_CACHE_MAX`).
 
 ## From source
 
-With Node 24 or newer, ffmpeg built with libopus and libmp3lame, and yt-dlp:
+With Node 24.11 or newer, ffmpeg built with libopus and libmp3lame, and yt-dlp:
 
 ```bash
 git clone https://github.com/kanggu12/jukecord.git && cd jukecord
@@ -87,11 +87,12 @@ makes a login link. yt-dlp needs a JavaScript runtime for YouTube: jukecord pass
 ## Updating
 
 ```bash
-git pull && ./jukecord update
+./jukecord backup && git pull && ./jukecord update
 ```
 
-The database moves to a newer schema by itself on the first start of a newer jukecord; an older jukecord refuses a
-database a newer one has written (restore the backup `./jukecord backup` made before the update instead).
+With `JUKECORD_IMAGE` set to a version, set the new version's tag first. The database moves to a newer schema by
+itself on the first start of a newer jukecord; an older jukecord refuses a database a newer one has written (restore
+the backup made before the update instead).
 
 ## Backups
 

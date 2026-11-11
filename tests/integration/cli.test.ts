@@ -90,7 +90,7 @@ describe('the jukecord command', () => {
     assert.match(away.out, /not answering/);
     const wrong = await cli('whoami', { JUKECORD_TOKEN: 'jkc_wrong' });
     assert.equal(wrong.code, 1);
-    assert.match(wrong.out, /log in first/);
+    assert.match(wrong.out, /token was refused/);
   });
 
   it('makes a token that then works on its own', async () => {

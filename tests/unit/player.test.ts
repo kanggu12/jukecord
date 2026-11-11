@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Bus } from '../../src/core/bus.ts';
-import { Player, type PlayerSnapshot } from '../../src/core/player.ts';
+import { fetchLimitMs, Player, type PlayerSnapshot } from '../../src/core/player.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
 import { FakeClock, FakeMedia, FakeOutput, flush } from '../support/fakes.ts';
@@ -102,8 +102,31 @@ describe('Player', () => {
     context.player.seek(30_000);
     context.player.outputEnded(first);
     assert.equal(context.player.snapshot().status, 'playing');
-    context.player.outputEnded(output.lastSession());
+    // The current stream's end, at the end of the track.
+    await context.clock.advance(SONG - 30_000);
+    context.player.outputEnded(output.lastSession(), output);
     assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.media.last().track.title, 'Track 2');
+  });
+
+  it('restarts an output that stops early, twice at most, and lets the clock end the track', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    // The stream breaks a minute in (a file gone, ffmpeg dead): the track goes on, the output starts again there.
+    await context.clock.advance(60_000);
+    context.player.outputEnded(output.lastSession(), output);
+    assert.equal(context.player.snapshot().status, 'playing');
+    assert.equal(context.player.snapshot().track?.title, 'Track 1');
+    assert.equal(output.of('start').length, 2);
+    context.player.outputEnded(output.lastSession(), output);
+    context.player.outputEnded(output.lastSession(), output);
+    // Two restarts, then no more: a broken output cannot make the queue fly by.
+    assert.equal(output.of('start').length, 3);
+    assert.equal(context.player.snapshot().track?.title, 'Track 1');
+    // The clock ends the track when it is over (with the grace period an output gets).
+    await context.clock.advance(SONG);
     assert.equal(context.media.last().track.title, 'Track 2');
   });
 
@@ -212,21 +235,62 @@ describe('Player', () => {
     await flush();
     const snapshot = context.player.snapshot();
     assert.equal(snapshot.track?.title, 'Track 2');
-    assert.equal(snapshot.error, 'Track 1: Video unavailable');
+    // A short reason for people (core/reasons.ts); the full text went to the log.
+    assert.equal(snapshot.error, 'Track 1: the video is unavailable');
     // The error clears when the next track starts.
     context.media.finish(SONG);
     await flush();
     assert.equal(context.player.snapshot().error, null);
   });
 
-  it('gives up on a fetch that takes longer than the timeout', async () => {
+  it('gives up on a fetch that takes longer than the timeout, which grows with the track', async () => {
     const context = setup({ fetchTimeoutMs: 10_000 });
     context.player.play();
     const first = context.media.last();
-    await context.clock.advance(10_000);
+    const limit = fetchLimitMs(10_000, first.track.durationMs);
+    // A tenth of the track's length on top of the base limit.
+    assert.equal(limit, 10_000 + Math.round((first.track.durationMs ?? 0) / 10));
+    await context.clock.advance(limit - 1);
+    assert.equal(first.signal.aborted, false);
+    await context.clock.advance(1);
     assert.equal(first.signal.aborted, true);
     assert.equal(context.player.snapshot().track?.title, 'Track 2');
-    assert.match(context.player.snapshot().error ?? '', /longer than 10 s/);
+    assert.equal(context.player.snapshot().error, 'Track 1: getting it took too long');
+  });
+
+  it('stops after three tracks in a row fail, leaving the rest of the queue alone', async () => {
+    const context = setup({ queued: 5 });
+    context.player.play();
+    for (let i = 0; i < 3; i += 1) {
+      context.media.last().reject(new Error('Sign in to confirm you’re not a bot'));
+      await flush();
+    }
+    const snapshot = context.player.snapshot();
+    assert.equal(snapshot.status, 'idle');
+    assert.equal(snapshot.error, 'Track 3: YouTube is refusing this server for now');
+    // The three tracks are back at the front, in order, before the two never tried: the cause was not them.
+    assert.deepEqual(
+      context.queue.list(GUILD).map((item) => item.track.title),
+      ['Track 1', 'Track 2', 'Track 3', 'Track 4', 'Track 5'],
+    );
+  });
+
+  it('counts failures in a row only until someone acts', async () => {
+    const context = setup({ queued: 8 });
+    context.player.play();
+    // Two failures, then a person skips: the count starts again, so two more failures do not stop the player.
+    for (let i = 0; i < 2; i += 1) {
+      context.media.last().reject(new Error('HTTP Error 503'));
+      await flush();
+    }
+    context.player.skip();
+    for (let i = 0; i < 2; i += 1) {
+      context.media.last().reject(new Error('HTTP Error 503'));
+      await flush();
+    }
+    // Still going: the sixth track is being got ready.
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.media.last().track.title, 'Track 6');
   });
 
   it('starts paused when paused while loading, and starts the output on resume', async () => {
@@ -300,5 +364,20 @@ describe('Player', () => {
     await flush();
     assert.equal(restarted.snapshot().status, 'paused');
     assert.equal(restarted.snapshot().positionMs, 65_000);
+  });
+});
+
+describe('Player failures after a restart', () => {
+  it('keeps the next track paused when the restored one cannot be got ready', async () => {
+    const context = setup();
+    const [first] = context.tracks;
+    assert.ok(first);
+    context.player.restore(first, 'u1', 30_000);
+    context.media.last().reject(new Error('Video unavailable'));
+    await flush();
+    context.media.finish(SONG);
+    await flush();
+    // A restart never comes back playing, even through a failure.
+    assert.equal(context.player.snapshot().status, 'paused');
   });
 });

@@ -60,6 +60,13 @@ export class Resolver {
       // than the guard yt-dlp would meet.
       if (input.kind === 'url') await this.options.checkAddress?.(input.url);
       found = await this.options.ytdlp.lookup(input, signal);
+    } catch (error) {
+      // The full text for the log; people get a short reason from the actions (core/reasons.ts).
+      this.options.log.info('a lookup failed', {
+        input: input.kind === 'search' ? `search: ${input.query}` : input.url.href,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     } finally {
       this.active -= 1;
       if (who) {

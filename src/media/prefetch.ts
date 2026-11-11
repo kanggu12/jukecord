@@ -30,11 +30,17 @@ export interface PrefetcherOptions {
 // A burst of changes (adding a playlist sends one event per batch, a drag sends several) is planned once, after it.
 const SETTLE_MS = 300;
 
-// What one server's prefetching holds: its pinned keys, its running fetch, its pending plan.
+// A track that failed to fetch is not tried again by the prefetcher for this long (the player will say why).
+const FAILED_RETRY_MS = 60_000;
+
+// What one server's prefetching holds: its pinned keys, its running fetch and which track that is, its pending plan,
+// and the tracks that failed lately.
 interface GuildPlan {
   pinned: Set<string>;
   abort: AbortController | null;
+  fetching: string | null;
   timer: TimerHandle | null;
+  failed: Map<string, number>;
 }
 
 export class Prefetcher {
@@ -77,7 +83,7 @@ export class Prefetcher {
   private planOf(guildId: string): GuildPlan {
     let plan = this.plans.get(guildId);
     if (!plan) {
-      plan = { pinned: new Set(), abort: null, timer: null };
+      plan = { pinned: new Set(), abort: null, fetching: null, timer: null, failed: new Map() };
       this.plans.set(guildId, plan);
     }
     return plan;
@@ -102,19 +108,37 @@ export class Prefetcher {
     for (const key of keys) if (!plan.pinned.has(key)) this.options.cache.pin(key);
     for (const key of plan.pinned) if (!keys.has(key)) this.options.cache.unpin(key);
     plan.pinned = keys;
-    // A plan that changed replaces the fetch of the old one (the shared download keeps going if the player waits on it).
+    // A fetch still wanted goes on: a pause, a seek or a new track at the end changes nothing about the next song,
+    // and stopping its download would only start it again. The running loop reads the new plan when it is done.
+    if (plan.fetching !== null && keys.has(plan.fetching)) return;
+    // Otherwise the old loop stops (its download too, unless the player waits on it) and a new one starts.
     plan.abort?.abort();
     const abort = new AbortController();
     plan.abort = abort;
-    for (const track of tracks) {
-      if (abort.signal.aborted) return;
-      if (this.options.cache.has(MediaCache.keyOf(track.source))) continue;
+    const clock = this.options.clock;
+    // One track at a time, the plan read again after each: the first wanted track that is not cached, not done in this
+    // loop, and has not failed lately.
+    const done = new Set<string>();
+    while (!abort.signal.aborted && !this.stopped) {
+      const next = this.wanted(guildId).find((track) => {
+        const key = MediaCache.keyOf(track.source);
+        const failedAt = plan.failed.get(key);
+        const failedLately = failedAt !== undefined && clock.now() - failedAt <= FAILED_RETRY_MS;
+        return !this.options.cache.has(key) && !done.has(key) && !failedLately;
+      });
+      if (!next) break;
+      const key = MediaCache.keyOf(next.source);
+      plan.fetching = key;
       try {
-        await this.options.media.prepare(track, abort.signal);
+        await this.options.media.prepare(next, abort.signal);
+        done.add(key);
       } catch (error) {
         if (abort.signal.aborted) return;
+        plan.failed.set(key, clock.now());
         // The player will say what is wrong when it gets there; here it is only worth a debug line.
-        this.options.log.debug('prefetch failed', { guild: guildId, track: track.url, error });
+        this.options.log.debug('prefetch failed', { guild: guildId, track: next.url, error });
+      } finally {
+        if (plan.fetching === key) plan.fetching = null;
       }
     }
   }

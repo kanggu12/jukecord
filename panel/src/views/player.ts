@@ -56,8 +56,8 @@ function addedBy(id: string | null, name: string | null): string {
   return id ? t().addedBy(name ?? id) : t().byHost;
 }
 
-// "3 min ago", "yesterday".
-function ago(at: number): string {
+/** "3 min ago", "yesterday". */
+export function ago(at: number): string {
   const minutes = Math.floor((Date.now() - at) / 60_000);
   if (minutes < 1) return t().justNow;
   if (minutes < 60) return t().minutesAgo(minutes);
@@ -143,9 +143,15 @@ export function nowCard(live: Live): HTMLElement {
         track.uploader ? h('span', null, icon('music-2'), track.uploader) : null,
         h('span', null, icon('users'), by),
       );
+    } else if (!player) {
+      // No state yet (connecting): nothing is claimed about the player.
+      refill(title, 'unknown');
+      refill(meta, 'unknown');
     } else {
+      // Nothing playing: with tracks waiting, the Play key starts them; with none, adding one plays it.
+      const hint = (state.queue?.items.length ?? 0) > 0 ? words.idleQueued : words.idleHint;
       refill(title, `idle|${words.idle}`, h('span', { class: 'muted' }, words.idle));
-      refill(meta, `idle|${words.idleHint}`, h('span', null, words.idleHint));
+      refill(meta, `idle|${hint}`, h('span', null, hint));
     }
     error.hidden = !player?.error;
     refill(
@@ -161,8 +167,8 @@ export function nowCard(live: Live): HTMLElement {
     const queued = (state.queue?.items.length ?? 0) > 0;
     const pauseWords = moving ? words.pause : status === 'paused' ? words.resume : words.play;
     refill(pause, `${moving}|${pauseWords}`, icon(moving ? 'pause' : 'play'), pauseWords);
-    // With nothing playing, the key starts the queue (when there is one).
-    pause.disabled = !control || (!track && !queued);
+    // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
+    pause.disabled = !player || !control || (!track && !queued);
     refill(skip, words.skip, icon('skip-forward'), h('span', { class: 'label' }, words.skip));
     skip.title = words.skip;
     skip.disabled = !control || !track;
@@ -229,6 +235,12 @@ export function nowCard(live: Live): HTMLElement {
   bar.onpointerleave = () => {
     tip.hidden = true;
   };
+  // A touch drag the browser turned into a scroll: the bar lets go instead of staying stuck where it was.
+  bar.onpointercancel = () => {
+    dragging = null;
+    tip.hidden = true;
+    tick();
+  };
   bar.onpointerup = () => {
     if (dragging === null) return;
     const target = dragging;
@@ -281,7 +293,13 @@ export function queueCard(): HTMLElement {
   const load = tool('folder-open', 'load');
   const clear = tool('trash-2', 'clear');
   clear.classList.add('quiet', 'bad');
-  const list = h('ol', { class: 'list scroll', 'aria-live': 'off' });
+  // Narrow cards (phones): Shuffle keeps its place and the other tools open from this key as a list.
+  const toolsMore = h(
+    'button',
+    { class: 'key sm square quiet tools-more', type: 'button', 'data-act': 'queue-tools' },
+    icon('ellipsis'),
+  );
+  const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
@@ -290,10 +308,15 @@ export function queueCard(): HTMLElement {
       { class: 'card-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
       searchField,
-      h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear),
+      h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear, toolsMore),
     ),
     list,
   );
+
+  // Long queues draw their first rows only, a hundred more at each press of the last row's key: a thousand rows
+  // rebuilt on every change would hold a phone still for seconds.
+  const PAGE = 100;
+  let shownLimit = PAGE;
 
   // Dragging a row by its grip: which item, and where it would land.
   let dragged: QueueItem | null = null;
@@ -350,6 +373,13 @@ export function queueCard(): HTMLElement {
     next.onclick = () => void act(next, () => api.move(guild(), item.id, 0));
     remove.onclick = () => void act(remove, () => api.remove(guild(), item.id));
     more.onclick = () => trackMenu(item.id);
+    // The first row is next already: its Play next holds the column without being a key.
+    if (item.position === 0) {
+      next.classList.add('ghost');
+      next.disabled = true;
+      next.tabIndex = -1;
+      next.setAttribute('aria-hidden', 'true');
+    }
     const grip = h('span', { class: 'grip', title: words.dragToMove }, icon('grip-vertical'));
     const element = h(
       'li',
@@ -373,7 +403,7 @@ export function queueCard(): HTMLElement {
           h('span', null, addedBy(item.addedBy, item.addedByName)),
         ),
       ),
-      control ? h('div', { class: 'acts' }, jump, item.position > 0 ? next : null, remove, more) : h('div'),
+      control ? h('div', { class: 'acts' }, jump, next, remove, more) : h('div'),
     );
     if (control) {
       // Only the grip starts a drag, so text in the row can still be selected and links clicked.
@@ -408,6 +438,8 @@ export function queueCard(): HTMLElement {
         let index = item.position + (before ? 0 : 1);
         if (dragged.position < index) index -= 1;
         const moving = dragged;
+        // Landing past the rows drawn: the next rows are drawn too, so it stays in sight.
+        if (index >= shownLimit - 1) shownLimit += PAGE;
         void act(null, () => api.move(guild(), moving.id, index));
       };
       // Alt+arrow moves a row with the keyboard.
@@ -415,6 +447,8 @@ export function queueCard(): HTMLElement {
         if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
         event.preventDefault();
         const index = Math.max(0, item.position + (event.key === 'ArrowUp' ? -1 : 1));
+        // Moving past the rows drawn draws the next ones, so the row (and the focus on it) stays in sight.
+        if (index >= shownLimit) shownLimit += PAGE;
         void act(null, () => api.move(guild(), item.id, index));
       };
     }
@@ -427,7 +461,8 @@ export function queueCard(): HTMLElement {
     const control = mayControl();
     (card.querySelector('#queue-h .name') as HTMLElement).textContent = words.queue;
     const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
-    count.textContent = items.length > 0 ? `${items.length} · ${clock(total)}` : '';
+    // "13 tracks · 39:00 in all": the number with its unit, so it does not read as a time.
+    count.textContent = items.length > 0 ? `${words.tracks(items.length)} · ${words.total(clock(total))}` : '';
     search.placeholder = words.searchQueue;
     search.setAttribute('aria-label', words.searchQueue);
     for (const [button, label] of [
@@ -441,6 +476,9 @@ export function queueCard(): HTMLElement {
       button.title = label;
       button.disabled = !control && button !== load;
     }
+    toolsMore.title = words.queueTools;
+    toolsMore.setAttribute('aria-label', words.queueTools);
+    toolsMore.disabled = !control;
     shuffle.disabled = !control || items.length < 2;
     dedupe.disabled = !control || items.length < 2;
     clear.disabled = !control || items.length === 0;
@@ -459,13 +497,29 @@ export function queueCard(): HTMLElement {
     // After the redraw (a move with Alt+arrow, a track added by someone else) the same key of the same row gets the
     // keyboard focus back.
     keepingFocus(list, () => {
-      if (items.length === 0) {
+      if (!state.queue) {
+        // No state yet (connecting): an empty list, not "the queue is empty".
+        fill(list);
+      } else if (items.length === 0) {
         fill(list, h('li', { class: 'empty' }, icon('list-music'), words.queueEmpty));
       } else if (shown.length === 0) {
         fill(list, h('li', { class: 'empty' }, icon('search'), words.noMatch));
       } else {
         const rows = document.createDocumentFragment();
-        for (const item of shown) rows.append(row(item, control));
+        for (const item of shown.slice(0, shownLimit)) rows.append(row(item, control));
+        // The rest waits behind one key, which draws the next hundred.
+        const left = shown.length - shownLimit;
+        if (left > 0) {
+          const more = h('button', { class: 'key sm', type: 'button' }, words.showMore(Math.min(PAGE, left), left));
+          more.onclick = () => {
+            const first = shownLimit;
+            shownLimit += PAGE;
+            draw();
+            // The keyboard continues at the first row just drawn (the key itself is gone).
+            list.querySelectorAll<HTMLElement>('li.row')[first]?.querySelector<HTMLElement>('a')?.focus();
+          };
+          rows.append(h('li', { class: 'more-rows' }, more));
+        }
         list.replaceChildren(rows);
       }
     });
@@ -477,8 +531,40 @@ export function queueCard(): HTMLElement {
   dedupe.onclick = () =>
     void act(dedupe, async () => {
       const result = await api.dedupe(guild());
-      toast(`${t().dedupe}: ${result.removed}`);
+      toast(t().deduped(result.removed));
     });
+  // The tools a narrow card hides, as a list; each runs what its key would.
+  toolsMore.onclick = () => {
+    const words = t();
+    const box = h('div', { class: 'menu-list' });
+    const dialog = showDialog(words.queue, box);
+    const choice = (source: HTMLButtonElement, name: IconName, text: string, bad = false) => {
+      const button = h(
+        'button',
+        // Named after the key it stands for, so tests (and people reading the page) can tell the choices apart.
+        {
+          class: `choice ${bad ? 'text-bad' : ''}`.trim(),
+          type: 'button',
+          dataset: { tool: source.dataset.act ?? '' },
+        },
+        icon(name),
+        h('span', { class: 'grow' }, text),
+      );
+      button.disabled = source.disabled;
+      button.onclick = () => {
+        dialog.close();
+        source.click();
+      };
+      return button;
+    };
+    fill(
+      box,
+      choice(dedupe, 'list-x', words.dedupe),
+      choice(save, 'save', words.save),
+      choice(load, 'folder-open', words.load),
+      choice(clear, 'trash-2', words.clear, true),
+    );
+  };
   clear.onclick = async () => {
     const words = t();
     const ok = await confirmDialog({
@@ -505,6 +591,10 @@ export function queueCard(): HTMLElement {
 
   // The rows follow the queue only: a loading track sends a few snapshots a second, and rows rebuilt on each would
   // swallow clicks. The player decides one thing here, whether there is anything to save.
+  // Another server starts again from its first rows (watched before the drawing, which then uses it).
+  watch(['guild'], () => {
+    shownLimit = PAGE;
+  });
   watch(['queue', 'lang', 'guild', 'me'], draw);
   watch(['player'], () => {
     save.disabled = !mayControl() || ((state.queue?.items.length ?? 0) === 0 && !state.player?.track);
@@ -780,7 +870,10 @@ export function voiceCard(): HTMLElement {
             ...people.slice(0, 6).map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')),
           )
         : h('span', { class: 'faint' }, words.nobody),
-      state.listeners.count > 0 ? h('span', { class: 'faint num' }, String(state.listeners.count)) : null,
+      // Faces say who; a number only for the browsers beyond the six faces shown.
+      state.listeners.count > Math.min(6, people.length)
+        ? h('span', { class: 'faint num' }, `+${state.listeners.count - Math.min(6, people.length)}`)
+        : null,
     );
   };
   leave.onclick = () =>
@@ -815,7 +908,7 @@ export function historyCard(): HTMLElement {
         'aria-label': words.addAgain,
         dataset: { key: 'again' },
       },
-      icon('rotate-ccw'),
+      icon('list-plus'),
     );
     again.disabled = !mayControl();
     again.onclick = () =>
@@ -848,7 +941,8 @@ export function historyCard(): HTMLElement {
   const draw = () => {
     const words = t();
     (card.querySelector('#history-h .name') as HTMLElement).textContent = words.history;
-    count.textContent = state.history.length > 0 ? String(state.history.length) : '';
+    // No count: it would only ever say how many entries were asked for.
+    count.textContent = '';
     keepingFocus(list, () => {
       if (state.history.length === 0) fill(list, h('li', { class: 'empty' }, icon('history'), words.noHistory));
       else fill(list, ...state.history.map(row));

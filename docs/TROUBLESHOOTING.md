@@ -38,7 +38,7 @@ sound back. Safari versions without Ogg Opus get the MP3 copy automatically.
 ## Logging in with Discord fails
 
 - `redirect_uri` errors: the address in **Redirects** must be exactly `<JUKECORD_PUBLIC_URL>/auth/callback` (or
-  `http://localhost:8795/auth/callback` without a public address).
+  `http://localhost:<JUKECORD_PORT>/auth/callback` without a public address).
 - "You are not in a server that jukecord is in": the bot must be in a server you are a member of.
 - Behind a reverse proxy, set `JUKECORD_PUBLIC_URL` to the proxy's address and `JUKECORD_TRUST_PROXY=1`.
 

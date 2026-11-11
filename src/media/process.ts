@@ -78,23 +78,37 @@ export function lastLines(text: string, count = 3): string {
  * Wires a started process to the abort signal and the time limit, and resolves when it has exited.
  *
  * SIGKILL rather than SIGTERM: yt-dlp ignores SIGTERM while a fragment is downloading, and a killed ffmpeg leaves only
- * a temporary file, which the caller deletes.
+ * a temporary file, which the caller deletes. A process started in its own group (`detached`, as yt-dlp is) is killed
+ * with its whole group, so a program it started (ffmpeg for some sites) goes too.
+ *
+ * It settles when the process has exited and its output is closed; if a leftover child keeps the output open, it
+ * settles anyway two seconds after the exit, so a job can never hang on a pipe nobody will close.
  */
 export function watch(child: ChildProcess, name: string, options: RunOptions = {}): Promise<RunResult> {
   const stdout = head(options.maxStdout ?? 16 * 1024 ** 2);
   const stderr = tail(options.maxStderr ?? 64 * 1024);
-  // stdout may already be piped into another process (yt-dlp into ffmpeg); then there is nothing to collect here.
-  if (child.stdout && child.stdout.listenerCount('data') === 0 && !child.stdout.readableFlowing) {
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-  }
+  // stdout may already be piped into another process (yt-dlp into ffmpeg); then there is nothing to collect here,
+  // and it is not this function's to close (see the grace period below).
+  const ownStdout = Boolean(child.stdout && child.stdout.listenerCount('data') === 0 && !child.stdout.readableFlowing);
+  if (ownStdout) child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
   child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
 
   return new Promise<RunResult>((resolve, reject) => {
     let killedFor: string | null = null;
+    // Declared first: an abort that has already happened kills at once, below, and reads them.
+    let grace: NodeJS.Timeout | null = null;
+    let settled = false;
     const kill = (reason: string): void => {
-      if (killedFor !== null || child.exitCode !== null) return;
+      if (killedFor !== null || settled) return;
       killedFor = reason;
-      child.kill('SIGKILL');
+      try {
+        // The process's own group when it has one (a negative ID names the group): that also ends what it left
+        // running after it exited itself, which may be what still holds its output open.
+        if (child.pid === undefined) throw new Error('no pid');
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        if (child.exitCode === null) child.kill('SIGKILL');
+      }
     };
     // Abort and time limit both end in a kill; the reason decides the error message.
     const onAbort = (): void => kill('cancelled');
@@ -106,6 +120,7 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
 
     const cleanup = (): void => {
       if (timer) clearTimeout(timer);
+      if (grace) clearTimeout(grace);
       options.signal?.removeEventListener('abort', onAbort);
     };
     child.once('error', (error: NodeJS.ErrnoException) => {
@@ -114,7 +129,9 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
       const why = error.code === 'ENOENT' ? `${name} was not found` : `${name} could not start: ${error.message}`;
       reject(new ProcessError(why, null));
     });
-    child.once('close', (code, signal) => {
+    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return;
+      settled = true;
       cleanup();
       const result: RunResult = { code, signal, stdout: stdout.text(), stderr: stderr.text() };
       if (killedFor !== null) {
@@ -122,6 +139,17 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
         return;
       }
       resolve(result);
+    };
+    child.once('close', (code, signal) => settle(code, signal));
+    // Exited, but something still holds the output open (a child of the process): two seconds, then settle anyway.
+    // Output piped into another process is left alone: closing it would cut what that process has not read yet.
+    child.once('exit', (code, signal) => {
+      grace = setTimeout(() => {
+        if (ownStdout) child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(code, signal);
+      }, 2000);
+      grace.unref();
     });
   });
 }
@@ -133,7 +161,8 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
 export async function run(command: string, args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
   const name = command.split('/').at(-1) ?? command;
   // stdin closed: none of these programs needs input, and ffmpeg would otherwise wait for a keypress on a terminal.
-  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  // Its own process group, so a kill ends whatever it started as well (see watch).
+  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   const result = await watch(child, name, options);
   if (result.code !== 0) {
     throw new ProcessError(

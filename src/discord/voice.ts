@@ -21,7 +21,14 @@ import {
   type VoiceConnection,
   VoiceConnectionStatus,
 } from '@discordjs/voice';
-import { type Client, type GuildMember, PermissionFlagsBits, type PermissionsBitField, type Role } from 'discord.js';
+import {
+  ChannelType,
+  type Client,
+  type GuildMember,
+  PermissionFlagsBits,
+  type PermissionsBitField,
+  type Role,
+} from 'discord.js';
 import { ActionError, type VoiceChannelInfo, type VoiceControl } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import { type Clock, systemClock } from '../core/clock.ts';
@@ -64,6 +71,9 @@ export class VoiceOutput implements PlayerOutput {
   private stream: Readable | null = null;
   private process: ChildProcess | null = null;
   private readonly log: Logger;
+  // Whether the player wants this output paused. @discordjs/voice ignores a pause while a new stream is still
+  // buffering (its first tens of milliseconds); the wish is kept and applied once it plays.
+  private wantPaused = false;
 
   constructor(options: { ffmpeg: Ffmpeg; onEnded: (session: number) => void; log: Logger; parts?: VoiceParts }) {
     this.ffmpeg = options.ffmpeg;
@@ -71,6 +81,8 @@ export class VoiceOutput implements PlayerOutput {
     this.parts = options.parts ?? realParts;
     this.audio = this.parts.createPlayer();
     this.audio.on('stateChange', (before, after) => {
+      // A pause asked for while the stream was buffering takes effect now that it plays.
+      if (after.status === AudioPlayerStatus.Playing && this.wantPaused) this.audio.pause(true);
       // The end of a track: a resource was playing and now nothing is.
       if (after.status !== AudioPlayerStatus.Idle || before.status === AudioPlayerStatus.Idle) return;
       const resource = before.resource as AudioResource<Meta>;
@@ -88,6 +100,8 @@ export class VoiceOutput implements PlayerOutput {
   start(media: PreparedMedia, offsetMs: number, session: number): void {
     this.release();
     this.session = session;
+    // A start plays; a pause that follows sets the wish again.
+    this.wantPaused = false;
     if (offsetMs < FROM_START_MS) {
       this.stream = fs.createReadStream(media.file);
     } else {
@@ -97,6 +111,12 @@ export class VoiceOutput implements PlayerOutput {
       });
       this.process = child;
       this.stream = child.stdout;
+      // ffmpeg that cannot start at all (missing, or no memory or processes left) must not take the process down:
+      // the stream ends, which the player sees as an output that stopped early.
+      child.on('error', (error) => {
+        this.log.warn('the voice seek could not start ffmpeg', { error });
+        child.stdout?.destroy();
+      });
     }
     // A file that vanished or an ffmpeg that failed must not take the process down: an unhandled stream error
     // would. The resource then ends early and the player moves on.
@@ -105,11 +125,13 @@ export class VoiceOutput implements PlayerOutput {
   }
 
   pause(): void {
+    this.wantPaused = true;
     // Silence frames while paused keep Discord's jitter buffer from glitching when the sound comes back.
     this.audio.pause(true);
   }
 
   resume(): void {
+    this.wantPaused = false;
     this.audio.unpause();
   }
 
@@ -143,6 +165,8 @@ export class VoiceManager implements VoiceControl {
   private readonly ffmpeg: Ffmpeg;
   private readonly log: Logger;
   private readonly joined = new Map<string, Joined>();
+  // Joins in progress, per server (see join).
+  private readonly joining = new Map<string, Promise<{ channelId: string; name: string }>>();
   // How long the bot stays alone in a channel, and the countdowns running per server.
   private readonly idleMs: number;
   private readonly idle: Countdowns;
@@ -179,8 +203,22 @@ export class VoiceManager implements VoiceControl {
    * way: leaving voice only stops sending sound nobody is there to hear.
    */
   voiceStateChanged(guildId: string): void {
-    const joined = this.joined.get(guildId);
-    if (!joined || this.idleMs === 0) return;
+    let joined = this.joined.get(guildId);
+    if (!joined) return;
+    // A moderator moved the bot to another channel: follow it, so the panel and the countdown use the right one. Moved
+    // onto a stage, it would sit there silent: it leaves instead.
+    const now = this.client.guilds.cache.get(guildId)?.members.me?.voice.channel;
+    if (now && now.id !== joined.channelId && now.type !== ChannelType.GuildVoice) {
+      this.log.info('left a stage the bot was moved to', { guild: guildId });
+      this.drop(guildId);
+      return;
+    }
+    if (now && now.id !== joined.channelId) {
+      joined = { ...joined, channelId: now.id, name: now.name };
+      this.joined.set(guildId, joined);
+      this.bus?.emit('voice', { guildId, channel: { channelId: now.id, name: now.name } });
+    }
+    if (this.idleMs === 0) return;
     const channel = this.client.guilds.cache.get(guildId)?.channels.cache.get(joined.channelId);
     const people = channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
     if (people > 0) this.idle.disarm(guildId);
@@ -203,8 +241,9 @@ export class VoiceManager implements VoiceControl {
       Boolean(channel.permissionsFor(member ?? guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel));
     return (
       [...guild.channels.cache.values()]
-        // Voice and stage channels the bot may enter and speak in; the others would only fail on join.
-        .filter((channel) => channel.isVoiceBased())
+        // Voice channels the bot may enter and speak in; the others would only fail on join. Stage channels are left
+        // out: the bot would join them as a listener, silent.
+        .filter((channel) => channel.type === ChannelType.GuildVoice)
         .filter((channel) => channel.permissionsFor(me)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]))
         // A private channel is not shown to people who cannot see it in Discord.
         .filter((channel) => sees(channel))
@@ -223,6 +262,24 @@ export class VoiceManager implements VoiceControl {
     channelId: string | null,
     userId: string | null,
   ): Promise<{ channelId: string; name: string }> {
+    // One join at a time per server: two quick /play commands would otherwise both connect and leave an extra
+    // output attached to the player. A second join waits for the first and then sees where the bot already is.
+    const before = this.joining.get(guildId) ?? Promise.resolve();
+    const run = before.catch(() => {}).then(() => this.joinNow(guildId, channelId, userId));
+    this.joining.set(guildId, run);
+    try {
+      return await run;
+    } finally {
+      if (this.joining.get(guildId) === run) this.joining.delete(guildId);
+    }
+  }
+
+  // The join itself (see join for the one-at-a-time rule).
+  private async joinNow(
+    guildId: string,
+    channelId: string | null,
+    userId: string | null,
+  ): Promise<{ channelId: string; name: string }> {
     const guild = this.client.guilds.cache.get(guildId);
     if (!guild) throw new ActionError('not-found', 'the bot is not in that server');
     // No channel named: the one the person is in.
@@ -230,6 +287,8 @@ export class VoiceManager implements VoiceControl {
     if (!target) throw new ActionError('invalid', 'join a voice channel first, or name one');
     const channel = guild.channels.cache.get(target);
     if (!channel?.isVoiceBased()) throw new ActionError('invalid', 'that is not a voice channel');
+    // A stage would take the bot as a listener: it would be there and play nothing.
+    if (channel.type !== ChannelType.GuildVoice) throw new ActionError('invalid', 'the bot does not play on stages');
     // A named channel: the person must be able to go there themselves, or the bot would carry music into a channel
     // they cannot see. (Their own channel needs no check: they are in it.)
     if (channelId && userId) {
@@ -263,10 +322,11 @@ export class VoiceManager implements VoiceControl {
       connection.destroy();
       throw new ActionError('unavailable', 'could not connect to the voice channel in time');
     }
-    const output = new VoiceOutput({
+    const output: VoiceOutput = new VoiceOutput({
       ffmpeg: this.ffmpeg,
       log: this.log,
-      onEnded: (session) => this.players.get(guildId).outputEnded(session),
+      // The output says which one it is: an early end restarts only that output (see Player.outputEnded).
+      onEnded: (session) => this.players.get(guildId).outputEnded(session, output),
     });
     connection.subscribe(output.audio);
     // The connection's own account of its states (signalling, the DAVE handshake, reconnects), for debugging.
@@ -279,6 +339,8 @@ export class VoiceManager implements VoiceControl {
         entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
         entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
       ]).catch(() => {
+        // Only if this connection is still the one in use: a join elsewhere meanwhile replaced it.
+        if (this.joined.get(guildId)?.connection !== connection) return;
         this.log.info('left voice after a disconnect that did not recover', { guild: guildId });
         this.drop(guildId);
       });

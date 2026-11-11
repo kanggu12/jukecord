@@ -49,11 +49,11 @@ describe('Player repeat', () => {
     await flush();
     assert.equal(player.setRepeat('track'), true);
     assert.equal(player.setRepeat('track'), false);
-    // Two full plays: a listen only counts once it has played a while.
-    await clock.advance(30_000);
-    player.outputEnded(output.lastSession());
-    await clock.advance(30_000);
-    player.outputEnded(output.lastSession());
+    // Two full plays, each ending at the end of the track: a listen only counts once it has played a while.
+    await clock.advance(SONG);
+    player.outputEnded(output.lastSession(), output);
+    await clock.advance(SONG);
+    player.outputEnded(output.lastSession(), output);
     assert.equal(player.snapshot().track?.title, 'Track 1');
     assert.equal(player.snapshot().status, 'playing');
     // One fetch only, and the output restarted from the top twice.
@@ -101,5 +101,22 @@ describe('Player loading progress', () => {
     media.finish(SONG);
     await flush();
     assert.equal(player.snapshot().progress, null);
+  });
+});
+
+describe('Player repeat with skips', () => {
+  it('keeps a skipped track in the loop when the queue repeats', async () => {
+    const { media, player, queue } = setup(2);
+    player.play();
+    media.finish(SONG);
+    await flush();
+    player.setRepeat('queue');
+    player.skip();
+    // Track 1 went back to the end, after Track 2 (now loading).
+    assert.deepEqual(
+      queue.list(GUILD).map((item) => item.track.title),
+      ['Track 1'],
+    );
+    assert.equal(media.last().track.title, 'Track 2');
   });
 });

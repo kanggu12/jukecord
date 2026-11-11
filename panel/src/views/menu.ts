@@ -7,7 +7,7 @@ import { avatarUrl, face, fill, guildIconUrl, h, icon } from '../dom.ts';
 import { pickLang } from '../i18n.ts';
 import { keep, state, t, update } from '../state.ts';
 import { confirmDialog, problem, sheet, showDialog } from '../ui/layers.ts';
-import { act } from './player.ts';
+import { act, ago } from './player.ts';
 
 /** The servers this login can open, in a dialog; picking one switches the panel to it. */
 export function serversSheet(choose: (id: string) => void): void {
@@ -70,18 +70,20 @@ export function menuSheet(navigate: (path: string) => void): void {
   const { body, close } = sheet({ label: words.menu });
   const me = state.me;
   if (!me) return;
+  // The host has no Discord name: one line, "Host" in the panel's language. A Discord login: the name, and how.
+  const host = me.kind === 'host';
   const who = h(
     'div',
     { class: 'section' },
     h(
       'div',
       { class: 'line' },
-      face(me.name, avatarUrl(me.id, me.avatar)),
+      face(host ? words.host : me.name, avatarUrl(me.id, me.avatar)),
       h(
         'div',
         { class: 'grow' },
-        h('b', null, me.name),
-        h('div', { class: 'faint' }, me.kind === 'host' ? words.host : words.discordLogin),
+        h('b', null, host ? words.host : me.name),
+        host ? null : h('div', { class: 'faint' }, words.discordLogin),
       ),
     ),
   );
@@ -162,7 +164,13 @@ export function menuSheet(navigate: (path: string) => void): void {
   const dj = h('div', { class: 'section', hidden: true });
   const tokens = h('div', { class: 'section' });
   const end = h('div', { class: 'section' });
-  const shortcuts = h('button', { class: 'choice', type: 'button' }, icon('keyboard'), words.shortcuts);
+  // Keyboard shortcuts mean nothing on a touch screen without a keyboard; style.css hides this item there.
+  const shortcuts = h(
+    'button',
+    { class: 'choice', type: 'button', 'data-act': 'shortcuts' },
+    icon('keyboard'),
+    words.shortcuts,
+  );
   shortcuts.onclick = () => {
     close();
     shortcutsDialog();
@@ -313,7 +321,8 @@ async function drawTokens(box: HTMLElement): Promise<void> {
               h(
                 'div',
                 { class: 'faint' },
-                `${scopeName} · ${token.usedAt ? words.usedAgo(new Date(token.usedAt).toLocaleDateString()) : words.neverUsed}`,
+                // "used 3 h ago", in the panel's language whatever the browser's.
+                `${scopeName} · ${token.usedAt ? words.usedAgo(ago(token.usedAt)) : words.neverUsed}`,
               ),
             ),
             revoke,
@@ -347,6 +356,7 @@ export function shortcutsDialog(): void {
     [['Space'], words.keyPlayPause],
     [['←', '→'], words.keySeek],
     [['N'], words.keyNext],
+    [['Alt', '↑', '↓'], words.keyMove],
     [['/'], words.keySearch],
     [['?'], words.keyHelp],
   ];

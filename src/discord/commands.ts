@@ -113,11 +113,12 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       '지금 바로 재생(지금 곡은 건너뜀)',
     ).addStringOption(inputOption),
     command('skip', 'Skip to the next track', '건너뛰기', '다음 곡으로'),
+    // Not "삭제": next to /빼기 (remove a queued track) it would read as the same thing.
     command(
       'drop',
-      'Remove the current track without counting it as played',
-      '삭제',
-      '지금 곡을 들은 것으로 치지 않고 빼기',
+      'Remove the current track without adding it to the history',
+      '지금곡빼기',
+      '재생 기록에 남기지 않고 지금 곡 빼기',
     ),
     command('pause', 'Pause', '일시정지', '일시정지'),
     command('resume', 'Play on, or start the queue', '다시재생', '이어서 재생(멈췄으면 대기열 시작)'),
@@ -154,8 +155,8 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       option
         .setName('page')
         .setDescription('Page')
-        .setNameLocalizations({ ko: '쪽' })
-        .setDescriptionLocalizations({ ko: '쪽' })
+        .setNameLocalizations({ ko: '페이지' })
+        .setDescriptionLocalizations({ ko: '페이지' })
         .setMinValue(1),
     ),
     command('remove', 'Remove a track from the queue', '빼기', '대기열에서 곡 빼기').addIntegerOption((option) =>
@@ -259,7 +260,8 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
         .setDescription('A voice channel (default: yours)')
         .setNameLocalizations({ ko: '채널' })
         .setDescriptionLocalizations({ ko: '음성 채널(기본: 내 채널)' })
-        .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
+        // Voice channels only: on a stage the bot would be a silent listener.
+        .addChannelTypes(ChannelType.GuildVoice),
     ),
     command(
       'leave',
@@ -315,7 +317,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setNameLocalizations({ ko: '풀기' })
           .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
       ),
-    command('version', 'The jukecord version and its connection', '버전', 'jukecord 판과 연결 상태'),
+    command('version', 'The jukecord version', '버전', 'jukecord 버전'),
   ];
   return commands.map((builder) => builder.toJSON());
 }

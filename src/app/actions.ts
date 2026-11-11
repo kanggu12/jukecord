@@ -8,6 +8,7 @@
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
+import { plainReason, REASONS } from '../core/reasons.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
@@ -220,9 +221,11 @@ export class Actions {
       return await this.options.resolver.resolve(input, signal, who);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (error instanceof AddressError) throw new ActionError('invalid', message);
+      if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork);
       if (error instanceof BusyError) throw new ActionError('unavailable', message);
-      throw new ActionError(/nothing to add/.test(message) ? 'invalid' : 'not-found', message);
+      // Nothing typed: said as it is. Anything else: the short reason (the resolver logged the full text).
+      if (/nothing to add/.test(message)) throw new ActionError('invalid', message);
+      throw new ActionError('not-found', plainReason(message));
     }
   }
 

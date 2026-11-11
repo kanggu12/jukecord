@@ -73,6 +73,13 @@ All notable changes to jukecord are documented here. The format is based on
 - `JUKECORD_TRUST_PROXY` for running behind a reverse proxy or an Ingress.
 - yt-dlp keeps what it learns between runs (YouTube's player code) in the data directory instead of fetching it for
   every lookup.
+- A voice stream that breaks partway is started again where the track is (twice at most), and the track ends by the
+  clock; three tracks in a row that cannot be got stop the player and leave the rest of the queue. A track that fails
+  shows a short reason ("the video is unavailable"); the full text is in the log.
+- Refusals in Discord are in the person's language, a confirmation says what was done, and commands that only look
+  something up (the queue, the version, the DJ role, the playlists) answer the person alone.
+- The `jukecord` command checks what was typed before it connects, takes `--version` and `-h`, names an unknown
+  option, and `doctor` exits 1 when a check fails.
 - Play a queued track now (`/jump`, the panel's play key on a row, `jukecord jump`), and the play key starts the queue
   again after a stop (`/resume`).
 - The panel: the track playing on a disc that turns while it plays (the rainbow rim means "playing now"; white when
@@ -85,7 +92,7 @@ All notable changes to jukecord are documented here. The format is based on
   each chart with a table view.
 - The log page for the host, the login page, the menu (theme, language, motion, the DJ role, API tokens), keyboard
   shortcuts (Space, the arrows, N, /, ?).
-- A new mark: a jukebox's arch, lit in the colours of "playing now", with a record under it.
+- The mark: a jukebox's arch, lit in the colours of "playing now", with a record under it.
 - `./jukecord`, the front door: up, open (a login link, opened in the browser), status, logs, doctor, update, backup,
   restore, down, and every `jukecord` command.
 - `compose.yaml` at the top of the repository: the panel on 127.0.0.1, a read-only container without privileges, the

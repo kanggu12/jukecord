@@ -19,6 +19,11 @@ export interface Config {
   readonly host: string;
   /** The port the panel and the API listen on. */
   readonly port: number;
+  /**
+   * The port people reach it on from this machine when that differs from `port` (compose publishes 8795 inside the
+   * container on JUKECORD_PORT outside); links and the Discord login use it when there is no public address.
+   */
+  readonly publishedPort: number;
   /** The address people reach the panel at, when it is not this machine (used for login and links). */
   readonly publicUrl: string | null;
   /** Whether to believe X-Forwarded-* headers: false, true (any proxy), a hop count, or the proxies' addresses. */
@@ -26,7 +31,7 @@ export interface Config {
   readonly discord: {
     /** The bot's token; without it jukecord runs browser-only (the panel plays, nothing joins voice). */
     readonly token: string | null;
-    /** The application's ID, needed for the slash commands and for logging in with Discord. */
+    /** The application's ID, for logging in with Discord. */
     readonly clientId: string | null;
     /** The application's OAuth2 secret, needed for logging in with Discord. */
     readonly clientSecret: string | null;
@@ -110,6 +115,8 @@ const KNOWN = new Set([
   // when .env passes them through.
   'JUKECORD_BIND',
   'JUKECORD_IMAGE',
+  // Set by compose.yaml from JUKECORD_PORT: the port outside the container.
+  'JUKECORD_PUBLISHED_PORT',
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
@@ -182,6 +189,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
   // container image sets 0.0.0.0, and compose publishes the port on 127.0.0.1 only.
   const host = get('JUKECORD_HOST') ?? '127.0.0.1';
   const port = read('JUKECORD_PORT', DEFAULT_PORT, integer(1, 65535));
+  const publishedPort = read('JUKECORD_PUBLISHED_PORT', port, integer(1, 65535));
 
   // The public address must be a full http(s) URL; login redirects are built from it, so a bare host name would
   // produce redirects Discord refuses.
@@ -321,6 +329,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     dataDir,
     host,
     port,
+    publishedPort,
     publicUrl,
     trustProxy,
     discord: { token, clientId, clientSecret },

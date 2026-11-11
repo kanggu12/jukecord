@@ -19,6 +19,8 @@ services:
       JUKECORD_HOST: 0.0.0.0
       JUKECORD_PORT: "8795"
       JUKECORD_DATA_DIR: /data
+      # The port outside the container, for links and the Discord login when there is no public address.
+      JUKECORD_PUBLISHED_PORT: "${JUKECORD_PORT:-8795}"
     ports:
       # JUKECORD_BIND=0.0.0.0 opens the panel to the network (for friends on the same network, or a reverse proxy).
       - "${JUKECORD_BIND:-127.0.0.1}:${JUKECORD_PORT:-8795}:8795"

@@ -57,7 +57,7 @@ next track, <kbd>/</kbd> add a track, <kbd>?</kbd> the list.
 | `/listen`                                    | the panel's link, to listen in a browser                            |
 | `/stats`                                     | listening figures                                                   |
 | `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
-| `/version`                                   | the version and whether Discord is connected                        |
+| `/version`                                   | the version                                                         |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
@@ -69,6 +69,7 @@ On the machine running jukecord, `./jukecord <command>` runs it inside the conta
 checkout with `JUKECORD_URL` and an API token:
 
 ```bash
+npm ci --omit=dev
 export JUKECORD_URL=https://music.example.com JUKECORD_TOKEN=jkc_...
 node src/cli/main.ts np
 ```
@@ -90,28 +91,29 @@ is, for scripts. Exit codes: 0 done, 1 refused (the message says why), 2 a typin
 
 Settings are environment variables; with Docker Compose they go in `.env`. Every one is optional.
 
-| Variable                                                             | Default            | What it sets                                                                            |
-| :------------------------------------------------------------------- | :----------------- | :-------------------------------------------------------------------------------------- |
-| `JUKECORD_DISCORD_TOKEN`                                             |                    | the bot's token; without it jukecord runs browser-only                                  |
-| `JUKECORD_DISCORD_CLIENT_ID`                                         |                    | the application's ID, for the slash commands and Discord login                          |
-| `JUKECORD_DISCORD_CLIENT_SECRET`                                     |                    | the application's OAuth2 secret, for Discord login                                      |
-| `JUKECORD_DISCORD_TOKEN_FILE`, `JUKECORD_DISCORD_CLIENT_SECRET_FILE` |                    | the same secrets read from files (Docker and Kubernetes secrets)                        |
-| `JUKECORD_PUBLIC_URL`                                                |                    | the panel's address when it is not this machine (login and links are built on it)       |
-| `JUKECORD_PORT`                                                      | `8795`             | the panel's port                                                                        |
-| `JUKECORD_HOST`                                                      | `127.0.0.1`        | the address it listens on (the image sets `0.0.0.0`)                                    |
-| `JUKECORD_DATA_DIR`                                                  | `./data`           | the database, the media cache and the logs (`/data` in the image)                       |
-| `JUKECORD_TRUST_PROXY`                                               | `false`            | behind a reverse proxy: how many proxies are in front (`1` for one), or their addresses |
-| `JUKECORD_ALLOW_PRIVATE_ADDRESSES`                                   | `false`            | also fetch from addresses on private networks (a media server on the local network)     |
-| `JUKECORD_CACHE_MAX`                                                 | `2GiB`             | the most the media cache holds; the least recently played tracks go first               |
-| `JUKECORD_FETCH_TIMEOUT`                                             | `60s`              | how long getting one track may take                                                     |
-| `JUKECORD_PREFETCH`                                                  | `2`                | how many of the next tracks are fetched ahead                                           |
-| `JUKECORD_TRACK_MAX`                                                 | `3h`               | the longest track that may be added                                                     |
-| `JUKECORD_QUEUE_MAX`                                                 | `1000`             | the most tracks a server's queue holds                                                  |
-| `JUKECORD_VOICE_IDLE`                                                | `5m`               | how long the bot stays alone in a voice channel (`0`: it stays)                         |
-| `JUKECORD_YTDLP_COOKIES`                                             |                    | a cookies file for YouTube's sign-in check ([Troubleshooting](TROUBLESHOOTING.md))      |
-| `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                              |
-| `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                      |
-| `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                               |
+| Variable                                                             | Default            | What it sets                                                                                   |
+| :------------------------------------------------------------------- | :----------------- | :--------------------------------------------------------------------------------------------- |
+| `JUKECORD_DISCORD_TOKEN`                                             |                    | the bot's token; without it jukecord runs browser-only                                         |
+| `JUKECORD_DISCORD_CLIENT_ID`                                         |                    | the application's ID, for logging in with Discord                                              |
+| `JUKECORD_DISCORD_CLIENT_SECRET`                                     |                    | the application's OAuth2 secret, for Discord login                                             |
+| `JUKECORD_DISCORD_TOKEN_FILE`, `JUKECORD_DISCORD_CLIENT_SECRET_FILE` |                    | the same secrets read from files (Docker and Kubernetes secrets)                               |
+| `JUKECORD_PUBLIC_URL`                                                |                    | the panel's address when it is not this machine (login and links are built on it)              |
+| `JUKECORD_PORT`                                                      | `8795`             | the panel's port                                                                               |
+| `JUKECORD_PUBLISHED_PORT`                                            | the port           | the port this machine reaches it on, for links without a public address (compose.yaml sets it) |
+| `JUKECORD_HOST`                                                      | `127.0.0.1`        | the address it listens on (the image sets `0.0.0.0`)                                           |
+| `JUKECORD_DATA_DIR`                                                  | `./data`           | the database, the media cache and the logs (`/data` in the image)                              |
+| `JUKECORD_TRUST_PROXY`                                               | `false`            | behind a reverse proxy: how many proxies are in front (`1` for one), or their addresses        |
+| `JUKECORD_ALLOW_PRIVATE_ADDRESSES`                                   | `false`            | also fetch from addresses on private networks (a media server on the local network)            |
+| `JUKECORD_CACHE_MAX`                                                 | `2GiB`             | the most the media cache holds; the least recently played tracks go first                      |
+| `JUKECORD_FETCH_TIMEOUT`                                             | `60s`              | how long getting one track may take                                                            |
+| `JUKECORD_PREFETCH`                                                  | `2`                | how many of the next tracks are fetched ahead                                                  |
+| `JUKECORD_TRACK_MAX`                                                 | `3h`               | the longest track that may be added                                                            |
+| `JUKECORD_QUEUE_MAX`                                                 | `1000`             | the most tracks a server's queue holds                                                         |
+| `JUKECORD_VOICE_IDLE`                                                | `5m`               | how long the bot stays alone in a voice channel (`0`: it stays)                                |
+| `JUKECORD_YTDLP_COOKIES`                                             |                    | a cookies file for YouTube's sign-in check ([Troubleshooting](TROUBLESHOOTING.md))             |
+| `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                                     |
+| `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                             |
+| `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                                      |
 
 jukecord checks every setting when it starts and lists every problem at once. `jukecord doctor` shows the settings in
 effect (secrets only as set or not set) and checks the parts jukecord needs.

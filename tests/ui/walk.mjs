@@ -218,12 +218,23 @@ await sweep('menu', FEW, async (page) => {
   await page.waitForSelector('.sheet .section');
   await page.waitForTimeout(400);
 });
+// A queue tool: its own key on a wide card, the list behind the tools key on a narrow one (phones).
+async function tool(page, act) {
+  const key = page.locator(`[data-act="${act}"]`);
+  if (await key.isVisible()) {
+    await key.click();
+    return;
+  }
+  await page.click('[data-act="queue-tools"]');
+  await page.click(`.dialog [data-tool="${act}"]`);
+}
+
 await sweep('clear-dialog', FEW, async (page) => {
-  await page.click('[data-act="clear"]');
+  await tool(page, 'clear');
   await page.waitForSelector('.dialog');
 });
 await sweep('playlists', FEW, async (page) => {
-  await page.click('[data-act="load"]');
+  await tool(page, 'load');
   await page.waitForSelector('.dialog .channel');
 });
 await sweep('shortcuts', FEW, async (page) => {

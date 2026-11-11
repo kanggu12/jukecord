@@ -101,3 +101,46 @@ describe('VoiceOutput', () => {
     }
   });
 });
+
+describe('VoiceOutput pauses and broken starts', () => {
+  it('keeps a pause asked for while the stream was buffering, and applies it once the stream plays', () => {
+    const { audio, output, media, cleanup } = setup();
+    try {
+      // The fake moves to Playing at once; a real player buffers first. Pausing then is lost in @discordjs/voice.
+      audio.play = (resource: AudioResource<{ session: number }>) => {
+        audio.calls.push(`play ${resource.metadata.session}`);
+        audio.state = { status: AudioPlayerStatus.Buffering, resource };
+      };
+      output.start(media, 0, 1);
+      output.pause();
+      const pausesBefore = audio.calls.filter((call) => call === 'pause').length;
+      // The stream starts to play: the wanted pause takes effect now.
+      const before = audio.state;
+      audio.state = before.resource
+        ? { status: AudioPlayerStatus.Playing, resource: before.resource }
+        : { status: AudioPlayerStatus.Playing };
+      audio.emit('stateChange', before, audio.state);
+      assert.equal(audio.calls.filter((call) => call === 'pause').length, pausesBefore + 1);
+      // A resume clears the wish: the next start plays.
+      output.resume();
+      const again = audio.state;
+      audio.emit('stateChange', { status: AudioPlayerStatus.Buffering }, again);
+      assert.equal(audio.calls.filter((call) => call === 'pause').length, pausesBefore + 1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('survives an ffmpeg that cannot start for a seek', async () => {
+    const { output, media, cleanup } = setup();
+    try {
+      // A missing program: spawn reports ENOENT as an error event, which would crash the process unhandled.
+      (output as unknown as { ffmpeg: Ffmpeg }).ffmpeg = new Ffmpeg('/nonexistent/ffmpeg');
+      output.start(media, 30_000, 2);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      output.stop();
+    } finally {
+      cleanup();
+    }
+  });
+});

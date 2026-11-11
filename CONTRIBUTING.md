@@ -5,7 +5,7 @@ so we can agree on the shape before you spend the time.
 
 ## Set up
 
-Node 24 or newer, ffmpeg with libopus (for the integration tests), and Docker (for the image, the panel walk and the
+Node 24.11 or newer, ffmpeg with libopus (for the integration tests), and Docker (for the image, the panel walk and the
 chart test).
 
 ```bash
@@ -52,3 +52,5 @@ To release:
 3. Tag `vX.Y.Z` and push the tag. `release.yml` checks the versions and the notes, runs the tests and the chart test,
    publishes the image for amd64 and arm64 and the chart to ghcr.io with signed build provenance, and makes the GitHub
    release.
+4. The first time only: on GitHub, make the `jukecord` and `charts/jukecord` packages public (a new package starts
+   private, and `docker pull` and `helm install` need it public).
