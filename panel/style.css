@@ -1765,7 +1765,8 @@ kbd {
   .card-head .tools .tools-more {
     display: inline-flex;
   }
-  .card-head .tools .key.sm[data-act="shuffle"] {
+  /* As heavy as the rule above that makes the tools square, and heavier: Shuffle keeps its word, so its width. */
+  .card-head .tools .key.sm:not(.table-key)[data-act="shuffle"]:has(.label) {
     width: auto;
     padding: 0 10px;
   }
@@ -1789,6 +1790,10 @@ kbd {
   }
   .divider,
   .bar .nav {
+    display: none;
+  }
+  /* The listeners' faces leave the bottom bar to the track's name; the voice channel's card shows who listens. */
+  .listen .faces-box {
     display: none;
   }
   .now {
@@ -1832,6 +1837,14 @@ kbd {
     gap: 8px;
     padding: 0 10px;
   }
+}
+@media (max-width: 400px) {
+  /* The narrowest phones give the version's place to the server's name (/version and the status still say it). */
+  .bar .version {
+    display: none;
+  }
+}
+@media (max-width: 560px) {
   /* On a phone the bar keeps the mark and the version; the login page keeps the name too. */
   .bar .brand b {
     display: none;

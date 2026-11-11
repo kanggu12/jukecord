@@ -60,7 +60,7 @@ async function until(status) {
 const browser = await chromium.launch();
 
 // A page logged in as the host, in a theme, a language and a size.
-async function open({ width, height, theme, lang, login = true, motion = 'off' }) {
+async function open({ width, height, theme, lang, login = true, motion = 'off', discord = false }) {
   const touch = width <= 744;
   const context = await browser.newContext({
     viewport: { width, height },
@@ -78,6 +78,7 @@ async function open({ width, height, theme, lang, login = true, motion = 'off' }
     [lang, motion],
   );
   const page = await context.newPage();
+  if (discord) await asDiscord(page);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -113,13 +114,13 @@ async function measure(page, name, setting, errors) {
 }
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
-async function sweep(name, sizes, act) {
+async function sweep(name, sizes, act, { discord = false } = {}) {
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
     for (const lang of ['ko', 'en']) {
       for (const [width, height] of sizes) {
         const setting = { theme, lang, width, height };
-        const { context, page, errors } = await open({ ...setting, login: name !== 'login' });
+        const { context, page, errors } = await open({ ...setting, login: name !== 'login', discord });
         try {
           if (act) await act(page);
           await measure(page, name, setting, errors);
@@ -153,6 +154,64 @@ async function intercept(page) {
   };
 }
 
+// A made-up Discord around the seeded server: what the panel shows when a bot is connected, which the walk's own
+// server (browser-only) cannot. The server's answers pass through with the Discord parts put in: the status says a
+// bot is connected, the login is a person's, the server has a name, and every live state carries voice channels and
+// people listening in browsers. Every name and ID is made up; no picture is fetched (a person without one shows
+// initials).
+const MADE_UP = {
+  me: { kind: 'user', id: '100000000000000001', name: 'Mina', avatar: null },
+  bot: { id: '100000000000000009', name: 'jukecord', avatar: null },
+  guild: 'Night Owls',
+  voice: {
+    current: { channelId: '200000000000000001', name: 'Lounge' },
+    channels: [
+      { id: '200000000000000001', name: 'Lounge', people: 4 },
+      { id: '200000000000000002', name: 'Study room', people: 0 },
+      { id: '200000000000000003', name: 'Late night, quiet please', people: 2 },
+    ],
+  },
+  listeners: {
+    people: [
+      { id: '100000000000000001', name: 'Mina', avatar: null },
+      { id: '100000000000000002', name: 'Joon', avatar: null },
+      { id: '100000000000000003', name: 'Sol', avatar: null },
+    ],
+    count: 3,
+  },
+};
+async function asDiscord(page) {
+  await page.route(/\/api\/v1\/(status|me|guilds)(\?.*)?$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const what = new URL(route.request().url()).pathname.split('/').pop();
+    const json =
+      what === 'status'
+        ? { ...body, discord: true, mode: 'discord', login: { discord: true } }
+        : what === 'me'
+          ? { ...body, ...MADE_UP.me, bot: MADE_UP.bot }
+          : body.map((guild) => ({ ...guild, name: MADE_UP.guild, icon: null }));
+    await route.fulfill({ response, json });
+  });
+  await page.routeWebSocket(/\/api\/v1\/events/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      let data;
+      try {
+        data = JSON.parse(String(message));
+      } catch {
+        ws.send(message);
+        return;
+      }
+      if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners: MADE_UP.listeners });
+      if (data.type === 'voice') data.voice = MADE_UP.voice;
+      if (data.type === 'listeners') data.listeners = MADE_UP.listeners;
+      ws.send(JSON.stringify(data));
+    });
+    ws.onMessage((message) => server.send(message));
+  });
+}
+
 // ---- the walk ---------------------------------------------------------------------------------------------------
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 await sweep('idle', SIZES);
@@ -161,18 +220,21 @@ await sweep('login', FEW);
 await api('POST', '/guilds/local/player/resume');
 await until('playing');
 await sweep('playing', SIZES);
+await sweep('discord', SIZES, null, { discord: true });
 
-// The README's pictures: the player while a track plays, in each theme, at twice the pixels (full colour, no
-// quantising: a reduced palette turns the shadows into steps).
+// The README's pictures: the player with a Discord bot while a track plays, in each theme, 1600 wide (the queue's
+// tools keep their words) at 1.6 times the pixels (full colour, no quantising: a reduced palette turns the shadows
+// into steps).
 for (const theme of ['light', 'dark']) {
   const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-    deviceScaleFactor: 2,
+    viewport: { width: 1600, height: 1000 },
+    deviceScaleFactor: 1.6,
     colorScheme: theme,
     locale: 'en-US',
   });
   await context.addInitScript(() => localStorage.setItem('jukecord.lang', 'en'));
   const page = await context.newPage();
+  await asDiscord(page);
   const link = await api('POST', '/login-links');
   await page.goto(link.url.replace(new URL(link.url).origin, BASE));
   await page.waitForSelector('.history .row');
@@ -180,6 +242,47 @@ for (const theme of ['light', 'dark']) {
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(OUT, `readme-panel-${theme}.png`) });
+  await context.close();
+}
+
+// And on a phone: the player listening along, the queue, and the statistics, each a picture of its own (the README's
+// figure puts them side by side).
+for (const theme of ['light', 'dark']) {
+  const context = await browser.newContext({
+    viewport: { width: 412, height: 915 },
+    deviceScaleFactor: 2,
+    colorScheme: theme,
+    locale: 'en-US',
+    isMobile: true,
+    hasTouch: true,
+  });
+  await context.addInitScript(() => localStorage.setItem('jukecord.lang', 'en'));
+  const page = await context.newPage();
+  await asDiscord(page);
+  const link = await api('POST', '/login-links');
+  await page.goto(link.url.replace(new URL(link.url).origin, BASE));
+  await page.waitForSelector('.history .row');
+  await page.click('[data-act="listen"]');
+  await page.waitForFunction(
+    () => document.querySelector('.listen .what span')?.textContent?.includes('In time'),
+    null,
+    {
+      timeout: 15000,
+    },
+  );
+  await page.evaluate(() => document.fonts.ready);
+  const shot = async (n) => {
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: path.join(OUT, `readme-phone-${n}-${theme}.png`) });
+  };
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot(1);
+  await page.evaluate(() => document.querySelector('#queue-h')?.closest('.card')?.scrollIntoView({ block: 'start' }));
+  await shot(2);
+  await page.click('a[data-route="stats"]').catch(() => page.goto(`${BASE}/stats`));
+  await page.waitForSelector('.tiles');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot(3);
   await context.close();
 }
 

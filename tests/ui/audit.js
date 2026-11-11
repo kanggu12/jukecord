@@ -4,6 +4,7 @@
  *
  * - clipped: text cut off by its box (ellipsis or hidden overflow), unless marked data-clip="ok" with a title
  *   that carries the whole text;
+ * - spills: a key whose icon and words run out of its own box (a width made for the icon alone, say);
  * - page-wide: the page scrolls sideways;
  * - overlap: two pieces of text drawn over each other;
  * - contrast: text below 4.5:1 against what is really behind it (translucent layers composited), 3:1 when large;
@@ -155,6 +156,13 @@ window.__audit = () => {
     }
   }
 
+  // Keys whose content runs out of their box: drawn over the key's edge, it is not clipped, so the check above misses
+  // it.
+  for (const key of document.querySelectorAll('button, a.key, .key')) {
+    if (!visibleRect(key) || key.closest('.sr')) continue;
+    if (key.scrollWidth > key.clientWidth + 2) add('spills', key, `${key.scrollWidth} wide in ${key.clientWidth}`);
+  }
+
   // Sideways scrolling of the page.
   if (document.documentElement.scrollWidth > window.innerWidth + 1) {
     add(
@@ -172,6 +180,10 @@ window.__audit = () => {
       const a = boxes[i];
       const b = boxes[j];
       if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
+      // People's faces are stacked a little over each other on purpose, each ringed in the card's colour; their
+      // initials sit in the middle and never touch.
+      const stack = a.element.closest('.faces');
+      if (stack && stack === b.element.closest('.faces')) continue;
       const x = Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left);
       const y = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
       // More than a couple of pixels each way is a real overlap, not touching line boxes.
