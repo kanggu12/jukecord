@@ -144,7 +144,7 @@ export const API = {
   resume: op({
     method: 'POST',
     path: '/guilds/{guild}/player/resume',
-    summary: 'Resume',
+    summary: 'Play on: resume what is paused, or start the queue when nothing plays',
     tag: 'player',
     access: 'control',
     params: InGuild,
@@ -230,6 +230,15 @@ export const API = {
     params: InGuildItem,
     body: Type.Object({ index: Type.Integer({ minimum: 0 }) }, strict),
     response: OkSchema,
+  }),
+  jump: op({
+    method: 'POST',
+    path: '/guilds/{guild}/queue/{item}/play',
+    summary: 'Play a queued track now (the current one is skipped)',
+    tag: 'queue',
+    access: 'control',
+    params: InGuildItem,
+    response: PlayerSchema,
   }),
   shuffle: op({
     method: 'POST',

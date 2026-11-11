@@ -315,6 +315,12 @@ export class Bot implements Directory {
           await interaction.editReply({ embeds: [done(lang)] });
           return;
         }
+        case 'jump': {
+          const item = actions.queue(context).items[options.getInteger('position', true) - 1];
+          if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
+          await interaction.editReply(nowCard(actions.jump(context, item.id), lang, this.options.panelUrl));
+          return;
+        }
         case 'shuffle':
           actions.shuffle(context);
           await interaction.editReply({ embeds: [done(lang)] });
@@ -339,7 +345,7 @@ export class Bot implements Directory {
           return;
         case 'join': {
           const joined = await actions.join(context, options.getChannel('channel')?.id ?? null);
-          await interaction.editReply({ embeds: [note(lang, `Joined ${joined.name}`, `${joined.name} 에 들어옴`)] });
+          await interaction.editReply({ embeds: [note(lang, `Joined ${joined.name}`, `${joined.name}에 들어옴`)] });
           return;
         }
         case 'leave':
@@ -424,7 +430,7 @@ export class Bot implements Directory {
           options.getString('new_name', true),
         );
         await interaction.editReply({
-          embeds: [note(lang, `Renamed to "${renamed.name}"`, `"${renamed.name}" 로 바꿈`)],
+          embeds: [note(lang, `Renamed to "${renamed.name}"`, `새 이름: "${renamed.name}"`)],
         });
         return;
       }

@@ -93,6 +93,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     deps.actions.move(context, params.item, body.index);
     return OK;
   },
+  jump: ({ context, params, deps }) => deps.presenter.player(deps.actions.jump(context, params.item)),
   shuffle: ({ context, deps }) => {
     deps.actions.shuffle(context);
     return OK;

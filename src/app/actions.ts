@@ -33,6 +33,7 @@ export const ACTIONS = [
   'queue',
   'remove',
   'move',
+  'jump',
   'shuffle',
   'dedupe',
   'clear',
@@ -289,11 +290,17 @@ export class Actions {
     return player.snapshot();
   }
 
+  /**
+   * Plays on: a paused track continues, and with nothing playing (after a stop, or a restart that found nothing) the
+   * queue starts. One action for the one play key people expect.
+   */
   resume(context: ActionContext): PlayerSnapshot {
     this.control(context);
     const player = this.options.players.get(context.guildId);
-    if (!player.resume()) throw new ActionError('conflict', 'nothing is paused');
-    return player.snapshot();
+    if (player.resume() || player.play()) return player.snapshot();
+    // Neither worked: either something is already playing, or there is nothing to start.
+    const idle = player.snapshot().status === 'idle';
+    throw new ActionError('conflict', idle ? 'the queue is empty' : 'it is already playing');
   }
 
   /** Moves to a place in the current track, in milliseconds from the start. */
@@ -338,6 +345,20 @@ export class Actions {
     } catch (error) {
       throw this.fromStore(error);
     }
+  }
+
+  /** Plays a queued track now: it moves to the front and the current track is skipped. */
+  jump(context: ActionContext, itemId: number): PlayerSnapshot {
+    this.control(context);
+    const player = this.options.players.get(context.guildId);
+    try {
+      this.options.queue.move(context.guildId, itemId, 0);
+    } catch (error) {
+      throw this.fromStore(error);
+    }
+    // Idle: play starts it. Otherwise skipping moves on to it, now first in the queue.
+    if (!player.play()) player.skip();
+    return player.snapshot();
   }
 
   shuffle(context: ActionContext): void {

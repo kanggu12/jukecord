@@ -177,7 +177,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     show: showPlayer,
   },
   pause: { name: 'pause', usage: '', summary: 'Pause', request: () => ({}), show: showPlayer },
-  resume: { name: 'resume', usage: '', summary: 'Resume', request: () => ({}), show: showPlayer },
+  resume: { name: 'resume', usage: '', summary: 'Play on (or start the queue)', request: () => ({}), show: showPlayer },
   seek: {
     name: 'seek',
     usage: '<time: 83, 1:23 or 1m23s>',
@@ -241,6 +241,15 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       body: { index: number(words.args[1], 'the new number') - 1 },
     }),
     show: showOk,
+  },
+  jump: {
+    name: 'jump',
+    usage: '<number>',
+    summary: 'Play a queued track now (its number in the queue)',
+    request: async (words, lookups) => ({
+      params: { item: await lookups.queueItemId(number(words.args[0], 'the number')) },
+    }),
+    show: showPlayer,
   },
   shuffle: { name: 'shuffle', usage: '', summary: 'Shuffle the queue', request: () => ({}), show: showOk },
   dedupe: {

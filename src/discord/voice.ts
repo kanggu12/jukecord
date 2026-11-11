@@ -73,7 +73,10 @@ export class VoiceOutput implements PlayerOutput {
     this.audio.on('stateChange', (before, after) => {
       // The end of a track: a resource was playing and now nothing is.
       if (after.status !== AudioPlayerStatus.Idle || before.status === AudioPlayerStatus.Idle) return;
-      const ended = (before.resource as AudioResource<Meta>).metadata.session;
+      const resource = before.resource as AudioResource<Meta>;
+      const ended = resource.metadata.session;
+      // How much sound actually went out, which is the one way to see voice working with nobody in the channel.
+      options.log.debug('voice stream ended', { session: ended, sentMs: resource.playbackDuration });
       if (ended !== this.session) return;
       this.session = -1;
       options.onEnded(ended);
@@ -248,6 +251,10 @@ export class VoiceManager implements VoiceControl {
       onEnded: (session) => this.players.get(guildId).outputEnded(session),
     });
     connection.subscribe(output.audio);
+    // The connection's own account of its states (signalling, the DAVE handshake, reconnects), for debugging.
+    connection.on('stateChange', (before, after) =>
+      this.log.debug('voice connection state', { guild: guildId, from: before.status, to: after.status }),
+    );
     // Discord moves voice servers now and then: a disconnect that turns into a reconnect within 5 s is kept.
     connection.on(VoiceConnectionStatus.Disconnected, () => {
       Promise.race([

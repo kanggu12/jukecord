@@ -145,3 +145,16 @@ describe('Actions', () => {
     assert.equal(actions.status().discord, true);
   });
 });
+
+describe('Actions resume', () => {
+  it('continues a paused track, starts the queue after a stop, and says why when it cannot', async () => {
+    const { actions } = setup();
+    await assert.rejects(async () => actions.resume(DJ), /the queue is empty/);
+    await actions.add(DJ, 'list');
+    actions.stop(DJ);
+    assert.equal(actions.nowPlaying(DJ).status, 'idle');
+    // After a stop the play key starts the queue again.
+    assert.equal(actions.resume(DJ).status, 'loading');
+    assert.throws(() => actions.resume(DJ), /already playing/);
+  });
+});

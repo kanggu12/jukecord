@@ -29,6 +29,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   queue: '/queue',
   remove: '/remove',
   move: '/move',
+  jump: '/jump',
   shuffle: '/shuffle',
   dedupe: '/dedupe',
   clear: '/clear',
@@ -119,7 +120,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       '지금 곡을 들은 것으로 치지 않고 빼기',
     ),
     command('pause', 'Pause', '일시정지', '일시정지'),
-    command('resume', 'Resume', '다시재생', '이어서 재생'),
+    command('resume', 'Play on, or start the queue', '다시재생', '이어서 재생(멈췄으면 대기열 시작)'),
     command('seek', 'Go to a place in the current track', '탐색', '지금 곡의 원하는 위치로').addStringOption((option) =>
       option
         .setName('time')
@@ -185,6 +186,15 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setRequired(true)
           .setMinValue(1),
       ),
+    command('jump', 'Play a queued track now', '바로재생', '대기열의 곡을 지금 재생').addIntegerOption((option) =>
+      option
+        .setName('position')
+        .setDescription('Its number in /queue')
+        .setNameLocalizations({ ko: '번호' })
+        .setDescriptionLocalizations({ ko: '/대기열 의 번호' })
+        .setRequired(true)
+        .setMinValue(1),
+    ),
     command('shuffle', 'Shuffle the queue', '섞기', '대기열 섞기'),
     command('dedupe', 'Remove tracks queued twice', '중복제거', '두 번 넣은 곡 빼기'),
     command('clear', 'Empty the queue', '비우기', '대기열 비우기'),

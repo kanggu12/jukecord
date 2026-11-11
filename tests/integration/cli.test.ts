@@ -68,12 +68,15 @@ describe('the jukecord command', () => {
     assert.equal((await cli('queue', extra)).out, '1. Track c · 3:00\n2. Track b · 3:00');
     assert.equal((await cli('remove 1', extra)).code, 0);
     assert.equal((await cli('queue', extra)).out, '1. Track b · 3:00');
+    // Playing a queued track now takes it out of the queue and makes it current.
+    assert.equal((await cli('jump 1', extra)).code, 0);
+    assert.equal((await cli('queue', extra)).out, 'The queue is empty');
+    assert.match((await cli('np', extra)).out, /Track b/);
     const missing = await cli('remove 9', extra);
     assert.equal(missing.code, 2);
     assert.match(missing.out, /no track number 9/);
-    assert.match((await cli('np', extra)).out, /^Getting ready/);
     const json = await cli('np --json', extra);
-    assert.equal(JSON.parse(json.out).track.title, 'Track a');
+    assert.equal(JSON.parse(json.out).track.title, 'Track b');
   });
 
   it('exits 1 with the reason when jukecord refuses, 2 for typing mistakes, 3 when nobody answers', async () => {

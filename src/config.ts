@@ -103,6 +103,10 @@ const KNOWN = new Set([
   'JUKECORD_QUEUE_MAX',
   'JUKECORD_VOICE_IDLE',
   'JUKECORD_TRUST_PROXY',
+  // Read by compose.yaml (the published address and the image), not by jukecord; known so they raise no warning
+  // when .env passes them through.
+  'JUKECORD_BIND',
+  'JUKECORD_IMAGE',
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
