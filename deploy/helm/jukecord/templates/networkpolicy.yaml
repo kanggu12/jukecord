@@ -1,0 +1,40 @@
+{{- if .Values.networkPolicy.enabled }}
+# In: the panel's port only. Out: DNS, and the internet (Discord's gateway and its voice servers over UDP, the sites
+# tracks come from) but none of the cluster's private networks, so a compromised jukecord cannot reach other services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "jukecord.fullname" . }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "jukecord.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # The container's port by number: not every policy implementation resolves port names.
+    - ports:
+        - port: 8795
+          protocol: TCP
+  egress:
+    # Names, from the cluster's DNS (which lives in a private range, hence its own rule).
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # The internet, any port: Discord voice uses UDP on ports it chooses.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml .Values.networkPolicy.privateRanges | nindent 14 }}
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - fc00::/7
+              - fe80::/10
+{{- end }}

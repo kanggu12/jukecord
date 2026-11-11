@@ -1,0 +1,46 @@
+# jukecord with Docker Compose. The front door (./jukecord up) runs this; `docker compose up -d` does the same.
+#
+# The panel is published on this machine only (127.0.0.1). Settings come from .env beside this file (copy
+# .env.example); the database, the media cache and the logs live in the named volume jukecord-data.
+name: jukecord
+
+services:
+  jukecord:
+    # A local build by default; set JUKECORD_IMAGE to a released image (ghcr.io/<owner>/jukecord:<version>) to pull one.
+    image: ${JUKECORD_IMAGE:-jukecord:local}
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    # Fixed inside the container whatever .env says: the port and address are the image's, the data is the volume.
+    environment:
+      JUKECORD_HOST: 0.0.0.0
+      JUKECORD_PORT: "8795"
+      JUKECORD_DATA_DIR: /data
+    ports:
+      # JUKECORD_BIND=0.0.0.0 opens the panel to the network (for friends on the same network, or a reverse proxy).
+      - "${JUKECORD_BIND:-127.0.0.1}:${JUKECORD_PORT:-8795}:8795"
+    volumes:
+      - jukecord-data:/data
+    restart: unless-stopped
+    # The image writes only to /data and /tmp; everything else is read-only, and the process gains no privileges.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # jukecord saves where every server was and leaves voice within 10 s of SIGTERM.
+    stop_grace_period: 15s
+    # Docker's own log of the console lines, bounded (jukecord's JSON log in the volume has its own rotation).
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  jukecord-data:

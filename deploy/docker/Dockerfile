@@ -49,6 +49,17 @@ COPY package.json package-lock.json ./
 # The folder is created even when there are no runtime packages, so the COPY below never fails on its absence.
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && mkdir -p node_modules
 
+# ---- the panel ------------------------------------------------------------------------------------------------------
+# Built once on the machine doing the build (it is plain JavaScript and CSS, the same for every architecture), with
+# the development packages (esbuild) that the image itself does not carry.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS panel
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY scripts ./scripts
+COPY panel ./panel
+RUN node scripts/build-panel.ts
+
 # ---- the image ------------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
 # Labels the registries and scanners read; the version and revision are passed by the release workflow.
@@ -67,18 +78,27 @@ RUN apt-get update \
 COPY --from=ytdlp /opt/yt-dlp /opt/yt-dlp
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json LICENSE ./
-COPY src ./src
+# Readable by jukecord's user (10001) whatever umask the checkout was made with (0755: directories need x).
+COPY --chmod=0755 package.json LICENSE ./
+COPY --chmod=0755 src ./src
+COPY --from=panel --chmod=0755 /app/panel/dist ./panel/dist
 # Inside a container the panel listens on every interface (compose publishes it on 127.0.0.1); data lives in /data.
 ENV NODE_ENV=production \
     JUKECORD_HOST=0.0.0.0 \
     JUKECORD_DATA_DIR=/data \
     JUKECORD_YTDLP=/opt/yt-dlp/yt-dlp
+# The jukecord command on the PATH: `docker compose exec jukecord jukecord np` (and the front door) use it. It finds
+# the host token in /data, so commands run inside the container need no login.
+RUN printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning /app/src/cli/main.ts "$@"\n' > /usr/local/bin/jukecord \
+ && chmod 0755 /usr/local/bin/jukecord
 # A fixed non-root user, the same number the Helm chart's securityContext uses.
 RUN mkdir -p /data && chown 10001:10001 /data
 USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8795
+# Healthy when the web server answers; Node's own fetch, as the image has no curl.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.JUKECORD_PORT||8795)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 ENTRYPOINT ["/usr/bin/tini", "--"]
 # Node's SQLite driver prints an "experimental" warning on every start (Node 24 and 26); it is known and expected.
 CMD ["node", "--disable-warning=ExperimentalWarning", "src/main.ts"]

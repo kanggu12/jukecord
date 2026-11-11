@@ -1,0 +1,48 @@
+# The panel in a real browser: every state (idle, playing, paused, loading, a failed track, a lost connection, the
+# menus and dialogs, the statistics, the log, the login page, an empty and a 200-track queue) at eight window sizes,
+# both themes and both languages, measured by tests/ui/audit.js (clipped text, overlaps, contrast, alignment,
+# floating layers across other boxes, touch targets), and the browser playing along. The pictures are kept for a week.
+name: look
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "panel/**"
+      - "tests/ui/**"
+      - "src/web/**"
+      - ".github/workflows/look.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  walk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund && npm run build
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          load: true
+          tags: jukecord:dev
+          cache-from: type=gha,scope=linux/amd64
+      - name: Walk the panel
+        run: tests/ui/run.sh "$RUNNER_TEMP/look" | tee "$RUNNER_TEMP/look.log"
+      - name: No finding is allowed
+        run: node tests/ui/verdict.mjs "$RUNNER_TEMP/look/report.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: look
+          path: ${{ runner.temp }}/look
+          retention-days: 7

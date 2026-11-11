@@ -1,0 +1,167 @@
+# A version tag (v1.2.3) publishes a release: the image for linux/amd64 and linux/arm64 to the GitHub Container
+# Registry (each built on its own processor's runner, then joined under one tag), the Helm chart as an OCI artifact
+# and a .tgz, checksums, signed build provenance, and the GitHub release whose notes are the version's CHANGELOG.md
+# section. A tag with a pre-release part (v1.2.3-rc.1) publishes as a pre-release, without the `latest` tag.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # What a tag must have before anything is built: one version in the tag, src/version.ts, package.json and the
+  # chart, and this version's section of CHANGELOG.md.
+  notes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: One version in the tag, the code and the chart
+        run: node scripts/check-version.ts "$GITHUB_REF_NAME"
+      - name: The release notes, from CHANGELOG.md
+        # Written to a file first: through a pipe the step would pass even when the script fails.
+        run: node scripts/release-notes.ts "$GITHUB_REF_NAME" > release-notes.md && cat release-notes.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  chart:
+    uses: ./.github/workflows/chart-e2e.yml
+
+  # Each architecture on its own runner, pushed by digest; the next job puts them under the tags.
+  image:
+    needs: [notes, checks, chart]
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Names
+        id: v
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "arch=${{ matrix.platform }}" | sed 's#linux/##' >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        id: build
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ steps.v.outputs.owner }}/jukecord,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+      - name: The digest, for the next job
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ steps.v.outputs.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  release:
+    needs: [image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # the GitHub release and its files
+      packages: write # the image tags and the chart in ghcr.io
+      id-token: write # the build provenance, signed through GitHub's OIDC token
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Version and names
+        id: v
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          case "$GITHUB_REF_NAME" in *-*) echo "pre=true" >> "$GITHUB_OUTPUT" ;; *) echo "pre=false" >> "$GITHUB_OUTPUT" ;; esac
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: One tag for both architectures
+        id: image
+        run: |
+          image=ghcr.io/${{ steps.v.outputs.owner }}/jukecord
+          tags=(-t "$image:${{ steps.v.outputs.version }}")
+          if [ "${{ steps.v.outputs.pre }}" = false ]; then tags+=(-t "$image:latest"); fi
+          sources=()
+          for digest in /tmp/digests/*; do sources+=("$image@sha256:$(basename "$digest")"); done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$image:${{ steps.v.outputs.version }}"
+          echo "digest=$(docker buildx imagetools inspect "$image:${{ steps.v.outputs.version }}" --format '{{json .Manifest}}' | jq -r .digest)" >> "$GITHUB_OUTPUT"
+      - name: Where the image was built, signed by GitHub
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ghcr.io/${{ steps.v.outputs.owner }}/jukecord
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
+      - name: The Helm chart, pointing at this release's image
+        run: |
+          sed -i "s#^  repository: jukecord\$#  repository: ghcr.io/${{ steps.v.outputs.owner }}/jukecord#" deploy/helm/jukecord/values.yaml
+          test "$(grep -c "repository: ghcr.io/" deploy/helm/jukecord/values.yaml)" = 1
+          helm lint deploy/helm/jukecord
+          helm package deploy/helm/jukecord --version "${{ steps.v.outputs.version }}" \
+            --app-version "${{ steps.v.outputs.version }}" --destination dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/jukecord-${{ steps.v.outputs.version }}.tgz" "oci://ghcr.io/${{ steps.v.outputs.owner }}/charts"
+      - name: Checksums
+        run: (cd dist && sha256sum "jukecord-${{ steps.v.outputs.version }}.tgz" > SHA256SUMS && cat SHA256SUMS)
+      - name: Where the chart was built, signed by GitHub
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/jukecord-${{ steps.v.outputs.version }}.tgz
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: dist
+      - name: GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          prerelease: ${{ steps.v.outputs.pre == 'true' }}
+          body_path: dist/release-notes.md
+          generate_release_notes: true
+          files: |
+            dist/jukecord-${{ steps.v.outputs.version }}.tgz
+            dist/SHA256SUMS

@@ -1,6 +1,10 @@
-# Only what the image needs goes into the build context: the Dockerfile copies package files, LICENSE and src.
+# Only what the image needs goes into the build context: the package files, LICENSE, the source, the panel's source
+# and its build script. The panel is built inside the image build, so a local panel/dist is left out.
 **
 !package.json
 !package-lock.json
 !LICENSE
 !src/**
+!panel/**
+!scripts/**
+panel/dist

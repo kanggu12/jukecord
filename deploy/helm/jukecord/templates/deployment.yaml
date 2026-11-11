@@ -1,0 +1,147 @@
+# jukecord: the bot, the panel and the API in one process.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jukecord.fullname" . }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+spec:
+  # One: Discord allows one gateway session per bot token, and the data volume is ReadWriteOnce. Recreate stops the
+  # old pod before the new one logs in and mounts that volume.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "jukecord.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jukecord.labels" . | nindent 8 }}
+      annotations:
+        # A changed token or secret in the values restarts the pod, which reads them only when it starts.
+        checksum/secret: {{ printf "%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Nothing in the pod talks to the Kubernetes API. And no Service variables: a Service called "jukecord" would add
+      # JUKECORD_PORT=tcp://..., which jukecord would read as its own setting.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Time to save where every server was and leave voice (jukecord takes at most 10 s).
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: jukecord
+          image: {{ include "jukecord.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8795
+              protocol: TCP
+          env:
+            - name: JUKECORD_HOST
+              value: "0.0.0.0"
+            - name: JUKECORD_PORT
+              value: "8795"
+            - name: JUKECORD_DATA_DIR
+              value: /data
+            {{- with .Values.publicUrl }}
+            - name: JUKECORD_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.discord.clientId }}
+            - name: JUKECORD_DISCORD_CLIENT_ID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if include "jukecord.hasSecret" . }}
+            # From the Secret; a key that is not there (an existing Secret without clientSecret) is simply not set.
+            - name: JUKECORD_DISCORD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jukecord.secretName" . }}
+                  key: token
+                  optional: true
+            - name: JUKECORD_DISCORD_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jukecord.secretName" . }}
+                  key: clientSecret
+                  optional: true
+            {{- end }}
+            {{- if and .Values.ingress.enabled (not (hasKey .Values.env "JUKECORD_TRUST_PROXY")) }}
+            # Behind the Ingress controller: one proxy whose X-Forwarded-For is believed (for the login limiter).
+            - name: JUKECORD_TRUST_PROXY
+              value: "1"
+            {{- end }}
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ toString $value | quote }}
+            {{- end }}
+          # Started: the web server answers (a first start creates the database; a minute is plenty).
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # Ready: it can serve the panel and the API (Discord connecting or not: browsers still play).
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          # Alive: the process answers at all.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # The root filesystem is read-only; yt-dlp and ffmpeg write their scratch files here.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "jukecord.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

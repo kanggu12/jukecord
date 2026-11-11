@@ -6,6 +6,8 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-12
+
 ### Added
 
 - One queue per Discord server, kept in a SQLite database: add at the end, next or at a position, remove, move,
@@ -69,6 +71,32 @@ All notable changes to jukecord are documented here. The format is based on
   cache, Discord and the login; `jukecord backup` writes a copy of the database; `jukecord logs` reads the log.
 - `/healthz`, `/readyz` and `/metrics` (Prometheus text) for containers and monitoring.
 - `JUKECORD_TRUST_PROXY` for running behind a reverse proxy or an Ingress.
+- yt-dlp keeps what it learns between runs (YouTube's player code) in the data directory instead of fetching it for
+  every lookup.
+- Play a queued track now (`/jump`, the panel's play key on a row, `jukecord jump`), and the play key starts the queue
+  again after a stop (`/resume`).
+- The panel: the track playing on a disc that turns while it plays (the rainbow rim means "playing now"; white when
+  paused), a progress bar to click or drag, the queue with covers and who added each track, dragging to reorder,
+  search, playlists, the voice channel with who listens in browsers, recently played with "add again", in light and
+  dark, in English and Korean, from phones to 4K screens.
+- Listening in the browser: a bar at the bottom plays the track in time with the voice channel (within 300 ms), with
+  its own volume, the system's media keys and lock screen, and MP3 for browsers without Opus.
+- Statistics: plays per day and per hour, the most played tracks and who added most, over 7, 30 or 90 days or a year,
+  each chart with a table view.
+- The log page for the host, the login page, the menu (theme, language, motion, the DJ role, API tokens), keyboard
+  shortcuts (Space, the arrows, N, /, ?).
+- A new mark: a jukebox's arch, lit in the colours of "playing now", with a record under it.
+- `./jukecord`, the front door: up, open (a login link, opened in the browser), status, logs, doctor, update, backup,
+  restore, down, and every `jukecord` command.
+- `compose.yaml` at the top of the repository: the panel on 127.0.0.1, a read-only container without privileges, the
+  data in a named volume.
+- The Helm chart (`deploy/helm/jukecord`): one pod with the Recreate strategy, a volume kept on uninstall, a Secret or
+  your own, an optional Ingress, a NetworkPolicy (in: the panel's port; out: DNS and the internet, not the cluster's
+  private networks), three probes, a non-root read-only pod, a values schema and `helm test`; checked on a kind
+  cluster by `deploy/kind/check.sh`.
+- An optional systemd unit that starts the Compose project with the machine.
+- Documents: the user guide, installing, Kubernetes, the API (its operations table made from the API itself),
+  architecture, decisions, testing, troubleshooting, running offline, third-party notices.
 
 ### Security
 
@@ -77,8 +105,26 @@ All notable changes to jukecord are documented here. The format is based on
 - A change made from the panel must carry the session's CSRF token; the session cookie is httpOnly and SameSite=Lax,
   and Secure when the public address is https. WebSocket connections with a cookie are accepted from the panel's own
   origin only.
-- Twenty failed logins from one address within ten minutes block that address for a while.
+- Twenty failed logins from one address within ten minutes block that address for a while. An IPv6 address counts
+  by its /56, each address keeps only its latest twenty failures, and at most 10,000 addresses are remembered, the
+  oldest forgotten first, so neither one address nor many can make the list long or every request slow. The audio,
+  the live updates and logging out are refused to a blocked address too.
+- Addresses on private networks (this machine, the home network, other containers and pods) are not fetched. Every
+  connection yt-dlp makes goes through a proxy inside jukecord that connects only to public addresses, so redirects,
+  a playlist's entries and names that change their answer are held to the same rule. `JUKECORD_ALLOW_PRIVATE_ADDRESSES`
+  allows them, for a media server on the local network.
+- At most four lookups (two per person) and two MP3 copies run at once; another is refused with "try again in a
+  moment" instead of starting more processes than a small server has memory for. Names are asked of DNS directly with
+  a time limit, so a name that never answers cannot hold up the panel's files.
+- A browser gets the audio of a track only when a server it can open is playing it or has it queued.
+- The panel lists only the voice channels a person can see in Discord (and does not name the bot's channel to those
+  who cannot see it), and the bot joins a chosen channel only for someone who may go there themselves.
+- After logging in with Discord, only a page of the panel itself can come next.
+- Live updates end with their login: logging out closes that browser's connection at once, an expired session or a
+  revoked token is noticed within 30 s, and someone no longer in the server within about a minute and a half.
 - Pages carry a content security policy (scripts and styles from jukecord only), and nothing may frame them.
-- Everything jukecord writes (the database, the cache, the logs) is readable by its own user only.
+- Everything jukecord writes (the database, the cache, the logs) is readable by its own user only, and a database
+  copied in with a looser mode (a restore, a move) is made so again when jukecord opens it.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/commits/main
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/kanggu12/jukecord/releases/tag/v0.1.0

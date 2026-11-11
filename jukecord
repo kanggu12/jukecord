@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# The front door: runs jukecord with Docker Compose and passes everything else to the jukecord command inside it.
+#
+#   ./jukecord up          start (builds the image the first time; makes .env from .env.example)
+#   ./jukecord open        a one-time login link for this browser (opens it when it can)
+#   ./jukecord status      is it running, which version, is Discord connected
+#   ./jukecord logs [-f]   jukecord's log (-f follows the console lines live)
+#   ./jukecord doctor      check every part jukecord needs, here and inside the container
+#   ./jukecord update      a newer image (pulled, or rebuilt from this checkout), then restart
+#   ./jukecord backup      a copy of the database, into ./backups
+#   ./jukecord restore F   put a backup back (the current database is kept beside it first)
+#   ./jukecord down        stop (the data stays in the volume)
+#   ./jukecord <command>   anything else goes to the jukecord command: np, add, skip, queue, token create ...
+#
+# Exit codes: those of the command run; 2 for a typing mistake here.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$here"
+service=jukecord
+
+# Says something on stderr, prefixed so it is clear where it came from.
+say() { printf 'jukecord: %s\n' "$*" >&2; }
+
+# docker compose, after checking it exists (the error otherwise is "compose is not a docker command").
+compose() {
+  if ! docker compose version >/dev/null 2>&1; then
+    say "Docker Compose is needed (https://docs.docker.com/compose/install/)"
+    exit 1
+  fi
+  docker compose "$@"
+}
+
+# This machine's time zone, so times the jukecord command prints and "today" in the statistics are local.
+timezone() {
+  if [ -n "${TZ:-}" ]; then printf '%s' "$TZ"
+  elif command -v timedatectl >/dev/null 2>&1 && timedatectl show -p Timezone --value 2>/dev/null | grep -q .; then
+    timedatectl show -p Timezone --value
+  elif [ -f /etc/timezone ]; then cat /etc/timezone
+  else printf 'UTC'
+  fi
+}
+
+# Whether the container is running.
+running() {
+  [ -n "$(compose ps --status running -q "$service" 2>/dev/null)" ]
+}
+
+# Runs the jukecord command inside the running container; it finds the host token there, so no login is needed.
+inside() {
+  if ! running; then
+    say "jukecord is not running here (./jukecord up)"
+    exit 1
+  fi
+  local tty=()
+  # A terminal when there is one (colours, Ctrl+C); none for scripts and pipes.
+  if [ -t 0 ] && [ -t 1 ]; then tty=(-it); else tty=(-T); fi
+  compose exec "${tty[@]}" -e "TZ=$(timezone)" "$service" jukecord "$@"
+}
+
+# A setting from .env as Compose reads it: the last line that sets it, without quotes around the value.
+setting() {
+  sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\\1/"
+}
+
+# The address the panel is reached at from this machine: the public one when set, else where Compose really published
+# the port (which also follows JUKECORD_PORT and JUKECORD_BIND from the shell, not only from .env).
+panel_url() {
+  local url published host port
+  url=$(setting JUKECORD_PUBLIC_URL)
+  if [ -n "$url" ]; then
+    printf '%s' "$url"
+    return
+  fi
+  published=$(compose port "$service" 8795 2>/dev/null | tail -n 1)
+  host=${published%:*}
+  port=${published##*:}
+  # Published on every address (0.0.0.0 or ::) or on this machine only: localhost, the name the documents use.
+  case "$host" in '' | 0.0.0.0 | '[::]' | '::' | 127.0.0.1) host=localhost ;; esac
+  printf 'http://%s:%s' "$host" "${port:-${JUKECORD_PORT:-$(setting JUKECORD_PORT)}}"
+}
+
+# Opens an address in a browser when this is someone's desktop; prints it either way.
+open_url() {
+  printf '%s\n' "$1"
+  [ -t 1 ] || return 0
+  if command -v wslview >/dev/null 2>&1; then wslview "$1" >/dev/null 2>&1 || true
+  elif grep -qi microsoft /proc/version 2>/dev/null && command -v cmd.exe >/dev/null 2>&1; then
+    # WSL without wslu: Windows opens the default browser.
+    cmd.exe /c start "" "$1" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$1" >/dev/null 2>&1 || true
+  elif command -v open >/dev/null 2>&1; then open "$1" >/dev/null 2>&1 || true
+  fi
+}
+
+# Starts jukecord again at the end of a restore, whatever happened before; a failure shows Compose's own words and
+# makes the whole command fail.
+start_again() {
+  local out
+  if ! out=$(compose up -d "$service" 2>&1); then
+    printf '%s\n' "$out" >&2
+    say "jukecord did not start again"
+    exit 1
+  fi
+  wait_ready || exit 1
+}
+
+# Waits until the panel answers, up to a minute.
+wait_ready() {
+  local tries=60
+  while [ "$tries" -gt 0 ]; do
+    if compose exec -T "$service" node -e "fetch('http://127.0.0.1:8795/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    tries=$((tries - 1))
+  done
+  say "jukecord did not answer within a minute; its console says why: ./jukecord logs -f"
+  return 1
+}
+
+command=${1:-help}
+case "$command" in
+  up | start)
+    # Settings start from the example, readable by this user only (the bot's token goes in there).
+    if [ ! -f .env ]; then
+      cp .env.example .env
+      chmod 600 .env
+      say "made .env from .env.example; put the bot's token in it to use Discord (browser-only until then)"
+    fi
+    compose up -d "${@:2}"
+    wait_ready
+    printf 'jukecord is up: %s\n' "$(panel_url)"
+    printf 'Log in with: ./jukecord open\n'
+    ;;
+  down | stop)
+    compose down "${@:2}"
+    ;;
+  restart)
+    compose restart "$service"
+    wait_ready
+    ;;
+  open)
+    # The container makes the link from the public address when there is one. Without it the container knows only its
+    # own port (8795), not the one published here (JUKECORD_PORT), so the link is rebuilt on this machine's address.
+    url=$(inside link | tail -n 1)
+    if [ -z "$(setting JUKECORD_PUBLIC_URL)" ]; then
+      url="$(panel_url)/auth/link/${url##*/}"
+    fi
+    open_url "$url"
+    ;;
+  status)
+    compose ps "$service"
+    if running; then inside status; fi
+    ;;
+  logs)
+    if [ "${2:-}" = "-f" ] || [ "${2:-}" = "--follow" ]; then
+      compose logs -f --tail 100 "$service"
+    else
+      inside logs "${@:2}"
+    fi
+    ;;
+  doctor)
+    printf 'docker: %s\n' "$(docker version --format '{{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}})' 2>/dev/null || echo 'not answering')"
+    printf 'compose: %s\n' "$(docker compose version --short 2>/dev/null || echo 'missing')"
+    printf 'settings: %s\n' "$( [ -f .env ] && echo ".env ($(stat -c %a .env 2>/dev/null || echo '?'))" || echo 'no .env (defaults)')"
+    if running; then inside doctor; else say "jukecord is not running, so only this machine was checked (./jukecord up)"; fi
+    ;;
+  update)
+    image=$(compose config --images 2>/dev/null | head -n 1)
+    case "$image" in
+      *jukecord:local) compose build --pull ;;
+      *) compose pull ;;
+    esac
+    compose up -d
+    wait_ready
+    inside status
+    ;;
+  backup)
+    # Written inside the volume by jukecord itself (a consistent copy while it runs), then copied out here.
+    file=$(inside backup --json | sed -n 's/.*"file": *"\([^"]*\)".*/\1/p')
+    mkdir -p backups
+    compose cp "$service:$file" "backups/$(basename "$file")"
+    printf 'backups/%s\n' "$(basename "$file")"
+    ;;
+  restore)
+    file=${2:-}
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+      say "restore needs a backup file: ./jukecord restore backups/jukecord-<time>.db"
+      exit 2
+    fi
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    # However it ends, jukecord runs again afterwards: with the restored database, or the old one when a step failed.
+    # (up, not start: after ./jukecord down there is no container to start.)
+    trap start_again EXIT
+    # Stopped first: the database must not change while it is replaced.
+    compose stop "$service"
+    # Done inside the volume as jukecord's own user, with the backup on stdin: a mounted file would keep this
+    # machine's owner and mode (0600), which that user cannot read. Every step must work (set -e) or nothing changes.
+    # The file is checked to be a database before the current one is touched. The current one is folded into one file
+    # (what its write-ahead log still holds included) and kept beside the new one, so a wrong file can be undone.
+    # Single quotes on purpose: the script runs in the container, where its own variables expand.
+    # shellcheck disable=SC2016
+    swap='set -e
+umask 077
+cd /data
+cat > jukecord.db.restoring
+if [ "$(head -c 15 jukecord.db.restoring)" != "SQLite format 3" ]; then
+  rm -f jukecord.db.restoring
+  echo "jukecord: that file is not a jukecord backup (not an SQLite database); nothing was changed" >&2
+  exit 2
+fi
+if [ -f jukecord.db ]; then
+  node -e "const { DatabaseSync } = require(\"node:sqlite\"); const db = new DatabaseSync(\"jukecord.db\"); db.exec(\"PRAGMA wal_checkpoint(TRUNCATE)\"); db.close()" 2>/dev/null || true
+fi
+for part in jukecord.db jukecord.db-wal jukecord.db-shm; do
+  if [ -f "$part" ]; then mv "$part" "$part.before-restore-$STAMP"; fi
+done
+mv jukecord.db.restoring jukecord.db'
+    compose run --rm --no-deps -T -e "STAMP=$stamp" --entrypoint sh "$service" -c "$swap" <"$file"
+    printf 'restored %s (the database before it: jukecord.db.before-restore-%s in the volume)\n' "$file" "$stamp"
+    ;;
+  version)
+    inside status
+    ;;
+  help | -h | --help)
+    # This file by its full path: the directory changed above, so a relative $0 would point nowhere.
+    sed -n '2,15p' "$here/${BASH_SOURCE[0]##*/}" | sed 's/^# \{0,1\}//'
+    ;;
+  *)
+    inside "$@"
+    ;;
+esac

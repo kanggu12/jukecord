@@ -1,0 +1,16 @@
+# The panel and the API inside the cluster (an Ingress, kubectl port-forward, or another Service in front of it).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "jukecord.fullname" . }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "jukecord.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP

@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/data", "!**/_work", "!**/coverage"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/data",
+      "!**/_work",
+      "!**/coverage",
+      "!**/deploy/helm/*/templates",
+      "!**/docs/API.md"
+    ]
   },
   "formatter": {
     "enabled": true,

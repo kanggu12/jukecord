@@ -1,0 +1,22 @@
+jukecord {{ .Chart.AppVersion }} is installed as {{ include "jukecord.fullname" . }} in {{ .Release.Namespace }}.
+
+{{- if .Values.ingress.enabled }}
+
+The panel: {{ .Values.publicUrl | default (printf "http://%s/" (.Values.ingress.host | default "<the Ingress address>")) }}
+{{- else }}
+
+The panel, from this computer:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "jukecord.fullname" . }} 8795:{{ .Values.service.port }}
+  then open http://localhost:8795
+{{- end }}
+
+Log in as the host with a one-time link (valid for 10 minutes):
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "jukecord.fullname" . }} -- jukecord link
+
+{{- if not (include "jukecord.hasSecret" .) }}
+
+No bot token was given, so jukecord runs browser-only. Set discord.existingSecret (or discord.token) to use Discord.
+{{- end }}
+
+Check every part it needs:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "jukecord.fullname" . }} -- jukecord doctor

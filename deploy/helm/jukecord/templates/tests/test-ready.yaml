@@ -1,0 +1,40 @@
+# helm test: the panel answers through the Service, as anything in the cluster (an Ingress) would reach it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "jukecord.fullname" . }}-test-ready
+  # Not jukecord's own labels: those would put this pod under jukecord's NetworkPolicy, which keeps it from the
+  # cluster's private addresses, the Service's among them.
+  labels:
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: ready
+      # The jukecord image itself: it has Node, whose fetch does what curl would (the image has no curl).
+      image: {{ include "jukecord.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - node
+        - -e
+        - >-
+          fetch('http://{{ include "jukecord.fullname" . }}:{{ .Values.service.port }}/readyz')
+          .then(async (r) => { console.log(r.status, await r.text()); process.exit(r.ok ? 0 : 1); },
+          (e) => { console.error(e.message); process.exit(1); })
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL

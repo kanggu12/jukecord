@@ -1,0 +1,25 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+# The database, the media cache and the logs. Kept when the release is uninstalled (helm.sh/resource-policy), so an
+# uninstall by mistake does not take a server's history with it; delete the claim by hand to remove the data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "jukecord.fullname" . }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- if .Values.persistence.storageClass }}
+  {{- if eq "-" (toString .Values.persistence.storageClass) }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+{{- end }}

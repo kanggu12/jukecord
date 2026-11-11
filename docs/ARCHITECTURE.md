@@ -1,0 +1,109 @@
+# How jukecord is built
+
+One Node process, written in TypeScript and run as it is (Node strips the types; there is no build step for the
+server). Its parts, from the outside in:
+
+```mermaid
+flowchart LR
+  subgraph ways["Four ways in"]
+    panel["Panel (browser)"]
+    discord["Discord slash commands"]
+    api["HTTP API"]
+    cli["jukecord command"]
+  end
+  subgraph app["The actions (src/app)"]
+    actions["Actions: one function per thing a person can do"]
+    access["Access: who may do it, in which server"]
+  end
+  subgraph core["The music (src/core)"]
+    queue["Queue per server"]
+    player["Player per server: the clock"]
+    bus["Event bus"]
+  end
+  subgraph media["Getting tracks (src/media)"]
+    resolver["Resolver: address or search to tracks"]
+    preparer["Preparer: yt-dlp to ffmpeg to Ogg Opus"]
+    cache["Media cache, with a size limit"]
+  end
+  store[("SQLite (src/store)")]
+  voice["Voice channel (src/discord)"]
+  browsers["Browsers playing along"]
+
+  panel --> api
+  cli --> api
+  api --> access --> actions
+  discord --> actions
+  actions --> queue & player & resolver
+  player --> preparer --> cache
+  player --> voice
+  player --> bus
+  queue --> bus
+  bus -- "WebSocket: every change" --> browsers
+  cache -- "audio with Range" --> browsers
+  queue & player & actions --> store
+```
+
+## The actions are the product
+
+`src/app/actions.ts` holds every action a person can take: add, play now, skip, seek, the queue edits, playlists,
+voice, statistics, the DJ role. The panel, the slash commands, the API and the CLI only turn their input into a call
+of one of these and show the answer. So a feature exists when it is an action, and the four ways in cannot drift apart:
+the slash commands are a record over all action names (a missing one does not compile), the API is a table of
+operations from which the server's routes, the OpenAPI document and the CLI's requests are all made, and a test checks
+the four lists against each other.
+
+## The player is the clock
+
+Each server has one player (`src/core/player.ts`), a small state machine: idle, loading (fetching the track), playing,
+paused. It decides where in the track everyone is. Every change ends in a snapshot: the status, the track, the place
+(`positionMs`) at a server time (`at`), and a version number. The voice connection is told to start, pause or stop;
+browsers get the snapshot over WebSocket and play the same file from the same place, correcting themselves when they
+drift more than 300 ms. Each start of the outputs gets a session number, so an "ended" from a stream already replaced
+(by a seek, or a skip) is recognised and ignored.
+
+## Getting a track
+
+The resolver turns what was typed into tracks: an address seen before without asking the site, anything else through
+yt-dlp (one request for a whole playlist). The preparer runs yt-dlp and ffmpeg together through a pipe: yt-dlp fetches
+the best audio, ffmpeg evens the loudness (measured once per track and stored), adds a short fade in and out, and
+writes Ogg Opus. That file is what Discord carries, so voice sends it as it is, and browsers get the same file (or an
+MP3 copy made the first time a browser without Opus asks). The next tracks are prepared while one plays. The cache
+keeps the files up to its size limit, removing the least recently played first and never the one playing or the next
+ones.
+
+yt-dlp reaches the internet only through a small proxy inside jukecord (`--proxy` to 127.0.0.1). The proxy resolves
+each name itself, refuses addresses on private networks, and connects to the very address it checked, so a redirect, a
+playlist entry or a name that answers differently the second time cannot make the server fetch from its own network.
+An address someone types is also checked before yt-dlp starts, which gives the clearer message.
+
+## Storage
+
+One SQLite file (Node's built-in driver, no native add-on, so the same image runs on amd64 and arm64), with numbered
+migrations and WAL. It holds tracks, queues, history (the newest 10,000 plays per server), playlists, each player's
+state (so a restart comes back paused at the same place), settings, the people jukecord has met (for names in the
+panel), panel logins and API tokens (both as SHA-256 hashes). Backups use `VACUUM INTO`, a consistent copy while
+jukecord runs.
+
+## Logging in
+
+The host (the machine running jukecord) has a token in the data directory, readable by jukecord's user only; its
+command line uses it, and it can make one-time login links for a browser. Other people log in with Discord (OAuth2,
+the `identify` scope only); whether they are in a server, and with which roles, is asked through the bot and kept for a
+minute. Programs use API tokens with a scope. A panel session changes nothing without its CSRF token in a header.
+
+## Files
+
+| Path            | What is there                                                   |
+| :-------------- | :-------------------------------------------------------------- |
+| `src/main.ts`   | starts the parts in order and stops them in order               |
+| `src/config.ts` | the settings, every problem reported at once                    |
+| `src/app/`      | the actions, who may do what, the self-check                    |
+| `src/core/`     | queue, player, clock, event bus                                 |
+| `src/media/`    | yt-dlp, ffmpeg, the cache, preparing and prefetching            |
+| `src/discord/`  | the bot, slash commands, cards, voice                           |
+| `src/web/`      | the API table, routes, logins, live updates, OpenAPI            |
+| `src/cli/`      | the `jukecord` command                                          |
+| `src/store/`    | the database and its migrations                                 |
+| `panel/`        | the browser app (TypeScript, bundled with esbuild)              |
+| `deploy/`       | the Dockerfile, the Helm chart, the kind test, the systemd unit |
+| `tests/`        | unit, integration, packaging and UI tests                       |

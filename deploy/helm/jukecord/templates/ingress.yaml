@@ -1,0 +1,36 @@
+{{- if .Values.ingress.enabled }}
+# The panel from outside the cluster. WebSocket (/api/v1/events) passes through common controllers as it is; give it
+# a long read timeout (the panel keeps one connection open for hours), for example with ingress-nginx:
+#   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "jukecord.fullname" . }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - {{- with .Values.ingress.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "jukecord.fullname" . }}
+                port:
+                  name: http
+{{- end }}
