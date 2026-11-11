@@ -27,5 +27,12 @@ All notable changes to jukecord are documented here. The format is based on
 - An MP3 copy of a track is made for browsers that cannot play Opus (Safari), the first time one asks.
 - A container image for linux/amd64 and linux/arm64 with ffmpeg and the official yt-dlp build, checked against its
   published checksum. yt-dlp runs YouTube's scripts with the image's Node; no Python or Deno in the image.
+- The Discord bot: slash commands for every action, with Korean names and descriptions (Discord shows each person
+  their own language), answers as short cards with pause and skip buttons, and playlist names suggested as you type.
+  It asks Discord only for the Guilds and GuildVoiceStates intents. Without a token jukecord runs browser-only.
+- Voice: the cached Opus file is sent as it is (no encoder needed), a seek or a late join starts through ffmpeg from
+  that place, voice is end-to-end encrypted (DAVE), and a dropped connection that recovers within 5 s is kept.
+- Every action (add, play now, skip, pause, seek, queue edits, playlists, join, leave, status) lives in one place that
+  the bot, the panel, the API and the CLI all call; a server's DJ role, when set, decides who may change the music.
 
 [Unreleased]: https://github.com/kanggu12/jukecord/commits/main
