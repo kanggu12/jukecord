@@ -73,6 +73,8 @@ export class Bot implements Directory {
   readonly client: Client;
   readonly voice: VoiceManager;
   private readonly options: BotOptions;
+  // Set by the first login: from then on the server list is known (a reconnect later keeps the list it had).
+  private serversKnown = false;
 
   constructor(options: BotOptions) {
     this.options = options;
@@ -90,6 +92,10 @@ export class Bot implements Directory {
   self(): { id: string; name: string; avatar: string | null } | null {
     const user = this.client.user;
     return user ? { id: user.id, name: user.displayName, avatar: user.avatar } : null;
+  }
+
+  loaded(): boolean {
+    return this.serversKnown;
   }
 
   guilds(): GuildInfo[] {
@@ -177,6 +183,7 @@ export class Bot implements Directory {
   async start(): Promise<void> {
     const log = this.options.log;
     this.client.once(Events.ClientReady, (client) => {
+      this.serversKnown = true;
       log.info('logged in to Discord', { as: client.user.tag, servers: client.guilds.cache.size });
       for (const guild of client.guilds.cache.values()) void this.register(guild);
     });

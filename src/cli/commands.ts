@@ -136,7 +136,8 @@ function showVoice(answer: unknown): string {
     current: { name: string } | null;
     channels: { id: string; name: string; people: number }[];
   };
-  const lines = [voice.current ? `In ${voice.current.name}` : 'Not in a voice channel'];
+  // An empty name: the bot is in a channel this login cannot see.
+  const lines = [voice.current ? `In ${voice.current.name || 'a channel you cannot see'}` : 'Not in a voice channel'];
   for (const channel of voice.channels) lines.push(`  ${channel.id}  ${channel.name} (${channel.people})`);
   return lines.join('\n');
 }

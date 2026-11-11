@@ -110,7 +110,18 @@ export class Store {
    */
   static open(file: string, options: StoreOptions = {}): Store {
     // The data directory may be new; SQLite does not create parent folders.
-    if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (file !== ':memory:') {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      // A database copied in from elsewhere (a restore, a move between machines) keeps the mode it was copied with;
+      // it is made this user's alone again, with its log files, which SQLite creates with the database's mode.
+      for (const part of [file, `${file}-wal`, `${file}-shm`]) {
+        try {
+          fs.chmodSync(part, 0o600);
+        } catch {
+          // Not there yet (a new database), or not this user's to change: nothing to tighten.
+        }
+      }
+    }
     // Foreign keys on (the driver's default, written out so it is not lost on a change of default); wait up to 5 s
     // for a lock instead of failing at once, which covers a backup running while the bot writes.
     const db = new DatabaseSync(file, { enableForeignKeyConstraints: true, timeout: 5000 });

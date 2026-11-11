@@ -98,19 +98,23 @@ export function openApiDocument(serverUrl = API_PREFIX): Json {
     paths[spec.path] = { ...(paths[spec.path] ?? {}), [spec.method.toLowerCase()]: operation };
   }
   // The two browser endpoints that are not JSON operations, so the document lists everything under the prefix.
-  paths['/tracks/{track}/audio'] = {
+  paths['/guilds/{guild}/tracks/{track}/audio'] = {
     get: {
       operationId: 'audio',
-      summary: 'The audio of a prepared track (Ogg Opus, or MP3 for browsers without Opus); supports Range',
+      summary:
+        'The audio of a track the server is playing or has queued (Ogg Opus, or MP3 for browsers without Opus); supports Range',
       tags: ['browser'],
       parameters: [
+        { name: 'guild', in: 'path', required: true, schema: { type: 'string' } },
         { name: 'track', in: 'path', required: true, schema: { type: 'integer', minimum: 1 } },
         { name: 'format', in: 'query', required: false, schema: { type: 'string', enum: ['opus', 'mp3'] } },
       ],
       responses: {
         '200': { description: 'The audio', content: { 'audio/ogg': {}, 'audio/mpeg': {} } },
         '206': { description: 'Part of the audio (Range)' },
-        '409': { description: 'The track is not prepared (nothing is playing it)' },
+        '404': { description: 'The track is not playing or queued in this server' },
+        '409': { description: 'The track is not prepared yet' },
+        '503': { description: 'Too many MP3 copies are being made; try again in a moment' },
       },
     },
   };

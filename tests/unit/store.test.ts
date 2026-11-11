@@ -253,3 +253,19 @@ describe('PlayerStateRepository and SettingsRepository', () => {
     assert.deepEqual(store.settings.get(GUILD), { djRoleId: null });
   });
 });
+
+describe('Store.open and file modes', () => {
+  it("makes a database copied in with a looser mode this user's alone", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-mode-'));
+    try {
+      const file = path.join(dir, 'jukecord.db');
+      Store.open(file).close();
+      fs.chmodSync(file, 0o644);
+      const store = Store.open(file);
+      assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      store.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

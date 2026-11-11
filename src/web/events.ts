@@ -37,6 +37,7 @@ export interface Listener {
 // One open connection.
 interface Client {
   readonly socket: WebSocket;
+  readonly caller: Caller;
   readonly principal: Principal;
   readonly who: Listener;
   // The server it shows, once subscribed.
@@ -45,6 +46,8 @@ interface Client {
   listening: boolean;
   // Set by every pong; cleared by every ping. Still clear at the next ping means the browser is gone.
   alive: boolean;
+  // Counts subscribes: one that finishes after a newer one began is dropped, so the last server asked for wins.
+  asking: number;
 }
 
 export interface EventHubOptions {
@@ -55,11 +58,25 @@ export interface EventHubOptions {
   readonly users: UserRepository;
   readonly log: Logger;
   readonly now?: () => number;
+  /** Whether a caller's login still exists (logged out, expired and revoked logins end their connections). */
+  readonly stillValid?: (caller: Caller) => boolean;
 }
 
 // The context for reading a server's state on behalf of everyone subscribed to it (reading needs no rights).
 function reader(guildId: string): ActionContext {
   return { guildId, userId: null, mayControl: false, mayManage: false };
+}
+
+// The context for what one connection may see: its own person (voice channels are listed as they see them in
+// Discord), or the host, who sees them all.
+function viewer(client: Client, guildId: string): ActionContext {
+  const principal = client.principal;
+  return {
+    guildId,
+    userId: principal.kind === 'user' ? principal.userId : null,
+    mayControl: false,
+    mayManage: principal.kind === 'host',
+  };
 }
 
 export class EventHub {
@@ -89,7 +106,15 @@ export class EventHub {
       }));
     };
     const onVoice = ({ guildId }: { guildId: string }) => {
-      this.toGuild(guildId, () => ({ type: 'voice', guild: guildId, voice: actions.voiceChannels(reader(guildId)) }));
+      // Each connection gets the channels its own person can see, worked out once per person.
+      const lists = new Map<string, unknown>();
+      for (const client of this.clients) {
+        if (client.guild !== guildId) continue;
+        const context = viewer(client, guildId);
+        const key = context.userId ?? (context.mayManage ? 'host' : 'anyone');
+        if (!lists.has(key)) lists.set(key, actions.voiceChannels(context));
+        this.send(client, { type: 'voice', guild: guildId, voice: lists.get(key) });
+      }
     };
     bus.on('player', onPlayer);
     bus.on('queue', onQueue);
@@ -111,7 +136,7 @@ export class EventHub {
       principal.kind === 'host'
         ? { id: null, name: 'Host', avatar: null }
         : { id: principal.userId, name: person?.name ?? principal.userId, avatar: person?.avatar ?? null };
-    const client: Client = { socket, principal, who, guild: null, listening: false, alive: true };
+    const client: Client = { socket, caller, principal, who, guild: null, listening: false, alive: true, asking: 0 };
     this.clients.add(client);
     socket.on('pong', () => {
       client.alive = true;
@@ -140,6 +165,15 @@ export class EventHub {
     let listening = 0;
     for (const client of this.clients) if (client.listening) listening += 1;
     return { connections: this.clients.size, listening };
+  }
+
+  /** Ends the connections of the logins that match (a logout ends that browser's live updates at once). */
+  end(match: (caller: Caller) => boolean): void {
+    for (const client of this.clients) {
+      if (!match(client.caller)) continue;
+      client.socket.close(4401, 'logged out');
+      this.drop(client);
+    }
   }
 
   /** Closes every connection (shutting down): the panels reconnect to the next jukecord. */
@@ -172,13 +206,18 @@ export class EventHub {
 
   // Switches a connection to a server and sends that server's whole state.
   private async subscribe(client: Client, guildId: string): Promise<void> {
+    // The access check may wait for Discord; a subscribe that began later (another server chosen meanwhile) wins.
+    client.asking += 1;
+    const mine = client.asking;
     try {
       await this.options.access.context(client.principal, guildId);
     } catch (error) {
+      if (client.asking !== mine) return;
       const code = error instanceof ActionError ? error.code : 'unavailable';
       this.send(client, { type: 'error', code, message: error instanceof Error ? error.message : String(error) });
       return;
     }
+    if (client.asking !== mine) return;
     const before = client.guild;
     client.guild = guildId;
     const { actions, presenter } = this.options;
@@ -187,7 +226,7 @@ export class EventHub {
       guild: guildId,
       player: presenter.player(actions.nowPlaying(reader(guildId))),
       queue: presenter.queue(actions.queue(reader(guildId))),
-      voice: actions.voiceChannels(reader(guildId)),
+      voice: actions.voiceChannels(viewer(client, guildId)),
       listeners: this.listeners(guildId),
     });
     // A listener who switches servers stops counting in the old one and starts in the new one.
@@ -228,13 +267,37 @@ export class EventHub {
     client.socket.send(text);
   }
 
-  // Pings every connection and closes the ones that did not answer the last ping.
+  // Pings every connection and closes the ones that did not answer the last ping. The login behind each connection is
+  // checked again too: a logout, an expired session, a revoked token or a person who left the server ends it.
   private beat(): void {
     for (const client of this.clients) {
       if (!client.alive) {
         client.socket.terminate();
         this.drop(client);
         continue;
+      }
+      // Read from the database; if that fails this once, the connection stays and the next beat asks again.
+      let valid = true;
+      try {
+        valid = this.options.stillValid?.(client.caller) ?? true;
+      } catch (error) {
+        this.options.log.debug('could not check a login', { error });
+      }
+      if (!valid) {
+        client.socket.close(4401, 'the login has ended');
+        this.drop(client);
+        continue;
+      }
+      if (client.guild) {
+        const guild = client.guild;
+        // Membership answers are kept for a minute (Access), so this costs Discord at most one question a minute.
+        this.options.access.context(client.principal, guild).catch((error: unknown) => {
+          // Discord not answering (unavailable) is no reason to end anything; only a clear "not any more" is.
+          const gone = error instanceof ActionError && (error.code === 'forbidden' || error.code === 'not-found');
+          if (!gone || client.guild !== guild) return;
+          client.socket.close(4410, 'no longer allowed in that server');
+          this.drop(client);
+        });
       }
       client.alive = false;
       client.socket.ping();

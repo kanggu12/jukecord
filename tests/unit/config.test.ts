@@ -48,6 +48,16 @@ describe('loadConfig', () => {
     assert.equal(config.log.level, 'debug');
   });
 
+  it('refuses private addresses unless JUKECORD_ALLOW_PRIVATE_ADDRESSES says otherwise', () => {
+    assert.equal(loadConfig({}, '/srv').media.allowPrivate, false);
+    assert.equal(loadConfig({ JUKECORD_ALLOW_PRIVATE_ADDRESSES: 'yes' }, '/srv').media.allowPrivate, true);
+    assert.equal(loadConfig({ JUKECORD_ALLOW_PRIVATE_ADDRESSES: '0' }, '/srv').media.allowPrivate, false);
+    assert.throws(
+      () => loadConfig({ JUKECORD_ALLOW_PRIVATE_ADDRESSES: 'maybe' }, '/srv'),
+      (error: unknown) => error instanceof ConfigError && /JUKECORD_ALLOW_PRIVATE_ADDRESSES/.test(error.message),
+    );
+  });
+
   it('treats an empty value as unset, the way compose writes VAR=', () => {
     const config = loadConfig({ JUKECORD_PORT: '', JUKECORD_DISCORD_TOKEN: '   ' }, '/srv');
     assert.equal(config.port, DEFAULT_PORT);

@@ -19,7 +19,9 @@ import { Players } from './core/players.ts';
 import { QueueService } from './core/queue.ts';
 import { Bot } from './discord/bot.ts';
 import { ConsoleSink, createLogger, FileSink } from './log.ts';
+import { publicAddressesOnly } from './media/address.ts';
 import { MediaCache } from './media/cache.ts';
+import { startEgressGuard } from './media/egress.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
@@ -91,13 +93,17 @@ async function main(): Promise<number> {
     fs.copyFileSync(config.media.cookies, cookies);
     fs.chmodSync(cookies, 0o600);
   }
+  // Every connection yt-dlp makes goes through the address guard, unless private addresses are allowed (egress.ts).
+  const egress = config.media.allowPrivate ? null : await startEgressGuard({ log: log.child('egress') });
   // yt-dlp runs YouTube's scripts with this very Node binary (the image has no other JavaScript runtime).
   const ytdlp = new YtDlp({
+    proxy: egress?.url ?? null,
     cookies,
     binary: config.media.ytdlp,
     jsRuntime: `node:${process.execPath}`,
     timeoutMs: config.media.fetchTimeoutMs,
     maxPlaylist: MAX_PLAYLIST,
+    cacheDir: path.join(config.dataDir, 'yt-dlp'),
   });
   const ffmpeg = new Ffmpeg(config.media.ffmpeg);
   const media = new Media({
@@ -128,7 +134,12 @@ async function main(): Promise<number> {
     log: log.child('prefetch'),
     count: config.media.prefetch,
   });
-  const resolver = new Resolver({ ytdlp, tracks: store.tracks, log: log.child('lookup') });
+  const resolver = new Resolver({
+    ytdlp,
+    tracks: store.tracks,
+    log: log.child('lookup'),
+    ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
+  });
   const actions = new Actions({
     store,
     queue,
@@ -242,6 +253,7 @@ async function main(): Promise<number> {
       .close()
       .catch(() => {})
       .then(() => bot?.stop())
+      .then(() => egress?.close())
       .finally(() => {
         store.close();
         process.exit(0);

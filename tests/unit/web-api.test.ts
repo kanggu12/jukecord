@@ -269,26 +269,34 @@ describe('the HTTP API', () => {
     assert.equal(answer.headers['cache-control'], 'no-store');
   });
 
-  it('serves a prepared track with Range, and says when a track is not ready', async () => {
+  it("serves a server's queued track with Range, and nothing else", async () => {
     const track = server.store.tracks.upsert(exampleTrack('audio'));
-    const missing = await inject({ method: 'GET', url: api(`/tracks/${track.id}/audio`), headers: asHost });
-    assert.equal(missing.statusCode, 409);
+    const url = api(`/guilds/${GUILD}/tracks/${track.id}/audio`);
+    // Not queued anywhere yet: not served, whatever the cache holds.
+    assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404);
+    server.queue.add(GUILD, [track.id], 'end', null);
+    assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 409);
     const key = MediaCache.keyOf(track.source);
     const tmp = server.cache.tmpPath(key);
     fs.writeFileSync(tmp, Buffer.alloc(1000, 7));
     server.cache.commit(key, tmp, { source: track.source, durationMs: 1000, loudness: null });
-    const whole = await inject({ method: 'GET', url: api(`/tracks/${track.id}/audio`), headers: asHost });
+    const whole = await inject({ method: 'GET', url, headers: asHost });
     assert.equal(whole.statusCode, 200);
     assert.match(String(whole.headers['content-type']), /^audio\/ogg/);
     assert.equal(whole.rawPayload.length, 1000);
-    const part = await inject({
-      method: 'GET',
-      url: api(`/tracks/${track.id}/audio`),
-      headers: { ...asHost, range: 'bytes=100-199' },
-    });
+    const part = await inject({ method: 'GET', url, headers: { ...asHost, range: 'bytes=100-199' } });
     assert.equal(part.statusCode, 206);
     assert.equal(part.rawPayload.length, 100);
-    assert.equal((await inject({ method: 'GET', url: api(`/tracks/${track.id}/audio`) })).statusCode, 401);
+    assert.equal((await inject({ method: 'GET', url })).statusCode, 401);
+    // Through another server's path: that server does not have it.
+    assert.equal(
+      (await inject({ method: 'GET', url: api(`/guilds/${OTHER_GUILD}/tracks/${track.id}/audio`), headers: asHost }))
+        .statusCode,
+      404,
+    );
+    // A member of neither server cannot ask at all.
+    const stranger = sessionFor(server, BOB);
+    assert.equal((await inject({ method: 'GET', url, headers: { cookie: stranger.cookie } })).statusCode, 403);
   });
 });
 
@@ -349,6 +357,16 @@ describe('logging in with Discord through the server', () => {
           headers: { cookie: stateCookie },
         });
       };
+      // Just started, Discord's server list not here yet: "still connecting", and not counted as a failed login
+      // (21 of them would pass the limit of 20).
+      server.directory.serversKnown = false;
+      for (let i = 0; i < 21; i += 1) {
+        assert.equal((await login()).headers.location, '/login?error=connecting');
+      }
+      const early = await app.inject({ method: 'GET', url: api('/guilds'), headers: asHost });
+      assert.equal(early.statusCode, 503);
+      assert.equal(early.json().error.code, 'unavailable');
+      server.directory.serversKnown = true;
       const stranger = await login();
       assert.equal(stranger.headers.location, '/login?error=not-a-member');
       server.directory.join(GUILD, ALICE);

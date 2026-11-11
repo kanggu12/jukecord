@@ -10,6 +10,7 @@ import type { MediaPreparer, PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { TrackRepository } from '../store/store.ts';
+import { BusyError } from './busy.ts';
 import { MediaCache } from './cache.ts';
 import type { Ffmpeg } from './ffmpeg.ts';
 import { oggOpusDurationMs } from './ogg.ts';
@@ -185,6 +186,9 @@ export class Media implements MediaPreparer {
     if (cache.hasMp3(key)) return cache.mp3Path(key);
     let job = this.mp3Jobs.get(key);
     if (!job) {
+      // Two conversions at a time: each is an ffmpeg process, and requests for many tracks at once would start many.
+      if (this.mp3Jobs.size >= 2)
+        throw new BusyError('jukecord is making other MP3 copies right now; try again in a moment');
       const tmp = cache.tmpPath(key, 'mp3');
       job = this.options.ffmpeg
         .toMp3(cache.opusPath(key), tmp, signal, this.options.timeoutMs)

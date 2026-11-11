@@ -46,6 +46,8 @@ export interface Config {
     readonly trackMaxMs: number;
     /** A cookies file yt-dlp uses for YouTube's sign-in check, or null. */
     readonly cookies: string | null;
+    /** Whether addresses on private networks may be fetched (media servers on the local network). */
+    readonly allowPrivate: boolean;
   };
   /** The most tracks one server's queue may hold. */
   readonly queueMax: number;
@@ -103,6 +105,7 @@ const KNOWN = new Set([
   'JUKECORD_QUEUE_MAX',
   'JUKECORD_VOICE_IDLE',
   'JUKECORD_TRUST_PROXY',
+  'JUKECORD_ALLOW_PRIVATE_ADDRESSES',
   // Read by compose.yaml (the published address and the image), not by jukecord; known so they raise no warning
   // when .env passes them through.
   'JUKECORD_BIND',
@@ -268,6 +271,13 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
       if (!files.readable(full)) throw new Error(`${full} cannot be read`);
       return full;
     }),
+    // Off unless asked for: people who may add tracks should not be able to make the server fetch from its own network.
+    allowPrivate: read('JUKECORD_ALLOW_PRIVATE_ADDRESSES', false, (text) => {
+      const value = text.toLowerCase();
+      if (value === 'true' || value === 'yes' || value === '1') return true;
+      if (value === 'false' || value === 'no' || value === '0') return false;
+      throw new Error(`"${text}" is not true or false`);
+    }),
   };
 
   // The queue limit keeps a pasted 5,000-track playlist (or a script) from making the panel and the database crawl.
@@ -347,6 +357,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'log rotation': `${config.log.files} files of ${config.log.maxBytes} bytes`,
     'longest track': `${config.media.trackMaxMs} ms`,
     'yt-dlp cookies': config.media.cookies ?? 'not set',
+    'private addresses': config.media.allowPrivate ? 'allowed' : 'refused',
     'queue limit': String(config.queueMax),
     'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
   };

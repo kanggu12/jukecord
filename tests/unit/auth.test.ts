@@ -6,12 +6,14 @@ import { describe, it } from 'node:test';
 import { createLogger } from '../../src/log.ts';
 import {
   Auth,
+  addressKey,
   cookie,
   ensureHostToken,
   FailureLimiter,
   hashSecret,
   parseCookies,
   SESSION_COOKIE,
+  safeNext,
 } from '../../src/web/auth.ts';
 import { memoryStore } from '../support/store.ts';
 import { ALICE, HOST_TOKEN } from '../support/web.ts';
@@ -217,5 +219,60 @@ describe('Discord login', () => {
     const started = auth.oauthStart('/');
     const state = new URL(started.location).searchParams.get('state') ?? '';
     await assert.rejects(auth.oauthFinish('c', state, started.cookie.split(';')[0]), /without an ID/);
+  });
+});
+
+describe('addressKey and the limiter under a scan', () => {
+  it('counts an IPv6 /56 as one address, IPv4 written as IPv6 as the IPv4 address, and no address as one', () => {
+    assert.equal(addressKey('2001:db8:1:2:3:4:5:6'), '2001:db8:1:0::/56');
+    assert.equal(addressKey('2001:db8:1:2::9'), '2001:db8:1:0::/56');
+    assert.equal(addressKey('2001:db8:1:1ff::9'), '2001:db8:1:100::/56');
+    assert.equal(addressKey('2001:db8::1'), '2001:db8:0:0::/56');
+    assert.equal(addressKey('::ffff:192.0.2.7'), '192.0.2.7');
+    assert.equal(addressKey('192.0.2.7'), '192.0.2.7');
+    assert.equal(addressKey(undefined), 'unknown');
+    const limiter = new FailureLimiter();
+    for (let i = 0; i < 20; i += 1) limiter.fail(`2001:db8:1:${(i % 4).toString(16)}::${i.toString(16)}`);
+    // Every /64 of that /56 is blocked; the next /56 is not.
+    assert.equal(limiter.blocked('2001:db8:1:ff:ffff::1'), true);
+    assert.equal(limiter.blocked('2001:db8:1:100::1'), false);
+  });
+
+  it('keeps at most its capacity, forgetting the addresses that failed longest ago', () => {
+    const limiter = new FailureLimiter({ capacity: 3, limit: 2 });
+    limiter.fail('10.0.0.1');
+    limiter.fail('10.0.0.1');
+    assert.equal(limiter.blocked('10.0.0.1'), true);
+    for (const address of ['10.0.0.2', '10.0.0.3', '10.0.0.4']) limiter.fail(address);
+    // The first address was pushed out by three newer ones.
+    assert.equal(limiter.blocked('10.0.0.1'), false);
+  });
+
+  it('keeps no more failures for one address than it takes to block it', () => {
+    const limiter = new FailureLimiter({ limit: 20 });
+    for (let i = 0; i < 5000; i += 1) limiter.fail('10.0.0.9');
+    const kept = (limiter as unknown as { failures: Map<string, number[]> }).failures.get('10.0.0.9');
+    assert.equal(kept?.length, 20);
+    assert.equal(limiter.blocked('10.0.0.9'), true);
+  });
+});
+
+describe('safeNext', () => {
+  it('keeps paths on this site and turns everything else into /', () => {
+    assert.equal(safeNext('/stats?days=7#top'), '/stats?days=7#top');
+    for (const next of [
+      '//evil.example',
+      '/\t/evil.example',
+      '/\\evil.example',
+      'https://evil.example/',
+      'stats',
+      '',
+      // Dot segments that rebuild into "//evil.example".
+      '/.//evil.example',
+      '/%2e%2e//evil.example',
+      '/./\\evil.example',
+    ]) {
+      assert.equal(safeNext(next), '/', JSON.stringify(next));
+    }
   });
 });

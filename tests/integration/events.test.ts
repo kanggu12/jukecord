@@ -145,3 +145,26 @@ describe('live updates', () => {
     socket.close();
   });
 });
+
+describe('live updates end with the login', () => {
+  it('closes a browser connection when its session logs out', async () => {
+    const server = await testServer({ listen: true });
+    try {
+      server.directory.join(GUILD, ALICE);
+      const { cookie, csrf } = sessionFor(server, ALICE);
+      const socket = new Socket(`${server.url.replace('http://', 'ws://')}/api/v1/events?guild=${GUILD}`, {
+        cookie,
+        origin: server.url,
+      });
+      await socket.next('state');
+      const logout = await fetch(`${server.url}/auth/logout`, {
+        method: 'POST',
+        headers: { cookie, 'x-jukecord-csrf': csrf },
+      });
+      assert.equal(logout.status, 204);
+      assert.equal((await socket.closed).code, 4401);
+    } finally {
+      await server.close();
+    }
+  });
+});

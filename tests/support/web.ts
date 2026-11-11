@@ -47,9 +47,15 @@ export class FakeDirectory implements Directory {
   asked = 0;
   /** When set, member questions fail as if Discord were down. */
   down = false;
+  /** Cleared to act as if jukecord had just started and Discord had not sent the server list yet. */
+  serversKnown = true;
 
   self() {
     return { id: '200000000000000001', name: 'jukecord', avatar: null };
+  }
+
+  loaded(): boolean {
+    return this.serversKnown;
   }
 
   guilds(): GuildInfo[] {

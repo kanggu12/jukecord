@@ -21,6 +21,13 @@ export interface YtDlpOptions {
   readonly maxPlaylist: number;
   /** A Netscape cookies file passed to yt-dlp (needed when YouTube asks the server to sign in), or null. */
   readonly cookies?: string | null;
+  /**
+   * Where yt-dlp keeps what it learns between runs (YouTube's player code and its solved challenges). Without it
+   * yt-dlp looks under the home directory, which the image's user does not have, and fetches it all again each time.
+   */
+  readonly cacheDir?: string | null;
+  /** The proxy every connection of yt-dlp goes through (the address guard, egress.ts), or null for none. */
+  readonly proxy?: string | null;
 }
 
 // Titles YouTube gives entries that cannot be played; they are left out of an added playlist.
@@ -70,6 +77,8 @@ export function trackFromEntry(entry: Record<string, unknown>): NewTrack | null 
   } catch {
     return null;
   }
+  // Only web pages: an entry pointing at file:, data: or javascript: is not something to fetch or to link to.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   const source = canonicalSource(url);
   const seconds = number(entry.duration);
   return {
@@ -148,6 +157,9 @@ export class YtDlp {
   // Arguments every run shares: no config files, no warnings in the output we parse, Node as the JS runtime.
   private common(): string[] {
     const args = ['--ignore-config', '--no-warnings', '--js-runtimes', this.options.jsRuntime];
+    if (this.options.cacheDir) args.push('--cache-dir', this.options.cacheDir);
+    // Redirects, playlist entries and the media itself go through the guard, which connects to public addresses only.
+    if (this.options.proxy) args.push('--proxy', this.options.proxy);
     // The cookies of a signed-in browser get past YouTube's bot check on a server it distrusts.
     if (this.options.cookies) args.push('--cookies', this.options.cookies);
     return args;

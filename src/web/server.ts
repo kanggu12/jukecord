@@ -17,6 +17,7 @@ import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
+import { BusyError } from '../media/busy.ts';
 import { MediaCache } from '../media/cache.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
@@ -116,6 +117,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     presenter: deps.presenter,
     users: deps.store.users,
     log: log.child('events'),
+    stillValid: (caller) => auth.stillValid(caller),
   });
 
   // Responses by status class, for /metrics.
@@ -252,20 +254,35 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     });
   }
 
-  // The audio of a prepared track, for browsers playing along. Range requests let them seek without downloading it all.
-  app.get<{ Params: { track: string }; Querystring: { format?: string } }>(
-    `${API_PREFIX}/tracks/:track/audio`,
+  // The audio of a prepared track, for browsers playing along. Only a track that a server the caller can open is
+  // playing or has queued: a login cannot walk the track numbers and make ffmpeg convert the whole cache. Range
+  // requests let a browser seek without downloading it all.
+  app.get<{ Params: { guild: string; track: string }; Querystring: { format?: string } }>(
+    `${API_PREFIX}/guilds/:guild/tracks/:track/audio`,
     async (request, reply) => {
-      if (!identify(request, reply)) return failure(reply, 'unauthorized', 'log in first');
+      // An address that failed too often is refused here too, before its credential is tried again.
+      if (auth.limiter.blocked(request.ip))
+        return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
+      const caller = identify(request, reply);
+      if (!caller) return failure(reply, 'unauthorized', 'log in first');
+      const context = await deps.access.context(caller.principal, request.params.guild);
       const id = Number(request.params.track);
-      const track = Number.isInteger(id) && id > 0 ? deps.store.tracks.get(id) : null;
-      if (!track) return failure(reply, 'not-found', 'there is no such track');
+      const current = options.players.get(context.guildId).snapshot().track;
+      const queued = current?.id === id || options.queue.list(context.guildId).some((item) => item.track.id === id);
+      const track = Number.isInteger(id) && id > 0 && queued ? deps.store.tracks.get(id) : null;
+      if (!track) return failure(reply, 'not-found', 'that track is not playing or queued in this server');
       const key = MediaCache.keyOf(track.source);
       if (!options.cache.has(key)) return failure(reply, 'conflict', 'the track is not prepared yet');
       let file = options.cache.opusPath(key);
       if (request.query.format === 'mp3') {
         // Shared by everyone asking at once and not tied to this request: a second browser may be waiting for it.
-        const mp3 = await options.mp3(track, AbortSignal.timeout(120_000));
+        let mp3: string | null;
+        try {
+          mp3 = await options.mp3(track, AbortSignal.timeout(120_000));
+        } catch (error) {
+          if (error instanceof BusyError) return failure(reply, 'unavailable', error.message);
+          throw error;
+        }
         if (!mp3) return failure(reply, 'conflict', 'the track is not prepared yet');
         file = mp3;
       }
@@ -277,6 +294,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // Live updates. A browser's cookie is only accepted from the panel's own pages (another site could otherwise open
   // a connection with it).
   app.get<{ Querystring: { guild?: string } }>(`${API_PREFIX}/events`, { websocket: true }, (socket, request) => {
+    // A blocked address is told to come back later (1013), which a panel takes as "reconnect after a wait".
+    if (auth.limiter.blocked(request.ip)) {
+      socket.close(1013, 'too many failed logins; wait ten minutes');
+      return;
+    }
     const caller = identify(request);
     if (!caller) {
       socket.close(4401, 'log in first');
@@ -317,6 +339,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         log.info('logged in with Discord', { user: person.name });
         return reply.redirect(next);
       } catch (failure) {
+        // Just started and not connected to Discord yet: not the person's failure, and not counted as one.
+        if (failure instanceof ActionError && failure.code === 'unavailable')
+          return reply.redirect('/login?error=connecting');
         auth.limiter.fail(request.ip);
         log.info('a Discord login failed', { reason: failure instanceof Error ? failure.message : String(failure) });
         return reply.redirect('/login?error=failed');
@@ -334,11 +359,14 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     return reply.header('set-cookie', auth.startSession({ kind: 'host' })).redirect('/');
   });
   app.post('/auth/logout', async (request, reply) => {
+    if (auth.limiter.blocked(request.ip)) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
     const caller = identify(request);
     if (caller && !auth.csrfOk(caller, request.headers[CSRF_HEADER] as string | undefined)) {
       return failure(reply, 'forbidden', "the logout came without the panel's CSRF token");
     }
     if (caller?.principal.kind === 'user') deps.access.forget(caller.principal.userId);
+    // This browser's live connection ends with its login.
+    if (caller?.sessionHash) hub.end((other) => other.sessionHash === caller.sessionHash);
     return reply.header('set-cookie', auth.endSession(caller)).code(204).send();
   });
 

@@ -10,6 +10,8 @@ import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
+import { AddressError } from '../media/address.ts';
+import { BusyError } from '../media/busy.ts';
 import type { Resolver } from '../media/resolver.ts';
 import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
@@ -86,8 +88,12 @@ export interface VoiceControl {
   leave(guildId: string): boolean;
   /** The voice channel the bot is in, or null. */
   channel(guildId: string): { channelId: string; name: string } | null;
-  /** The server's voice channels the bot may join, in Discord's order. */
-  channels(guildId: string): VoiceChannelInfo[];
+  /**
+   * The server's voice channels the bot may join, in Discord's order, as one viewer may see them: a member sees the
+   * channels they can see themselves, anyone else (the panels' shared updates) the ones everybody in the server can
+   * see, and `all` (the host) every one.
+   */
+  channels(guildId: string, viewer: { userId: string | null; all: boolean }): VoiceChannelInfo[];
 }
 
 /** A voice channel, for choosing where the bot goes. */
@@ -125,6 +131,8 @@ export interface MemberInfo {
 export interface Directory {
   /** The bot's own account (name and avatar for the panel's header), or null before it has logged in. */
   self(): { readonly id: string; readonly name: string; readonly avatar: string | null } | null;
+  /** Whether Discord has sent the server list yet: false for the first seconds after jukecord starts. */
+  loaded(): boolean;
   guilds(): GuildInfo[];
   roles(guildId: string): RoleInfo[];
   /** The member's roles and rights, or null when they are not in the server. */
@@ -207,11 +215,13 @@ export class Actions {
   }
 
   // Looks up an input and turns lookup failures into errors people can act on.
-  private async lookup(input: string, signal?: AbortSignal): Promise<Track[]> {
+  private async lookup(input: string, signal: AbortSignal | undefined, who: string | null): Promise<Track[]> {
     try {
-      return await this.options.resolver.resolve(input, signal);
+      return await this.options.resolver.resolve(input, signal, who);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof AddressError) throw new ActionError('invalid', message);
+      if (error instanceof BusyError) throw new ActionError('unavailable', message);
       throw new ActionError(/nothing to add/.test(message) ? 'invalid' : 'not-found', message);
     }
   }
@@ -219,7 +229,7 @@ export class Actions {
   /** Adds what an address or search finds (all of a playlist) and starts playing if nothing was. */
   async add(context: ActionContext, input: string, at: InsertAt = 'end', signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
-    const result = this.enqueue(context, await this.lookup(input, signal), at);
+    const result = this.enqueue(context, await this.lookup(input, signal, context.userId), at);
     this.options.players.get(context.guildId).play();
     return result;
   }
@@ -251,7 +261,7 @@ export class Actions {
   /** Puts what an input finds first and plays it now; the current track is skipped. */
   async playNow(context: ActionContext, input: string, signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
-    const result = this.enqueue(context, await this.lookup(input, signal), 'next');
+    const result = this.enqueue(context, await this.lookup(input, signal, context.userId), 'next');
     const player = this.options.players.get(context.guildId);
     // Idle: play starts the first of the new items. Otherwise skipping moves on to it.
     if (!player.play()) player.skip();
@@ -455,7 +465,13 @@ export class Actions {
     const voice = this.options.voice;
     // Browser-only: there are no channels, which is an answer, not an error (the panel shows "no Discord").
     if (!voice) return { current: null, channels: [] };
-    return { current: voice.channel(context.guildId), channels: voice.channels(context.guildId) };
+    // The host (no Discord user, may manage) sees every channel; a member, the ones they can see themselves.
+    const viewer = { userId: context.userId, all: context.userId === null && context.mayManage };
+    const channels = voice.channels(context.guildId, viewer);
+    const current = voice.channel(context.guildId);
+    // The bot's own channel is named only to those who can see it; the others learn that it is in voice, not where.
+    const hidden = current !== null && !viewer.all && !channels.some((channel) => channel.id === current.channelId);
+    return { current: hidden ? { channelId: current.channelId, name: '' } : current, channels };
   }
 
   /**

@@ -21,7 +21,7 @@ import {
   type VoiceConnection,
   VoiceConnectionStatus,
 } from '@discordjs/voice';
-import { type Client, PermissionFlagsBits } from 'discord.js';
+import { type Client, type GuildMember, PermissionFlagsBits, type PermissionsBitField, type Role } from 'discord.js';
 import { ActionError, type VoiceChannelInfo, type VoiceControl } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import { type Clock, systemClock } from '../core/clock.ts';
@@ -192,15 +192,22 @@ export class VoiceManager implements VoiceControl {
     return joined ? { channelId: joined.channelId, name: joined.name } : null;
   }
 
-  channels(guildId: string): VoiceChannelInfo[] {
+  channels(guildId: string, viewer: { userId: string | null; all: boolean }): VoiceChannelInfo[] {
     const guild = this.client.guilds.cache.get(guildId);
     const me = guild?.members.me;
     if (!guild || !me) return [];
+    // Whose eyes the list is for: a member (from the cache Access fills), else everybody in the server.
+    const member = viewer.userId ? guild.members.cache.get(viewer.userId) : undefined;
+    const sees = (channel: { permissionsFor(target: GuildMember | Role): Readonly<PermissionsBitField> | null }) =>
+      viewer.all ||
+      Boolean(channel.permissionsFor(member ?? guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel));
     return (
       [...guild.channels.cache.values()]
         // Voice and stage channels the bot may enter and speak in; the others would only fail on join.
         .filter((channel) => channel.isVoiceBased())
         .filter((channel) => channel.permissionsFor(me)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]))
+        // A private channel is not shown to people who cannot see it in Discord.
+        .filter((channel) => sees(channel))
         // Discord's own order: by position, then by ID for channels at the same position.
         .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
         .map((channel) => ({
@@ -223,6 +230,17 @@ export class VoiceManager implements VoiceControl {
     if (!target) throw new ActionError('invalid', 'join a voice channel first, or name one');
     const channel = guild.channels.cache.get(target);
     if (!channel?.isVoiceBased()) throw new ActionError('invalid', 'that is not a voice channel');
+    // A named channel: the person must be able to go there themselves, or the bot would carry music into a channel
+    // they cannot see. (Their own channel needs no check: they are in it.)
+    if (channelId && userId) {
+      const member = guild.members.cache.get(userId) ?? (await guild.members.fetch(userId).catch(() => null));
+      if (
+        !member ||
+        !channel.permissionsFor(member)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect])
+      ) {
+        throw new ActionError('forbidden', 'you cannot join that channel yourself');
+      }
+    }
     // Missing permissions fail silently in Discord (the bot appears and says nothing); say it plainly instead.
     const me = guild.members.me;
     const allowed = me ? channel.permissionsFor(me) : null;

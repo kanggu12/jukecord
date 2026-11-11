@@ -81,7 +81,15 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
 
   function build() {
     const store = memoryStore();
-    const ytdlp = new YtDlp({ binary: FAKE, jsRuntime: 'node', timeoutMs: 30_000, maxPlaylist: 100 });
+    // The proxy is only passed on (the fake yt-dlp makes no connections); the cache folder is where it would keep things.
+    const ytdlp = new YtDlp({
+      binary: FAKE,
+      jsRuntime: 'node',
+      timeoutMs: 30_000,
+      maxPlaylist: 100,
+      proxy: 'http://127.0.0.1:9',
+      cacheDir: path.join(dir, 'yt-dlp'),
+    });
     const cache = new MediaCache({ dir: fs.mkdtempSync(path.join(dir, 'cache-')), maxBytes: 1024 ** 3, log });
     cache.init();
     const ffmpeg = new Ffmpeg(FFMPEG);
@@ -101,12 +109,16 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
     assert.equal(await oggOpusDurationMs(prepared.file), prepared.durationMs);
     assert.ok(store.tracks.get(track.id)?.loudness !== null, 'loudness was not recorded');
     assert.equal(cache.count(), 1);
-    // yt-dlp was told to use Node for JavaScript and to ignore config files.
+    // yt-dlp was told to use Node for JavaScript, to ignore config files, to keep its cache in the data directory and
+    // to make every connection through the address guard: the lookup and the download alike.
     const runs = fs.readFileSync(path.join(dir, 'args.log'), 'utf8').trim().split('\n');
+    assert.ok(runs.length >= 2, `only ${runs.length} yt-dlp runs were recorded`);
     for (const run of runs) {
       const args = JSON.parse(run) as string[];
       assert.ok(args.includes('--ignore-config'));
       assert.equal(args[args.indexOf('--js-runtimes') + 1], 'node');
+      assert.equal(args[args.indexOf('--proxy') + 1], 'http://127.0.0.1:9');
+      assert.equal(args[args.indexOf('--cache-dir') + 1], path.join(dir, 'yt-dlp'));
     }
     // The second time comes from the cache: no new download.
     fs.writeFileSync(path.join(dir, 'args.log'), '');

@@ -114,40 +114,76 @@ export interface OAuthConfig {
   readonly authorize?: string;
 }
 
-/** Turns failed logins from one address into a short ban, so a link or token cannot be guessed at speed. */
+/**
+ * The key failures are counted under: an IPv4 address as it is, an IPv6 address by its /56 (the block a home or a
+ * server is usually given, so rotating through it does not reset the count; a /48 holds only 256 of them), an IPv4
+ * address written as IPv6 as the IPv4 one. A request without an address (its socket already closed) counts as one.
+ */
+export function addressKey(address: string | undefined): string {
+  const plain = (address ?? 'unknown').split('%')[0] ?? 'unknown';
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(plain)?.[1];
+  if (mapped) return mapped;
+  if (!plain.includes(':')) return plain;
+  // "::" stands for as many zero groups as are missing from eight.
+  const [head = '', tail = ''] = plain.split('::');
+  const compressed = plain.includes('::');
+  const left = head ? head.split(':') : [];
+  const right = compressed && tail ? tail.split(':') : [];
+  const groups = compressed
+    ? [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right]
+    : plain.split(':');
+  const [a, b, c, d] = groups.map((group) => Number.parseInt(group || '0', 16) || 0);
+  // The first 56 bits: three groups and the high byte of the fourth.
+  return `${[a, b, c, (d ?? 0) & 0xff00].map((group) => (group ?? 0).toString(16)).join(':')}::/56`;
+}
+
+/**
+ * Turns failed logins from one address into a short ban, so a link or token cannot be guessed at speed.
+ *
+ * It remembers at most 10,000 addresses, the ones that failed most recently: a scan from many addresses pushes out
+ * the oldest instead of growing the map or making every failure walk it.
+ */
 export class FailureLimiter {
+  // Insertion order is the order of each address's latest failure, oldest first.
   private readonly failures = new Map<string, number[]>();
   private readonly limit: number;
   private readonly windowMs: number;
   private readonly now: () => number;
+  private readonly capacity: number;
 
-  constructor(options: { limit?: number; windowMs?: number; now?: () => number } = {}) {
+  constructor(options: { limit?: number; windowMs?: number; now?: () => number; capacity?: number } = {}) {
     this.limit = options.limit ?? 20;
     this.windowMs = options.windowMs ?? 10 * 60_000;
     this.now = options.now ?? Date.now;
+    this.capacity = options.capacity ?? 10_000;
   }
 
   /** Whether this address has failed too often lately. */
-  blocked(address: string): boolean {
-    return this.recent(address).length >= this.limit;
+  blocked(address: string | undefined): boolean {
+    return this.recent(addressKey(address)).length >= this.limit;
   }
 
-  fail(address: string): void {
-    const recent = this.recent(address);
+  fail(address: string | undefined): void {
+    const key = addressKey(address);
+    const recent = this.recent(key);
     recent.push(this.now());
-    this.failures.set(address, recent);
-    // Old addresses are forgotten as they age out, so the map cannot grow without end under a scan.
-    if (this.failures.size > 10_000) {
-      for (const [key] of this.failures) {
-        if (this.recent(key).length === 0) this.failures.delete(key);
-      }
+    // Only the latest `limit` failures matter (that many block), so no more are kept: an address failing without end
+    // costs the same little each time.
+    if (recent.length > this.limit) recent.splice(0, recent.length - this.limit);
+    // Moved to the end: it is now the most recent.
+    this.failures.delete(key);
+    this.failures.set(key, recent);
+    while (this.failures.size > this.capacity) {
+      const oldest = this.failures.keys().next().value;
+      if (oldest === undefined) break;
+      this.failures.delete(oldest);
     }
   }
 
-  // The failures of an address inside the window.
-  private recent(address: string): number[] {
+  // The failures of a key inside the window.
+  private recent(key: string): number[] {
     const since = this.now() - this.windowMs;
-    return (this.failures.get(address) ?? []).filter((at) => at > since);
+    return (this.failures.get(key) ?? []).filter((at) => at > since);
   }
 }
 
@@ -258,6 +294,14 @@ export class Auth {
     } catch (error) {
       this.options.log.debug('could not note a token as used', { error });
     }
+  }
+
+  /** Whether a caller's login still exists: a session not logged out or expired, a token not revoked. */
+  stillValid(caller: Caller): boolean {
+    if (caller.sessionHash) return this.options.store.sessions.get(caller.sessionHash) !== null;
+    if (caller.tokenId !== null) return this.options.store.tokens.get(caller.tokenId) !== null;
+    // The host token: valid as long as jukecord runs with it.
+    return true;
   }
 
   /** Starts a panel login and returns the Set-Cookie value. */
@@ -427,8 +471,18 @@ export class Auth {
   }
 }
 
-// Only paths on this site may be the place to go after logging in: "//evil.example" and full addresses would turn
-// the login into an open redirect.
-function safeNext(next: string): string {
-  return next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : '/';
+// Only paths on this site may be the place to go after logging in: "//evil.example", "/<tab>/evil.example" and full
+// addresses would turn the login into an open redirect. Parsed the way a browser parses it, then rebuilt from its path.
+export function safeNext(next: string): string {
+  const base = 'http://jukecord.invalid';
+  try {
+    const url = new URL(next, base);
+    if (url.origin !== base || !next.startsWith('/')) return '/';
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    // Dot segments can rebuild into "//elsewhere" ("/.//evil.example" has the path "//evil.example"), which a
+    // browser reads as another site.
+    return /^\/[/\\]/.test(path) ? '/' : path;
+  } catch {
+    return '/';
+  }
 }

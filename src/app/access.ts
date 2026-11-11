@@ -33,6 +33,9 @@ export interface AccessOptions {
   readonly ttlMs?: number;
 }
 
+// The answer while Discord has not sent the server list yet (the first seconds after a start); panels ask again.
+const STILL_CONNECTING = 'jukecord is still connecting to Discord; try again in a moment';
+
 // One remembered answer about a member (null: not in the server) and when it was asked.
 interface Remembered {
   readonly member: MemberInfo | null;
@@ -58,6 +61,8 @@ export class Access {
     const directory = this.options.directory();
     // Browser-only: the one local queue, which only the host can reach (there is no Discord login without a bot).
     if (!directory) return principal.kind === 'host' ? [{ ...LOCAL_GUILD, mayControl: true, mayManage: true }] : [];
+    // Just started: an empty list now would read as "the bot is in no server".
+    if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING);
     const guilds = directory.guilds();
     if (principal.kind === 'host') return guilds.map((guild) => ({ ...guild, mayControl: true, mayManage: true }));
     // A user sees the servers they are in; the questions go out together, not one after another.
@@ -80,6 +85,7 @@ export class Access {
       if (principal.kind !== 'host') throw new ActionError('forbidden', 'only the host can use jukecord here');
       return { guildId, userId: null, mayControl: true, mayManage: true };
     }
+    if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING);
     if (!directory.guilds().some((guild) => guild.id === guildId)) {
       throw new ActionError('not-found', 'the bot is not in that server');
     }
