@@ -84,9 +84,8 @@ execFileSync(ffmpeg, [
   '-loglevel',
   'error',
   '-y',
-  '-f',
-  'lavfi',
-  '-i',
+  // A source filter, not -f lavfi: the image's FFmpeg is built without devices (lavfi is one).
+  '-filter_complex',
   'sine=frequency=330:duration=180,volume=0.08',
   '-c:a',
   'libopus',

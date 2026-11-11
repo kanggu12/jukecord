@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 #
-# The jukecord image, for linux/amd64 and linux/arm64: Node 26 LTS on Debian 13, Debian's ffmpeg (libopus, libmp3lame), and
-# the official yt-dlp build for the image's architecture, checked against the release's published checksum.
+# The jukecord image, for linux/amd64 and linux/arm64: Node 26 LTS on Debian 13, FFmpeg built here for audio (Opus,
+# MP3), and the official yt-dlp build for the image's architecture, checked against the release's published checksum.
 #
 # yt-dlp's official builds carry everything yt-dlp needs, including the scripts it runs for YouTube; they run those
 # with Node (JUKECORD passes --js-runtimes node), so the image needs neither Python nor Deno.
@@ -41,6 +41,41 @@ RUN set -eu; \
     ln -s "$exe" /opt/yt-dlp/yt-dlp; \
     rm /tmp/yt-dlp.zip
 
+# ---- FFmpeg ---------------------------------------------------------------------------------------------------------
+# FFmpeg for what jukecord asks of it: reading the audio of whatever yt-dlp brings (from a pipe, or over https when
+# yt-dlp hands a stream to FFmpeg), evening out its loudness, and writing Ogg Opus and MP3. Every demuxer, decoder,
+# parser, protocol, muxer and audio filter of FFmpeg's own stays in; devices, video scaling, encoders other than Opus,
+# MP3 and PCM, and every outside library but the four below are left out. Debian's package brings the libraries of
+# every codec and device it supports (about 450 MB); this is a single program of a few dozen MB. No GPL parts:
+# LGPL-3.0-or-later (version 3 for OpenSSL's licence).
+FROM ${NODE_IMAGE} AS ffmpeg
+# Bump both together. The sum is of the release's .tar.xz, whose signature was checked against FFmpeg's release
+# signing key (FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8, https://ffmpeg.org/ffmpeg-devel.asc) when pinned.
+ARG FFMPEG_VERSION=7.1.5
+ARG FFMPEG_SHA256=de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential ca-certificates curl nasm pkg-config xz-utils \
+      libmp3lame-dev libopus-dev libssl-dev zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    curl -fsSL --retry 3 -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
+    mkdir /tmp/ffmpeg; \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
+    cd /tmp/ffmpeg; \
+    ./configure --prefix=/opt/ffmpeg \
+      --disable-debug --disable-doc --disable-ffplay --disable-ffprobe \
+      --disable-autodetect --disable-avdevice --disable-swscale --disable-postproc \
+      --disable-encoders --enable-encoder=libopus,libmp3lame,pcm_s16le,pcm_f32le \
+      --enable-version3 --enable-openssl --enable-zlib --enable-libopus --enable-libmp3lame; \
+    make -j"$(nproc)"; \
+    make install; \
+    strip /opt/ffmpeg/bin/ffmpeg; \
+    rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
+    /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -q libopus; \
+    /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep -q libmp3lame; \
+    /opt/ffmpeg/bin/ffmpeg -hide_banner -protocols | grep -qx '  https'
+
 # ---- npm packages ---------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
@@ -71,10 +106,14 @@ LABEL org.opencontainers.image.title="jukecord" \
       org.opencontainers.image.source="https://github.com/kanggu12/jukecord" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
-# tini as PID 1 forwards SIGTERM to Node and reaps the yt-dlp and ffmpeg processes jukecord starts.
+# tini as PID 1 forwards SIGTERM to Node and reaps the yt-dlp and ffmpeg processes jukecord starts. libopus and LAME
+# are the two libraries FFmpeg was built against that the base does not have (OpenSSL comes with ca-certificates).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates tini \
+ && apt-get install -y --no-install-recommends ca-certificates tini libopus0 libmp3lame0 \
  && rm -rf /var/lib/apt/lists/*
+COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+# The program starts with the libraries this stage has (a missing one fails the build here, not at the first track).
+RUN ffmpeg -hide_banner -encoders | grep -q libopus
 COPY --from=ytdlp /opt/yt-dlp /opt/yt-dlp
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules

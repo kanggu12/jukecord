@@ -110,7 +110,8 @@ function frame(): void {
   const version = h('span', { class: 'version' });
   const brand = h(
     'a',
-    { class: 'brand', href: '/', 'data-route': 'player' },
+    // Named in words: on a phone the name beside the mark is hidden, and the link would have no name.
+    { class: 'brand', href: '/', 'data-route': 'player', 'aria-label': 'jukecord' },
     logoMark(26),
     h('b', null, 'jukecord'),
     version,
@@ -135,9 +136,16 @@ function frame(): void {
   );
 
   // The pages. The player screen is built once and kept; the others are built on each visit.
+  // Each page has one level-one heading: the player's is for screen readers (the cards carry their own titles).
+  const playerTitle = h('h1', { class: 'sr' });
+  watch(['lang'], () => {
+    playerTitle.textContent = t().player;
+  });
+  playerTitle.textContent = t().player;
   const playerScreen = h(
     'main',
     { class: 'main' },
+    playerTitle,
     h('div', { class: 'col' }, nowCard(live), queueCard(), addCard()),
     h('div', { class: 'col' }, voiceCard(), historyCard()),
   );

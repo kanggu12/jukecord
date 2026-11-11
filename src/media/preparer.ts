@@ -160,8 +160,22 @@ export class Media implements MediaPreparer {
           }
         }
         // The real length comes from the file: sites round, and some say nothing.
-        const durationMs = await oggOpusDurationMs(tmp);
-        if (durationMs < 500) throw new Error('the downloaded audio is empty');
+        let durationMs = await oggOpusDurationMs(tmp);
+        if (durationMs < 500) {
+          // An MP4 whose index comes at its end cannot be read as it arrives: ffmpeg finds no audio and still ends
+          // well. Such a file is fetched whole and read from the disk; one that is empty there too is empty.
+          const source = cache.tmpPath(key, 'source');
+          const limit = fetchLimitMs(this.options.timeoutMs, track.durationMs);
+          try {
+            await this.options.ytdlp.audioToFile(track.url, source, abort.signal, limit);
+            ({ loudness } = await this.options.ffmpeg.fromFile(source, tmp, abort.signal, limit));
+          } finally {
+            fs.rmSync(source, { force: true });
+          }
+          durationMs = await oggOpusDurationMs(tmp);
+          if (durationMs < 500) throw new Error('the downloaded audio is empty');
+          this.options.log.info('read a track from a whole file', { title: track.title });
+        }
         cache.commit(key, tmp, { source: track.source, durationMs, loudness });
         if (loudness !== null) this.options.tracks.setLoudness(track.id, loudness);
         this.options.log.info('cached a track', {

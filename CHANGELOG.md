@@ -6,6 +6,25 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The image is half the size: 423 MB instead of 843 MB on disk, 145 MiB instead of 290 MiB to download (gzip). FFmpeg
+  7.1.5 is built in it for what jukecord does (every format FFmpeg reads on its own, https, Opus and MP3 out) instead
+  of Debian's package with the libraries of every codec and device; it reads, measures and writes as before (sixteen
+  kinds of file compared, the same lengths and loudness).
+- The panel's first visit fetches about 300 KiB instead of 2.1 MiB: the font comes in pieces by character range
+  (Pretendard's own dynamic subset), and the scripts and styles are sent compressed, made so once by the build.
+- Live updates go compressed to browsers: a queue of a thousand tracks is about 60 KiB on the wire instead of
+  330 KiB, sent to every listener whenever the queue changes.
+
+### Fixed
+
+- A track whose file cannot be read as it arrives (an MP4 with its index at the end, as some sites serve it) is
+  fetched whole and plays, instead of failing as "the downloaded audio is empty".
+- Accessibility: the logo link has a name on phones, each page has one main landmark and one level-one heading, and
+  the menu's sheet is a valid dialog. The panel walk runs axe-core on the pages it photographs and fails on any rule
+  broken.
+
 ## [0.1.0] - 2026-11-12
 
 The first release.

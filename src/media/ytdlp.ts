@@ -12,6 +12,9 @@ import type { NewTrack } from '../core/types.ts';
 import { lastLines, ProcessError, type RunOptions, type RunResult, run } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
 
+// WebM/Opus is what YouTube serves best and ffmpeg reads it from a pipe; anything else as a fallback.
+const AUDIO_FORMAT = 'bestaudio[ext=webm]/bestaudio/best';
+
 export interface YtDlpOptions {
   /** The yt-dlp program. */
   readonly binary: string;
@@ -204,15 +207,44 @@ export class YtDlp {
   }
 
   /**
+   * Downloads a track's best audio (the same choice as audio()) into a file. For the few files ffmpeg cannot read as
+   * they arrive, an MP4 whose index comes at its end: ffmpeg then reads it from the disk, where it can look ahead.
+   */
+  async audioToFile(url: string, file: string, signal: AbortSignal, timeoutMs: number): Promise<void> {
+    const args = [
+      ...this.common(),
+      '--format',
+      AUDIO_FORMAT,
+      '--no-playlist',
+      // Straight into the file named, with no progress on stdout (which would only fill the output buffer).
+      '--no-part',
+      '--force-overwrites',
+      '--quiet',
+      '--no-progress',
+      '--output',
+      file,
+      url,
+    ];
+    try {
+      await run(this.options.binary, args, { signal, timeoutMs });
+    } catch (error) {
+      // The same short reason as a failed stream gives (a removed video, YouTube's bot check ...).
+      if (error instanceof ProcessError && error.result) {
+        throw new ProcessError(ytdlpFailure(error.result.stderr, error.result.code), error.result);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Starts downloading a track's best audio to stdout. The caller pipes stdout into ffmpeg and watches both
    * processes (see ffmpeg.ts); keeping the download in a pipe means no second temporary file.
    */
   audio(url: string): ChildProcess {
     const args = [
       ...this.common(),
-      // WebM/Opus is what YouTube serves best and ffmpeg reads it from a pipe; anything else as a fallback.
       '--format',
-      'bestaudio[ext=webm]/bestaudio/best',
+      AUDIO_FORMAT,
       '--no-playlist',
       // One progress line per update on stderr (stdout carries the audio), in a form parseProgress reads.
       '--progress',

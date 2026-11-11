@@ -23,7 +23,8 @@ too: a made-up server, its voice channels and people listening in browsers are p
 which runs browser-only. The README's pictures come from the same walk. `tests/ui/audit.js` measures each page:
 text that is clipped or drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with
 translucent layers composited), controls on one row that differ in height or centre, floating layers that cut across other boxes, a sheet or dialog that something
-else covers, and touch targets under 44 pixels. It also presses **Listen here** and waits for the browser to be in time
+else covers, and touch targets under 44 pixels. On the pages it photographs it also runs axe-core's accessibility
+rules (names, roles, landmarks, headings). It also presses **Listen here** and waits for the browser to be in time
 with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
 
 ## On arm64 without an arm64 machine

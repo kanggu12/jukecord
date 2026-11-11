@@ -94,13 +94,13 @@ people use most.
 
 ### What it runs on
 
-|                    | Needs                                                                                                                |
-| :----------------- | :------------------------------------------------------------------------------------------------------------------- |
-| **Docker Compose** | Linux, macOS, or Windows with WSL, on amd64 or arm64; 1 GB for the image and 2 GiB for the cache (its default limit) |
-| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system, through Docker Compose                                                             |
-| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume (its default)                              |
-| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                 |
-| **Listening**      | A current browser on a computer or a phone; Safari gets an MP3 copy of each track                                    |
+|                    | Needs                                                                                                                  |
+| :----------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| **Docker Compose** | Linux, macOS, or Windows with WSL, on amd64 or arm64; 450 MB for the image and 2 GiB for the cache (its default limit) |
+| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system, through Docker Compose                                                               |
+| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume (its default)                                |
+| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                   |
+| **Listening**      | A current browser on a computer or a phone; Safari gets an MP3 copy of each track                                      |
 
 ## Features
 

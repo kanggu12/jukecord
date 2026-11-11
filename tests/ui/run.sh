@@ -37,4 +37,4 @@ for _ in $(seq 1 30); do
 done
 docker run --rm --network "$network" --ipc=host -v "$PWD/tests/ui:/ui:ro" -v "$work/data:/data:ro" -v "$out:/out" \
   -e BASE="http://$server:8795" -e TOKEN_FILE=/data/host-token -e OUT=/out -w /tmp "$playwright" \
-  sh -c 'npm init -y >/dev/null 2>&1 && npm i --no-audit --no-fund --silent playwright@1.60.0 >/dev/null 2>&1 && cp /ui/walk.mjs /ui/audit.js . && node walk.mjs'
+  sh -c 'npm init -y >/dev/null 2>&1 && npm i --no-audit --no-fund --silent playwright@1.60.0 axe-core@4.10.3 >/dev/null 2>&1 && cp /ui/walk.mjs /ui/audit.js . && node walk.mjs'

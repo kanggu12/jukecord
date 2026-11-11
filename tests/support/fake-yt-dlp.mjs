@@ -3,7 +3,7 @@
 // environment, so the media code can be run end to end without reaching any site.
 //
 //   FAKE_YTDLP_INFO   a JSON file printed for -J
-//   FAKE_YTDLP_AUDIO  an audio file streamed to stdout for -o -
+//   FAKE_YTDLP_AUDIO  an audio file streamed to stdout for -o -, or copied for --output <file>
 //   FAKE_YTDLP_FAIL   when set, print it as an error and exit 1 (a removed video, say)
 //   FAKE_YTDLP_ARGS   when set, append the received arguments to this file, one run per line (to check the flags)
 import fs from 'node:fs';
@@ -51,6 +51,9 @@ if (output !== -1 && args[output + 1] === '-') {
       process.exit(1);
     })
     .pipe(process.stdout);
+} else if (output !== -1) {
+  // A download into a file (--output <file>): the same audio, copied whole.
+  fs.copyFileSync(process.env.FAKE_YTDLP_AUDIO ?? '', args[output + 1] ?? '');
 } else {
   process.stderr.write(`ERROR: the fake yt-dlp does not know these arguments: ${args.join(' ')}\n`);
   process.exit(2);

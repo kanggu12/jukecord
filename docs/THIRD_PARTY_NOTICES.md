@@ -4,12 +4,13 @@ jukecord itself is MIT-licensed ([LICENSE](../LICENSE)). It uses the following, 
 
 ## In the container image
 
-| Part                                                                        | Licence                                                                      | Where its source is                                                             |
-| :-------------------------------------------------------------------------- | :--------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
-| [Node.js](https://nodejs.org) 26 (the official `node:26-trixie-slim` image) | MIT, with the licences of its bundled parts                                  | https://github.com/nodejs/node                                                  |
-| [FFmpeg](https://ffmpeg.org) 7.1, Debian's package                          | LGPL-2.1-or-later, with GPL-2.0-or-later parts as Debian builds it           | `apt-get source ffmpeg` on Debian 13, or https://sources.debian.org/src/ffmpeg/ |
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp), its official Linux build        | Unlicense; the build bundles Python and other parts under their own licences | https://github.com/yt-dlp/yt-dlp                                                |
-| Debian 13 base packages (tini, ca-certificates and their dependencies)      | their own licences, listed in `/usr/share/doc/*/copyright` in the image      | https://sources.debian.org                                                      |
+| Part                                                                                                                   | Licence                                                                      | Where its source is                             |
+| :--------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- | :---------------------------------------------- |
+| [Node.js](https://nodejs.org) 26 (the official `node:26-trixie-slim` image)                                            | MIT, with the licences of its bundled parts                                  | https://github.com/nodejs/node                  |
+| [FFmpeg](https://ffmpeg.org) 7.1.5, built in the image for audio (its configure line is in `deploy/docker/Dockerfile`) | LGPL-3.0-or-later, with no GPL parts                                         | https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz |
+| Opus, LAME, OpenSSL and zlib, the libraries FFmpeg is built with (Debian's packages)                                   | BSD-3-Clause, LGPL-2.0-or-later, Apache-2.0 and Zlib                         | https://sources.debian.org                      |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp), its official Linux build                                                   | Unlicense; the build bundles Python and other parts under their own licences | https://github.com/yt-dlp/yt-dlp                |
+| Debian 13 base packages (tini, ca-certificates, libopus0, libmp3lame0 and their dependencies)                          | their own licences, listed in `/usr/share/doc/*/copyright` in the image      | https://sources.debian.org                      |
 
 jukecord runs FFmpeg and yt-dlp as separate programs; it does not link to them.
 
@@ -29,10 +30,10 @@ jukecord runs FFmpeg and yt-dlp as separate programs; it does not link to them.
 
 ## In the panel
 
-| Part                                                                                | Licence                                                        |
-| :---------------------------------------------------------------------------------- | :------------------------------------------------------------- |
-| [Pretendard](https://github.com/orioncactus/pretendard) 1.3.9, the font (unchanged) | SIL Open Font License 1.1, served beside the font as `OFL.txt` |
-| [Lucide](https://lucide.dev) 1.60.0 icons (the shapes of the icons the panel uses)  | ISC                                                            |
+| Part                                                                                                       | Licence                                                        |
+| :--------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------- |
+| [Pretendard](https://github.com/orioncactus/pretendard) 1.3.9, the font's dynamic subset files (unchanged) | SIL Open Font License 1.1, served beside the font as `OFL.txt` |
+| [Lucide](https://lucide.dev) 1.60.0 icons (the shapes of the icons the panel uses)                         | ISC                                                            |
 
 ## For development only
 

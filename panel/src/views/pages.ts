@@ -137,8 +137,9 @@ export function statsPage(): HTMLElement {
   const content = h('div', { class: 'page-body', style: 'display:flex;flex-direction:column;gap:var(--gap)' });
   const range = h('div', { class: 'seg', role: 'group' });
   const title = h('h1');
+  // The page's own main landmark (the player's is hidden while this one shows).
   const page = h(
-    'div',
+    'main',
     { class: 'page' },
     h('div', { class: 'page-head' }, title, h('div', { class: 'page-tools' }, range)),
     content,
@@ -345,13 +346,15 @@ export function logsPage(): HTMLElement {
   const component = h('input', { type: 'search', autocomplete: 'off' });
   const refresh = h('button', { class: 'key', type: 'button' });
   const older = h('button', { class: 'key', type: 'button' });
-  const list = h('div', { class: 'logs scroll', style: 'flex:1;min-height:0' });
+  // A named region the keyboard can enter, so the records can be scrolled without a mouse.
+  const list = h('div', { class: 'logs scroll', style: 'flex:1;min-height:0', role: 'region', tabindex: '0' });
   // Older records go above the ones shown, so the key that brings them sits at the top of the list (its row is hidden
   // when there is nothing older).
   const olderHead = h('div', { class: 'card-head log-older', hidden: true }, older);
   const card = h('section', { class: 'card fill' }, olderHead, list);
+  // The page's own main landmark (the player's is hidden while this one shows).
   const page = h(
-    'div',
+    'main',
     { class: 'page', style: 'height:calc(100dvh - var(--bar-h) - var(--listen-h))' },
     h(
       'div',
@@ -420,6 +423,7 @@ export function logsPage(): HTMLElement {
   const draw = () => {
     const words = t();
     title.textContent = words.logs;
+    list.setAttribute('aria-label', words.logs);
     fill(
       levels,
       ...(

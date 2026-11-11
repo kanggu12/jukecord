@@ -36,9 +36,8 @@ describe('media reinforcements', { skip: !haveFfmpeg() && 'ffmpeg with libopus i
       '-hide_banner',
       '-loglevel',
       'error',
-      '-f',
-      'lavfi',
-      '-i',
+      // A source filter, not -f lavfi, so the image's FFmpeg (built without devices) runs it too.
+      '-filter_complex',
       'sine=frequency=330:duration=3',
       '-c:a',
       'libopus',

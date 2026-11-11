@@ -13,7 +13,8 @@ Without a bot token jukecord runs browser-only, which needs no Discord at all; t
 
 ## Building the image without the internet
 
-The image build downloads the Node base image, Debian's ffmpeg, the npm packages and yt-dlp's release. To run it on a
+The image build downloads the Node base image, FFmpeg's source and the libraries it is built with, the npm packages
+and yt-dlp's release. To run it on a
 machine without access, build on one with access and move the image, with a copy of this repository:
 
 ```bash

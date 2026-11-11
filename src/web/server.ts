@@ -177,7 +177,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       .send({ error: { code: 'internal', message: 'something went wrong in jukecord (see its log)' } });
   });
 
-  await app.register(fastifyWebsocket, { options: { maxPayload: 4096 } });
+  await app.register(fastifyWebsocket, {
+    options: {
+      maxPayload: 4096,
+      // Messages over 1 KiB go compressed to a browser that offers it: a queue of a thousand tracks is about 330 KiB as
+      // JSON and 60 KiB compressed, sent to every listener whenever the queue changes. No zlib context is kept between
+      // messages, so a connection holds no compression memory while it waits.
+      perMessageDeflate: { threshold: 1024, serverNoContextTakeover: true, clientNoContextTakeover: true },
+    },
+  });
   // The panel's files when it is built; otherwise only sendFile (for the audio) is set up.
   const panelDir =
     options.panelDir && fs.existsSync(path.join(options.panelDir, 'index.html')) ? options.panelDir : null;
@@ -190,6 +198,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     index: false,
     // Revalidated on every load (ETag), so a new version is seen at once without renaming files.
     cacheControl: false,
+    // The build's .br and .gz copies, sent to a browser that takes them (scripts/build-panel.ts makes them).
+    preCompressed: true,
     setHeaders: (reply) => reply.header('cache-control', 'no-cache'),
   });
 

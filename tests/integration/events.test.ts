@@ -3,6 +3,8 @@
  * listeners, the clock exchange, and the refusals (no login, another site's page).
  */
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import http from 'node:http';
 import { after, before, describe, it } from 'node:test';
 import { EVENTS_VERSION } from '../../src/web/events.ts';
 import {
@@ -77,6 +79,32 @@ describe('live updates', () => {
     server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: 'av' });
   });
   after(() => server.close());
+
+  it('agrees to compress messages with a client that offers it, keeping no context between them', async () => {
+    // The upgrade by hand, to read the extension the server agreed to (a WebSocket object hides it).
+    const headers = await new Promise<http.IncomingHttpHeaders>((resolve, reject) => {
+      const request = http.request(`${server.url}/api/v1/events`, {
+        headers: {
+          connection: 'Upgrade',
+          upgrade: 'websocket',
+          'sec-websocket-version': '13',
+          'sec-websocket-key': crypto.randomBytes(16).toString('base64'),
+          'sec-websocket-extensions': 'permessage-deflate; client_max_window_bits',
+          authorization: `Bearer ${HOST_TOKEN}`,
+        },
+      });
+      request.on('upgrade', (response, socket) => {
+        socket.destroy();
+        resolve(response.headers);
+      });
+      request.on('response', (response) => reject(new Error(`no upgrade: ${response.statusCode}`)));
+      request.on('error', reject);
+      request.end();
+    });
+    const agreed = String(headers['sec-websocket-extensions'] ?? '');
+    assert.match(agreed, /permessage-deflate/);
+    assert.match(agreed, /server_no_context_takeover/);
+  });
 
   it('says hello, sends the whole state on subscribe, then each change', async () => {
     const socket = new Socket(`${base}/api/v1/events`, { authorization: `Bearer ${HOST_TOKEN}` });

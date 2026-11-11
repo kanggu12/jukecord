@@ -137,6 +137,7 @@ export function nowCard(live: Live): HTMLElement {
         `${track.id}|${track.title}`,
         h('a', { href: track.url, target: '_blank', rel: 'noopener noreferrer' }, track.title),
       );
+      title.removeAttribute('aria-hidden');
       refill(
         meta,
         `${track.uploader}|${by}`,
@@ -144,13 +145,16 @@ export function nowCard(live: Live): HTMLElement {
         h('span', null, icon('users'), by),
       );
     } else if (!player) {
-      // No state yet (connecting): nothing is claimed about the player.
+      // No state yet (connecting): nothing is claimed about the player. The empty heading keeps its place on the card
+      // but is no heading to a screen reader until it says something.
       refill(title, 'unknown');
       refill(meta, 'unknown');
+      title.setAttribute('aria-hidden', 'true');
     } else {
       // Nothing playing: with tracks waiting, the Play key starts them; with none, adding one plays it.
       const hint = (state.queue?.items.length ?? 0) > 0 ? words.idleQueued : words.idleHint;
       refill(title, `idle|${words.idle}`, h('span', { class: 'muted' }, words.idle));
+      title.removeAttribute('aria-hidden');
       refill(meta, `idle|${hint}`, h('span', null, hint));
     }
     error.hidden = !player?.error;

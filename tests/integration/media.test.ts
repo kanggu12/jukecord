@@ -24,15 +24,23 @@ const FFMPEG = process.env.JUKECORD_FFMPEG ?? 'ffmpeg';
 const FAKE = fileURLToPath(new URL('../support/fake-yt-dlp.mjs', import.meta.url));
 const log = createLogger({ level: 'error', sinks: [] });
 
-// Whether ffmpeg with Opus and MP3 encoders is available.
-function haveFfmpeg(): boolean {
+// The encoders of the ffmpeg at hand ('' when there is none).
+function encoders(): string {
   try {
-    const encoders = execFileSync(FFMPEG, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
-    return encoders.includes('libopus') && encoders.includes('libmp3lame');
+    return execFileSync(FFMPEG, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
   } catch {
-    return false;
+    return '';
   }
 }
+
+// Whether ffmpeg with Opus and MP3 encoders is available.
+function haveFfmpeg(): boolean {
+  return encoders().includes('libopus') && encoders().includes('libmp3lame');
+}
+
+// Whether it can also write AAC, to make an MP4 for the test of one: the image's FFmpeg encodes only what jukecord
+// writes (Opus, MP3), so the test runs where a full FFmpeg is installed (CI's runners, a development machine).
+const canWriteAac = / aac /.test(encoders());
 
 describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and libmp3lame is not installed' }, () => {
   let dir = '';
@@ -44,9 +52,8 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
       '-hide_banner',
       '-loglevel',
       'error',
-      '-f',
-      'lavfi',
-      '-i',
+      // A source filter, not -f lavfi, so the image's FFmpeg (built without devices) runs it too.
+      '-filter_complex',
       'sine=frequency=440:duration=5',
       '-c:a',
       'libopus',
@@ -124,6 +131,52 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
     fs.writeFileSync(path.join(dir, 'args.log'), '');
     await media.prepare(track, new AbortController().signal);
     assert.equal(fs.readFileSync(path.join(dir, 'args.log'), 'utf8'), '');
+  });
+
+  it('reads an MP4 whose index comes at its end from the whole file, as it cannot be read as it arrives', {
+    skip: !canWriteAac && 'this ffmpeg has no AAC encoder to make the test file with',
+  }, async () => {
+    // Thirty seconds of AAC in an MP4 with its index (moov) at the end, as plain MP4 files have it: through a pipe
+    // ffmpeg finds no audio and still ends well.
+    const late = path.join(dir, 'index-at-end.m4a');
+    execFileSync(
+      FFMPEG,
+      ['-hide_banner', '-loglevel', 'error', '-filter_complex', 'anoisesrc=d=30:c=pink:a=0.2'].concat([
+        '-ac',
+        '2',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-y',
+        late,
+      ]),
+    );
+    const before = process.env.FAKE_YTDLP_AUDIO;
+    process.env.FAKE_YTDLP_AUDIO = late;
+    fs.writeFileSync(path.join(dir, 'args.log'), '');
+    try {
+      const { cache, media, resolver } = build();
+      const [track] = await resolver.resolve('https://example.com/tone');
+      assert.ok(track);
+      const prepared = await media.prepare(track, new AbortController().signal);
+      assert.ok(Math.abs(prepared.durationMs - 30_000) <= 100, `length ${prepared.durationMs}`);
+      // Streamed first, then fetched into a file, which is gone again.
+      const outputs = fs
+        .readFileSync(path.join(dir, 'args.log'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as string[])
+        .filter((args) => args.includes('--output'))
+        .map((args) => args[args.indexOf('--output') + 1]);
+      assert.equal(outputs.length, 2, outputs.join(' '));
+      assert.equal(outputs[0], '-');
+      assert.notEqual(outputs[1], '-');
+      assert.equal(fs.existsSync(outputs[1] ?? ''), false);
+      assert.equal(cache.count(), 1);
+    } finally {
+      process.env.FAKE_YTDLP_AUDIO = before;
+    }
   });
 
   it('answers a known address from the database without asking the site', async () => {

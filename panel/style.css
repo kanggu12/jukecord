@@ -6,13 +6,9 @@
  * disc's rim and the progress bar's knob, and they turn white when paused.
  */
 
-@font-face {
-  font-family: "Pretendard Variable";
-  src: url("./fonts/PretendardVariable.woff2") format("woff2-variations");
-  font-weight: 45 920;
-  font-style: normal;
-  font-display: swap;
-}
+/* The font in pieces by character range: a page fetches only the pieces for the characters it shows (an English page
+   with Latin names a few dozen kilobytes, not the whole font's two megabytes). */
+@import "./fonts/pretendard.css";
 
 /* ---- tokens: dark (the default) ----------------------------------------------------------------------------- */
 :root {

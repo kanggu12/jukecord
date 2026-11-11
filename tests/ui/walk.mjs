@@ -16,6 +16,9 @@ const BASE = process.env.BASE ?? 'http://jk-ui:8795';
 const OUT = process.env.OUT ?? '/out';
 const TOKEN = fs.readFileSync(process.env.TOKEN_FILE ?? '/data/host-token', 'utf8').trim();
 const AUDIT = fs.readFileSync(new URL('./audit.js', import.meta.url), 'utf8');
+// axe-core, installed beside this script by run.sh: the accessibility rules (names, roles, landmarks, headings) on the
+// pages that are also photographed. Required: a walk without it would pass without checking them.
+const AXE = fs.readFileSync('node_modules/axe-core/axe.min.js', 'utf8');
 // Phones, the narrowest tablet, laptops, and the big screens (2560 is a 4K screen at 150 %).
 const SIZES = [
   [360, 780],
@@ -108,6 +111,18 @@ async function measure(page, name, setting, errors) {
   report.push({ state: name, ...setting, findings: result.findings, sizes: result.sizes, errors: [...errors] });
   if (SHOOT.has(setting.width) || (name === 'idle' && setting.width === 2560)) {
     await page.screenshot({ path: path.join(OUT, `${name}-${setting.theme}-${setting.lang}-${setting.width}.png`) });
+    // The accessibility rules, on the same pages (each rule once per page, with where it failed first).
+    await page.evaluate(AXE);
+    const axe = await page.evaluate(
+      async () => (await window.axe.run(document, { resultTypes: ['violations'] })).violations,
+    );
+    for (const rule of axe) {
+      result.findings.push({
+        kind: 'a11y',
+        where: `${rule.id}: ${rule.nodes[0]?.target.join(' ') ?? ''}`,
+        detail: rule.help,
+      });
+    }
   }
   const count = result.findings.length + errors.length;
   if (count > 0) process.stdout.write(`  ${label}: ${count}\n`);

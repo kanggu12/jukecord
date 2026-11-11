@@ -47,8 +47,9 @@ export function sheet(options: { side?: 'left' | 'right'; label: string; onClose
   closeSheet?.();
   const scrim = h('div', { class: 'scrim' });
   const body = h('div', { class: 'sheet-body scroll' });
+  // A div: the dialog role is not allowed on an aside.
   const panel = h(
-    'aside',
+    'div',
     { class: `sheet ${options.side === 'left' ? 'left' : ''}`.trim(), role: 'dialog', 'aria-label': options.label },
     body,
   );

@@ -38,6 +38,13 @@ the place you forgot.
 needs `docker build -f deploy/docker/Dockerfile -t jukecord:dev .` once); a change to the chart runs
 `deploy/kind/check.sh`.
 
+## FFmpeg
+
+The image builds FFmpeg from its release source (the `ffmpeg` stage of `deploy/docker/Dockerfile`), for audio only. To
+move to a newer release, check the `.tar.xz` against its signature with FFmpeg's release key
+(https://ffmpeg.org/ffmpeg-devel.asc), set `FFMPEG_VERSION` and `FFMPEG_SHA256`, and build: the stage fails when the
+Opus or MP3 encoder or https is missing, and CI runs jukecord's three FFmpeg commands in the image.
+
 ## Versions and releases
 
 The version is set in one place, `src/version.ts`; `package.json` and the chart's `version` and `appVersion` follow it

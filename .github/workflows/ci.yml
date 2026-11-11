@@ -105,5 +105,18 @@ jobs:
           docker exec smoke jukecord status
           docker exec smoke jukecord doctor
           docker exec smoke sh -c 'ffmpeg -hide_banner -encoders | grep -q libopus && /opt/yt-dlp/yt-dlp --version'
+          # The FFmpeg built in the image, through jukecord's own three jobs: a cached file from a pipe (loudness evened
+          # out), a stream from the middle of it, and the MP3 copy.
+          docker exec smoke sh -c '
+            set -e
+            ffmpeg -hide_banner -loglevel error -filter_complex "anoisesrc=d=8:c=pink:a=0.2" -ac 2 -c:a pcm_s16le -f wav pipe:1 |
+              ffmpeg -hide_banner -loglevel error -nostdin -i pipe:0 -vn -af "loudnorm=I=-14:TP=-1:LRA=11,afade=t=in:d=3" -ar 48000 -ac 2 -c:a libopus -b:a 128k -frame_duration 20 -application audio -f ogg /tmp/t.ogg
+            ffmpeg -hide_banner -loglevel error -nostdin -ss 4 -i /tmp/t.ogg -af afade=t=in:d=0.12 -c:a libopus -b:a 128k -f ogg /tmp/s.ogg
+            ffmpeg -hide_banner -loglevel error -nostdin -i /tmp/t.ogg -c:a libmp3lame -b:a 192k -f mp3 /tmp/t.mp3
+            test "$(wc -c < /tmp/t.ogg)" -gt 50000 && test "$(wc -c < /tmp/s.ogg)" -gt 20000 && test "$(wc -c < /tmp/t.mp3)" -gt 50000'
           docker logs smoke
           docker rm -f smoke
+          # The image stays lean: FFmpeg is built for audio here, and Debian's package (about 450 MB) does not come back.
+          size=$(docker image inspect jukecord:ci --format '{{.Size}}')
+          echo "image: $((size / 1000000)) MB"
+          test "$size" -lt 500000000

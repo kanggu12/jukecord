@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../panel', import.meta.url));
@@ -29,9 +30,9 @@ await build({
   format: 'esm',
   // Every browser the panel supports (the last two years of Chrome, Edge, Firefox and Safari).
   target: ['chrome120', 'edge120', 'firefox121', 'safari17'],
-  // The font is copied beside the stylesheet under its own name.
+  // The font's pieces are copied into fonts/ under their own names.
   loader: { '.woff2': 'file' },
-  assetNames: '[name]',
+  assetNames: 'fonts/[name]',
   logLevel: 'warning',
 });
 
@@ -39,4 +40,18 @@ for (const file of ['index.html', 'favicon.svg', 'theme.js'])
   fs.copyFileSync(path.join(root, file), path.join(out, file));
 // The font's licence travels with the font.
 fs.copyFileSync(path.join(root, 'fonts/OFL.txt'), path.join(out, 'OFL.txt'));
+
+// Each text file also compressed, Brotli and gzip, once here: the server sends the one a browser takes (see
+// preCompressed in src/web/server.ts) and spends no time compressing. Fonts are compressed already; source maps are
+// fetched only by a browser's developer tools.
+for (const name of fs.readdirSync(out)) {
+  if (!/\.(js|css|html|svg|txt)$/.test(name)) continue;
+  const file = path.join(out, name);
+  const data = fs.readFileSync(file);
+  fs.writeFileSync(
+    `${file}.br`,
+    zlib.brotliCompressSync(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }),
+  );
+  fs.writeFileSync(`${file}.gz`, zlib.gzipSync(data, { level: 9 }));
+}
 process.stdout.write(`built the panel in ${path.relative(process.cwd(), out)}\n`);

@@ -40,8 +40,17 @@ covers all of them with one rule and no change to yt-dlp. For a media server on 
 ## Debian, not Alpine
 
 The image is Node 26 on Debian 13, pinned by digest. Alpine would be smaller, but musl's resolver has failed name
-lookups in Kubernetes clusters, which the Helm chart is for. Debian's ffmpeg (with libopus and libmp3lame) is smaller
-than the static builds that would be needed elsewhere.
+lookups in Kubernetes clusters, which the Helm chart is for.
+
+## FFmpeg built for audio
+
+Debian's ffmpeg package brings the libraries of every codec and device FFmpeg supports: 451 MB of an 843 MB image,
+for a program that jukecord asks to read audio and write Opus and MP3. The image builds FFmpeg 7.1.5 from its signed
+release instead: every demuxer, decoder, parser, protocol and filter of FFmpeg's own (whatever yt-dlp hands over, from
+a pipe or over https), the Opus, MP3 and PCM encoders, and four libraries (Opus, LAME, OpenSSL, zlib). It is one
+21 MB program, LGPL with no GPL parts, and the image is 423 MB. The two were compared on sixteen kinds of file (audio
+alone, and the audio of video files) through jukecord's own commands: the same results, lengths and loudness. CI
+runs the three commands on each architecture's image and fails an image over 500 MB.
 
 ## One process, one replica
 
