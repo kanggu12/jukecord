@@ -124,8 +124,16 @@ Discord for the `identify` scope only; who is in which server is asked through t
 
 ### Starting with the machine
 
-Docker's restart policy brings jukecord back after a crash or a restart of Docker. Where Docker itself does not start at
-boot, or where the machine's shutdown must wait for jukecord to save its place, install the systemd unit:
+Docker's restart policy (`unless-stopped`) brings jukecord back after a crash, a restart of Docker and a restart of the
+machine, as long as Docker itself starts at boot (`sudo systemctl enable docker` on most Linux systems; Docker Desktop
+has a setting of its own). When Docker stops, at shutdown too, it gives jukecord the 15 seconds `compose.yaml` asks
+for, in which it saves where every server was and leaves voice.
+
+The systemd unit is for the rest. It starts jukecord's Compose project after Docker at every boot, even after a
+`./jukecord down`, which otherwise keeps it down, and it stops the project before Docker at shutdown, which matters
+when Docker's `live-restore` setting keeps containers running past Docker itself. Run `./jukecord up` once before you
+install it, so the image is built: the unit gives up on a start after 10 minutes, and a first build on a Raspberry Pi
+can take longer.
 
 ```bash
 sudo sed "s#/opt/jukecord#$PWD#" deploy/systemd/jukecord.service | sudo tee /etc/systemd/system/jukecord.service >/dev/null

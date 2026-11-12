@@ -1,19 +1,27 @@
-# Starts jukecord's Compose project with the machine and stops it at shutdown. docs/INSTALL.md has the commands.
+# Starts jukecord's Compose project at every boot, after Docker, and stops it before Docker at shutdown. Docker's
+# restart policy already brings jukecord back after a restart of the machine; this unit also starts it after
+# ./jukecord down, and stops it in time when Docker's live-restore keeps containers running past Docker itself.
+# docs/INSTALL.md has the commands.
 [Unit]
 Description=jukecord (Docker Compose)
+# Docker must run first, and is started for this unit when it is not set to start at boot.
 Requires=docker.service
+# After Docker, and after the network is up: jukecord connects to Discord as soon as it starts.
 After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
+# One command that returns once the container runs; the unit then stays active until it is stopped.
 Type=oneshot
 RemainAfterExit=yes
 # The folder of the jukecord checkout (where compose.yaml and .env are); the install command fills it in.
 WorkingDirectory=/opt/jukecord
 ExecStart=/usr/bin/docker compose up -d
+# Stopped, not removed: the container and its console log are still there at the next start.
 ExecStop=/usr/bin/docker compose stop
-# The first start may build the image.
+# A start that has to build the image first takes long; ./jukecord up once before enabling the unit builds it.
 TimeoutStartSec=600
+# jukecord itself takes at most 15 s to stop (stop_grace_period in compose.yaml).
 TimeoutStopSec=60
 
 [Install]
