@@ -62,6 +62,8 @@ export interface Config {
     /** How long the bot stays alone in a voice channel before it leaves (0: it does not leave by itself). */
     readonly idleMs: number;
   };
+  /** How long a playing server nobody hears anywhere plays on before it pauses (0: it never does; see app/rest.ts). */
+  readonly restAfterMs: number;
   readonly log: {
     readonly level: LogLevel;
     /** The size at which the log file is rotated, in bytes. */
@@ -114,6 +116,7 @@ const KNOWN = new Set([
   'JUKECORD_VOICE_IDLE',
   'JUKECORD_TRUST_PROXY',
   'JUKECORD_ALLOW_PRIVATE_ADDRESSES',
+  'JUKECORD_REST_AFTER',
   // Read by compose.yaml (the published address and the image), not by jukecord; known so they raise no warning
   // when .env passes them through.
   'JUKECORD_BIND',
@@ -308,6 +311,15 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     }),
   };
 
+  // How long a playing server that nobody hears (the bot out of voice, no browser playing along) waits before it
+  // pauses; "0" or "off" lets it play on to nobody, as before.
+  const restAfterMs = read('JUKECORD_REST_AFTER', 2 * 60_000, (text) => {
+    if (text === '0' || text.toLowerCase() === 'off') return 0;
+    const ms = parseDuration(text);
+    if (ms < 10_000 || ms > 86_400_000) throw new Error(`${text} is outside 10s-24h (or 0 to never pause)`);
+    return ms;
+  });
+
   // Log settings: rotation keeps the log from growing without end (every log has a size limit and a count).
   const log = {
     level: read('JUKECORD_LOG_LEVEL', 'info' as LogLevel, (text) => {
@@ -344,6 +356,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     queueMax,
     liveMax,
     voice,
+    restAfterMs,
     log,
     warnings,
   };
@@ -378,5 +391,6 @@ export function describeConfig(config: Config): Record<string, string> {
     'queue limit': String(config.queueMax),
     'live connections limit': String(config.liveMax),
     'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
+    'pause with nobody listening after': config.restAfterMs === 0 ? 'never' : `${config.restAfterMs} ms`,
   };
 }

@@ -133,6 +133,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['the track is getting ready', '곡을 준비하는 중'],
   // A voice channel at its member limit.
   [/^the voice channel (.+) is full$/, '$1 음성 채널이 가득 참'],
+  // A player that paused by itself with nobody hearing it anywhere (app/rest.ts).
+  ['paused with nobody listening', '듣는 사람이 없어 일시정지함'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

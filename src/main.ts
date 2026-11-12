@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { Access } from './app/access.ts';
 import { Actions, type Directory } from './app/actions.ts';
 import { runDoctor } from './app/doctor.ts';
+import { Rest } from './app/rest.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -239,6 +240,19 @@ async function main(): Promise<number> {
         }),
     },
   });
+  // A playing server that nobody hears anywhere (the bot not in its voice channel, no browser playing along) pauses
+  // after a while, instead of fetching and counting plays for nobody (JUKECORD_REST_AFTER).
+  const rest = new Rest({
+    bus,
+    players,
+    inVoice: (guildId) => (bot ? bot.voice.channel(guildId) !== null : false),
+    listeners: (guildId) => web.hub.listeners(guildId).count,
+    clock: systemClock,
+    afterMs: config.restAfterMs,
+    log: log.child('rest'),
+  });
+  rest.start();
+
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;
@@ -252,6 +266,8 @@ async function main(): Promise<number> {
       process.exit(1);
     }, 10_000).unref();
     prefetcher.stop();
+    // Leaving voice below is jukecord stopping, not nobody listening.
+    rest.stop();
     players.checkpointAll();
     // The panels are told first (they reconnect to the next jukecord), then Discord, then the database.
     void web

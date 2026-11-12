@@ -65,7 +65,9 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
-five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers.
+five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers. When nobody hears a server anywhere (the bot
+in no voice channel, no browser playing along) for two minutes (`JUKECORD_REST_AFTER`), its player pauses and says so,
+instead of fetching tracks and counting plays for nobody; playing on is a press of play.
 
 ## The jukecord command
 
@@ -120,6 +122,7 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                                     |
 | `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                             |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                                      |
+| `JUKECORD_REST_AFTER`                                                | `2m`               | how long a server nobody hears plays on before it pauses (`0`: it plays on)                    |
 
 jukecord checks every setting when it starts and lists every problem at once. `jukecord doctor` shows the settings in
 effect (secrets only as set or not set) and checks the parts jukecord needs.

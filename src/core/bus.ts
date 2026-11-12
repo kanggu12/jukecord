@@ -19,11 +19,18 @@ export interface VoiceChanged {
   readonly channel: { readonly channelId: string; readonly name: string } | null;
 }
 
+/** How many browsers of a server play along changed (the live updates count them). */
+export interface ListenersChanged {
+  readonly guildId: string;
+  readonly count: number;
+}
+
 /** Every event and its payload. */
 export interface BusEvents {
   queue: [QueueChanged];
   player: [PlayerSnapshot];
   voice: [VoiceChanged];
+  listeners: [ListenersChanged];
 }
 
 /** Hears about a listener that threw: the event, the server it was about, and the error. */

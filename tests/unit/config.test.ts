@@ -115,4 +115,13 @@ describe('describeConfig', () => {
     assert.ok(!text.includes('hush'));
     assert.equal(describeConfig(config)['discord token'], 'set');
   });
+
+  it('reads how long a server nobody hears plays on before it pauses, 0 or off for never', () => {
+    const base = { JUKECORD_DATA_DIR: '/data' };
+    assert.equal(loadConfig(base, '/').restAfterMs, 120_000);
+    assert.equal(loadConfig({ ...base, JUKECORD_REST_AFTER: '30s' }, '/').restAfterMs, 30_000);
+    assert.equal(loadConfig({ ...base, JUKECORD_REST_AFTER: '0' }, '/').restAfterMs, 0);
+    assert.equal(loadConfig({ ...base, JUKECORD_REST_AFTER: 'off' }, '/').restAfterMs, 0);
+    assert.throws(() => loadConfig({ ...base, JUKECORD_REST_AFTER: '5s' }, '/'), /JUKECORD_REST_AFTER: 5s is outside/);
+  });
 });

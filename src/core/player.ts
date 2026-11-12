@@ -277,22 +277,15 @@ export class Player {
 
   /** Pauses. While loading, the track will start paused when it is ready. */
   pause(): boolean {
-    if (this.status === 'loading') {
-      if (this.startPaused) return false;
-      this.startPaused = true;
-      this.notice = null;
-      this.emit();
-      return true;
-    }
-    if (this.status !== 'playing') return false;
-    this.notice = null;
-    // Freeze the position first, then stop the clock-driven timer and the sound.
-    this.offsetMs = this.position();
-    this.status = 'paused';
-    this.cancelEndTimer();
-    for (const output of this.outputs.keys()) output.pause();
-    this.emit();
-    return true;
+    return this.pauseSaying(null);
+  }
+
+  /**
+   * Pauses because nobody hears it anywhere (see app/rest.ts), and says so in the notice; a person plays on. Only a
+   * player that plays or gets a track ready rests.
+   */
+  rest(): boolean {
+    return this.pauseSaying('paused with nobody listening');
   }
 
   /** Resumes after a pause (or cancels the "start paused" of a loading track). */
@@ -436,6 +429,27 @@ export class Player {
 
   // ---------------------------------------------------------------------------------------------------------------
   // Internals
+
+  // Pauses (a loading track starts paused when it is ready) with this notice: none for a person's pause, which clears
+  // what the player said before, or what the player says about pausing by itself.
+  private pauseSaying(notice: string | null): boolean {
+    if (this.status === 'loading') {
+      if (this.startPaused) return false;
+      this.startPaused = true;
+      this.notice = notice;
+      this.emit();
+      return true;
+    }
+    if (this.status !== 'playing') return false;
+    this.notice = notice;
+    // Freeze the position first, then stop the clock-driven timer and the sound.
+    this.offsetMs = this.position();
+    this.status = 'paused';
+    this.cancelEndTimer();
+    for (const output of this.outputs.keys()) output.pause();
+    this.emit();
+    return true;
+  }
 
   // Finishes the current track and starts the next one in the queue (held paused if `paused`), or goes idle when
   // there is none.

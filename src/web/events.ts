@@ -581,9 +581,13 @@ export class EventHub {
     return room.listeners;
   }
 
-  // Someone started or stopped listening in a server: its panels hear about it, at most once a second.
+  // Someone started or stopped listening in a server: its panels hear about it, at most once a second, and the rest of
+  // jukecord at once (whether a server is heard anywhere, see app/rest.ts), the last listener leaving included.
   private listenersChanged(guildId: string): void {
     const room = this.rooms.get(guildId);
+    let count = 0;
+    for (const client of room?.clients ?? []) if (client.listening) count += 1;
+    this.options.bus.emit('listeners', { guildId, count });
     if (!room) return;
     room.listeners = null;
     if (room.listenersTimer) return;
