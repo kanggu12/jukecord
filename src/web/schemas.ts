@@ -140,10 +140,25 @@ export const StatsSchema = Type.Object(
   { title: 'Stats' },
 );
 
+/**
+ * A sound preset of the voice channel, which browsers listening along apply too: the presets of core/sound.ts, written
+ * out so that TypeBox keeps each one's literal type (tests/unit/sound.test.ts holds the two lists together).
+ */
+export const SoundPresetSchema = Type.Union(
+  [Type.Literal('off'), Type.Literal('bass'), Type.Literal('voices'), Type.Literal('bright'), Type.Literal('night')],
+  { description: 'off, more bass, clearer voices, brighter, or softer at night' },
+);
+
 export const SettingsSchema = Type.Object(
   {
     djRoleId: Nullable(Type.String()),
     roles: Type.Array(Type.Object({ id: Type.String(), name: Type.String(), color: Type.Integer() })),
+    voteSkip: Type.Boolean({ description: 'Skip from someone without the DJ role is a vote (with a DJ role set)' }),
+    takeTurns: Type.Boolean({ description: "A track added goes in its person's turn, not at the end" }),
+    personLimit: Type.Integer({ description: 'The most tracks one person may have queued; 0 for no limit' }),
+    stay: Type.Boolean({ description: 'The bot stays in voice when everyone has left' }),
+    volume: Type.Integer({ description: "The voice channel's volume, in percent" }),
+    sound: SoundPresetSchema,
   },
   { title: 'Settings' },
 );

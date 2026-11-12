@@ -14,7 +14,7 @@ import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import type { Resolver } from '../media/resolver.ts';
-import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
+import type { CommunitySettings, HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 
@@ -140,8 +140,8 @@ export interface Directory {
   member(guildId: string, userId: string): Promise<MemberInfo | null>;
 }
 
-/** A server's jukecord settings as the panel and the commands show them. */
-export interface SettingsView {
+/** A server's jukecord settings as the panel and the commands show them: the DJ role, and how people share the music. */
+export interface SettingsView extends CommunitySettings {
   /** The role that may change the music, or null for everyone. */
   readonly djRoleId: string | null;
   /** The server's roles to choose from (empty in browser-only mode). */
@@ -519,7 +519,8 @@ export class Actions {
     const roles = this.options.directory?.roles(context.guildId) ?? null;
     // A deleted role is shown as none, which is how it counts (see djRoleNow).
     const djRoleId = djRoleNow(this.options.store.settings.get(context.guildId).djRoleId, roles);
-    return { djRoleId, roles: roles ?? [] };
+    // How the server's people share the music, beside the DJ role.
+    return { djRoleId, roles: roles ?? [], ...this.options.store.settings.community(context.guildId) };
   }
 
   /** Sets (or clears, with null) the role that may change the music. Needs Manage Server. */

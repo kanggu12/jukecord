@@ -6,6 +6,8 @@
  * shared actions, so a feature cannot exist in Discord or the API and be missing here.
  */
 
+import type { SoundPreset } from '../../src/core/sound.ts';
+
 /** Every action the panel offers, by the shared action names. */
 export const PANEL_ACTIONS = [
   'add',
@@ -191,6 +193,12 @@ export interface Stats {
 export interface Settings {
   djRoleId: string | null;
   roles: { id: string; name: string; color: number }[];
+  voteSkip: boolean;
+  takeTurns: boolean;
+  personLimit: number;
+  stay: boolean;
+  volume: number;
+  sound: SoundPreset;
 }
 export interface Status {
   version: string;

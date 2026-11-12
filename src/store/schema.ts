@@ -144,4 +144,19 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    sql: `
+      -- How a server's people share the music, each with the default of a server that never chose: whether Skip from
+      -- someone without the DJ role is a vote (on), whether tracks added take turns by person (off), how many tracks
+      -- one person may have queued (0: no limit), whether the bot stays in voice when everyone has left (off), and the
+      -- voice channel's volume in percent (100) and sound preset (off).
+      ALTER TABLE guild_settings ADD COLUMN vote_skip    INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE guild_settings ADD COLUMN take_turns   INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE guild_settings ADD COLUMN person_limit INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE guild_settings ADD COLUMN stay         INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE guild_settings ADD COLUMN volume       INTEGER NOT NULL DEFAULT 100;
+      ALTER TABLE guild_settings ADD COLUMN sound        TEXT    NOT NULL DEFAULT 'off';
+    `,
+  },
 ];

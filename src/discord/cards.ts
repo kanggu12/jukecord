@@ -57,6 +57,19 @@ const TEXT = {
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
+  on: { en: 'on', ko: '켬' },
+  off: { en: 'off', ko: '끔' },
+  voteSkip: { en: 'Vote to skip', ko: '건너뛰기 투표' },
+  takeTurns: { en: 'Take turns', ko: '차례대로 넣기' },
+  personLimit: { en: 'Tracks per person', ko: '한 사람당 곡 수' },
+  noLimit: { en: 'no limit', ko: '제한 없음' },
+  stay: { en: 'Stay in voice', ko: '음성 채널에 머물기' },
+  volume: { en: 'Voice volume', ko: '음성 채널 음량' },
+  sound: { en: 'Sound', ko: '음색' },
+  presets: {
+    en: { off: 'off', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
+    ko: { off: '끔', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
+  },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -259,9 +272,19 @@ export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   return embed.setDescription(lines.join('\n'));
 }
 
-/** The DJ role, or that everyone may change the music. */
+/** The DJ role, or that everyone may change the music, and the server's other settings under it. */
 export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
-  if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
-  return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
+  const role = settings.djRoleId === null ? TEXT.everyone[lang] : `<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`;
+  // How the server's people share the music and how its voice channel sounds, one line each.
+  const onOff = (on: boolean) => (on ? TEXT.on[lang] : TEXT.off[lang]);
+  const lines = [
+    `${TEXT.voteSkip[lang]}: ${onOff(settings.voteSkip)}`,
+    `${TEXT.takeTurns[lang]}: ${onOff(settings.takeTurns)}`,
+    `${TEXT.personLimit[lang]}: ${settings.personLimit === 0 ? TEXT.noLimit[lang] : settings.personLimit}`,
+    `${TEXT.stay[lang]}: ${onOff(settings.stay)}`,
+    `${TEXT.volume[lang]}: ${settings.volume}%`,
+    `${TEXT.sound[lang]}: ${TEXT.presets[lang][settings.sound]}`,
+  ];
+  return embed.setDescription(`${role}\n\n${lines.join('\n')}`);
 }

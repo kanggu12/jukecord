@@ -142,13 +142,39 @@ function showVoice(answer: unknown): string {
   return lines.join('\n');
 }
 
+// The sound presets as the CLI names them.
+const PRESET_NAMES: Readonly<Record<string, string>> = {
+  off: 'off',
+  bass: 'more bass',
+  voices: 'clearer voices',
+  bright: 'brighter',
+  night: 'softer at night',
+};
+
 function showSettings(answer: unknown): string {
-  const settings = answer as { djRoleId: string | null; roles: { id: string; name: string }[] };
+  const settings = answer as {
+    djRoleId: string | null;
+    roles: { id: string; name: string }[];
+    voteSkip: boolean;
+    takeTurns: boolean;
+    personLimit: number;
+    stay: boolean;
+    volume: number;
+    sound: string;
+  };
   const role = settings.roles.find((entry) => entry.id === settings.djRoleId);
+  const onOff = (on: boolean) => (on ? 'on' : 'off');
   const lines = [
     settings.djRoleId === null
       ? 'DJ role: none (everyone may change the music)'
       : `DJ role: ${role?.name ?? settings.djRoleId}`,
+    // How people share the music, and the voice channel's sound.
+    `Vote to skip: ${onOff(settings.voteSkip)}`,
+    `Take turns: ${onOff(settings.takeTurns)}`,
+    `Tracks per person: ${settings.personLimit === 0 ? 'no limit' : settings.personLimit}`,
+    `Stay in voice: ${onOff(settings.stay)}`,
+    `Voice volume: ${settings.volume}%`,
+    `Sound: ${PRESET_NAMES[settings.sound] ?? settings.sound}`,
   ];
   if (settings.roles.length > 0) lines.push('Roles:', ...settings.roles.map((entry) => `  ${entry.id}  ${entry.name}`));
   return lines.join('\n');
@@ -382,7 +408,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   settings: {
     name: 'settings',
     usage: '',
-    summary: "The server's DJ role and roles",
+    summary: "The server's DJ role, roles and settings",
     request: () => ({}),
     show: showSettings,
   },

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { MIGRATIONS } from '../../src/store/schema.ts';
-import { Store } from '../../src/store/store.ts';
+import { COMMUNITY_DEFAULTS, Store } from '../../src/store/store.ts';
 import { addTracks, memoryStore } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
@@ -64,5 +64,59 @@ describe('DiscordRepository', () => {
     store.discord.setCommandsHash(GUILD, 'abc');
     store.discord.setCommandsHash(GUILD, 'def');
     assert.equal(store.discord.commandsHash(GUILD), 'def');
+  });
+});
+
+describe('the community settings', () => {
+  it('comes to a database from before them with every server at the defaults, its DJ role kept', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-migrate-'));
+    try {
+      const file = path.join(dir, 'jukecord.db');
+      // Every migration before the one that adds them, found by what it adds (its number changes when branches merge).
+      const mine = MIGRATIONS.findIndex((migration) => migration.sql.includes('vote_skip'));
+      assert.ok(mine > 0);
+      const old = new DatabaseSync(file);
+      for (const migration of MIGRATIONS.slice(0, mine)) old.exec(migration.sql);
+      old.exec(`PRAGMA user_version = ${MIGRATIONS[mine - 1]?.version}`);
+      old
+        .prepare("INSERT INTO guild_settings (guild_id, dj_role_id, updated_at) VALUES (?, '500000000000000001', 1)")
+        .run(GUILD);
+      old.close();
+      const store = Store.open(file);
+      assert.equal(store.settings.get(GUILD).djRoleId, '500000000000000001');
+      assert.deepEqual(store.settings.community(GUILD), COMMUNITY_DEFAULTS);
+      store.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('changes only what it is given, for one server, and keeps the DJ role', () => {
+    const store = memoryStore();
+    // A server never configured reads as the defaults, without a row.
+    assert.deepEqual(store.settings.community(GUILD), COMMUNITY_DEFAULTS);
+    store.settings.setCommunity(GUILD, { takeTurns: true, personLimit: 3 });
+    store.settings.setDjRole(GUILD, '500000000000000001');
+    store.settings.setCommunity(GUILD, { volume: 150, sound: 'bass', voteSkip: false, stay: true });
+    assert.deepEqual(store.settings.community(GUILD), {
+      voteSkip: false,
+      takeTurns: true,
+      personLimit: 3,
+      stay: true,
+      volume: 150,
+      sound: 'bass',
+    });
+    assert.equal(store.settings.get(GUILD).djRoleId, '500000000000000001');
+    // Nothing given changes nothing; another server keeps its defaults.
+    store.settings.setCommunity(GUILD, {});
+    assert.equal(store.settings.community(GUILD).volume, 150);
+    assert.deepEqual(store.settings.community('other'), COMMUNITY_DEFAULTS);
+  });
+
+  it('reads a preset this version does not know as the plain sound', () => {
+    const store = memoryStore();
+    store.settings.setCommunity(GUILD, { volume: 80 });
+    store.db.prepare("UPDATE guild_settings SET sound = 'nightcore' WHERE guild_id = ?").run(GUILD);
+    assert.equal(store.settings.community(GUILD).sound, 'off');
   });
 });

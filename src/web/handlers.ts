@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Static, TSchema } from 'typebox';
 import type { Access } from '../app/access.ts';
-import { type ActionContext, ActionError, type Actions, type Directory } from '../app/actions.ts';
+import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
 import type { DoctorReport } from '../app/doctor.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
@@ -78,6 +78,11 @@ export function pruneBackups(dir: string, keep: number): void {
 
 const OK = { ok: true as const };
 
+// A server's settings as the API sends them (the roles as an array of their own; the schema drops nothing else).
+function settingsAnswer(settings: SettingsView) {
+  return { ...settings, roles: settings.roles.map((role) => ({ ...role })) };
+}
+
 /** Every operation's handler; a missing one fails the type check. */
 export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]> } = {
   'now-playing': ({ context, deps }) => deps.presenter.player(deps.actions.nowPlaying(context)),
@@ -143,14 +148,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return deps.actions.voiceChannels(context);
   },
 
-  settings: ({ context, deps }) => {
-    const settings = deps.actions.settings(context);
-    return { djRoleId: settings.djRoleId, roles: [...settings.roles] };
-  },
-  'dj-role': ({ context, body, deps }) => {
-    const settings = deps.actions.djRole(context, body.roleId);
-    return { djRoleId: settings.djRoleId, roles: [...settings.roles] };
-  },
+  settings: ({ context, deps }) => settingsAnswer(deps.actions.settings(context)),
+  'dj-role': ({ context, body, deps }) => settingsAnswer(deps.actions.djRole(context, body.roleId)),
   status: ({ deps }) => {
     const status = deps.actions.status();
     return {
