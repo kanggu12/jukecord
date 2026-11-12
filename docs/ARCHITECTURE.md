@@ -1,7 +1,7 @@
 # How jukecord is built
 
 One Node process, written in TypeScript and run as it is (Node strips the types; there is no build step for the
-server). Its parts, from the outside in:
+server, and the image carries the source with the types already stripped, line for line). Its parts, from the outside in:
 
 ```mermaid
 flowchart LR

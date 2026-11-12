@@ -8,14 +8,16 @@
 #
 #   docker build -f deploy/docker/Dockerfile -t jukecord .
 #
-# Each step of the stages that only build (yt-dlp, FFmpeg, the npm packages, the panel) starts by echoing a line that
-# begins with "jukecord:". Docker describes a step's build cache by its command, so that word is how
+# Each step of the stages that only build (yt-dlp, FFmpeg, the npm packages, the panel, the source as JavaScript)
+# starts by echoing a line that begins with "jukecord:". Docker describes a step's build cache by its command, so
+# that word is how
 # `docker buildx prune --filter description~=jukecord` finds this build's cache and leaves other projects' alone.
 
 # Node 26 is the current LTS (from 2026-10-28) and Debian 13 (trixie) the current stable release. Pinned by the
 # multi-platform index digest, so a rebuild gets the same base on both architectures until it is bumped on purpose.
-# Written out here and in the panel's stage, not through an ARG: Dependabot reads only FROM lines when it proposes a
-# newer digest (.github/dependabot.yml). The release workflow reads this line (AS base) for the image's base labels.
+# Written out here and in the two stages made on the build machine (the panel, the source as JavaScript), not through
+# an ARG: Dependabot reads only FROM lines when it proposes a newer digest (.github/dependabot.yml). The release
+# workflow reads this line (AS base) for the image's base labels.
 # Debian (glibc), not Alpine: musl's resolver has failed lookups in Kubernetes clusters, which the Helm chart targets.
 FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS base
 
@@ -124,6 +126,19 @@ COPY src/core/say.ts src/core/reasons.ts ./src/core/
 RUN echo "jukecord: the panel" \
  && node scripts/build-panel.ts
 
+# ---- the source as JavaScript ---------------------------------------------------------------------------------------
+# jukecord is TypeScript that Node runs as it is, taking the types out each time a process starts; for that Node loads
+# its TypeScript parser, about 20 MiB and 40 ms in the server and in every `jukecord` command. Here the types are taken
+# out once (scripts/strip-types.ts: by Node's own function, with every line and column left where it is), and the
+# image carries the result. Text in, text out: made on the machine doing the build, like the panel, and the same for
+# every architecture.
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS source
+WORKDIR /app
+COPY scripts/strip-types.ts ./scripts/
+COPY src ./src
+RUN echo "jukecord: its source as JavaScript" \
+ && node --disable-warning=ExperimentalWarning scripts/strip-types.ts src js
+
 # ---- the image ------------------------------------------------------------------------------------------------------
 FROM base AS runtime
 # tini as PID 1 forwards SIGTERM to Node and reaps the yt-dlp and ffmpeg processes jukecord starts. libopus and LAME
@@ -146,7 +161,8 @@ COPY --from=deps /app/node_modules ./node_modules
 # Readable by jukecord's user (10001) whatever umask the checkout was made with, and not executable: files 644,
 # folders 755 (X gives execute to folders, and to nothing else here).
 COPY --chmod=u=rwX,go=rX package.json LICENSE ./
-COPY --chmod=u=rwX,go=rX src ./src
+# The source with its types already out (the source stage above): src/main.js is src/main.ts of the checkout.
+COPY --from=source --chmod=u=rwX,go=rX /app/js ./src
 COPY --from=panel --chmod=u=rwX,go=rX /app/panel/dist ./panel/dist
 # Inside a container the panel listens on every interface (compose publishes it on 127.0.0.1); data lives in /data.
 ENV NODE_ENV=production \
@@ -155,7 +171,7 @@ ENV NODE_ENV=production \
     JUKECORD_YTDLP=/opt/yt-dlp/yt-dlp
 # The jukecord command on the PATH: `docker compose exec jukecord jukecord np` (and the front door) use it. It finds
 # the host token in /data, so commands run inside the container need no login.
-RUN printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning /app/src/cli/main.ts "$@"\n' > /usr/local/bin/jukecord \
+RUN printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning /app/src/cli/main.js "$@"\n' > /usr/local/bin/jukecord \
  && chmod 0755 /usr/local/bin/jukecord
 # A fixed non-root user, the same number the Helm chart's securityContext uses.
 RUN mkdir -p /data && chown 10001:10001 /data
@@ -182,4 +198,4 @@ LABEL org.opencontainers.image.title="jukecord" \
       org.opencontainers.image.revision="${REVISION}"
 ENTRYPOINT ["/usr/bin/tini", "--"]
 # Node's SQLite driver prints an "experimental" warning on every start (Node 24 and 26); it is known and expected.
-CMD ["node", "--disable-warning=ExperimentalWarning", "src/main.ts"]
+CMD ["node", "--disable-warning=ExperimentalWarning", "src/main.js"]

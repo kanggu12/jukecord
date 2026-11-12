@@ -5,9 +5,14 @@ why.
 
 ## TypeScript run as it is
 
-Node 24 runs `.ts` files by stripping the types, so the server has no build step and the image runs the source. Only
+Node 24 runs `.ts` files by stripping the types, so the server has no build step: a checkout runs as it is. Only
 syntax that can be stripped is used (no enums, namespaces or parameter properties), which `tsc` checks
-(`erasableSyntaxOnly`). Type checking is TypeScript 7; linting and formatting are Biome (typescript-eslint did not yet
+(`erasableSyntaxOnly`). The image carries the same source with the types already stripped, as `.js` files
+(`scripts/strip-types.ts`, with Node's own `stripTypeScriptTypes`). Stripping on every start loads Node's TypeScript
+parser into each process: in the image on two cores the server rested at 96 MiB that way and rests at 78 MiB now,
+and a `jukecord` command took 150 ms and takes 100 ms. The stripping leaves spaces where the types were, so every
+line and column of a `.js` file is the same place in its `.ts` file, and a stack trace from the image points into
+the source. A bundle, as the panel has, would have put the server into one file with other line numbers. Type checking is TypeScript 7; linting and formatting are Biome (typescript-eslint did not yet
 support TypeScript 7). The panel is bundled with esbuild, since browsers need JavaScript.
 
 ## Node's own SQLite

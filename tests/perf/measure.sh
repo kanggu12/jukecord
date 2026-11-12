@@ -14,7 +14,9 @@
 #   tests/perf/measure.sh [cores] [panels]      (panels 0 leaves the crowd out)
 #
 # Needs the jukecord image (docker build -f deploy/docker/Dockerfile -t jukecord:dev .); JUKECORD_IMAGE picks
-# another. The source is mounted over the image's, as tests/ui/run.sh does, so it measures this checkout.
+# another. The server it measures is the image with this checkout's source in place of its own, made the way the image
+# build makes it (the types already out: scripts/strip-types.ts). So it measures this checkout as an image of it would
+# run, without building one.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 cores=${1:-2}
@@ -28,25 +30,32 @@ crowd=jukecord-perf-crowd-$$
 cleanup() {
   docker rm -f "$crowd" "$server" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
-  # The data folder belongs to the image's user; a container removes it.
-  docker run --rm -v "$work:/work" --entrypoint sh "$image" -c 'rm -rf /work/data' >/dev/null 2>&1 || true
+  # The folders written from inside containers belong to the image's user; a container removes them.
+  docker run --rm -v "$work:/work" --entrypoint sh "$image" -c 'rm -rf /work/data /work/js' >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
-mkdir -p "$work/data"
-chmod 0777 "$work/data"
+mkdir -p "$work/data" "$work/js"
+chmod 0777 "$work/data" "$work/js"
 docker network create "$network" >/dev/null
 # The same container settings as compose.yaml (read-only, no capabilities, 1 GiB of memory without swap, 1024
 # processes, a 256 MiB /tmp), with the cores given and no published port.
-run=(--user 10001:10001 --read-only --tmpfs /tmp:size=256m --cap-drop ALL --security-opt no-new-privileges:true
-  --memory 1g --memory-swap 1g --pids-limit 1024 --cpus "$cores" -v "$PWD:/app:ro" -v "$work/data:/data")
+limits=(--user 10001:10001 --read-only --tmpfs /tmp:size=256m --cap-drop ALL --security-opt no-new-privileges:true
+  --memory 1g --memory-swap 1g --pids-limit 1024 --cpus "$cores")
+# What prepares and measures from the side runs from the checkout, as the .ts it is.
+checkout=("${limits[@]}" -v "$PWD:/app:ro" -v "$work/data:/data")
+# The server is the image, with this checkout's source as JavaScript over its own and the scripts that ask it.
+image_run=("${limits[@]}" -v "$work/js/src:/app/src:ro" -v "$PWD/tests/perf:/app/tests/perf:ro" -v "$work/data:/data")
 node=(node --disable-warning=ExperimentalWarning)
 
 echo "jukecord $(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json) in $image, on $cores processor cores"
+# The checkout's source the way the image build writes it.
+docker run --rm "${checkout[@]}" -v "$work/js:/js" "$image" "${node[@]}" /app/scripts/strip-types.ts /app/src /js/src >/dev/null
 # A server used every day for a year (tests/perf/seed.ts).
-docker run --rm "${run[@]}" "$image" "${node[@]}" /app/tests/perf/seed.ts /data
+docker run --rm "${checkout[@]}" "$image" "${node[@]}" /app/tests/perf/seed.ts /data
 # Listening on every address of its container, so the crowd's container reaches it over their private network.
-docker run -d --name "$server" --network "$network" -e JUKECORD_HOST=0.0.0.0 "${run[@]}" "$image" >/dev/null
+docker run -d --name "$server" --network "$network" -e JUKECORD_HOST=0.0.0.0 "${image_run[@]}" "$image" \
+  "${node[@]}" src/main.js >/dev/null
 # Ready when the API answers.
 for _ in $(seq 1 30); do
   docker exec "$server" node -e "fetch('http://127.0.0.1:8795/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" &&
@@ -58,7 +67,8 @@ sleep 10
 docker stats --no-stream --format 'memory at rest: {{.MemUsage}}' "$server"
 docker exec "$server" "${node[@]}" /app/tests/perf/reads.ts /data
 docker stats --no-stream --format 'memory after the reads: {{.MemUsage}}' "$server"
-docker exec "$server" "${node[@]}" /app/tests/perf/encode.ts /tmp
+# The encoding is FFmpeg's work, started by jukecord's own code: in a container of its own beside the server.
+docker run --rm "${checkout[@]}" "$image" "${node[@]}" /app/tests/perf/encode.ts /tmp
 
 if [ "$panels" -gt 0 ]; then
   echo "a crowd of $panels panels, the queue changing 3 times a second for 20 s:"

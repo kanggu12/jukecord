@@ -6,6 +6,22 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The image carries jukecord's source with the types already taken out: JavaScript, with every line and column where
+  it is in the TypeScript, so a stack trace still points into the source. Node no longer loads its TypeScript parser
+  in each process: the server rests at about 78 MiB instead of 96, and a `jukecord` command answers in about 100 ms
+  instead of 150.
+- typebox 1.4.6.
+
+### Fixed
+
+- The watchdog ended jukecord when the whole process had been stopped for longer than half a minute and was let go
+  again (`docker pause`, a laptop asleep), whenever its thread happened to look before the main one had moved its
+  counter; every server then came back paused. A look that itself comes late now starts the count again.
+- What Discord said about a person in a server is reused for a minute and then dropped; it was kept until the next
+  start, one entry for every person who had opened the panel, in every server.
+
 ## [0.2.0] - 2026-11-12
 
 ### Changed

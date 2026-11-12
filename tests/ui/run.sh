@@ -6,7 +6,8 @@
 #   ONLY=toast,menu tests/ui/run.sh <output folder>     only those states, for a quick look (readme: its pictures)
 #
 # Needs the jukecord image (docker build -f deploy/docker/Dockerfile -t jukecord:dev .) and a built panel
-# (npm run build). The source is mounted over the image's, so a change needs no image rebuild.
+# (npm run build). The checkout is mounted over the image's own files and run as the .ts it is, so a change needs
+# no image rebuild.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=$(realpath -m "${1:?say where the screenshots go}")
@@ -30,7 +31,8 @@ docker network create "$network" >/dev/null
 docker run --rm --user 10001:10001 -v "$PWD:/app:ro" -v "$work/data:/data" "$image" \
   node --disable-warning=ExperimentalWarning /app/tests/ui/seed.ts /data
 docker run -d --name "$server" --network "$network" --user 10001:10001 -v "$PWD:/app:ro" -v "$work/data:/data" \
-  -e JUKECORD_PUBLIC_URL="http://$server:8795" "$image" >/dev/null
+  -e JUKECORD_PUBLIC_URL="http://$server:8795" "$image" \
+  node --disable-warning=ExperimentalWarning src/main.ts >/dev/null
 # Ready when the API answers.
 for _ in $(seq 1 30); do
   docker exec "$server" node -e "fetch('http://127.0.0.1:8795/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" && break

@@ -90,14 +90,15 @@ describe('the image', () => {
   const dockerfile = read('deploy/docker/Dockerfile');
 
   it('pins its base by digest in FROM lines, where Dependabot reads it, and yt-dlp by version and checksum', () => {
-    // The base stage and the panel's stage (built for the build machine's processor) name the same image.
+    // The base stage and the two stages made on the build machine (for its own processor) name the same image.
     const bases = [...dockerfile.matchAll(/^FROM (?:--platform=\$BUILDPLATFORM )?(node:\S+) AS (\w+)$/gm)];
     assert.deepEqual(
       bases.map((match) => match[2]),
-      ['base', 'panel'],
+      ['base', 'panel', 'source'],
     );
     assert.match(bases[0]?.[1] ?? '', /^node:26-[a-z-]+@sha256:[0-9a-f]{64}$/);
-    assert.equal(bases[1]?.[1], bases[0]?.[1], 'the panel stage builds on another base');
+    for (const stage of bases.slice(1))
+      assert.equal(stage[1], bases[0]?.[1], `the ${stage[2]} stage builds on another base`);
     // Every other stage starts from the base stage, so one line sets the base for all of them.
     for (const match of dockerfile.matchAll(/^FROM (?!node:|--platform)(\S+) AS \w+$/gm))
       assert.equal(match[1], 'base');
@@ -115,11 +116,32 @@ describe('the image', () => {
     assert.match(dockerfile, /\/usr\/local\/bin\/jukecord/);
   });
 
+  it('carries its source as JavaScript, and starts nothing that would have its types taken out', () => {
+    // The stage that takes the types out has the script and the source, and nothing else to wait for.
+    const start = dockerfile.indexOf(' AS source\n');
+    const stage = dockerfile.slice(start, dockerfile.indexOf('\nFROM ', start));
+    assert.deepEqual(stage.match(/^COPY .+$/gm), ['COPY scripts/strip-types.ts ./scripts/', 'COPY src ./src']);
+    assert.match(stage, /node --disable-warning=ExperimentalWarning scripts\/strip-types\.ts src js$/m);
+    // What runs gets that stage's output where the source is in a checkout, and the checkout's .ts files stay out.
+    const runtime = dockerfile.slice(dockerfile.indexOf(' AS runtime\n'));
+    assert.match(runtime, /^COPY --from=source --chmod=u=rwX,go=rX \/app\/js \.\/src$/m);
+    assert.doesNotMatch(runtime, /^COPY (?!--from=).*\bsrc\b/m);
+    // The server and the jukecord command are the .js files; no instruction names a .ts one.
+    assert.match(runtime, /^CMD \["node", "--disable-warning=ExperimentalWarning", "src\/main\.js"\]$/m);
+    assert.match(runtime, /exec node --disable-warning=ExperimentalWarning \/app\/src\/cli\/main\.js "\$@"/);
+    const instructions = runtime
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    assert.doesNotMatch(instructions, /\.ts\b/);
+    assert.ok(fs.existsSync('src/main.ts') && fs.existsSync('src/cli/main.ts'));
+  });
+
   it('copies its own files readable and not executable, and keeps no npm and no setuid program', () => {
     // The symbolic mode needs a newer Dockerfile frontend than the octal one; X is execute for folders only.
     assert.match(dockerfile, /^# syntax=docker\/dockerfile:1\n/);
     assert.doesNotMatch(dockerfile, /--chmod=0?7/);
-    assert.equal(dockerfile.match(/^COPY (--from=panel )?--chmod=u=rwX,go=rX /gm)?.length, 3);
+    assert.equal(dockerfile.match(/^COPY (--from=\w+ )?--chmod=u=rwX,go=rX /gm)?.length, 3);
     assert.match(
       dockerfile,
       /rm -rf \/usr\/local\/lib\/node_modules\/npm \/usr\/local\/bin\/npm \/usr\/local\/bin\/npx/,
@@ -197,7 +219,7 @@ describe('the image', () => {
   });
 
   it('names jukecord first in each step of the stages that only build, which the build-cache advice filters on', () => {
-    for (const stage of ['ytdlp', 'ffmpeg', 'deps', 'panel']) {
+    for (const stage of ['ytdlp', 'ffmpeg', 'deps', 'panel', 'source']) {
       const start = dockerfile.indexOf(` AS ${stage}\n`);
       // The stage's instructions, each with its continuation lines joined and its comment lines left out.
       const instructions = dockerfile
