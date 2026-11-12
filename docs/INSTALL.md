@@ -31,7 +31,7 @@ The front door's other commands:
 | `./jukecord down`                  | stops it; the data stays in the `jukecord-data` volume                                            |
 | `./jukecord <command>`             | the [jukecord command](README.md#the-jukecord-command): `np`, `add`, `token create` ...           |
 
-To use a released image instead of building one, set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.1.0` in `.env`.
+To use a released image instead of building one, set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.1.1` in `.env`.
 
 ### Friends on other machines
 

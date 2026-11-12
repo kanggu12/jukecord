@@ -6,6 +6,8 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-12
+
 ### Changed
 
 - The image is half the size: 423 MB instead of 843 MB on disk, 145 MiB instead of 290 MiB to download (gzip). FFmpeg
@@ -26,7 +28,8 @@ All notable changes to jukecord are documented here. The format is based on
 ### Fixed
 
 - A track whose file cannot be read as it arrives (an MP4 with its index at the end, as some sites serve it) is
-  fetched whole and plays, instead of failing as "the downloaded audio is empty".
+  fetched whole, up to 512 MB and with its progress shown, and plays, instead of failing as "the downloaded audio is
+  empty".
 - Accessibility: the logo link has a name on phones, each page has one main landmark and one level-one heading, the
   menu's sheet is a valid dialog, the log can be scrolled from the keyboard, and the player's heading is not read out
   empty before the first state. The panel walk runs axe-core on the pages it photographs and fails on any rule broken.
@@ -35,8 +38,13 @@ All notable changes to jukecord are documented here. The format is based on
 - A part that fails while hearing about a change (a panel's message, a card) no longer keeps the others from hearing
   it, nor takes the process down with every server's music when the change came from a player's timer.
 - Audio files keep their day-long browser cache; the panel files' "no-cache" had replaced it.
-- A track fetched whole after the stream could not be read: a time limit or a cancel says so, the download shows its
-  progress, a file over 512 MB is not fetched, and what yt-dlp leaves beside the file is removed.
+
+### Security
+
+- The image's FFmpeg has only the four libraries it needs (Opus, LAME, OpenSSL and zlib) instead of the libraries of
+  every codec and device that Debian's package brings, so much less code reads the media sites send. Debian's updates
+  no longer reach it by themselves: a weekly check fails when a newer FFmpeg release of its line is out, and a patch
+  release of jukecord brings it.
 
 ## [0.1.0] - 2026-11-12
 
@@ -94,5 +102,6 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/kanggu12/jukecord/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kanggu12/jukecord/releases/tag/v0.1.0

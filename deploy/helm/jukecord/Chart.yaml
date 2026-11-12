@@ -4,8 +4,8 @@ description: >-
   A self-hosted Discord music bot: one queue per server, heard in a voice channel and in the browser at the same
   time, with a web panel, an HTTP API and a command line.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "0.1.1"
 kubeVersion: ">=1.25.0-0"
 keywords:
   - discord
