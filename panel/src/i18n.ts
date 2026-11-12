@@ -308,7 +308,7 @@ const EN = {
   waitingTurn: 'Waiting for its turn',
   // The alerts channel, in the menu (app/alerts.ts).
   alerts: 'Alerts channel',
-  alertsHint: 'Where jukecord tells this server about trouble: YouTube refusing it, a restart, a full disk',
+  alertsHint: 'Where jukecord tells this server about trouble: YouTube refusing it, a restart, a disk nearly full',
   alertsOff: 'Nowhere',
   // An add that did not go through, under the field (the reason after it, in the panel's language).
   couldNotAdd: (reason: string) => `Could not add: ${reason}`,
