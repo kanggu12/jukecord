@@ -91,17 +91,21 @@ describe('the image', () => {
 
   it('pins its base by digest in FROM lines, where Dependabot reads it, and yt-dlp by version and checksum', () => {
     // The base stage and the two stages made on the build machine (for its own processor) name the same image.
-    const bases = [...dockerfile.matchAll(/^FROM (?:--platform=\$BUILDPLATFORM )?(node:\S+) AS (\w+)$/gm)];
+    const bases = [...dockerfile.matchAll(/^FROM (?:--platform=\$BUILDPLATFORM )?(node:\S+) AS ([\w-]+)$/gm)];
     assert.deepEqual(
       bases.map((match) => match[2]),
-      ['base', 'panel', 'source'],
+      ['base', 'jukecord-panel', 'jukecord-source'],
     );
     assert.match(bases[0]?.[1] ?? '', /^node:26-[a-z-]+@sha256:[0-9a-f]{64}$/);
     for (const stage of bases.slice(1))
       assert.equal(stage[1], bases[0]?.[1], `the ${stage[2]} stage builds on another base`);
     // Every other stage starts from the base stage, so one line sets the base for all of them.
-    for (const match of dockerfile.matchAll(/^FROM (?!node:|--platform)(\S+) AS \w+$/gm))
+    for (const match of dockerfile.matchAll(/^FROM (?!node:|--platform)(\S+) AS [\w-]+$/gm))
       assert.equal(match[1], 'base');
+    // Every stage with steps of its own has jukecord in its name, which the build-cache advice filters on.
+    for (const match of dockerfile.matchAll(/^FROM .* AS ([\w-]+)$/gm)) {
+      if (match[1] !== 'base') assert.match(match[1] ?? '', /^jukecord(-[a-z]+)?$/);
+    }
     assert.match(dockerfile, /^ARG YTDLP_VERSION=\d{4}\.\d{2}\.\d{2}$/m);
     assert.match(dockerfile, /^ARG YTDLP_SHA256_AMD64=[0-9a-f]{64}$/m);
     assert.match(dockerfile, /^ARG YTDLP_SHA256_ARM64=[0-9a-f]{64}$/m);
@@ -112,19 +116,19 @@ describe('the image', () => {
   it('runs as a fixed non-root user with a health check, and carries the panel and the command', () => {
     assert.match(dockerfile, /^USER 10001:10001$/m);
     assert.match(dockerfile, /^HEALTHCHECK --interval=60s /m);
-    assert.match(dockerfile, /COPY --from=panel (--chmod=\S+ )?\/app\/panel\/dist \.\/panel\/dist/);
+    assert.match(dockerfile, /COPY --from=jukecord-panel (--chmod=\S+ )?\/app\/panel\/dist \.\/panel\/dist/);
     assert.match(dockerfile, /\/usr\/local\/bin\/jukecord/);
   });
 
   it('carries its source as JavaScript, and starts nothing that would have its types taken out', () => {
     // The stage that takes the types out has the script and the source, and nothing else to wait for.
-    const start = dockerfile.indexOf(' AS source\n');
+    const start = dockerfile.indexOf(' AS jukecord-source\n');
     const stage = dockerfile.slice(start, dockerfile.indexOf('\nFROM ', start));
     assert.deepEqual(stage.match(/^COPY .+$/gm), ['COPY scripts/strip-types.ts ./scripts/', 'COPY src ./src']);
     assert.match(stage, /node --disable-warning=ExperimentalWarning scripts\/strip-types\.ts src js$/m);
     // What runs gets that stage's output where the source is in a checkout, and the checkout's .ts files stay out.
-    const runtime = dockerfile.slice(dockerfile.indexOf(' AS runtime\n'));
-    assert.match(runtime, /^COPY --from=source --chmod=u=rwX,go=rX \/app\/js \.\/src$/m);
+    const runtime = dockerfile.slice(dockerfile.indexOf(' AS jukecord\n'));
+    assert.match(runtime, /^COPY --from=jukecord-source --chmod=u=rwX,go=rX \/app\/js \.\/src$/m);
     assert.doesNotMatch(runtime, /^COPY (?!--from=).*\bsrc\b/m);
     // The server and the jukecord command are the .js files; no instruction names a .ts one.
     assert.match(runtime, /^CMD \["node", "--disable-warning=ExperimentalWarning", "src\/main\.js"\]$/m);
@@ -141,7 +145,7 @@ describe('the image', () => {
     // The symbolic mode needs a newer Dockerfile frontend than the octal one; X is execute for folders only.
     assert.match(dockerfile, /^# syntax=docker\/dockerfile:1\n/);
     assert.doesNotMatch(dockerfile, /--chmod=0?7/);
-    assert.equal(dockerfile.match(/^COPY (--from=\w+ )?--chmod=u=rwX,go=rX /gm)?.length, 3);
+    assert.equal(dockerfile.match(/^COPY (--from=[\w-]+ )?--chmod=u=rwX,go=rX /gm)?.length, 3);
     assert.match(
       dockerfile,
       /rm -rf \/usr\/local\/lib\/node_modules\/npm \/usr\/local\/bin\/npm \/usr\/local\/bin\/npx/,
@@ -157,8 +161,8 @@ describe('the image', () => {
     }
     // A pinned version comes after the tools its stage installs, so a bump takes those from the cache.
     for (const [stage, pin] of [
-      ['ytdlp', 'YTDLP_VERSION'],
-      ['ffmpeg', 'FFMPEG_VERSION'],
+      ['jukecord-ytdlp', 'YTDLP_VERSION'],
+      ['jukecord-ffmpeg', 'FFMPEG_VERSION'],
     ]) {
       const from = dockerfile.indexOf(`AS ${stage}\n`);
       assert.ok(dockerfile.indexOf('apt-get install', from) < dockerfile.indexOf(`ARG ${pin}=`, from), stage);
@@ -196,7 +200,7 @@ describe('the image', () => {
     }
     // What the stage copies from the build context to the same place under its working folder, which is where a
     // relative import from panel/ looks for it.
-    const start = dockerfile.indexOf(' AS panel\n');
+    const start = dockerfile.indexOf(' AS jukecord-panel\n');
     const stage = dockerfile.slice(start, dockerfile.indexOf('\nFROM ', start));
     const copied: string[] = [];
     for (const match of stage.matchAll(/^COPY ((?:--\S+ )*)(.+)$/gm)) {
@@ -219,7 +223,7 @@ describe('the image', () => {
   });
 
   it('names jukecord first in each step of the stages that only build, which the build-cache advice filters on', () => {
-    for (const stage of ['ytdlp', 'ffmpeg', 'deps', 'panel', 'source']) {
+    for (const stage of ['jukecord-ytdlp', 'jukecord-ffmpeg', 'jukecord-deps', 'jukecord-panel', 'jukecord-source']) {
       const start = dockerfile.indexOf(` AS ${stage}\n`);
       // The stage's instructions, each with its continuation lines joined and its comment lines left out.
       const instructions = dockerfile

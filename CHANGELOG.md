@@ -32,6 +32,9 @@ All notable changes to jukecord are documented here. The format is based on
   module's address made with `new URL`), which the image could not load, and when a `.js` and a `.ts` of one name sit
   side by side.
 - `/metrics` treats the standard `Forwarded` header as a request through a proxy, as it does `X-Forwarded-For`.
+- The image's build stages are named jukecord and jukecord-…, so `docker buildx prune --filter description~=jukecord`
+  (docs/INSTALL.md) finds the final stage's cache too (its copies of yt-dlp, FFmpeg and the packages, about 170 MB a
+  build), which it left before.
 
 ### Fixed
 

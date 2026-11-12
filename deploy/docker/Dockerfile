@@ -8,10 +8,10 @@
 #
 #   docker build -f deploy/docker/Dockerfile -t jukecord .
 #
-# Each step of the stages that only build (yt-dlp, FFmpeg, the npm packages, the panel, the source as JavaScript)
-# starts by echoing a line that begins with "jukecord:". Docker describes a step's build cache by its command, so
-# that word is how
-# `docker buildx prune --filter description~=jukecord` finds this build's cache and leaves other projects' alone.
+# Docker describes each step's build cache by its stage and its command ("[jukecord-ffmpeg 3/5] RUN ..."), so every
+# stage that has steps is named jukecord or jukecord-something, and each step of the stages that only build starts by
+# echoing a line that begins with "jukecord:". That word is how `docker buildx prune --filter description~=jukecord`
+# finds all of this build's cache, the final stage's copies included, and leaves other projects' alone.
 
 # Node 26 is the current LTS (from 2026-10-28) and Debian 13 (trixie) the current stable release. Pinned by the
 # multi-platform index digest, so a rebuild gets the same base on both architectures until it is bumped on purpose.
@@ -22,7 +22,7 @@
 FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS base
 
 # ---- yt-dlp ---------------------------------------------------------------------------------------------------------
-FROM base AS ytdlp
+FROM base AS jukecord-ytdlp
 # Set by buildx for each platform of a multi-platform build.
 ARG TARGETARCH
 # Before the versions below: a build argument declared before a RUN is part of that RUN's cache key, so a newer
@@ -61,7 +61,7 @@ RUN set -eu; \
 # MP3 and PCM, and every outside library but the four below are left out. Debian's package brings the libraries of
 # every codec and device it supports (about 450 MB); this is a single program of a few dozen MB. No GPL parts:
 # LGPL-3.0-or-later (version 3 for OpenSSL's licence).
-FROM base AS ffmpeg
+FROM base AS jukecord-ffmpeg
 # Before the version below, so a newer FFmpeg reuses the compilers from the cache.
 RUN echo "jukecord: the tools FFmpeg is built with" \
  && apt-get update \
@@ -100,7 +100,7 @@ RUN set -eu; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -protocols | grep -qx '  https'
 
 # ---- npm packages ---------------------------------------------------------------------------------------------------
-FROM base AS deps
+FROM base AS jukecord-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Runtime packages only; install scripts off, since nothing jukecord uses needs one (native parts come prebuilt).
@@ -112,7 +112,7 @@ RUN echo "jukecord: the npm packages it runs" \
 # Built once on the machine doing the build (it is plain JavaScript and CSS, the same for every architecture), with
 # the development packages (esbuild) that the image itself does not carry. The same base as above, for the machine's
 # own processor.
-FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS panel
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS jukecord-panel
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN echo "jukecord: the tools the panel is built with" \
@@ -132,7 +132,7 @@ RUN echo "jukecord: the panel" \
 # out once (scripts/strip-types.ts: by Node's own function, with every line and column left where it is), and the
 # image carries the result. Text in, text out: made on the machine doing the build, like the panel, and the same for
 # every architecture.
-FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS source
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS jukecord-source
 WORKDIR /app
 COPY scripts/strip-types.ts ./scripts/
 COPY src ./src
@@ -140,7 +140,7 @@ RUN echo "jukecord: its source as JavaScript" \
  && node --disable-warning=ExperimentalWarning scripts/strip-types.ts src js
 
 # ---- the image ------------------------------------------------------------------------------------------------------
-FROM base AS runtime
+FROM base AS jukecord
 # tini as PID 1 forwards SIGTERM to Node and reaps the yt-dlp and ffmpeg processes jukecord starts. libopus and LAME
 # are the two libraries FFmpeg was built against that the base does not have (OpenSSL comes with ca-certificates).
 # npm and npx go: jukecord installs nothing while it runs, and a package manager is a tool for anyone who gets in
@@ -151,19 +151,19 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
  && find / -xdev -type f -perm /6000 -exec chmod a-s {} +
-COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=ffmpeg /opt/ffmpeg/share/doc/ffmpeg /usr/local/share/doc/ffmpeg
+COPY --from=jukecord-ffmpeg /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=jukecord-ffmpeg /opt/ffmpeg/share/doc/ffmpeg /usr/local/share/doc/ffmpeg
 # The program starts with the libraries this stage has (a missing one fails the build here, not at the first track).
 RUN ffmpeg -hide_banner -encoders | grep -q libopus
-COPY --from=ytdlp /opt/yt-dlp /opt/yt-dlp
+COPY --from=jukecord-ytdlp /opt/yt-dlp /opt/yt-dlp
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=jukecord-deps /app/node_modules ./node_modules
 # Readable by jukecord's user (10001) whatever umask the checkout was made with, and not executable: files 644,
 # folders 755 (X gives execute to folders, and to nothing else here).
 COPY --chmod=u=rwX,go=rX package.json LICENSE ./
 # The source with its types already out (the source stage above): src/main.js is src/main.ts of the checkout.
-COPY --from=source --chmod=u=rwX,go=rX /app/js ./src
-COPY --from=panel --chmod=u=rwX,go=rX /app/panel/dist ./panel/dist
+COPY --from=jukecord-source --chmod=u=rwX,go=rX /app/js ./src
+COPY --from=jukecord-panel --chmod=u=rwX,go=rX /app/panel/dist ./panel/dist
 # Inside a container the panel listens on every interface (compose publishes it on 127.0.0.1); data lives in /data.
 ENV NODE_ENV=production \
     JUKECORD_HOST=0.0.0.0 \
