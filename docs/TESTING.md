@@ -37,8 +37,9 @@ composited), controls on one row that differ in height or centre, floating layer
 a dialog or a toast that something else covers, a page wider than the screen, a badge whose word breaks out of it, the
 playing card's keys leaving one key alone on a row, a list in a card with room for fewer than three rows, a box that
 scrolls with nothing in it the keyboard can stop on, a state told by a fill alone drawn like its absence (as a contrast
-theme paints), keys and cards under a screen's notch or home bar, and touch targets under 44 pixels (keys, fields, the
-switch, the sliders and the seek bar, the logo). On the pages it photographs it also runs axe-core's accessibility
+theme paints), keys and cards under a screen's notch or home bar, touch targets under 44 pixels (keys, fields, the
+switch, the sliders and the seek bar, the logo), and a listen bar pushed off the foot of the window (a page that ran
+past the window and scrolled its bars with it). On the pages it photographs it also runs axe-core's accessibility
 rules (names, roles, landmarks, headings). It also presses **Listen here** and waits for the browser to be in time
 with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
 
