@@ -122,6 +122,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'jukecord is making the MP3 copy of this track; try again in a moment',
     '이 곡의 MP3 사본을 만드는 중: 잠시 뒤 다시 시도하세요',
   ],
+  // What the player did by itself (PlayerSnapshot.notice), after the track's title.
+  ['taken out of the looping queue', '대기열 반복에서 뺌'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

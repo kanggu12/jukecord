@@ -64,6 +64,7 @@ interface PlayerJson {
   repeat: string;
   progress: number | null;
   error: string | null;
+  notice: string | null;
 }
 interface AddJson {
   items: ItemJson[];
@@ -103,7 +104,10 @@ function trackLine(track: TrackJson, by: string | null): string {
 function showPlayer(answer: unknown): string {
   const player = answer as PlayerJson;
   const repeat = player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`;
-  if (!player.track) return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}`;
+  // What the player did by itself (a track taken out of the loop), on a line of its own.
+  const notice = player.notice ? `\n${player.notice}` : '';
+  if (!player.track)
+    return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}${notice}`;
   // Where it is now: the snapshot's position plus the time since it was taken, while playing.
   const position =
     player.status === 'playing' ? player.positionMs + Math.max(0, Date.now() - player.at) : player.positionMs;
@@ -114,7 +118,7 @@ function showPlayer(answer: unknown): string {
       : player.status === 'paused'
         ? 'Paused'
         : 'Playing';
-  return `${state}:${where}\n${trackLine(player.track, player.addedByName)}${repeat}`;
+  return `${state}:${where}\n${trackLine(player.track, player.addedByName)}${repeat}${notice}`;
 }
 
 function showAdded(answer: unknown): string {

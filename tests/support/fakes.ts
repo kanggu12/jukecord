@@ -98,10 +98,10 @@ export class FakeMedia implements MediaPreparer {
     return call;
   }
 
-  /** Finishes the newest fetch with a file of the given length. */
-  finish(durationMs: number): void {
+  /** Finishes the newest fetch with a file of the given length; `fromCache` as for a track found in the cache. */
+  finish(durationMs: number, fromCache = false): void {
     const call = this.last();
-    call.resolve({ file: `/cache/${call.track.id}.opus`, durationMs });
+    call.resolve({ file: `/cache/${call.track.id}.opus`, durationMs, fromCache });
   }
 }
 

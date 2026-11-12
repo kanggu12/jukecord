@@ -117,6 +117,57 @@ describe('Player repeat and a track that keeps failing', () => {
     );
   });
 
+  it('keeps a failing track in the loop while only tracks from the cache play (the site is down, not the track)', async () => {
+    const { clock, queue, media, player, snapshots } = setup(2);
+    player.setRepeat('queue');
+    player.play();
+    // A YouTube bot check, or an outage: Track 1 played before and comes from the cache, Track 2 cannot be fetched.
+    // A track from the cache says nothing about the site, so it must not count as "the site works, the track does not".
+    const fetches: string[] = [];
+    for (let step = 0; step < 8; step += 1) {
+      const call = media.last();
+      fetches.push(call.track.title);
+      if (call.track.title === 'Track 2') {
+        call.reject(new Error("ERROR: [youtube] abc: Sign in to confirm you're not a bot"));
+        await flush();
+      } else {
+        media.finish(SONG, true);
+        await flush();
+        await clock.advance(SONG);
+      }
+    }
+    // Still both in the loop after four passes, each tried once per pass.
+    assert.deepEqual(
+      [player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)].sort(),
+      ['Track 1', 'Track 2'],
+      fetches.join(', '),
+    );
+    assert.ok(snapshots.every((snapshot) => snapshot.notice === null));
+  });
+
+  it('says that a track was taken out of the loop, until a person changes the player', async () => {
+    const { clock, queue, media, player } = setup(2);
+    player.setRepeat('queue');
+    player.play();
+    // Track 1 is gone for good (removed by its uploader): out of the loop at once, and the player moves on.
+    media.last().reject(new Error('ERROR: [youtube] abc: Video unavailable. This video has been removed'));
+    await flush();
+    assert.deepEqual(
+      [player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)],
+      ['Track 2'],
+    );
+    // The next track playing does not clear it, as it clears the failure itself: nobody was told otherwise.
+    media.finish(SONG);
+    await flush();
+    await clock.advance(1000);
+    assert.equal(player.snapshot().status, 'playing');
+    assert.equal(player.snapshot().error, null);
+    assert.equal(player.snapshot().notice, 'Track 1: taken out of the looping queue');
+    // A person's change (a pause here) clears it.
+    player.pause();
+    assert.equal(player.snapshot().notice, null);
+  });
+
   it('keeps a track in the loop that failed once and then played', async () => {
     const { clock, queue, media, player } = setup(2);
     player.setRepeat('queue');

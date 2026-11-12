@@ -115,7 +115,8 @@ export class Media implements MediaPreparer {
   ): Promise<PreparedMedia> {
     const key = MediaCache.keyOf(track.source);
     const cached = this.options.cache.get(key);
-    if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs };
+    // From the cache: nothing was asked of the site (the player tells the two apart, see PreparedMedia.fromCache).
+    if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs, fromCache: true };
     let job = this.jobs.get(key);
     // A download being stopped (everyone left it) is not joined: it can only end in "cancelled". A new one starts.
     if (!job || job.abort.signal.aborted) {

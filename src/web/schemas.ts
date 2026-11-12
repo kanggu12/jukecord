@@ -69,6 +69,11 @@ export const PlayerSchema = Type.Object(
     repeat: Type.Union([Type.Literal('off'), Type.Literal('track'), Type.Literal('queue')]),
     progress: Nullable(Type.Number({ description: 'Download progress (0 to 1) while loading' })),
     version: Type.Integer(),
+    notice: Nullable(
+      Type.String({
+        description: 'What the player did by itself ("Title: taken out of the looping queue"); kept until a change',
+      }),
+    ),
   },
   { title: 'Player' },
 );

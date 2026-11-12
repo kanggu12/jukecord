@@ -144,6 +144,8 @@ export interface Player {
   repeat: 'off' | 'track' | 'queue';
   progress: number | null;
   version: number;
+  /** What the player did by itself ("Title: taken out of the looping queue"), kept until a person changes it. */
+  notice: string | null;
 }
 export interface AddResult {
   items: QueueItem[];
