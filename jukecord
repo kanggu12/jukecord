@@ -164,6 +164,12 @@ wait_ready() {
   return 1
 }
 
+# The time zone the container runs in (compose.yaml passes TZ on): the shell's, else TZ in .env, else this machine's,
+# so "today" in the statistics and the time of day of scheduled backups are the host's rather than UTC.
+if [ -z "${TZ:-}" ]; then TZ=$(setting TZ); fi
+TZ=${TZ:-$(timezone)}
+export TZ
+
 command=${1:-help}
 # Every command but help and doctor needs Docker and readable settings; doctor reports on both instead of stopping.
 case "$command" in

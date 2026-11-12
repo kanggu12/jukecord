@@ -259,6 +259,9 @@ describe('Compose and the front door', () => {
     assert.match(compose, /^ {4}memswap_limit: 1g$/m);
     assert.match(compose, /^ {4}pids_limit: \d+$/m);
     assert.match(compose, /^ {6}- \/tmp:size=\d+m$/m);
+    // The host's time zone, which the front door sets: the statistics' "today" and the backups' time of day.
+    assert.match(compose, /^ {6}TZ: "\$\{TZ:-UTC\}"$/m);
+    assert.match(read('jukecord'), /^export TZ$/m);
   });
 
   it('has a front door that runs and explains itself', () => {
