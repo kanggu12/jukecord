@@ -36,6 +36,9 @@ const FEW = [
   [1440, 900],
 ];
 const SHOOT = new Set([412, 390, 1440]);
+// Only some states, for a quick look while working on one (ONLY=toast,menu tests/ui/run.sh <folder>): the other
+// states, the README's pictures and the playing-along check are skipped. A whole walk leaves it unset.
+const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
 const report = [];
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -130,12 +133,13 @@ async function measure(page, name, setting, errors) {
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
 async function sweep(name, sizes, act, { discord = false } = {}) {
+  if (ONLY && !ONLY.has(name)) return;
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
     for (const lang of ['ko', 'en']) {
       for (const [width, height] of sizes) {
         const setting = { theme, lang, width, height };
-        const { context, page, errors } = await open({ ...setting, login: name !== 'login', discord });
+        const { context, page, errors } = await open({ ...setting, login: !name.startsWith('login'), discord });
         try {
           if (act) await act(page);
           await measure(page, name, setting, errors);
@@ -240,7 +244,7 @@ await sweep('discord', SIZES, null, { discord: true });
 // The README's pictures: the player with a Discord bot while a track plays, in each theme, 1600 wide (the queue's
 // tools keep their words) at 1.6 times the pixels (full colour, no quantising: a reduced palette turns the shadows
 // into steps).
-for (const theme of ['light', 'dark']) {
+for (const theme of ONLY ? [] : ['light', 'dark']) {
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1000 },
     deviceScaleFactor: 1.6,
@@ -262,7 +266,7 @@ for (const theme of ['light', 'dark']) {
 
 // And on a phone: the player listening along, the queue, and the statistics, each a picture of its own (the README's
 // figure puts them side by side).
-for (const theme of ['light', 'dark']) {
+for (const theme of ONLY ? [] : ['light', 'dark']) {
   const context = await browser.newContext({
     viewport: { width: 412, height: 915 },
     deviceScaleFactor: 2,
@@ -302,7 +306,7 @@ for (const theme of ['light', 'dark']) {
 }
 
 // Playing along: the audio must actually start and keep in time.
-{
+if (!ONLY) {
   const { context, page, errors } = await open({ width: 1440, height: 900, theme: 'dark', lang: 'en', motion: 'on' });
   await page.click('[data-act="listen"]');
   let synced = false;
@@ -359,6 +363,27 @@ await sweep('shortcuts', FEW, async (page) => {
   await page.keyboard.press('?');
   await page.waitForSelector('.dialog kbd');
 });
+// Phones and the tablet, where width is short: a toast (Remove duplicates says how many went) under the bar.
+const NARROW = [
+  [360, 780],
+  [412, 915],
+  [744, 1000],
+];
+await sweep('toast', NARROW, async (page) => {
+  await tool(page, 'dedupe');
+  await page.waitForSelector('.toast');
+});
+await sweep(
+  'toast-discord',
+  NARROW,
+  async (page) => {
+    await tool(page, 'dedupe');
+    await page.waitForSelector('.toast');
+  },
+  { discord: true },
+);
+// The Discord login on a phone: its key, a finger's size.
+await sweep('login-discord', [[360, 780]], null, { discord: true });
 // A queued track's keys on a phone, behind the row's one key.
 await sweep(
   'track-menu',
@@ -372,7 +397,11 @@ await sweep(
   },
 );
 await sweep('stats', SIZES, async (page) => {
-  await page.click('a[data-route="stats"]').catch(() => page.goto(`${BASE}/stats`));
+  // The link in the bar on a wide window; on a narrow one the links are in the menu, so the address itself (waiting
+  // for a hidden link to become pressable would take half a minute a page).
+  const link = page.locator('.bar a[data-route="stats"]');
+  if (await link.isVisible()) await link.click();
+  else await page.goto(`${BASE}/stats`);
   await page.waitForSelector('.tiles');
 });
 await sweep('stats-tip', FEW, async (page) => {
@@ -410,7 +439,8 @@ await sweep('failed', FEW, async (page) => {
       ...player,
       status: 'idle',
       track: null,
-      error: 'yt-dlp failed: ERROR: [generic] Unable to download webpage: HTTP Error 404',
+      // As the server says it: the track's title and a short reason (core/reasons.ts).
+      error: 'Neon Rain: the site answered 404',
       version: player.version + 1000,
     },
   });
@@ -422,6 +452,14 @@ await sweep('disconnected', FEW, async (page) => {
   await page.waitForSelector('.app .card');
   await page.waitForTimeout(1500);
 });
+// The seed's longest title playing, on phones and the tablet: the bar at the bottom shows it on one line.
+{
+  const queue = await api('GET', '/guilds/local/queue');
+  const long = queue.items.find((item) => item.track.title.length > 60);
+  if (long) await api('POST', `/guilds/local/queue/${long.id}/play`).catch(() => {});
+  await until('playing');
+  await sweep('long-title', NARROW);
+}
 // A queue of two hundred tracks (saved playlists loaded over and over).
 for (let i = 0; i < 16; i += 1) await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
 await sweep('long-queue', FEW);

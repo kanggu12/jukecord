@@ -3,6 +3,7 @@
 # (tests/ui/walk.mjs), all in containers on a private network. Screenshots and report.json land in the folder given.
 #
 #   tests/ui/run.sh <output folder>
+#   ONLY=toast,menu tests/ui/run.sh <output folder>     only those states, for a quick look
 #
 # Needs the jukecord image (docker build -f deploy/docker/Dockerfile -t jukecord:dev .) and a built panel
 # (npm run build). The source is mounted over the image's, so a change needs no image rebuild.
@@ -36,5 +37,5 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 docker run --rm --network "$network" --ipc=host -v "$PWD/tests/ui:/ui:ro" -v "$work/data:/data:ro" -v "$out:/out" \
-  -e BASE="http://$server:8795" -e TOKEN_FILE=/data/host-token -e OUT=/out -w /tmp "$playwright" \
+  -e BASE="http://$server:8795" -e TOKEN_FILE=/data/host-token -e OUT=/out -e ONLY="${ONLY:-}" -w /tmp "$playwright" \
   sh -c 'npm init -y >/dev/null 2>&1 && npm i --no-audit --no-fund --silent playwright@1.60.0 axe-core@4.10.3 >/dev/null 2>&1 && cp /ui/walk.mjs /ui/audit.js . && node walk.mjs'

@@ -18,12 +18,14 @@ and every example address is on example.com or media.example.
 `tests/ui/run.sh` seeds a throwaway jukecord with made-up tracks, people and a month of history
 (`tests/ui/seed.ts`), starts it, and walks the panel in Playwright's Chromium (`tests/ui/walk.mjs`): idle, playing,
 paused, loading, a failed track, a lost connection, the menu, the dialogs, the statistics with a tooltip open, the log,
-the login page, an empty queue and a 200-track one, at 360 to 2560 pixels wide. The panel with a Discord bot is walked
+the login page, an empty queue and a 200-track one, at 360 to 2560 pixels wide. On phones and the tablet it also plays
+the longest title and raises a toast, where width is shortest. The panel with a Discord bot is walked
 too: a made-up server, its voice channels and people listening in browsers are put between the page and the server,
 which runs browser-only. The README's pictures come from the same walk. `tests/ui/audit.js` measures each page:
 text that is clipped or drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with
-translucent layers composited), controls on one row that differ in height or centre, floating layers that cut across other boxes, a sheet or dialog that something
-else covers, and touch targets under 44 pixels. On the pages it photographs it also runs axe-core's accessibility
+translucent layers composited), controls on one row that differ in height or centre, floating layers that cut across
+other boxes, a sheet or dialog that something else covers, a page wider than the screen, a badge whose word breaks
+out of it, and touch targets under 44 pixels (keys, fields, the switch, the sliders and the seek bar, the logo). On the pages it photographs it also runs axe-core's accessibility
 rules (names, roles, landmarks, headings). It also presses **Listen here** and waits for the browser to be in time
 with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
 

@@ -78,3 +78,20 @@ stops sending sound nobody is there to hear.
 Features that appear in only one place are the usual way a bot's panel and its commands drift apart. Making every
 feature an action, and checking at compile time and in tests that each way in offers every action, makes that drift a
 failing build instead of a bug report.
+
+## Glass, lit by the music
+
+The panel is frosted glass over a field of light, and the light is the music's own: the cover of the track playing,
+blurred far out of shape behind the cards and again as a glow behind the turning disc. Nothing playing, the field
+rests near grey. So the panel has colour without a colour scheme of its own to wear out, and what plays now is the
+first thing seen. The rainbow of the mark means one thing, "playing now": it travels round the disc's rim and runs
+along the progress bar, and rests white when paused. Other colour is kept for meaning: the state of the player and the
+connection, and removing.
+
+The cards carry no backdrop blur. The only thing behind a card is the field, which is blurred already; blurring it
+again under every card would cost a phone its smooth scrolling for nothing seen. The bars and the sheets, which content
+passes under, do blur. The field's picture is drawn at a tenth of the window and scaled up, since blurring a small
+picture costs far less than a large one, and it changes only when the track does. Everything that moves all the time
+(the disc, its rim, the glow's slow breathing) changes only position, size and opacity, which a browser animates
+without drawing anything again; the menu's motion switch and the system's own setting stop all of it, and the system's
+setting for less transparency turns the glass solid.

@@ -158,17 +158,26 @@ window.__audit = () => {
 
   // Keys whose content runs out of their box: drawn over the key's edge, it is not clipped, so the check above misses
   // it.
-  for (const key of document.querySelectorAll('button, a.key, .key')) {
+  // Badges too: a word that breaks inside its small pill spills out over and under it.
+  for (const key of document.querySelectorAll('button, a.key, .key, .badge, .pill')) {
     if (!visibleRect(key) || key.closest('.sr')) continue;
     if (key.scrollWidth > key.clientWidth + 2) add('spills', key, `${key.scrollWidth} wide in ${key.clientWidth}`);
+    if (key.matches('.badge, .pill') && key.scrollHeight > key.clientHeight + 2)
+      add('spills', key, `${key.scrollHeight} high in ${key.clientHeight}`);
   }
 
-  // Sideways scrolling of the page.
-  if (document.documentElement.scrollWidth > window.innerWidth + 1) {
+  // Sideways scrolling of the page. Against the screen's width, not innerWidth: a phone's browser (and its emulation)
+  // grows the layout viewport with a page that is too wide, so innerWidth would agree with the page.
+  const screenWidth = Math.min(
+    window.innerWidth,
+    window.screen?.width || window.innerWidth,
+    document.documentElement.clientWidth,
+  );
+  if (document.documentElement.scrollWidth > screenWidth + 1) {
     add(
       'page-wide',
       document.documentElement,
-      `${document.documentElement.scrollWidth} wide in a ${window.innerWidth} window`,
+      `${document.documentElement.scrollWidth} wide in a ${screenWidth} screen`,
     );
   }
 
@@ -239,9 +248,21 @@ window.__audit = () => {
   for (const layer of layers) {
     const a = layer.getBoundingClientRect();
     if (layer.matches('.toast')) {
-      // A toast lives inside the top bar.
-      const bar = document.querySelector('.bar').getBoundingClientRect();
-      if (a.top < bar.top - 0.5 || a.bottom > bar.bottom + 0.5) add('crossing', layer, 'outside the top bar');
+      // A toast lives inside the top bar, or (on a narrow window) in the strip hanging right under it, as wide as the
+      // window: the strip is part of the bar, and content passes under both.
+      const barElement = document.querySelector('.bar');
+      const bar = barElement.getBoundingClientRect();
+      const strip = layer.closest('.toasts')?.getBoundingClientRect();
+      // The strip hangs from the bar's inner edge, so it starts on the bar's bottom line (covering it) or right under.
+      const line = Number.parseFloat(getComputedStyle(barElement).borderBottomWidth) || 0;
+      const hanging =
+        strip &&
+        strip.top >= bar.bottom - line - 0.5 &&
+        strip.top <= bar.bottom + 0.5 &&
+        strip.left <= 0.5 &&
+        strip.right >= document.documentElement.clientWidth - 0.5;
+      const bottom = hanging ? strip.bottom : bar.bottom;
+      if (a.top < bar.top - 0.5 || a.bottom > bottom + 0.5) add('crossing', layer, 'outside the top bar');
       continue;
     }
     let crossed = 0;
@@ -273,13 +294,18 @@ window.__audit = () => {
 
   // Touch targets on touch screens.
   if (matchMedia('(pointer: coarse)').matches) {
-    for (const control of document.querySelectorAll('button, a.key, .field, input[type="range"], .switch')) {
+    // Every control a finger presses: keys, fields, the switch and the sliders (the seek bar too), and links that
+    // are not words in a sentence (the logo, the page links).
+    for (const control of document.querySelectorAll(
+      'button, a.key, a.brand, .nav a, .field, input[type="range"], .switch, [role="slider"]',
+    )) {
       if (!shown(control) || !visibleRect(control)) continue;
       const box = control.getBoundingClientRect();
-      // The switch and the range are wider than tall by nature; their height counts with the row around them.
-      const height = control.matches('.switch, input[type="range"]') ? 44 : box.height;
-      if (box.width < 43.5 || height < 43.5)
-        add('small-target', control, `${Math.round(box.width)}x${Math.round(box.height)}`);
+      // A slider is wider than tall by nature: its height alone must reach a finger's.
+      const short = control.matches('input[type="range"], [role="slider"]')
+        ? box.height < 43.5
+        : box.width < 43.5 || box.height < 43.5;
+      if (short) add('small-target', control, `${Math.round(box.width)}x${Math.round(box.height)}`);
     }
   }
 
