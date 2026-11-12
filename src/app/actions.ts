@@ -230,6 +230,9 @@ export function djRoleNow(chosen: string | null, roles: readonly RoleInfo[] | nu
   return roles.some((role) => role.id === chosen) ? chosen : null;
 }
 
+/** The highest limit of tracks per person a server may set. */
+export const PERSON_LIMIT_MAX = 1000;
+
 /** The repeat modes, for checking input from the panel, the API and the CLI. */
 export const REPEAT_MODES: readonly RepeatMode[] = ['off', 'track', 'queue'];
 
@@ -686,10 +689,9 @@ export class Actions {
   /** The most tracks one person may have in the queue at once (0 for no limit). Needs Manage Server. */
   personLimit(context: ActionContext, tracks: number): SettingsView {
     this.manage(context);
-    // A whole number up to the queue's own limit: more could never be reached.
-    const max = this.options.queueMax ?? 1000;
-    if (!Number.isInteger(tracks) || tracks < 0 || tracks > max)
-      throw new ActionError('invalid', `the limit is 0 (none) to ${max} tracks`);
+    // A whole number up to a thousand, as the API and the slash command take it (the queue's own default size).
+    if (!Number.isInteger(tracks) || tracks < 0 || tracks > PERSON_LIMIT_MAX)
+      throw new ActionError('invalid', `the limit is 0 (none) to ${PERSON_LIMIT_MAX} tracks`);
     this.options.store.settings.setCommunity(context.guildId, { personLimit: tracks });
     return this.settings(context);
   }

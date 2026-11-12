@@ -9,8 +9,8 @@
  * track: a skip, its end, a stop, or the same track starting again by repeat.
  *
  * Who listens changes all the time. While a vote is open, the count is made again a moment after each change (at most
- * four times a second), and a vote that has enough then skips the track: four people listening and two votes is
- * enough the moment one of the other two leaves. A server without an open vote keeps nothing here and costs nothing.
+ * four times a second), and a vote that has enough then skips the track: five people listening and two votes is
+ * enough the moment one of the other three leaves. A server without an open vote keeps nothing here and costs nothing.
  */
 import type { Bus } from '../core/bus.ts';
 import type { Clock, TimerHandle } from '../core/clock.ts';
