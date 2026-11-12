@@ -987,10 +987,8 @@ img {
     0 14px 32px -14px rgba(0, 0, 0, 0.75);
   transition: opacity 0.6s ease;
 }
-/* Nothing playing: the disc rests, a little faded. */
-.disc.idle:not(.sm) {
-  opacity: 0.6;
-}
+/* Nothing playing: the disc rests as it is, a dark record with a plain label and no colour on its rim. (Faded, it
+   turned into a flat grey circle on the pale theme.) */
 /* Behind the big disc, the cover's own colours glow, blurred far out of shape (Apple Music and YouTube Music do this
    with the art); with no cover there is no glow. */
 .art {
