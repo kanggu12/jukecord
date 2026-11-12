@@ -255,6 +255,24 @@ describe('EventHub', () => {
     events.close();
   });
 
+  it('counts a listener who switches servers in the state it gets for the new one', async () => {
+    const { events } = hub({}, { listenersEveryMs: 1000 });
+    // A panel shows server G (nobody listens there yet); a listener is in server H.
+    const watcher = socket();
+    events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    const listener = socket();
+    events.attach(listener.fake as never, { principal: { kind: 'host' } } as never, { guild: 'H' });
+    await settle(10);
+    listener.say({ type: 'listening', on: true });
+    await settle(10);
+    // It switches to G: the state it gets there counts it already, without waiting for the next listeners message.
+    listener.say({ type: 'subscribe', guild: 'G' });
+    await settle(10);
+    const state = listener.of('state').at(-1) as { listeners: { count: number } } | undefined;
+    assert.equal(state?.listeners.count, 1);
+    events.close();
+  });
+
   it('makes a big message once, as gzip for the panels that take it and as text for the others', async () => {
     const { events, handlers, queue } = hub({}, { queueEveryMs: 0 });
     // A queue well over the 2 KiB below which messages stay text.

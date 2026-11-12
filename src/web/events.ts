@@ -402,6 +402,12 @@ export class EventHub {
       this.leaveRoom(client);
       client.guild = guildId;
       this.roomOf(guildId).clients.add(client);
+      // A listener who switches servers stops counting in the old one and starts in the new one, before the state
+      // below is made: the listeners in it count this one already.
+      if (client.listening) {
+        if (before) this.listenersChanged(before);
+        this.listenersChanged(guildId);
+      }
     }
     const room = this.roomOf(guildId);
     const { actions, presenter } = this.options;
@@ -421,11 +427,6 @@ export class EventHub {
         () => gzipJoined(this.compressedStart(start), ending),
       )(client),
     );
-    // A listener who switches servers stops counting in the old one and starts in the new one.
-    if (client.listening && before !== guildId) {
-      if (before) this.listenersChanged(before);
-      this.listenersChanged(guildId);
-    }
   }
 
   // The room of a server, made when the first connection shows it.
