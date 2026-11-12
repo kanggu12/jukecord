@@ -278,6 +278,23 @@ await sweep(
   null,
   { discord: { name: 'Maximilian Alexander von Hohenau', guild: 'The Late Night Listening Society' } },
 );
+// A phone with a notch and a home bar, held upright and sideways (its safe-area insets, emulated by the browser): the
+// bars' keys stay clear of them, and the cards of the screen's sides.
+const NOTCH = { 390: { top: 47, right: 0, bottom: 34, left: 0 }, 844: { top: 0, right: 47, bottom: 21, left: 47 } };
+await sweep(
+  'notch',
+  [
+    [390, 844],
+    [844, 390],
+  ],
+  async (page) => {
+    const session = await page.context().newCDPSession(page);
+    await session.send('Emulation.setSafeAreaInsetsOverride', { insets: NOTCH[page.viewportSize().width] });
+    await page.reload();
+    await page.waitForSelector('.app .card');
+  },
+  { touch: true },
+);
 // A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows.
 await sweep(
   'tablet',

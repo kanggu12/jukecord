@@ -160,8 +160,17 @@
   --r-card: 18px;
   /* Movement that settles like a spring: quick out, soft landing. */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --bar-h: 52px;
-  --listen-h: 56px;
+  /* What a phone's notch, rounded corners and home bar cover at the window's edges (the page asks to be drawn under
+     them, viewport-fit=cover, for its colour to reach the edges): what is to be read or pressed keeps clear of them. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* The bars' own heights, and the room they take with the edge above or below them. */
+  --bar-base: 52px;
+  --bar-h: calc(var(--bar-base) + var(--safe-top));
+  --listen-base: 56px;
+  --listen-h: calc(var(--listen-base) + var(--safe-bottom));
   --control: 32px;
   --control-sm: 28px;
   --gap: 12px;
@@ -334,7 +343,8 @@ img {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
+  /* Its parts below the notch and clear of the corners; its glass reaches the edges. */
+  padding: var(--safe-top) max(16px, var(--safe-right)) 0 max(16px, var(--safe-left));
   height: var(--bar-h);
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
   background: color-mix(in oklch, var(--bg) 90%, transparent);
@@ -491,7 +501,7 @@ img {
   position: absolute;
   left: 10px;
   right: 10px;
-  bottom: calc((var(--bar-h) - var(--control)) / -2);
+  bottom: calc((var(--bar-base) - var(--control)) / -2);
   height: 2px;
   background: var(--ink);
   pointer-events: none;
@@ -614,7 +624,7 @@ img {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--side-w);
   gap: var(--gap);
-  padding: var(--gap) 16px;
+  padding: var(--gap) max(16px, var(--safe-right)) var(--gap) max(16px, var(--safe-left));
   min-height: 0;
   height: calc(100dvh - var(--bar-h) - var(--listen-h));
 }
@@ -1614,7 +1624,8 @@ img {
   align-items: center;
   gap: 12px;
   height: var(--listen-h);
-  padding: 0 16px;
+  /* Its parts above the home bar and clear of the corners; its glass reaches the edges. */
+  padding: 0 max(16px, var(--safe-right)) var(--safe-bottom) max(16px, var(--safe-left));
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
   background: color-mix(in oklch, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
@@ -1778,10 +1789,14 @@ img {
     var(--rim),
     -24px 0 48px -24px rgba(0, 0, 0, 0.65);
   animation: sheet-in 220ms ease-out;
+  /* Its words clear of the screen's edge it stands on (a phone held sideways has its notch there). */
+  padding-right: var(--safe-right);
 }
 .sheet.left {
   right: auto;
   left: 0;
+  padding-right: 0;
+  padding-left: var(--safe-left);
   border-left: 0;
   border-right: 1px solid var(--edge);
   border-radius: 0 var(--r-card) var(--r-card) 0;
@@ -1809,11 +1824,11 @@ img {
   min-height: 0;
   padding: 8px 0 16px;
 }
-/* The sheet's own close key, in its top corner; the first section leaves it room. */
+/* The sheet's own close key, in its top corner (clear of a phone's rounded corner); the first section leaves it room. */
 .sheet-close {
   position: absolute;
   top: 10px;
-  right: 10px;
+  right: calc(10px + var(--safe-right));
   z-index: 1;
 }
 .sheet .sheet-body > :first-child {
@@ -1966,7 +1981,7 @@ kbd {
 
 /* ---- statistics ----------------------------------------------------------------------------------------------- */
 .page {
-  padding: var(--gap) 16px;
+  padding: var(--gap) max(16px, var(--safe-right)) var(--gap) max(16px, var(--safe-left));
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -2215,7 +2230,8 @@ kbd {
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 24px 16px;
+  padding: max(24px, var(--safe-top)) max(16px, var(--safe-right)) max(24px, var(--safe-bottom))
+    max(16px, var(--safe-left));
 }
 .login .card {
   width: min(420px, 100%);
@@ -2412,7 +2428,7 @@ kbd {
     top: 100%;
     left: 0;
     right: 0;
-    padding: 6px 12px;
+    padding: 6px max(12px, var(--safe-right)) 6px max(12px, var(--safe-left));
     background: color-mix(in oklch, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
@@ -2433,6 +2449,9 @@ kbd {
     border-radius: 0;
     border-left: 0;
     border-right: 0;
+    /* As wide as the window: clear of both edges. */
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
   .divider,
   .bar .nav {
@@ -2486,7 +2505,7 @@ kbd {
 @media (max-width: 560px) {
   .bar {
     gap: 8px;
-    padding: 0 10px;
+    padding: var(--safe-top) max(10px, var(--safe-right)) 0 max(10px, var(--safe-left));
   }
 }
 /* The log's tools on a window too narrow for them on one line (the levels, a filter of 260 px and Refresh): the

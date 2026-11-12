@@ -14,6 +14,8 @@
  *   the bar's toast, a dialog's shade over the bar);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
+ * - unsafe: on a screen with a notch, rounded corners or a home bar (safe-area insets), a key, a field or a card
+ *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
  *   room for fewer than three whole rows (a short window left the queue one row beside the cards above it, or none);
  * - sizes: the font sizes in use (reported, not a finding).
@@ -318,6 +320,42 @@ window.__audit = () => {
     const counts = [...rows.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1]);
     if (counts.length > 1 && counts.at(-1) === 1 && Math.max(...counts) > 1)
       add('lone-key', keys, `keys in rows of ${counts.join(' + ')}`);
+  }
+
+  // The safe area: what the screen's notch, corners and home bar leave (read from the browser itself, through a
+  // probe of env(), so a page that ignores the insets is measured too).
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:fixed;visibility:hidden;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+  document.body.append(probe);
+  const inset = getComputedStyle(probe);
+  const safe = {
+    top: Number.parseFloat(inset.paddingTop),
+    right: Number.parseFloat(inset.paddingRight),
+    bottom: Number.parseFloat(inset.paddingBottom),
+    left: Number.parseFloat(inset.paddingLeft),
+  };
+  probe.remove();
+  if (safe.top + safe.right + safe.bottom + safe.left > 0) {
+    const things = document.querySelectorAll(
+      '.bar button, .bar a, .bar .pill, .listen button, .listen input, .listen .what, .main .card, .sheet button',
+    );
+    for (const thing of things) {
+      if (!shown(thing)) continue;
+      const box = thing.getBoundingClientRect();
+      // Cards scroll with the page under the bars: only the sides count for them.
+      const fixed = thing.closest('.bar, .listen');
+      const out =
+        box.left < safe.left - 0.5 ||
+        box.right > window.innerWidth - safe.right + 0.5 ||
+        (fixed && (box.top < safe.top - 0.5 || box.bottom > window.innerHeight - safe.bottom + 0.5));
+      if (out)
+        add(
+          'unsafe',
+          thing,
+          `${Math.round(box.left)},${Math.round(box.top)} to ${Math.round(box.right)},${Math.round(box.bottom)}`,
+        );
+    }
   }
 
   // Lists that scroll inside their card must show at least three whole rows when they hold more than they show.
