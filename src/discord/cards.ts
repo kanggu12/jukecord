@@ -39,7 +39,7 @@ const TEXT = {
   noHistory: { en: 'Nothing has been played yet', ko: '아직 들은 곡 없음' },
   playlists: { en: 'Playlists', ko: '플레이리스트' },
   noPlaylists: { en: 'No saved playlists', ko: '저장한 플레이리스트 없음' },
-  addedBy: { en: 'added by', ko: '넣은 사람' },
+  addedBy: { en: 'added by', ko: '추가한 사람' },
   page: { en: 'page', ko: '페이지' },
   total: { en: 'total', ko: '총' },
   pause: { en: 'Pause', ko: '일시정지' },
@@ -53,12 +53,12 @@ const TEXT = {
   listened: { en: 'listened', ko: '들은 시간' },
   distinct: { en: 'tracks', ko: '곡' },
   topTracks: { en: 'Most played', ko: '많이 들은 곡' },
-  topPeople: { en: 'Added most', ko: '많이 넣은 사람' },
+  topPeople: { en: 'Added most', ko: '많이 추가한 사람' },
   nobody: { en: 'the host', ko: '호스트' },
   noStats: { en: 'Nothing was played in this time', ko: '이 기간에 들은 곡 없음' },
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
-  onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
+  onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿀 수 있음' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -105,12 +105,14 @@ export function addedCard(result: AddResult, lang: Lang, playingNow = false): Em
   const left: string[] = [];
   if (result.skippedTooLong > 0)
     left.push(
-      lang === 'ko' ? `너무 긴 곡 ${result.skippedTooLong}곡 뺌` : `${result.skippedTooLong} too long, left out`,
+      lang === 'ko'
+        ? `너무 긴 곡 ${result.skippedTooLong}곡은 추가하지 않음`
+        : `${result.skippedTooLong} too long, left out`,
     );
   if (result.skippedFull > 0)
     left.push(
       lang === 'ko'
-        ? `대기열이 차서 ${result.skippedFull}곡 못 넣음`
+        ? `대기열이 차서 ${result.skippedFull}곡은 추가하지 못함`
         : `${result.skippedFull} did not fit, the queue is full`,
     );
   if (left.length > 0) embed.setFooter({ text: left.join(' · ') });

@@ -68,7 +68,7 @@ function inputOption(option: SlashCommandStringOption): SlashCommandStringOption
     .setName('input')
     .setDescription('An address (YouTube, SoundCloud, a playlist...) or words to search for')
     .setNameLocalizations({ ko: '입력' })
-    .setDescriptionLocalizations({ ko: '주소(유튜브, 사운드클라우드, 재생목록 등) 또는 검색어' })
+    .setDescriptionLocalizations({ ko: '링크(유튜브, 사운드클라우드, 재생목록 등) 또는 검색어' })
     .setRequired(true)
     .setMaxLength(500);
 }
@@ -92,7 +92,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       'add',
       'Add to the queue (it starts playing if nothing is)',
       '추가',
-      '대기열에 넣기(재생 중이 아니면 바로 재생)',
+      '대기열에 추가(재생 중이 아니면 바로 재생)',
     )
       .addStringOption(inputOption)
       .addStringOption((option) =>
@@ -121,7 +121,8 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       '재생 기록에 남기지 않고 지금 곡 빼기',
     ),
     command('pause', 'Pause', '일시정지', '일시정지'),
-    command('resume', 'Play on, or start the queue', '다시재생', '이어서 재생(멈췄으면 대기열 시작)'),
+    // Not "다시재생", which reads as "play again".
+    command('resume', 'Play on, or start the queue', '이어재생', '이어서 재생(멈췄으면 대기열 시작)'),
     command('seek', 'Go to a place in the current track', '탐색', '지금 곡의 원하는 위치로').addStringOption((option) =>
       option
         .setName('time')
@@ -164,7 +165,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
         .setName('position')
         .setDescription('Its number in /queue')
         .setNameLocalizations({ ko: '번호' })
-        .setDescriptionLocalizations({ ko: '/대기열 의 번호' })
+        .setDescriptionLocalizations({ ko: '/대기열에 나오는 번호' })
         .setRequired(true)
         .setMinValue(1),
     ),
@@ -174,7 +175,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setName('from')
           .setDescription('Its number in /queue')
           .setNameLocalizations({ ko: '번호' })
-          .setDescriptionLocalizations({ ko: '/대기열 의 번호' })
+          .setDescriptionLocalizations({ ko: '/대기열에 나오는 번호' })
           .setRequired(true)
           .setMinValue(1),
       )
@@ -192,12 +193,12 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
         .setName('position')
         .setDescription('Its number in /queue')
         .setNameLocalizations({ ko: '번호' })
-        .setDescriptionLocalizations({ ko: '/대기열 의 번호' })
+        .setDescriptionLocalizations({ ko: '/대기열에 나오는 번호' })
         .setRequired(true)
         .setMinValue(1),
     ),
     command('shuffle', 'Shuffle the queue', '섞기', '대기열 섞기'),
-    command('dedupe', 'Remove tracks queued twice', '중복제거', '두 번 넣은 곡 빼기'),
+    command('dedupe', 'Remove tracks queued twice', '중복제거', '두 번 추가한 곡 제거'),
     command('clear', 'Empty the queue', '비우기', '대기열 비우기'),
     command('history', 'Recently played', '기록', '최근에 들은 곡'),
     command('playlist', 'Saved playlists', '플레이리스트', '저장한 플레이리스트')
@@ -221,7 +222,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setName('load')
           .setDescription('Add a saved playlist to the queue')
           .setNameLocalizations({ ko: '불러오기' })
-          .setDescriptionLocalizations({ ko: '저장한 플레이리스트를 대기열에 넣기' })
+          .setDescriptionLocalizations({ ko: '저장한 플레이리스트를 대기열에 추가' })
           .addStringOption(playlistName),
       )
       .addSubcommand((sub) =>
@@ -253,7 +254,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       'join',
       'Join your voice channel (or the one you name)',
       '참가',
-      '내 음성 채널(또는 고른 채널)에 들어오기',
+      '내 음성 채널(또는 고른 채널)로 봇 부르기',
     ).addChannelOption((option) =>
       option
         .setName('channel')
@@ -267,7 +268,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       'leave',
       'Leave the voice channel (the music goes on in the browser)',
       '퇴장',
-      '음성 채널에서 나가기(브라우저에서는 계속)',
+      '음성 채널에서 나가기(브라우저에서는 계속 재생)',
     ),
     command(
       'listen',
@@ -275,15 +276,14 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       '같이듣기',
       '브라우저에서 같이 듣기(패널 열기)',
     ),
-    command('stats', 'Listening figures of this server', '통계', '이 서버에서 들은 기록 통계').addIntegerOption(
-      (option) =>
-        option
-          .setName('days')
-          .setDescription('How many days back (default 30)')
-          .setNameLocalizations({ ko: '기간' })
-          .setDescriptionLocalizations({ ko: '며칠 전까지(기본 30일)' })
-          .setMinValue(1)
-          .setMaxValue(366),
+    command('stats', 'Listening figures of this server', '통계', '이 서버의 청취 통계').addIntegerOption((option) =>
+      option
+        .setName('days')
+        .setDescription('How many days back (default 30)')
+        .setNameLocalizations({ ko: '기간' })
+        .setDescriptionLocalizations({ ko: '며칠 전까지(기본 30일)' })
+        .setMinValue(1)
+        .setMaxValue(366),
     ),
     command('dj', 'Who may change the music here', '디제이', '이 서버에서 음악을 바꿀 수 있는 사람')
       // Shown in the command list only to people who can manage the server; Discord also enforces it.
@@ -300,7 +300,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setName('set')
           .setDescription('Only members with this role may change the music')
           .setNameLocalizations({ ko: '정하기' })
-          .setDescriptionLocalizations({ ko: '이 역할이 있는 사람만 음악을 바꿈' })
+          .setDescriptionLocalizations({ ko: '이 역할이 있는 사람만 음악을 바꿀 수 있음' })
           .addRoleOption((option) =>
             option
               .setName('role')
@@ -315,7 +315,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setName('clear')
           .setDescription('Everyone may change the music again')
           .setNameLocalizations({ ko: '풀기' })
-          .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
+          .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿀 수 있음' }),
       ),
     command('version', 'The jukecord version', '버전', 'jukecord 버전'),
   ];

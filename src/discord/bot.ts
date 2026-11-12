@@ -185,7 +185,7 @@ export class Bot implements Directory {
     if (!interaction.guild.voiceStates.cache.get(interaction.user.id)?.channelId) {
       reason =
         lang === 'ko'
-          ? '봇이 음성 채널에 없음: 음성 채널에 들어가 /참가'
+          ? '봇이 음성 채널에 없음: 음성 채널에 들어간 뒤 /참가를 쓰세요'
           : 'The bot is not in a voice channel: join one and use /join';
     } else {
       try {
@@ -400,7 +400,7 @@ export class Bot implements Directory {
                 : note(
                     lang,
                     removed === 1 ? 'Removed 1 duplicate' : `Removed ${removed} duplicates`,
-                    `중복 ${removed}곡 뺌`,
+                    `중복 ${removed}곡 제거함`,
                   ),
             ],
           });
@@ -464,7 +464,7 @@ export class Bot implements Directory {
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
-            embeds: [problem(lang === 'ko' ? '없어진 명령' : 'This command no longer exists')],
+            embeds: [problem(lang === 'ko' ? '더는 없는 명령' : 'This command no longer exists')],
           });
       }
     } catch (error) {
@@ -576,7 +576,7 @@ export class Bot implements Directory {
       error instanceof ActionError
         ? sayError(error.message, lang)
         : lang === 'ko'
-          ? '문제가 생김: 이유는 jukecord 로그에'
+          ? '문제가 생김: 자세한 내용은 jukecord 로그에 있음'
           : 'Something went wrong: the reason is in the log';
     if (!(error instanceof ActionError))
       this.options.log.warn('a command failed', {
