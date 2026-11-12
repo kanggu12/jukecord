@@ -743,7 +743,7 @@ export class Actions {
           .list(context.guildId)
           .some((playlist) => store.playlists.tracks(playlist.id).some((t) => t.id === trackId)));
     if (!track || !here)
-      throw new ActionError('not-found', 'that track is not playing, queued or played in this server');
+      throw new ActionError('not-found', 'that track is not playing, queued, played or in a playlist in this server');
     const owner = likesOwner(context);
     if (!store.likes.has(owner, trackId) && store.likes.count(owner) >= LIKES_MAX)
       throw new ActionError('conflict', `your likes are full (${LIKES_MAX} tracks)`);

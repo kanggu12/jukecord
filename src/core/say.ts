@@ -124,10 +124,10 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['too many searches at once; try again in a moment', '한꺼번에 너무 많이 검색함: 잠시 뒤 다시 시도하세요'],
   // Likes.
   [
-    'that track is not playing, queued or played in this server',
-    '이 서버에서 재생 중이거나 대기열에 있거나 들은 곡이 아님',
+    'that track is not playing, queued, played or in a playlist in this server',
+    '이 서버에서 재생 중이거나 대기열이나 플레이리스트에 있거나 들은 곡이 아님',
   ],
-  ['that track is not in your likes', '내 좋아요 목록에 없는 곡'],
+  ['that track is not in your likes', '내 좋아요 목록에 없는 곡임'],
   ['there are no liked tracks to add', '넣을 좋아요 곡 없음'],
   [/^your likes are full \((\d+) tracks\)$/, '좋아요 목록이 가득 참($1곡)'],
   // Autoplay.
@@ -138,7 +138,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['nothing in it could be found', '그 안의 곡을 하나도 찾지 못함'],
   ['the file is not valid JSON', '올바른 JSON 파일이 아님'],
   ['the JSON is not a jukecord playlist', 'jukecord 플레이리스트 JSON이 아님'],
-  ['the file is larger than 1 MiB', '1MiB보다 큰 파일'],
+  ['the file is larger than 1 MiB', '파일이 1MiB보다 큼'],
   ['importing a file is not set up here', '여기서는 파일 가져오기를 쓸 수 없음'],
   ['Discord did not hand over the file', '디스코드가 파일을 넘겨주지 않음'],
   [

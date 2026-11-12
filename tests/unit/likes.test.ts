@@ -100,7 +100,7 @@ describe('likes', () => {
     // Another server's track, and a number no track has.
     store.history.add({ guildId: OTHER, trackId: elsewhere.id, addedBy: null, playedAt: 1, playedMs: 5000 });
     for (const track of [playing, queued, played, listed]) actions.like(as(ALICE), track.id);
-    const refused = 'not-found: that track is not playing, queued or played in this server';
+    const refused = 'not-found: that track is not playing, queued, played or in a playlist in this server';
     assert.equal(
       refusal(() => actions.like(as(ALICE), elsewhere.id)),
       refused,

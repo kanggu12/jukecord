@@ -270,7 +270,7 @@ const EN = {
   formatM3u: 'M3U',
   formatM3uHint: 'For music players: each address with its length and name',
   formatJson: 'jukecord',
-  formatJsonHint: 'With titles, channels, lengths and pictures, for another jukecord',
+  formatJsonHint: 'With titles, channels, lengths and pictures, which jukecord reads back',
   importKey: 'Import',
   importTitle: 'Import a playlist',
   importText:
@@ -539,7 +539,7 @@ const KO: Strings = {
   formatM3u: 'M3U',
   formatM3uHint: '음악 플레이어용: 주소마다 길이와 이름',
   formatJson: 'jukecord',
-  formatJsonHint: '제목, 채널, 길이, 그림까지 담김: 다른 jukecord로 옮길 때',
+  formatJsonHint: '제목, 채널, 길이, 그림까지 담김: jukecord가 그대로 다시 읽음',
   importKey: '가져오기',
   importTitle: '플레이리스트 가져오기',
   importText: '한 줄에 주소 하나, M3U, jukecord에서 내보낸 파일을 받음. 주소가 아닌 줄은 YouTube에서 찾음.',
@@ -547,7 +547,7 @@ const KO: Strings = {
   chooseFile: '파일 고르기',
   importing: '가져오는 중',
   imported: (name: string, n: number, left: number) => `"${name}" 가져옴: ${n}곡${left > 0 ? ` · ${left}곡 빠짐` : ''}`,
-  fileTooLarge: '1MiB보다 큰 파일',
+  fileTooLarge: '파일이 1MiB보다 큼',
   leftNotFound: (n: number) => `${n}곡은 YouTube에서 못 찾아 뺌`,
 };
 
