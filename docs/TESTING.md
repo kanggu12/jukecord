@@ -85,6 +85,9 @@ the internet or Discord. On two cores of a desktop processor, jukecord 0.2.1 gav
 | A thousand panels connected while the queue changes 3 times a second | all stay connected; a change reaches a panel in 29 ms (the median; the slowest 105 ms) |
 | The server during that crowd                                         | up to 71 % of one core, 112 MiB                                                        |
 
+jukecord 0.3.0 and 0.2.1, measured back to back on the same machine while other work kept it busier, took the same
+times, and 0.3.0 rested at 85 MiB, 6 MiB more.
+
 The crowd is `tests/perf/crowd.ts` in a container of its own, so its thousand panels come from one address as they do
 through a reverse proxy (the server is told it is behind one): each panel asks for gzip frames as a browser does, and
 a change is timed from the request that makes it to the frame that carries it. The server runs this checkout's source

@@ -6,6 +6,136 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+What no other bot does, made more of: the queue heard in any browser in step with the voice channel now has guests
+without a Discord account, lyrics everyone follows at the same line, a light that moves with the music, and an app to
+install. And what the others had that jukecord lacked: search and pick, autoplay, likes, vote skip, taking turns, a
+voice volume and sound, links from other services, playlists as files, and a year in music.
+
+### Added
+
+- **Search and pick.** Search words show what YouTube found (cover, title, length, channel) under the add field, to
+  play now, play next or add; Discord suggests the same while `/play` and `/add` are typed, and `jukecord search`
+  prints it. Results are kept for half an hour, and searches have a rate of their own. The add card has a Play next
+  key, history rows have play now, play next and add again, and a link pasted or dropped anywhere on the page is
+  added.
+- **Autoplay.** When the queue runs out, a track from this server's own plays (likes count double, nothing of the last
+  30 plays) or from YouTube's mix of the track playing; one is queued as the last track starts, so there is no gap.
+  Its rows say "Autoplay", and statistics and Wrapped leave them out of who added most. `/autoplay`,
+  `jukecord autoplay`, the queue card's head.
+- **Likes.** A heart on the playing track, in a queue row's menu and on history rows; a Liked list in the card of
+  Recently played, with play now, next, add and add all. `/like`, `/likes`, `jukecord like|likes|unlike`.
+- **Playlists as files.** A saved playlist exported as a list of addresses, M3U or jukecord's JSON, and imported from
+  any of those or a pasted list: up to 500 entries, of which at most 100 that need looking up (an address jukecord has
+  not met, or words, searched on YouTube). From the playlists dialog, `/playlist export|import` (a file up to 1 MiB)
+  and `jukecord playlist export|import`; `./jukecord` reads the file where the command is typed.
+- **Links from other services.** Deezer tracks, albums and playlists; Spotify tracks (albums and playlists too with
+  the host's app credentials, `JUKECORD_SPOTIFY_CLIENT_ID` and `JUKECORD_SPOTIFY_CLIENT_SECRET` or `_SECRET_FILE`);
+  Apple Music tracks. Each is matched to a YouTube recording by length and title, official audio first, at most 100
+  per link. `JUKECORD_LINK_SERVICES` chooses the services (all three by default, `none` for none).
+- **Lyrics in time.** The words of the track playing, from LRCLIB, beside the player (a sheet on a phone), the line
+  being sung lit; whoever may change the music picks a line to play from there. `/lyrics`,
+  `jukecord lyrics [--synced]`; `JUKECORD_LYRICS=off` turns them off. jukecord sends LRCLIB the song's title, artist,
+  album and length, once per track, only when someone opens its lyrics.
+- **Listening links for guests.** A link for 1, 7 or 30 days lets anyone listen along to one server in a browser
+  without a Discord account: the player, the queue and Listen here, nothing to change. Revoking it ends its guests at
+  once. The host can also let a friend in to look or to change the music with a login link
+  (`jukecord link --scope read|control`). Both from one Invite dialog, with a QR code drawn by the panel; `/share`,
+  `jukecord share|shares|unshare`.
+- **A light that moves with the music** while a browser listens: the glow behind the disc and the light behind the
+  glass follow the low end; it rests when the tab is hidden, the music pauses or motion is off.
+- **An app on a phone.** The panel installs to a home screen and opens like an app (over https or on this computer);
+  on Android, a video shared from another app opens a page to add it to the queue.
+- **Stop after this track, and a sleep timer.** The player stops when the track ends (the player's menu,
+  `/stop after-track:`, `jukecord stop --after-track`), and a browser stops listening after 15, 30 or 60 minutes or at
+  the end of the track.
+- **Vote skip.** Where a DJ role is set, Skip from anyone without it is a vote; the track goes when half of the people
+  listening in the voice channel and in their browsers have voted (guests of a listening link do not vote). The Skip
+  key and the Discord card show the count. On by default; `/voteskip`, `jukecord voteskip on|off` or the menu's Server
+  settings turn it off.
+- **Taking turns, and a limit per person.** Tracks added go so that people take turns, or the queue is put in turns
+  once; a server can limit how many tracks one person queues. `/turns`, `/limit`, `jukecord turns|limit`, the menu's
+  Server settings.
+- **Stay in voice.** A server can keep the bot in its channel when everyone has left (`/stay`, `jukecord stay`, the
+  menu).
+- **A volume and a sound for the voice channel.** 0-200 %, and presets: more bass, clearer voices, brighter, softer at
+  night. Browsers playing along hear the same preset at their own volume. At 100 % with no preset the cached sound
+  goes to Discord untouched; another volume or a preset costs 2 to 3 % of one core per stream. The voice card,
+  `/volume`, `/sound`, `jukecord volume|sound`.
+- **Wrapped.** A server's year in music, a month, or the last 12 months: plays and hours, the song of the year (the
+  track played on the most days), the most played tracks and who added most, the busiest day and hour, the longest
+  day and the first track; saved as a picture for a story or a post. `/wrapped`, `jukecord wrapped`.
+- **Looks after itself.** A server nobody hears anywhere (the bot out of voice, no browser playing) pauses after two
+  minutes instead of fetching and counting plays for nobody (`JUKECORD_REST_AFTER`); after a restart the bot goes back
+  to its voice channel when people are there; the newest now-playing card in Discord follows the music; an alerts
+  channel of the server's choosing (`/alerts`, `jukecord alerts`, the menu) hears about trouble (YouTube refusing
+  jukecord, a watchdog restart, a disk nearly full, a daily backup that failed, a track leaving a looping queue,
+  connections turned away); and a backup can be made every day (`JUKECORD_BACKUP_AT`, `JUKECORD_BACKUP_KEEP`), which
+  `doctor` reports with what the database's write-ahead log holds.
+
+### Changed
+
+- The panel, evened out: the controls of a row one height on one centre, a key's words on the centre of its icon, and
+  cards side by side one top and one bottom, measured to half a pixel on every screen the walk opens; one spacing
+  scale, six type sizes whose lines centre their letters, and one rule for corners; flat frosted glass, its keys a face
+  and a 1px line; no glows or pools of light, coloured stripes, tinted boxes or boxes inside boxes; a row's title on
+  two lines at most (the whole of it on hover) with one line under it; two lines nobody needed taken out.
+- Covers come from jukecord: each track's picture, and a search result's, is fetched once by the server (public
+  addresses only) and kept with the track in its cache, so browsers never ask the image hosts.
+- The add card sits above the queue, and on top of an empty one with an example of what to add.
+- The player says "Waiting for its turn" while a track waits for a fetch, and a notice under the title when something
+  happened to the music ("Paused with nobody listening", a track taken out of a looping queue).
+- Look-ups in Discord (`/history`, `/stats`, `/lyrics`, `/likes` and the rest) answer the person who asked only, as
+  `/queue` already did.
+- The command line exits with 4 when jukecord says to try again in a moment (an answer with Retry-After, which a busy
+  moment now carries too), gives its errors as JSON under `--json`, shows one command with `help <command>`, and says
+  validation mistakes in words.
+- `./jukecord` runs the container in the host's time zone, and statistics count their days in jukecord's time zone
+  instead of UTC.
+- Korean throughout, read again by a native reader: 추가 for adding, 라이트/다크/시스템 for the themes, 맞춰 재생 중 for
+  "In time", and the refusals the bot and the panel share. `/resume` is `/이어재생` in Korean (it was `/다시재생`).
+- The API has 22 new operations (`docs/API.md`) and two pictures of its own (a track's cover, a search result's); a
+  skip may name the track it is for (`?track=`); `/metrics` counts the cached covers.
+- The database moves to a new schema the first time 0.3.0 starts, which 0.2.1 does not open: a backup made before
+  updating (`./jukecord backup`) is the way back.
+
+### Fixed
+
+- A long track could not be heard in a browser that needs MP3 (Safari, iOS): the wait for the copy ran into the
+  two-minute idle close. It is answered "not now" until the copy is ready.
+- `./jukecord restore` refused any backup over 256 MiB and gave the Node version as the reason.
+- A looping queue let a track go during a YouTube bot-check or an outage, as a track played from the cache counted as
+  proof that the site worked.
+- The player timed its position and seeks by the system clock; set back, the bar and seeks stood still.
+- More than 16 pipelined requests lost every answer; the cap of 256 connections per address and the read rate per
+  address turned away people sharing one address (a household, Docker's bridge) and said nothing; the probe at a cap
+  closed a tab that stalled for five seconds.
+- A second press of Skip, or the Skip of a stale card, skipped the next track as well: a skip names the track it is
+  for.
+- Pause on a paused track said nothing was playing, and a stale card's button refused wrongly.
+- A backup of a large database stalled the voice and could set off the watchdog: it is written in a worker thread.
+- A machine that could not reach the internet was told that every site did not exist; adding and playing now say
+  that jukecord cannot reach the internet.
+- In Discord: a voice channel at its member limit is said to be full at once, `/join` to the bot's own channel does
+  nothing, `/playlist save` over a name says it replaced the list, and `/queue` past its last page shows the last.
+- On the command line: an uptime past a day reads in days and hours, a listening time never reads "0 h 60 min", and
+  `./jukecord` says a mistyped command is not one while jukecord is down, and passes on words it does not know while
+  it runs.
+- In the panel: the focus was lost after almost every key press; a reverse proxy's error page showed as a JavaScript
+  error; short laptop windows hid the add field; the N shortcut did nothing in Hangul input mode; people who may only
+  look saw drag grips.
+
+### Security
+
+- Guests of a listening link have their own kind of login: an allow-list of what they reach (the player, the queue
+  and the lyrics of their server), codes of 32 random bytes kept as hashes and sent after "#", a cap of guests per link.
+- Every outside request (covers, lyrics, Deezer, Spotify) resolves the name itself, connects only to the public
+  address it checked, and checks each redirect again (unless `JUKECORD_ALLOW_PRIVATE_ADDRESSES` is set); lyrics follow
+  no redirect at all.
+- The panel's content security policy allows pictures from jukecord and from Discord's own address only; it allowed
+  any https address.
+
 ## [0.2.1] - 2026-11-12
 
 ### Changed
@@ -367,7 +497,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kanggu12/jukecord/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kanggu12/jukecord/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kanggu12/jukecord/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kanggu12/jukecord/compare/v0.1.0...v0.1.1
