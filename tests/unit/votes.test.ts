@@ -200,3 +200,25 @@ describe('votes to skip', () => {
     );
   });
 });
+
+describe('a skip meant for a track that has gone', () => {
+  it('skips nothing more and casts no vote on the next track, for a vote and for the DJ alike', async () => {
+    const { actions, listen, title, tracks } = await setup();
+    listen(ANN, BEN);
+    const first = tracks[0]?.id;
+    // Two people listening: Ann's vote is enough, and Track 1 goes.
+    assert.equal(actions.skip(listener(ANN), first).votes, null);
+    assert.equal(title(), 'Track 2');
+    // Ben pressed Skip on Track 1 too, a moment later: nothing more goes, and Track 2 has no vote against it.
+    const late = actions.skip(listener(BEN), first);
+    assert.equal(late.votes, null);
+    assert.equal(late.snapshot.track?.title, 'Track 2');
+    assert.equal(actions.skipVotes(listener(BEN)).votes, 0);
+    // The same for a DJ pressing on a card of Track 1.
+    actions.skip(DJ, first);
+    assert.equal(title(), 'Track 2');
+    // Without saying which, Skip is for what plays now.
+    actions.skip(DJ);
+    assert.equal(title(), 'Track 3');
+  });
+});

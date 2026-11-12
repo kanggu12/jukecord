@@ -50,6 +50,11 @@ describe('the playing card', () => {
     assert.equal(korean.embeds[0]?.toJSON().footer?.text, '대기열 반복 · 건너뛰기 투표: 3표 중 2표');
     const plain = nowCard(playing, 'en', null);
     assert.deepEqual(labels(plain), ['Pause', 'Skip']);
+    // Skip carries the track the card shows, so a press after it has gone skips nothing more.
+    const ids = plain.components.flatMap((row) =>
+      row.toJSON().components.map((button) => ('custom_id' in button ? button.custom_id : '')),
+    );
+    assert.deepEqual(ids, ['jukecord:pause:en', 'jukecord:skip:en:1']);
     assert.equal(plain.embeds[0]?.toJSON().footer, undefined);
   });
 });

@@ -596,8 +596,10 @@ export class Bot implements Directory {
     if (!context || !interaction.customId.startsWith('jukecord:')) return;
     this.remember(interaction);
     const actions = this.options.actions;
-    // "jukecord:pause:ko": the action, and the language the card was made in (older cards have none: the presser's).
-    const [, action, made] = interaction.customId.split(':');
+    // "jukecord:pause:ko": the action, and the language the card was made in (older cards have none: the presser's);
+    // Skip also carries the track the card showed ("jukecord:skip:ko:42"; older cards none).
+    const [, action, made, shown] = interaction.customId.split(':');
+    const track = shown && /^\d+$/.test(shown) ? Number(shown) : undefined;
     const cardLang: Lang = made === 'ko' || made === 'en' ? made : langOf(interaction.locale);
     try {
       const snapshot =
@@ -605,7 +607,7 @@ export class Bot implements Directory {
           ? actions.pause(context)
           : action === 'resume'
             ? actions.resume(context)
-            : actions.skip(context).snapshot;
+            : actions.skip(context, track).snapshot;
       // The card itself is updated in place, so the channel does not fill with copies; its Skip says how a vote stands.
       await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl, openVotes(actions, context)));
     } catch (error) {

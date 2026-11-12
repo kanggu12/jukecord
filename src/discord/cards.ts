@@ -193,7 +193,8 @@ export function nowCard(
       .setLabel(snapshot.status === 'paused' ? TEXT.resume[lang] : TEXT.pause[lang])
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(`jukecord:skip:${lang}`)
+      // The track the card shows rides along: a press after it has gone skips nothing more (see Actions.skip).
+      .setCustomId(`jukecord:skip:${lang}:${snapshot.track.id}`)
       .setLabel(votes ? TEXT.skipVotes[lang](votes.votes, votes.needed) : TEXT.skip[lang])
       .setStyle(ButtonStyle.Secondary),
   );

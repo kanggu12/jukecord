@@ -98,7 +98,9 @@ function guild(): string {
  * stands. Returns whether the track went, as far as this answer says (undefined when refused).
  */
 export async function skipOrVote(button: HTMLButtonElement | null): Promise<boolean | undefined> {
-  const answer = await act(button, () => api.skip(guild()));
+  // The track shown now: pressed together with others, the press does not go on to the next one.
+  const track = state.player?.track?.id;
+  const answer = await act(button, () => api.skip(guild(), track));
   if (!answer) return undefined;
   if (answer.votes) toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'pause', 'skip-forward');
   return answer.votes === null;

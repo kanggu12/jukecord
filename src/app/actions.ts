@@ -340,13 +340,22 @@ export class Actions {
 
   /**
    * Moves to the next track. Where the server has a DJ role and votes on, Skip from someone without the role is a vote
-   * instead (see app/votes.ts): the track goes once half of the people listening have voted.
+   * instead (see app/votes.ts): the track goes once half of the people listening have voted. `trackId`, when given,
+   * is the track the skip is for: once another plays (people pressing together, a card left from an earlier track),
+   * that one has gone already, and nothing more goes; no vote is cast against the next.
    */
-  skip(context: ActionContext): SkipResult {
+  skip(context: ActionContext, trackId?: number): SkipResult {
     const player = this.options.players.get(context.guildId);
     const votes = this.options.votes;
+    const voting = !context.mayControl && votes && context.userId !== null && this.voteSkipApplies(context.guildId);
+    // Anyone else without the DJ role is refused, as for every other change of the music.
+    if (!voting) this.control(context);
+    // Meant for a track that has gone by now: the answer is the player as it is.
+    if (trackId !== undefined && player.snapshot().track?.id !== trackId) {
+      return { snapshot: player.snapshot(), votes: null };
+    }
     // Someone without the DJ role where Skip is a vote: a vote, which skips the track once there are enough.
-    if (!context.mayControl && votes && context.userId !== null && this.voteSkipApplies(context.guildId)) {
+    if (voting && votes && context.userId !== null) {
       if (player.snapshot().track === null) throw new ActionError('conflict', 'nothing is playing');
       const result = votes.vote(context.guildId, context.userId);
       return {
@@ -354,8 +363,6 @@ export class Actions {
         votes: result.skipped ? null : { votes: result.votes, needed: result.needed },
       };
     }
-    // Anyone else without the DJ role is refused, as for every other change of the music.
-    this.control(context);
     if (!player.skip()) throw new ActionError('conflict', 'nothing is playing');
     return { snapshot: player.snapshot(), votes: null };
   }

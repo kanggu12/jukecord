@@ -269,7 +269,9 @@ export const api = {
   add: (guild: string, input: string, at: 'end' | 'next' = 'end') =>
     request<AddResult>('POST', `${g(guild)}/queue`, { input, at }),
   'play-now': (guild: string, input: string) => request<AddResult>('POST', `${g(guild)}/player/play`, { input }),
-  skip: (guild: string) => request<SkipAnswer>('POST', `${g(guild)}/player/skip`),
+  // The track it is for, when known: a press that arrives after that track has gone skips nothing more.
+  skip: (guild: string, track?: number) =>
+    request<SkipAnswer>('POST', `${g(guild)}/player/skip${track === undefined ? '' : `?track=${track}`}`),
   'remove-current': (guild: string) => request<Player>('POST', `${g(guild)}/player/drop`),
   pause: (guild: string) => request<Player>('POST', `${g(guild)}/player/pause`),
   resume: (guild: string) => request<Player>('POST', `${g(guild)}/player/resume`),

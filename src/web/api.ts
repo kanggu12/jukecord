@@ -125,6 +125,11 @@ export const API = {
     tag: 'player',
     access: 'control',
     params: InGuild,
+    query: Type.Object({
+      track: Type.Optional(
+        Type.Integer({ minimum: 1, description: 'The track the skip is for: once another plays, nothing more goes' }),
+      ),
+    }),
     response: SkipSchema,
   }),
   'remove-current': op({

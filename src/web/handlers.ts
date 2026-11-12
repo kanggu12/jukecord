@@ -90,8 +90,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const result = await deps.actions.playNow(context, body.input);
     return { ...result, items: deps.presenter.items(result.items) };
   },
-  skip: ({ context, deps }) => {
-    const { snapshot, votes } = deps.actions.skip(context);
+  skip: ({ context, query, deps }) => {
+    const { snapshot, votes } = deps.actions.skip(context, query.track);
     return { ...deps.presenter.player(snapshot), votes };
   },
   'remove-current': ({ context, deps }) => deps.presenter.player(deps.actions.removeCurrent(context)),

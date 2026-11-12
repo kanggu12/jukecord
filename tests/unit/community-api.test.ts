@@ -96,9 +96,17 @@ describe('votes to skip over the API', () => {
     assert.deepEqual(vote.json().votes, { votes: 1, needed: 2 });
     assert.equal(vote.json().track.title, 'Track a');
     // The host skips at once; its answer says no vote.
+    const first = vote.json().track.id;
     const skipped = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: asHost });
     assert.equal(skipped.json().votes, null);
     assert.equal(skipped.json().track.title, 'Track b');
+    // A skip meant for Track a, which has gone: nothing more goes.
+    const late = await inject({
+      method: 'POST',
+      url: api(`/guilds/${GUILD}/player/skip?track=${first}`),
+      headers: as(BOB),
+    });
+    assert.equal(late.json().track.title, 'Track b');
     // Votes off: Skip needs the DJ role again.
     const off = await inject({
       method: 'PUT',
