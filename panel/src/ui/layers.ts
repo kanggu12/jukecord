@@ -122,13 +122,85 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// The system's Back (a phone's back gesture, the browser's key) closes the layer on top, as Escape does, instead of
+// leaving the panel or changing the page under the layer. While any layer is open the history's newest entry is a
+// layer's (the same address, marked in its state): Back takes it away and the panel closes the top layer, putting an
+// entry back if another layer is still open. A layer the panel closes itself (its key, Escape, a choice) takes its
+// entry away with a Back of its own, unless another layer opens in the same turn (the menu reopened in a new language).
+let armed = false;
+// A Back the panel asked for itself: its popstate is not the person's.
+let ownBack = false;
+// Closing the top layer because of the person's Back: its entry is gone already.
+let byBack = false;
+let disarmTimer = 0;
+// A layer opened: the history's newest entry becomes a layer's, if it is not one already.
+function arm(): void {
+  window.clearTimeout(disarmTimer);
+  if (armed) return;
+  history.pushState({ jukecordLayer: true }, '');
+  armed = true;
+}
+// The last layer closed by the panel: its entry goes, at the end of this turn, if no layer opened meanwhile.
+function disarmSoon(): void {
+  if (byBack) return;
+  window.clearTimeout(disarmTimer);
+  disarmTimer = window.setTimeout(() => {
+    if (layers.length > 0 || !armed) return;
+    armed = false;
+    ownBack = true;
+    history.back();
+  }, 0);
+}
+
+/**
+ * For the panel's popstate: true when the history moved because of a layer (the person's Back closed the layer on
+ * top, or the panel's own Back took a closed layer's entry away), false when it is a move between pages.
+ */
+export function layerBack(historyState: unknown): boolean {
+  const onLayerEntry = (historyState as { jukecordLayer?: boolean } | null)?.jukecordLayer === true;
+  if (ownBack) {
+    ownBack = false;
+    armed = onLayerEntry;
+    return true;
+  }
+  const top = layers.at(-1);
+  if (top && !onLayerEntry) {
+    armed = false;
+    byBack = true;
+    top.close();
+    byBack = false;
+    // Another layer still open (a dialog over the menu): it gets an entry of its own for the next Back.
+    if (layers.length > 0) arm();
+    return true;
+  }
+  armed = onLayerEntry;
+  return false;
+}
+
+/**
+ * A move to another page by the panel itself (a link, the menu's pages): the closed layer's entry, still the newest,
+ * becomes the new page's, so Back from the new page goes to the one before, not to a layer that is gone.
+ */
+export function goTo(path: string): void {
+  if (location.pathname === path) return;
+  if (armed && layers.length === 0) {
+    window.clearTimeout(disarmTimer);
+    armed = false;
+    history.replaceState(null, '', path);
+    return;
+  }
+  history.pushState(null, '', path);
+}
+
 // Puts a layer on top; returns the function that takes it off again.
 function push(element: HTMLElement, close: () => void): () => void {
   const entry = { element, close };
   layers.push(entry);
+  arm();
   return () => {
     const index = layers.indexOf(entry);
     if (index >= 0) layers.splice(index, 1);
+    if (layers.length === 0) disarmSoon();
   };
 }
 

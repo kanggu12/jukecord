@@ -1884,7 +1884,7 @@ img {
 .choice:hover {
   background: var(--raised);
 }
-.choice:is([aria-checked="true"], [aria-current="true"], [aria-pressed="true"]) {
+.choice:is([aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]) {
   border-color: var(--line-2);
   background: var(--raised);
   font-weight: 600;

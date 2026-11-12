@@ -59,6 +59,13 @@ function segmented<T extends string>(
   return box;
 }
 
+// The page shown, by the address's first part ("/" is the player's).
+function currentPage(): string {
+  if (location.pathname.startsWith('/stats')) return '/stats';
+  if (location.pathname.startsWith('/logs')) return '/logs';
+  return '/';
+}
+
 /** Applies the theme and motion choices to the page. */
 export function applyLook(): void {
   const root = document.documentElement;
@@ -108,7 +115,13 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
       ['/stats', 'chart-column', words.stats],
       ...(me.kind === 'host' ? [['/logs', 'scroll-text', words.logs]] : []),
     ].map(([path, name, label]) => {
-      const button = h('button', { class: 'choice', type: 'button' }, icon(name as 'music-2'), label);
+      // The page in use is marked, as the bar's links mark it on a wide window.
+      const button = h(
+        'button',
+        { class: 'choice', type: 'button', 'aria-current': path === currentPage() ? 'page' : null },
+        icon(name as 'music-2'),
+        label,
+      );
       button.onclick = () => {
         close();
         navigate(path as string);

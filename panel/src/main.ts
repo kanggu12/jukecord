@@ -10,7 +10,7 @@ import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
 import { collect, keep, mayControl, positionNow, state, t, update, watch } from './state.ts';
-import { closeSheets, layerOpen, problem, toast } from './ui/layers.ts';
+import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { listenBar } from './views/listen.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
@@ -192,11 +192,15 @@ function frame(): void {
     drawBar();
   };
   const navigate = (path: string) => {
-    if (location.pathname !== path) history.pushState(null, '', path);
+    // The sheet first: its history entry, when it is the newest, becomes the new page's (see goTo).
     closeSheets();
+    goTo(path);
     show();
   };
-  window.onpopstate = show;
+  // Back and Forward: a layer's own entry closes the layer on top (or was the panel's own); any other is a page.
+  window.onpopstate = (event) => {
+    if (!layerBack(event.state)) show();
+  };
   // Links inside the panel move between pages without reloading (which would stop the music here).
   document.addEventListener('click', (event) => {
     const link = (event.target as Element).closest('a[data-route]') as HTMLAnchorElement | null;
