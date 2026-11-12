@@ -242,6 +242,7 @@ const EN = {
   songFacts: (days: number, plays: number) =>
     `played on ${days === 1 ? '1 day' : `${days} days`} · ${plays === 1 ? '1 play' : `${plays} plays`}`,
   wrappedPeriods: 'Which time',
+  // The year as the panel names one in a sentence ("2026", Korean "2026년").
   wrappedThisYear: (year: string) => `This year (${year})`,
   wrappedRange: (from: string, to: string) => `${from} to ${to}`,
   tileDays: 'Days with music',
@@ -530,7 +531,7 @@ const KO: Strings = {
   wrappedSong: (time: string) => `${time}의 노래`,
   songFacts: (days: number, plays: number) => `${days}일에 걸쳐 ${plays}번 재생`,
   wrappedPeriods: '기간',
-  wrappedThisYear: (year: string) => `올해(${year}년)`,
+  wrappedThisYear: (year: string) => `올해(${year})`,
   wrappedRange: (from: string, to: string) => `${from} ~ ${to}`,
   tileDays: '음악을 들은 날',
   daysUnit: '일',
