@@ -1,12 +1,13 @@
 /**
  * Inside a running jukecord seeded by tests/perf/seed.ts (tests/perf/measure.sh runs it): times each read the panel
- * makes (the median and the slowest of 20) with the size of its answer, and sizes the live state a browser gets for
- * the thousand-track queue, plain and compressed.
+ * makes (the median and the slowest of 20) with the size of its answer, and sizes the live state a panel gets for the
+ * thousand-track queue, as text and as the gzip frame a browser asks for.
  *
  *   node tests/perf/reads.ts <data directory>
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import WebSocket from 'ws';
 
 // The host's token, which the server wrote into its data directory.
@@ -55,23 +56,25 @@ for (const route of reads) {
   );
 }
 
-// The live state a panel gets when it connects, as JSON and as the bytes that cross the network.
-for (const compress of [false, true]) {
-  const socket = new WebSocket('ws://127.0.0.1:8795/api/v1/events?guild=local', {
+// The live state a panel gets when it connects: as text (what a client that does not ask gets), and as the gzip frame
+// a browser asks for with gzip=1 (made once for every panel showing the server).
+for (const packed of [false, true]) {
+  const socket = new WebSocket(`ws://127.0.0.1:8795/api/v1/events?guild=local${packed ? '&gzip=1' : ''}`, {
     headers: { authorization: `Bearer ${token}` },
-    perMessageDeflate: compress,
   });
-  const state = await new Promise<string>((resolve, reject) => {
+  const state = await new Promise<{ json: number; frame: number }>((resolve, reject) => {
     socket.on('error', reject);
-    socket.on('message', (data) => {
-      const text = String(data);
-      if ((JSON.parse(text) as { type: string }).type === 'state') resolve(text);
+    socket.on('message', (data, isBinary) => {
+      // A binary frame is gzip; a text frame is the JSON itself.
+      const frame = data as Buffer;
+      const json = isBinary ? zlib.gunzipSync(frame) : frame;
+      if ((JSON.parse(json.toString()) as { type: string }).type === 'state') {
+        resolve({ json: json.length, frame: frame.length });
+      }
     });
   });
-  // What the socket read off the network so far: the handshake, the state and any message before it.
-  const wire = (socket as unknown as { _socket: { bytesRead: number } })._socket.bytesRead;
   console.log(
-    `live state ${compress ? 'compressed' : 'plain     '}: ${(Buffer.byteLength(state) / 1024).toFixed(0)} KiB of JSON, ${(wire / 1024).toFixed(0)} KiB over the network`,
+    `live state ${packed ? 'as gzip' : 'as text'}: ${(state.json / 1024).toFixed(0)} KiB of JSON, ${(state.frame / 1024).toFixed(0)} KiB sent`,
   );
   socket.close();
 }
