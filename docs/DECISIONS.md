@@ -121,3 +121,34 @@ the measure is the event loop's delay rather than the processor's use: a busy pr
 up, and the loop's delay is what the voice of every server and every panel feel. Work that can be asked for again in
 a moment (audio, changes) is then turned away at once with 503, which costs almost nothing, instead of being queued
 behind work nobody can see.
+
+## Reads per person, changes per login and address
+
+Many people often share one address (a household, an office, Docker's bridge, a proxy not told about): counted by it,
+fifteen panels opening at once there had a third of their reads refused. So a logged-in read counts against the
+person behind it alone, all their logins and tokens together, and a read without a login against its address.
+Changes keep both, the login's and the address's: they cost more, and a refusal after a lookup (a search that found
+nothing) keeps its share of the address spent, so several tokens behind one address do not take the address's brake
+away.
+
+## Resting pauses, and only people play on
+
+A server nobody hears anywhere (the bot out of voice, no browser playing along) went on fetching tracks and counting
+plays for nobody. After two minutes of that its player pauses with a notice saying why. It does not play on by itself
+when someone comes back (the bot joining voice, a browser pressing Listen here): sound starting by itself surprises
+people, the reason a restart comes back paused too, and pressing play is one step. A bot that stays in voice sounds in
+the channel, which counts as heard.
+
+## Coming back to voice where people are
+
+After a restart the bot goes back to the voice channel it was in only when people are in it at that moment. Going
+back later, when someone happens to enter the channel hours after a reboot, would be the bot turning up by surprise;
+so a kept channel with nobody in it is forgotten.
+
+## Alerts once an hour, in a channel the server chooses
+
+Trouble used to be in the log alone, which the people of a Discord server do not read. Each server chooses a channel
+(or none, the default), and jukecord says there what happened, with the figures and nothing more: each kind at most
+once an hour per server, and a state that lasts (YouTube's check for bots) once as it starts and once as it ends, so a
+bad day is a few lines, not one per failed fetch. A webhook was the other choice; a channel the bot posts in needs no
+secret to keep, and the bot is there already.

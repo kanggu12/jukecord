@@ -76,8 +76,8 @@ before it tries again, later than after a drop.
 ## When it is busy
 
 Changes are held to a rate per login and per address (token buckets: ten a second with twenty at once, and two a
-second for the ones that start a fetch, like skip), and reads to a wider one (thirty a second with sixty at once),
-answered with 429 and Retry-After beyond it. One process serves
+second for the ones that start a fetch, like skip), and reads to a wider one (thirty a second with sixty at once, per
+person, or per address without a login), answered with 429 and Retry-After beyond it. One process serves
 every server, so while its event loop has fallen behind (the 99th percentile of its delay over the last second above
 0.2 s) it turns away what can wait (audio for everyone, and changes from anyone but the host) with 503 and Retry-After
 until it has caught up. The voice of every server and the panels' live updates are what it catches up on. Fetches somebody waits
@@ -98,6 +98,18 @@ yt-dlp reaches the internet only through a small proxy inside jukecord (`--proxy
 each name itself, refuses addresses on private networks, and connects to the very address it checked, so a redirect, a
 playlist entry or a name that answers differently the second time cannot make the server fetch from its own network.
 An address someone types is also checked before yt-dlp starts, which gives the clearer message.
+
+## Looking after itself
+
+A few watches run beside the music, each in a file of its own. `src/app/rest.ts` pauses a playing server nobody hears
+anywhere (the bot out of its voice channel, no browser playing along) after two minutes, from the bus's player, voice
+and listener events. `src/discord/rejoin.ts` keeps the voice channel each server's bot is in, from the bus's voice
+events, and goes back to it after a restart when people are there. `src/discord/keeper.ts` edits the newest
+now-playing card of each server as its player changes, at most every five seconds. `src/app/alerts.ts` tells the
+alerts channel a server chose (and the log) about trouble, each kind at most once an hour: YouTube's check for bots
+(from how fetches and lookups go), a restart by the watchdog (it leaves a mark the next start reads), a disk nearly
+full, a track taken out of a looping queue, connections turned away at a cap, a scheduled backup that failed.
+`src/app/backups.ts` makes the backups, the daily one too.
 
 ## Storage
 
@@ -120,7 +132,7 @@ minute. Programs use API tokens with a scope. A panel session changes nothing wi
 | :-------------- | :-------------------------------------------------------------- |
 | `src/main.ts`   | starts the parts in order and stops them in order               |
 | `src/config.ts` | the settings, every problem reported at once                    |
-| `src/app/`      | the actions, who may do what, the self-check                    |
+| `src/app/`      | the actions, who may do what, the self-check, the watches above |
 | `src/core/`     | queue, player, clock, event bus                                 |
 | `src/media/`    | yt-dlp, ffmpeg, the cache, preparing and prefetching            |
 | `src/discord/`  | the bot, slash commands, cards, voice                           |
