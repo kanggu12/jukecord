@@ -1,7 +1,9 @@
 # jukecord with Docker Compose. The front door (./jukecord up) runs this; `docker compose up -d` does the same.
 #
 # The panel is published on this machine only (127.0.0.1). Settings come from .env beside this file (copy
-# .env.example); the database, the media cache and the logs live in the named volume jukecord-data.
+# .env.example); the database, the media cache and the logs live in the named volume jukecord-data, which Docker lists
+# as jukecord_jukecord-data (the project's name first). Needs Compose 2.24 or newer (env_file with required: false).
+# A second copy on the same machine sets COMPOSE_PROJECT_NAME and JUKECORD_PORT in its own .env (docs/INSTALL.md).
 name: jukecord
 
 services:
@@ -30,11 +32,22 @@ services:
     # The image writes only to /data and /tmp; everything else is read-only, and the process gains no privileges.
     read_only: true
     tmpfs:
-      - /tmp
+      # Scratch space for yt-dlp and ffmpeg, which keep little there. Bounded, since a tmpfs lives in memory and what
+      # it holds counts against mem_limit below.
+      - /tmp:size=256m
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # Node with the panel open in many browsers uses about 200 MB, and each track being fetched adds a yt-dlp and an
+    # ffmpeg of about 70 MB each. Node sets its heap ceiling at about half of this limit, so 1g leaves it about 512 MiB.
+    # Past the limit the kernel ends the container and Docker starts it again, instead of the whole machine swapping.
+    mem_limit: 1g
+    # The same as mem_limit (this one counts memory and swap together), so the container gets no swap on top.
+    memswap_limit: 1g
+    # Node's threads plus a yt-dlp and an ffmpeg (about 20 threads each) for every track being fetched stay far below
+    # this; a program that runs away cannot fill the machine's process table.
+    pids_limit: 1024
     # jukecord saves where every server was and leaves voice within 10 s of SIGTERM.
     stop_grace_period: 15s
     # Docker's own log of the console lines, bounded (jukecord's JSON log in the volume has its own rotation).

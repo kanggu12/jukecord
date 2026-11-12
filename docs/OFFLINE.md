@@ -50,5 +50,6 @@ helm install jukecord ./jukecord-0.1.1.tgz -n jukecord --create-namespace \
 
 ## Moving the data
 
-The data is one folder (`/data` in the container, the `jukecord-data` volume with Compose). `./jukecord backup` makes
-a copy of the database to move; the cache can be left behind (tracks are fetched again when played).
+The data is one folder (`/data` in the container, the `jukecord_jukecord-data` volume with Compose).
+`./jukecord backup` makes a copy of the database to move; the cache can be left behind (tracks are fetched again when
+played).

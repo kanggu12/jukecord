@@ -111,12 +111,17 @@ describe('the image', () => {
 });
 
 describe('Compose and the front door', () => {
-  it('publishes the panel on this machine only by default, read-only and without privileges', () => {
+  it('publishes the panel on this machine only by default, read-only, bounded and without privileges', () => {
     const compose = read('compose.yaml');
     assert.match(compose, /"\$\{JUKECORD_BIND:-127\.0\.0\.1\}:\$\{JUKECORD_PORT:-8795\}:8795"/);
     assert.match(compose, /read_only: true/);
     assert.match(compose, /no-new-privileges:true/);
     assert.match(compose, /jukecord-data:\/data/);
+    // Memory without swap on top, a process count, and a /tmp that cannot grow into all of that memory.
+    assert.match(compose, /^ {4}mem_limit: 1g$/m);
+    assert.match(compose, /^ {4}memswap_limit: 1g$/m);
+    assert.match(compose, /^ {4}pids_limit: \d+$/m);
+    assert.match(compose, /^ {6}- \/tmp:size=\d+m$/m);
   });
 
   it('has a front door that runs and explains itself', () => {

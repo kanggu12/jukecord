@@ -5,7 +5,8 @@ has everything it needs (Node, ffmpeg, yt-dlp); from source you install those yo
 
 ## Docker Compose
 
-On Linux, macOS, or Windows with WSL, with Docker and its Compose plugin:
+On Linux, macOS, or Windows with WSL, with Docker and its Compose plugin 2.24 or newer (`docker compose version` says
+which):
 
 ```bash
 git clone https://github.com/kanggu12/jukecord.git && cd jukecord
@@ -28,10 +29,23 @@ The front door's other commands:
 | `./jukecord update`                | rebuilds the image from this checkout (after `git pull`), or pulls a released image, and restarts |
 | `./jukecord backup`                | a copy of the database in `./backups`                                                             |
 | `./jukecord restore <file>`        | puts a backup back; the current database is kept beside it                                        |
-| `./jukecord down`                  | stops it; the data stays in the `jukecord-data` volume                                            |
+| `./jukecord down`                  | stops it; the data stays in the `jukecord_jukecord-data` volume                                   |
 | `./jukecord <command>`             | the [jukecord command](README.md#the-jukecord-command): `np`, `add`, `token create` ...           |
 
 To use a released image instead of building one, set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.1.1` in `.env`.
+
+### A second copy on the same machine
+
+Compose names the container, its network and the `jukecord_jukecord-data` volume after the project, `jukecord`. A
+second checkout on the same machine needs a name and a port of its own, in its own `.env`:
+
+```bash
+COMPOSE_PROJECT_NAME=jukecord-second
+JUKECORD_PORT=8796
+```
+
+Its data then lives in the `jukecord-second_jukecord-data` volume. Each copy needs its own bot: Discord lets one token
+hold one connection.
 
 ### Friends on other machines
 
