@@ -14,7 +14,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 discord:
-  # A Secret of yours with the keys token and (optionally) clientSecret. When set, the two values below are not used.
+  # A Secret of yours with the key token (the pod does not start without it) and, for logging in with Discord,
+  # clientSecret (read when clientId is set). When set, the two values below are not used. Either way the chart mounts
+  # them as files that jukecord reads, not as variables, which yt-dlp and ffmpeg would inherit.
   existingSecret: ""
   # The bot's token. Without one (and without existingSecret) jukecord runs browser-only.
   token: ""

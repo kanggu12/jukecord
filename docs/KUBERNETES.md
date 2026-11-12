@@ -23,7 +23,7 @@ checks every part jukecord needs.
 | Value                                                             | Default                                             | Sets                                                                                                                                                                                              |
 | :---------------------------------------------------------------- | :-------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `image.repository`, `image.tag`                                   | `ghcr.io/kanggu12/jukecord`, the chart's appVersion | the image (another registry's copy, or a build of yours)                                                                                                                                          |
-| `discord.existingSecret`                                          |                                                     | a Secret with `token` and (optionally) `clientSecret`                                                                                                                                             |
+| `discord.existingSecret`                                          |                                                     | a Secret with `token` (the pod does not start without it) and `clientSecret` (read when a client ID is set)                                                                                       |
 | `discord.token`, `discord.clientSecret`                           |                                                     | the same in the values (the chart makes the Secret)                                                                                                                                               |
 | `discord.clientId`                                                |                                                     | the application's ID (use `--set-string`: it is a long number)                                                                                                                                    |
 | `publicUrl`                                                       |                                                     | the panel's address, for login and the bot's links                                                                                                                                                |
@@ -68,7 +68,9 @@ proxy for the internet, say), turn the policy off or add your own. Fetching trac
 
 The pod runs as user 10001 with a read-only root filesystem, no capabilities, no privilege escalation, the default
 seccomp profile, no Kubernetes API token and no Service environment variables. The image writes only to `/data` and
-`/tmp`.
+`/tmp`. The bot's token and the OAuth secret are mounted from the Secret as files in `/run/secrets/jukecord`, readable
+by jukecord's group only, and jukecord reads them through `JUKECORD_DISCORD_TOKEN_FILE` and
+`JUKECORD_DISCORD_CLIENT_SECRET_FILE`: they are not in the environment that yt-dlp and ffmpeg start with.
 
 ## k3s and Raspberry Pi clusters
 

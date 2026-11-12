@@ -234,6 +234,19 @@ describe('the Helm chart', () => {
     }
     assert.match(rendered, /enableServiceLinks: false/);
     assert.match(rendered, /readOnlyRootFilesystem: true/);
+    // The secrets reach jukecord as files, not as variables that yt-dlp and ffmpeg would inherit; an existing
+    // Secret must hold the token, and its OAuth secret is read only with a client ID to go with it.
+    assert.match(rendered, /name: JUKECORD_DISCORD_TOKEN_FILE\n/);
+    assert.doesNotMatch(rendered, /secretKeyRef/);
+    const existing = execFileSync(
+      'helm',
+      ['template', 't', 'deploy/helm/jukecord', '--set', 'discord.existingSecret=s'],
+      {
+        encoding: 'utf8',
+      },
+    );
+    assert.match(existing, /- key: token\n\s+path: token\n\s+optional: false\n/);
+    assert.doesNotMatch(existing, /JUKECORD_DISCORD_CLIENT_SECRET_FILE/);
     assert.throws(() =>
       execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', '--set', 'replica=2'], { stdio: 'pipe' }),
     );

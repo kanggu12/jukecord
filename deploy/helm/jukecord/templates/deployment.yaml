@@ -67,20 +67,15 @@ spec:
             - name: JUKECORD_DISCORD_CLIENT_ID
               value: {{ . | quote }}
             {{- end }}
-            {{- if include "jukecord.hasSecret" . }}
-            # From the Secret; a key that is not there (an existing Secret without clientSecret) is simply not set.
-            - name: JUKECORD_DISCORD_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "jukecord.secretName" . }}
-                  key: token
-                  optional: true
-            - name: JUKECORD_DISCORD_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "jukecord.secretName" . }}
-                  key: clientSecret
-                  optional: true
+            {{- /* The secrets as files from the Secret (the volume below), not as variables: yt-dlp and ffmpeg start
+            with jukecord's environment, and a file is not part of it. */}}
+            {{- if include "jukecord.readsToken" . }}
+            - name: JUKECORD_DISCORD_TOKEN_FILE
+              value: {{ include "jukecord.secretDir" . }}/token
+            {{- end }}
+            {{- if include "jukecord.readsClientSecret" . }}
+            - name: JUKECORD_DISCORD_CLIENT_SECRET_FILE
+              value: {{ include "jukecord.secretDir" . }}/clientSecret
             {{- end }}
             {{- if and .Values.ingress.enabled (not (hasKey .Values.env "JUKECORD_TRUST_PROXY")) }}
             # Behind the Ingress controller: one proxy whose X-Forwarded-For is believed (for the login limiter).
@@ -127,6 +122,11 @@ spec:
             # The root filesystem is read-only; yt-dlp and ffmpeg write their scratch files here.
             - name: tmp
               mountPath: /tmp
+            {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsClientSecret" .) }}
+            - name: discord
+              mountPath: {{ include "jukecord.secretDir" . }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -138,6 +138,33 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 1Gi
+        {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsClientSecret" .) }}
+        # The token and the OAuth secret as files, readable by jukecord's group (the pod's fsGroup) only.
+        - name: discord
+          projected:
+            defaultMode: 0440
+            sources:
+              {{- if include "jukecord.readsToken" . }}
+              # Not optional: a Secret without the token (or a misspelt name) keeps the pod from starting, with an event
+              # that names the key, instead of letting it run browser-only by mistake.
+              - secret:
+                  name: {{ include "jukecord.secretName" . }}
+                  items:
+                    - key: token
+                      path: token
+                  optional: false
+              {{- end }}
+              {{- if include "jukecord.readsClientSecret" . }}
+              # Optional: an existing Secret may hold the token alone. With a client ID set, jukecord then says at start
+              # that it cannot read the OAuth secret's file.
+              - secret:
+                  name: {{ include "jukecord.secretName" . }}
+                  items:
+                    - key: clientSecret
+                      path: clientSecret
+                  optional: true
+              {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

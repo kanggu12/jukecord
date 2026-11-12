@@ -47,3 +47,23 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "jukecord.hasSecret" -}}
 {{- if or .Values.discord.existingSecret .Values.discord.token .Values.discord.clientSecret -}}true{{- end -}}
 {{- end -}}
+
+{{/* Where the Secret's keys are mounted as files; jukecord reads them through JUKECORD_*_FILE. */}}
+{{- define "jukecord.secretDir" -}}/run/secrets/jukecord{{- end -}}
+
+{{/* Whether jukecord reads the bot's token: given in the values, or in an existing Secret (which must hold it). */}}
+{{- define "jukecord.readsToken" -}}
+{{- if or .Values.discord.existingSecret .Values.discord.token -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Whether jukecord reads the OAuth secret: given in the values, or in an existing Secret when a client ID is set. An
+existing Secret may hold the token alone, and the OAuth secret does nothing without the ID it belongs to, so without
+an ID it is not read at all (a file that is not there would stop jukecord at start).
+*/}}
+{{- define "jukecord.readsClientSecret" -}}
+{{- if .Values.discord.existingSecret -}}
+{{- if or .Values.discord.clientId (hasKey .Values.env "JUKECORD_DISCORD_CLIENT_ID") -}}true{{- end -}}
+{{- else if .Values.discord.clientSecret -}}true
+{{- end -}}
+{{- end -}}
