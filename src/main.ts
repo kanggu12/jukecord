@@ -181,6 +181,7 @@ async function main(): Promise<number> {
         voiceIdleMs: config.voice.idleMs,
         log: log.child('discord'),
         panelUrl: config.publicUrl,
+        voiceChannels: store.voiceChannels,
       })
     : null;
   const directory = (): Directory | null => bot;

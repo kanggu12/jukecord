@@ -144,4 +144,20 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    sql: `
+      -- The voice channel the bot is in, per server, so that coming back after a restart (an update, a crash) it can
+      -- go back there when people are in it. Kept while the bot is in the channel; a leave by a person, by the bot
+      -- itself (nobody there) or by Discord removes it, and jukecord stopping does not.
+      CREATE TABLE voice_channels (
+        guild_id   TEXT    PRIMARY KEY,
+        channel_id TEXT    NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      -- The text channel where jukecord tells a server about trouble (app/alerts.ts); null for nowhere.
+      ALTER TABLE guild_settings ADD COLUMN alerts_channel_id TEXT;
+    `,
+  },
 ];

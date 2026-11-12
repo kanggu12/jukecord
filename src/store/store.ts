@@ -84,6 +84,7 @@ export class Store {
   readonly users: UserRepository;
   readonly sessions: SessionRepository;
   readonly tokens: TokenRepository;
+  readonly voiceChannels: VoiceChannelRepository;
   // How deep the current transaction is nested; inner ones become savepoints.
   private depth = 0;
 
@@ -100,6 +101,7 @@ export class Store {
     this.users = new UserRepository(this, now);
     this.sessions = new SessionRepository(this, now);
     this.tokens = new TokenRepository(this, now);
+    this.voiceChannels = new VoiceChannelRepository(this, now);
   }
 
   /**
@@ -852,6 +854,8 @@ function savedStateFrom(row: Row): SavedPlayerState {
 export interface GuildSettings {
   /** The role allowed to change the queue; null means every member of the server may. */
   readonly djRoleId: string | null;
+  /** The text channel where jukecord tells the server about trouble; null for nowhere. */
+  readonly alertsChannelId: string | null;
 }
 
 export class SettingsRepository {
@@ -865,10 +869,32 @@ export class SettingsRepository {
 
   /** A server's settings; a server never configured gets the defaults. */
   get(guildId: string): GuildSettings {
-    const row = this.store.db.prepare('SELECT dj_role_id FROM guild_settings WHERE guild_id = ?').get(guildId) as
-      | Row
-      | undefined;
-    return { djRoleId: row ? textOrNull(row, 'dj_role_id') : null };
+    const row = this.store.db
+      .prepare('SELECT dj_role_id, alerts_channel_id FROM guild_settings WHERE guild_id = ?')
+      .get(guildId) as Row | undefined;
+    return {
+      djRoleId: row ? textOrNull(row, 'dj_role_id') : null,
+      alertsChannelId: row ? textOrNull(row, 'alerts_channel_id') : null,
+    };
+  }
+
+  /** Sets or clears (null) the text channel where jukecord tells the server about trouble. */
+  setAlertsChannel(guildId: string, channelId: string | null): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO guild_settings (guild_id, alerts_channel_id, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (guild_id) DO UPDATE SET alerts_channel_id = excluded.alerts_channel_id,
+           updated_at = excluded.updated_at`,
+      )
+      .run(guildId, channelId, this.now());
+  }
+
+  /** The servers that chose an alerts channel, with it. */
+  withAlerts(): { readonly guildId: string; readonly channelId: string }[] {
+    const rows = this.store.db
+      .prepare('SELECT guild_id, alerts_channel_id FROM guild_settings WHERE alerts_channel_id IS NOT NULL')
+      .all() as Row[];
+    return rows.map((row) => ({ guildId: text(row, 'guild_id'), channelId: text(row, 'alerts_channel_id') }));
   }
 
   /** Sets or clears (null) the role that may change the queue. */
@@ -1134,4 +1160,39 @@ function tokenFrom(row: Row): TokenRow {
     createdAt: int(row, 'created_at'),
     usedAt: intOrNull(row, 'used_at'),
   };
+}
+
+/**
+ * The voice channel the bot is in, per server, kept for a restart: jukecord goes back to it when people are there
+ * (see discord/rejoin.ts). One per server; leaving forgets it.
+ */
+export class VoiceChannelRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** Keeps the channel the bot is in now (replacing the one before). */
+  remember(guildId: string, channelId: string): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO voice_channels (guild_id, channel_id, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id, updated_at = excluded.updated_at`,
+      )
+      .run(guildId, channelId, this.now());
+  }
+
+  /** Forgets a server's channel (the bot left it). */
+  forget(guildId: string): void {
+    this.store.db.prepare('DELETE FROM voice_channels WHERE guild_id = ?').run(guildId);
+  }
+
+  /** Every channel kept, in the order they were first kept. */
+  all(): { readonly guildId: string; readonly channelId: string }[] {
+    const rows = this.store.db.prepare('SELECT guild_id, channel_id FROM voice_channels ORDER BY rowid').all() as Row[];
+    return rows.map((row) => ({ guildId: text(row, 'guild_id'), channelId: text(row, 'channel_id') }));
+  }
 }

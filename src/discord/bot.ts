@@ -34,7 +34,7 @@ import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
-import type { DiscordRepository, SettingsRepository, UserRepository } from '../store/store.ts';
+import type { DiscordRepository, SettingsRepository, UserRepository, VoiceChannelRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
 import {
   addedCard,
@@ -55,6 +55,7 @@ import { commandDefinitions } from './commands.ts';
 const COMMAND_NAMES: ReadonlySet<string> = new Set(commandDefinitions().map((definition) => definition.name));
 
 import { sayError } from './errors.ts';
+import { VoiceMemory } from './rejoin.ts';
 import { VoiceManager } from './voice.ts';
 
 export interface BotOptions {
@@ -73,6 +74,8 @@ export interface BotOptions {
   readonly voiceIdleMs: number;
   /** Where the people who use commands are remembered, so the panel can show who added what. */
   readonly users: UserRepository;
+  /** Where the voice channel each server's bot is in is kept, to come back to after a restart (none: it does not). */
+  readonly voiceChannels?: VoiceChannelRepository;
 }
 
 export class Bot implements Directory {
@@ -81,6 +84,8 @@ export class Bot implements Directory {
   private readonly options: BotOptions;
   // Set by the first login: from then on the server list is known (a reconnect later keeps the list it had).
   private serversKnown = false;
+  // The voice channels kept for a restart (see rejoin.ts), when there is somewhere to keep them.
+  private readonly memory: VoiceMemory | null;
 
   constructor(options: BotOptions) {
     this.options = options;
@@ -93,6 +98,10 @@ export class Bot implements Directory {
       idleMs: options.voiceIdleMs,
       bus: options.bus,
     });
+    this.memory = options.voiceChannels
+      ? new VoiceMemory({ bus: options.bus, channels: options.voiceChannels, log: options.log })
+      : null;
+    this.memory?.start();
   }
 
   self(): { id: string; name: string; avatar: string | null } | null {
@@ -211,6 +220,8 @@ export class Bot implements Directory {
       this.serversKnown = true;
       log.info('logged in to Discord', { as: client.user.tag, servers: client.guilds.cache.size });
       for (const guild of client.guilds.cache.values()) void this.register(guild);
+      // Back to the voice channels the bot was in before the restart, where people are now.
+      void this.comeBackToVoice();
     });
     // A server that adds the bot later gets the commands at once.
     this.client.on(Events.GuildCreate, (guild) => void this.register(guild));
@@ -248,8 +259,54 @@ export class Bot implements Directory {
 
   /** Leaves voice everywhere and logs out. */
   async stop(): Promise<void> {
+    // Leaving every channel now is jukecord stopping: the channels stay kept for the restart.
+    this.memory?.freeze();
     this.voice.leaveAll();
     await this.client.destroy();
+  }
+
+  // Goes back, after a restart, to the voice channels the bot was in where people are now, and says so in each (see
+  // rejoin.ts): with the now-playing card, paused, so the people there can play on.
+  private async comeBackToVoice(): Promise<void> {
+    if (!this.memory) return;
+    const channelOf = (guildId: string, channelId: string) =>
+      this.client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
+    await this.memory
+      .rejoin({
+        people: (guildId, channelId) => {
+          const channel = channelOf(guildId, channelId);
+          return channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
+        },
+        join: (guildId, channelId) => this.voice.join(guildId, channelId, null),
+        told: async (guildId, channelId) => {
+          const guild = this.client.guilds.cache.get(guildId);
+          const channel = channelOf(guildId, channelId);
+          const me = guild?.members.me;
+          // A voice channel's own chat, when the bot may post there; nothing otherwise.
+          if (!guild || !me || !channel?.isTextBased() || !channel.isVoiceBased()) return;
+          const rights = [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.EmbedLinks,
+          ];
+          if (!channel.permissionsFor(me)?.has(rights)) return;
+          // The server's own language: nobody asked, so there is no one person's to answer in.
+          const lang = langOf(guild.preferredLocale);
+          const card = nowCard(
+            this.options.actions.nowPlaying({ guildId, userId: null, mayControl: false, mayManage: false }),
+            lang,
+            this.options.panelUrl,
+          );
+          await channel.send({
+            embeds: [
+              note(lang, 'jukecord restarted and is back in this channel', 'jukecord가 다시 시작해 이 채널로 돌아옴'),
+              ...card.embeds,
+            ],
+            components: card.components,
+          });
+        },
+      })
+      .catch((error: unknown) => this.options.log.warn('could not come back to voice after a restart', { error }));
   }
 
   // Puts this version's commands in a server (replacing whatever an older version registered).

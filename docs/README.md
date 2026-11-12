@@ -67,7 +67,9 @@ Commands and answers are in Korean for people whose Discord is in Korean, and in
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
 five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers. When nobody hears a server anywhere (the bot
 in no voice channel, no browser playing along) for two minutes (`JUKECORD_REST_AFTER`), its player pauses and says so,
-instead of fetching tracks and counting plays for nobody; playing on is a press of play.
+instead of fetching tracks and counting plays for nobody; playing on is a press of play. After a restart (an update,
+a crash) the bot goes back to the voice channel it was in when people are there, and says so in that channel's chat
+with the now-playing card, paused.
 
 ## The jukecord command
 
