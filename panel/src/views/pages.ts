@@ -7,10 +7,16 @@
  */
 import { api, type LogRecord, type Stats, type Status } from '../api.ts';
 import { niceTop } from '../axis.ts';
-import { avatarUrl, clock, face, fill, h, icon } from '../dom.ts';
+import { avatarUrl, face, fill, h, icon } from '../dom.ts';
 import { logoMark } from '../logo.ts';
 import { state, t, watch } from '../state.ts';
 import { problem } from '../ui/layers.ts';
+
+// Time listened in words, for a tooltip: "1 h 5 min", "45 min" (Korean "1시간 5분", "45분"), never like a clock's time.
+function listenedWords(ms: number): string {
+  const [big, rest] = listened(ms);
+  return state.lang === 'ko' ? `${big}${rest}` : `${big} ${rest}`;
+}
 
 // Hours and minutes as people say them ("12 h 5 min", "45 min").
 function listened(ms: number): [string, string] {
@@ -32,10 +38,11 @@ function logTime(iso: string): string {
   return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
 }
 
-// "11-07" from "2026-11-07", in the order people of each language read dates.
+// "11-07" from "2026-11-07", in the order people of each language read dates: Korean "11/7", with a slash (with a dot,
+// "11.12" on an axis reads as a number with a decimal point).
 function shortDay(day: string): string {
   const [, month, date] = day.split('-');
-  return state.lang === 'ko' ? `${Number(month)}.${Number(date)}` : `${month}-${date}`;
+  return state.lang === 'ko' ? `${Number(month)}/${Number(date)}` : `${month}-${date}`;
 }
 
 // A column chart with a y axis, a tooltip on each column and a table view.
@@ -54,13 +61,14 @@ function columns(
         class: `slot ${entry.value === 0 ? 'zero' : ''}`.trim(),
         tabindex: '0',
         role: 'listitem',
-        'aria-label': `${entry.label}: ${entry.value}`,
+        'aria-label': `${entry.label}: ${t().playsCount(entry.value)}`,
       },
       h('div', { class: 'b', style: `height:${(entry.value / top) * 100}%` }),
     );
     const show = () => {
       tip.hidden = false;
-      fill(tip, h('b', { class: 'value' }, String(entry.value)), entry.tip);
+      // The count with its unit ("5 plays"), then when (and for how long, a day's or a week's).
+      fill(tip, h('b', { class: 'value' }, t().playsCount(entry.value)), entry.tip);
       // Above the column, kept inside the chart so it never crosses the card's edge.
       const box = slot.getBoundingClientRect();
       const frame = plot.getBoundingClientRect();
@@ -95,7 +103,7 @@ function columns(
         'div',
         { class: 'axis', 'aria-hidden': 'true' },
         ...axis.map((tick) =>
-          h('span', { class: 'tick', style: `left:${((tick.at + 0.5) / values.length) * 100}%` }, tick.label),
+          h('span', { class: 'tick', style: `--at:${((tick.at + 0.5) / values.length) * 100}` }, tick.label),
         ),
       ),
     ),
@@ -230,7 +238,8 @@ export function statsPage(): HTMLElement {
         : write(bucket.first);
     const dayValues = buckets.map((bucket) => ({
       label: range(bucket, (day) => day),
-      tip: `${range(bucket, shortDay)} · ${clock(bucket.playedMs)}`,
+      // When, and how long was listened then, in words ("11-12 · 11 min").
+      tip: `${range(bucket, shortDay)} · ${listenedWords(bucket.playedMs)}`,
       value: bucket.plays,
     }));
     // Under the first, the middle and the last bar. A year of weeks crosses a new year, so its labels carry the year
@@ -239,7 +248,8 @@ export function statsPage(): HTMLElement {
     const tickOf = (index: number) => {
       const day = buckets[index]?.first ?? '';
       const [year, month] = day.split('-');
-      const label = span > 1 ? (state.lang === 'ko' ? `${year}.${Number(month)}` : `${year}-${month}`) : shortDay(day);
+      // Korean "2026.05": the month in two digits, so it does not read as a number with a decimal point.
+      const label = span > 1 ? (state.lang === 'ko' ? `${year}.${month}` : `${year}-${month}`) : shortDay(day);
       return { at: index, label };
     };
     const perDay = columns(

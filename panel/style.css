@@ -2131,7 +2131,9 @@ kbd {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-/* The labels under the bars: each one centred under its own bar (placed by the panel's code). */
+/* The labels under the bars: each one centred under its own bar (its place, --at, a percentage of the chart's width,
+   set by the panel's code), and kept inside the chart: a label that would stick out past either end moves in by just
+   that much. (Anchored by their outer edge before, the first and the last ended half a bar off on a phone.) */
 .axis {
   position: relative;
   height: 18px;
@@ -2139,19 +2141,15 @@ kbd {
   font-size: 12px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+  /* Its own width, which the labels' limits below are measured in (cqw). */
+  container-type: inline-size;
 }
 .axis .tick {
   position: absolute;
   top: 0;
-  translate: -50% 0;
+  left: calc(var(--at) * 1%);
+  translate: clamp(calc(var(--at) * -1cqw), -50%, calc((100 - var(--at)) * 1cqw - 100%)) 0;
   white-space: nowrap;
-}
-/* The first and the last label stay inside the chart. */
-.axis .tick:first-child {
-  translate: 0 0;
-}
-.axis .tick:last-child {
-  translate: -100% 0;
 }
 .chart-table {
   width: 100%;
