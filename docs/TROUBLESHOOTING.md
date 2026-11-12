@@ -64,7 +64,8 @@ same way; once the network is back, adding works again (a track that failed in a
 jukecord takes at most 256 connections from one address. The address in the log line is where they came from: a
 reverse proxy on the same machine, or Docker's bridge (`172.17.0.1`, how a client of the host looks inside the
 container), carries every browser on one address. With `JUKECORD_TRUST_PROXY` set, each browser counts by its own
-address for the rates and the live connections, and the proxy's address may have 2048.
+address for the rates and the live connections, and the proxy's address may have 3840 (all but a sixteenth of the
+4096 jukecord takes: the rest stay for health checks and other clients).
 
 ## Logging in with Discord fails
 

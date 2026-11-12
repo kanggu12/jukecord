@@ -285,13 +285,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   });
   // And at most this many from one address (an IPv6 address counts by its /56, as the other limits do): one client with
   // ordinary keep-alive connections could otherwise hold every place under the cap above, the health checks' too.
-  // Behind a trusted proxy every connection comes from the proxy, which carries many browsers: it gets a higher cap of
-  // its own (half the places), so a direct client still cannot take them all. Without the trust a proxy on the same
-  // machine, or Docker's own (inside a container a client of the host comes from the bridge's gateway), puts every
-  // browser on one address's share; the log says so, with the setting that changes it.
+  // Behind a trusted proxy every connection comes from the proxy, which carries every browser: it may take all but a
+  // sixteenth of the places (3,840 of 4,096), and the rest stay for the others (the platform's health checks, a direct
+  // client, a second proxy). Half of them, as first tried, halved what a deployment behind an ingress could take.
+  // Without the trust a proxy on the same machine, or Docker's own (inside a container a client of the host comes from
+  // the bridge's gateway), puts every browser on one address's share; the log says so, with the setting that changes
+  // it.
   const trusting = hops !== false && hops !== 0 && hops !== '';
   const perAddressMax = trusting
-    ? (timeouts.maxConnectionsPerProxy ?? Math.floor(app.server.maxConnections / 2))
+    ? (timeouts.maxConnectionsPerProxy ?? app.server.maxConnections - Math.floor(app.server.maxConnections / 16))
     : (timeouts.maxConnectionsPerAddress ?? 256);
   const fromAddress = new Map<string, number>();
   // Connections turned away at that cap since the log last said so, and when that was.

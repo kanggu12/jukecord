@@ -75,7 +75,7 @@ its audio waits like everyone's, as sending audio is the work that can wait.
 A request must arrive whole within 30 s, its headers within 15 s; a slower one is answered `408` and its connection
 closed. Sending an answer has no time limit while the reader takes it (audio to a slow line takes as long as it takes),
 but a connection on which nothing moves either way for two minutes is closed; a WebSocket is not (it is pinged every
-30 s). At most 4096 connections are open at once, 256 from one address (an IPv6 address counts by its /56), or 2048
+30 s). At most 4096 connections are open at once, 256 from one address (an IPv6 address counts by its /56), or 3840
 from one address when `JUKECORD_TRUST_PROXY` says they come through a proxy; one more is closed as it arrives, and the
 log says so once a minute. Requests sent one after another on one connection without waiting for the answers
 (pipelining) are answered in order, sixteen made at a time and the rest waiting their turn; past 128 waiting, the

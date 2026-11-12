@@ -279,6 +279,37 @@ describe('the web server caps its connections', () => {
     }
   });
 
+  it('lets a trusted proxy take all but a sixteenth of the places, not half of them', async () => {
+    // Behind a trusted proxy (an ingress, a reverse proxy) every browser's connection comes from the proxy's address.
+    const server = await testServer({ listen: true, trustProxy: true, timeouts: { maxConnections: 16 } });
+    const port = Number(new URL(server.url).port);
+    const open: net.Socket[] = [];
+    // A connection that asks for the health check and stays open (keep-alive): its answer's first line.
+    const asking = async () => {
+      const socket = net.connect(port, '127.0.0.1');
+      open.push(socket);
+      socket.on('error', () => {});
+      socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n');
+      return await new Promise<string>((resolve) => {
+        socket.once('data', (data) => resolve(data.toString().split('\r\n')[0] ?? ''));
+        socket.once('close', () => resolve(''));
+      });
+    };
+    try {
+      // Fifteen of sixteen from the proxy are answered (half, eight, was all it had); the sixteenth place stays for
+      // the others (the health checks of the platform, a direct client).
+      const answers = [];
+      for (let i = 0; i < 15; i += 1) answers.push(await asking());
+      assert.deepEqual(new Set(answers), new Set(['HTTP/1.1 200 OK']));
+      assert.equal(await asking(), '');
+      const told = server.logs.records.filter((record) => record.msg.startsWith('turned connections away from one'));
+      assert.equal(told[0]?.fields.cap, 15);
+    } finally {
+      for (const socket of open) socket.destroy();
+      await server.close();
+    }
+  });
+
   it('closes a connection beyond the cap as it arrives, and the idle ones to make room for the next', async () => {
     const server = await testServer({ listen: true, timeouts: { maxConnections: 2 } });
     const port = Number(new URL(server.url).port);
