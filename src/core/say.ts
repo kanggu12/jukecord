@@ -21,11 +21,11 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['it is already playing', '이미 재생 중'],
   ['only members with the DJ role can change the music here', '이 서버에서는 DJ 역할이 있어야 음악을 바꿀 수 있음'],
   ['only people who can manage the server can set the DJ role', '서버 관리 권한이 있어야 DJ 역할을 정할 수 있음'],
-  ['you cannot join that channel yourself', '내가 들어갈 수 없는 채널'],
+  ['you cannot join that channel yourself', '본인이 들어갈 수 없는 채널'],
   [/^the bot may not connect or speak in (.+)$/, '봇이 $1에 들어가거나 말할 권한이 없음'],
   ['join a voice channel first, or name one', '먼저 음성 채널에 들어가거나 채널을 고르세요'],
   ['that is not a voice channel', '음성 채널이 아님'],
-  ['the bot does not play on stages', '무대 채널에서는 재생하지 않음'],
+  ['the bot does not play on stages', '스테이지 채널에서는 재생하지 않음'],
   ['the position must be 0 or more', '위치는 0 이상'],
   ['there is nothing to save: the queue is empty', '저장할 곡 없음: 대기열이 비어 있음'],
   [/^longer than the (\d+) minute limit$/, '$1분보다 긴 곡'],
@@ -61,7 +61,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['jukecord runs without a Discord bot here, so there are no roles', '디스코드 봇 없이 도는 중이라 역할이 없음'],
   [
     /^"(.+)" is not a time in the track \(examples: 83, 1:23, 1m23s\)$/,
-    '"$1"은 곡 안의 시간이 아님(예: 83, 1:23, 1m23s)',
+    '곡 안의 시간이 아님: "$1"(예: 83, 1:23, 1m23s)',
   ],
   // Changes faster than the rates allow (429), and work turned away while jukecord is behind (503).
   ['too many changes at once; try again in a moment', '한꺼번에 너무 많이 바꿈: 잠시 뒤 다시'],
@@ -89,7 +89,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.noSuchSite, '없는 사이트'],
   [REASONS.nothingFound, '찾은 곡 없음'],
   [REASONS.failed, '받지 못함'],
-  [/^the site answered (\d{3})$/, '사이트가 $1로 답함'],
+  [/^the site answered (\d{3})$/, '사이트 응답 코드 $1'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */
@@ -117,6 +117,7 @@ export function sayFailure(message: string, lang: Lang): string {
 /** A message from the actions as the person reads it: a sentence in their language. */
 export function sayError(message: string, lang: Lang): string {
   const said = translate(message, lang);
-  // English (or Korean without an entry): the message as a sentence, with its capital.
+  // English (or Korean without an entry): the message as a sentence, with its capital; jukecord's name has none.
+  if (said.startsWith('jukecord')) return said;
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
