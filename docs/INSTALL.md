@@ -62,12 +62,53 @@ hold one connection.
 The panel is published on 127.0.0.1. For friends to log in and listen:
 
 - **A reverse proxy with HTTPS** (Caddy, nginx, Traefik) in front of jukecord, with `JUKECORD_PUBLIC_URL` set to its
-  address and `JUKECORD_TRUST_PROXY=1` (one proxy in front). It must pass WebSocket upgrades for `/api/v1/events` and allow a long read
-  timeout (the panel keeps that connection open). With Caddy:
+  address and `JUKECORD_TRUST_PROXY=1` (one proxy in front, whose `X-Forwarded-For` and `X-Forwarded-Proto` jukecord
+  then believes). It must pass WebSocket upgrades for `/api/v1/events` and allow a long read timeout (the panel keeps
+  that connection open). It should not pass `/metrics`, which answers without a login and tells anyone how many people
+  listen: Prometheus reads it on this machine, at `127.0.0.1:8795`. With Caddy, which gets the certificate itself:
 
   ```
   music.example.com {
+    # The figures for Prometheus stay on this machine.
+    respond /metrics 404
     reverse_proxy 127.0.0.1:8795
+  }
+  ```
+
+  With nginx, and a certificate of yours (certbot's paths here):
+
+  ```nginx
+  # In the http block (nginx.conf, or a file in conf.d): Connection follows the browser's Upgrade header.
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+  }
+
+  server {
+    listen 443 ssl;
+    server_name music.example.com;
+    ssl_certificate     /etc/letsencrypt/live/music.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/music.example.com/privkey.pem;
+
+    # The figures for Prometheus stay on this machine.
+    location = /metrics {
+      return 404;
+    }
+
+    location / {
+      proxy_pass http://127.0.0.1:8795;
+      # WebSocket needs HTTP/1.1, and the Upgrade and Connection headers passed on.
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      # Who asked, and whether over https, for JUKECORD_TRUST_PROXY=1.
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      # The panel's live connection stays open for hours.
+      proxy_read_timeout 1h;
+      proxy_send_timeout 1h;
+    }
   }
   ```
 
