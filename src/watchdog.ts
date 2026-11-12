@@ -11,20 +11,30 @@ import { Worker } from 'node:worker_threads';
 // The worker's code, the same as a module or a script (getBuiltinModule needs neither import nor require). It writes
 // with fs.writeSync: a worker's console goes through the main thread, which is the one that hangs. Its timer is not
 // unref'd, so the worker stays while the process runs; the main side unrefs the worker.
+//
+// A hung main thread and a frozen process look alike from the counter alone: in both it stands still. They differ in
+// this thread: while the whole process is stopped (docker pause, SIGSTOP, a laptop asleep, a machine with no
+// processor time to give), this thread does not run either, and its own look comes late. A late look says nothing
+// about the main thread, so the count starts again from it; without that, a process let go after half a minute was
+// ended as hung whenever this thread happened to look before the main one had moved the counter.
 const WATCHER = `
 const { workerData } = process.getBuiltinModule('node:worker_threads');
 const fs = process.getBuiltinModule('node:fs');
 const beat = new Int32Array(workerData.buffer);
 let seen = Atomics.load(beat, 0);
-let movedAt = Date.now();
+let movedAt = performance.now();
+let lookedAt = movedAt;
 setInterval(() => {
-  const now = Atomics.load(beat, 0);
-  if (now !== seen) {
-    seen = now;
-    movedAt = Date.now();
+  const now = performance.now();
+  const late = now - lookedAt > workerData.checkMs * 3;
+  lookedAt = now;
+  const count = Atomics.load(beat, 0);
+  if (count !== seen || late) {
+    seen = count;
+    movedAt = now;
     return;
   }
-  const still = Date.now() - movedAt;
+  const still = now - movedAt;
   if (still < workerData.limitMs) return;
   fs.writeSync(2, 'jukecord: the main thread has not answered for ' + Math.round(still / 1000) +
     ' s; ending the process so that it is started again\\n');
