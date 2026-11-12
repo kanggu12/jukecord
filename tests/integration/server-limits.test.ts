@@ -121,25 +121,66 @@ describe('the web server times requests, not answers', () => {
     assert.ok(received < size, `${received} bytes came, the whole track is ${size}`);
   });
 
-  it('closes a connection that sends request after request without reading the answers', async () => {
-    // A thousand requests for the API's description in one go (pipelining, which no browser does), nothing read: each
-    // answer would be built and held in memory for a reader that never comes.
-    const answers = await new Promise<number>((resolve) => {
+  it('answers requests sent one after another without waiting (pipelining), sixteen at a time', async () => {
+    // HTTP/1.1 lets a client send many requests in one go (undici with pipelining, benchmark tools); each must be
+    // answered, in order, whatever their number up to what one connection carries.
+    for (const count of [1, 16, 17, 40]) {
+      const answers = await new Promise<number>((resolve) => {
+        let got = '';
+        const socket = net.connect(port, '127.0.0.1', () => {
+          socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n'.repeat(count));
+        });
+        const done = () => {
+          socket.destroy();
+          resolve(got.split('HTTP/1.1 200').length - 1);
+        };
+        socket.on('data', (chunk: Buffer) => {
+          got += chunk.toString('latin1');
+          if (got.split('HTTP/1.1 200').length - 1 === count) done();
+        });
+        socket.on('error', () => {});
+        socket.on('close', done);
+        setTimeout(done, 2000).unref();
+      });
+      assert.equal(answers, count, `${count} pipelined requests`);
+    }
+  });
+
+  it('builds at most sixteen answers at a time for a connection that does not read, and refuses past 128', async () => {
+    // A thousand requests for the API's description in one go, nothing read for a while: sixteen answers are made,
+    // the next 112 wait their turn without being made, and the rest are refused at once (429), so a client that never
+    // reads cannot fill the memory with answers or with requests held for it.
+    const counts = await new Promise<{ ok: number; refused: number }>((resolve) => {
       let got = '';
       const socket = net.connect(port, '127.0.0.1', () => {
         socket.pause();
         socket.write('GET /api/v1/openapi.json HTTP/1.1\r\nHost: x\r\n\r\n'.repeat(1000));
         setTimeout(() => socket.resume(), 300);
       });
+      const count = () => ({
+        ok: got.split('HTTP/1.1 200').length - 1,
+        refused: got.split('HTTP/1.1 429').length - 1,
+      });
+      const done = () => {
+        socket.destroy();
+        resolve(count());
+      };
       socket.on('data', (chunk: Buffer) => {
         got += chunk.toString('latin1');
+        const now = count();
+        if (now.ok + now.refused === 1000) done();
       });
       socket.on('error', () => {});
-      socket.on('close', () => resolve(got.split('HTTP/1.1 200').length - 1));
-      setTimeout(() => socket.destroy(), 8000).unref();
+      socket.on('close', done);
+      setTimeout(done, 8000).unref();
     });
-    // Closed after the first few, long before a thousand answers.
-    assert.ok(answers <= 16, `${answers} answers came`);
+    // Every request answered, in order: the first 128 at least (more when answers went out while the rest of the
+    // requests were still arriving), the others refused.
+    assert.equal(counts.ok + counts.refused, 1000);
+    assert.ok(counts.ok >= 128 && counts.refused > 0, JSON.stringify(counts));
+    // Said in the log, once.
+    const told = server.logs.records.filter((record) => record.msg.startsWith('refused requests sent one after'));
+    assert.equal(told.length, 1);
     // And an ordinary client on a connection of its own is answered as ever.
     assert.equal((await fetch(`${server.url}/api/v1/openapi.json`)).status, 200);
   });
@@ -195,31 +236,42 @@ describe('the web server stops in time', () => {
 });
 
 describe('the web server caps its connections', () => {
-  it('takes at most so many connections from one address, unless it is told they come through a proxy', async () => {
+  it('takes at most so many connections from one address, more from a trusted proxy, and says so in the log', async () => {
     for (const trustProxy of [false, true]) {
-      const server = await testServer({ listen: true, trustProxy, timeouts: { maxConnectionsPerAddress: 2 } });
+      const server = await testServer({
+        listen: true,
+        trustProxy,
+        timeouts: { maxConnectionsPerAddress: 2, maxConnectionsPerProxy: 3 },
+      });
       const port = Number(new URL(server.url).port);
       const open: net.Socket[] = [];
+      // Behind a trusted proxy every connection comes from the proxy, which carries many browsers: a higher cap.
+      const share = trustProxy ? 3 : 2;
       try {
-        // Two idle connections from this address (127.0.0.1) are its share.
-        for (let i = 0; i < 2; i += 1) {
+        // The address's share of idle connections from 127.0.0.1.
+        for (let i = 0; i < share; i += 1) {
           const socket = net.connect(port, '127.0.0.1');
           await new Promise((resolve) => socket.once('connect', resolve));
           open.push(socket);
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
-        const third = await raw(port, (socket) =>
+        const over = await raw(port, (socket) =>
           socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'),
         );
-        // Behind a trusted proxy every connection comes from the proxy: the cap per address would be the proxy's.
-        assert.equal(third.first, trustProxy ? 'HTTP/1.1 200 OK' : '', `trustProxy ${trustProxy}`);
-        // One of the two leaves: there is room for one more from this address again.
+        assert.equal(over.first, '', `trustProxy ${trustProxy}`);
+        // Said in the log, with the address and the cap, and how a proxy in front gets its own higher share.
+        const told = server.logs.records.filter((record) => record.msg.startsWith('turned connections away from one'));
+        assert.equal(told.length, 1, `trustProxy ${trustProxy}`);
+        assert.equal(told[0]?.fields.cap, share);
+        assert.equal(told[0]?.fields.address, '127.0.0.1');
+        assert.equal(/JUKECORD_TRUST_PROXY/.test(String(told[0]?.fields.hint ?? '')), !trustProxy);
+        // One of them leaves: there is room for one more from this address again.
         open.pop()?.destroy();
         await new Promise((resolve) => setTimeout(resolve, 50));
-        const fourth = await raw(port, (socket) =>
+        const next = await raw(port, (socket) =>
           socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'),
         );
-        assert.equal(fourth.first, 'HTTP/1.1 200 OK');
+        assert.equal(next.first, 'HTTP/1.1 200 OK');
       } finally {
         for (const socket of open) socket.destroy();
         await server.close();

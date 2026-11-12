@@ -53,6 +53,13 @@ The panel says why jukecord turned its live connection away, and tries again by 
 - "jukecord has as many live connections as it allows": `JUKECORD_LIVE_MAX` (1000 by default) are open. A machine
   that can take more can be given a higher one.
 
+## "Turned connections away from one address at its cap"
+
+jukecord takes at most 256 connections from one address. The address in the log line is where they came from: a
+reverse proxy on the same machine, or Docker's bridge (`172.17.0.1`, how a client of the host looks inside the
+container), carries every browser on one address. With `JUKECORD_TRUST_PROXY` set, each browser counts by its own
+address for the rates and the live connections, and the proxy's address may have 2048.
+
 ## Logging in with Discord fails
 
 - `redirect_uri` errors: the address in **Redirects** must be exactly `<JUKECORD_PUBLIC_URL>/auth/callback` (or

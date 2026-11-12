@@ -73,6 +73,8 @@ export interface WebServerOptions {
     readonly idleMs?: number;
     readonly maxConnections?: number;
     readonly maxConnectionsPerAddress?: number;
+    /** The same from one address when proxies are trusted: a reverse proxy carries many browsers (default 2048). */
+    readonly maxConnectionsPerProxy?: number;
     /** How long an audio request waits for an MP3 copy being made before it is told to ask again (default 5 s). */
     readonly mp3WaitMs?: number;
   };
@@ -118,10 +120,14 @@ const TOO_MANY_READS = 'too many requests at once; try again in a moment';
 const MAKING_MP3 = 'jukecord is making the MP3 copy of this track; try again in a moment';
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
-// do. A client that sends many in one go and reads nothing had each one answered, and each answer held in memory for a
-// reader that never came: a few connections of small requests filled the heap. More than this many answers under way
-// on one connection closes it.
+// do; undici with pipelining and benchmark tools do. A client that sends many in one go and reads nothing had each one
+// answered, and each answer held in memory for a reader that never came: a few connections of small requests filled
+// the heap. So at most this many answers are made at a time on one connection; the requests after them wait their turn
+// without being made, up to PIPELINED_HELD more, and the ones past that are refused at once (a small 429 each, after
+// which Node stops reading the connection until its answers are taken). Closing the connection instead lost every
+// answer, the first sixteen too, without a word in the log.
 const PIPELINED_MAX = 16;
+const PIPELINED_HELD = 112;
 
 // Waits for `promise` at most `ms`: its value when it settled in time, `undefined` when the time ran out first (the
 // promise goes on; whoever made it keeps it). A rejection in time is passed on.
@@ -229,27 +235,49 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   });
   // And at most this many from one address (an IPv6 address counts by its /56, as the other limits do): one client with
   // ordinary keep-alive connections could otherwise hold every place under the cap above, the health checks' too.
-  // Behind a trusted proxy every connection comes from the proxy, so the proxy is where to limit them.
+  // Behind a trusted proxy every connection comes from the proxy, which carries many browsers: it gets a higher cap of
+  // its own (half the places), so a direct client still cannot take them all. Without the trust a proxy on the same
+  // machine, or Docker's own (inside a container a client of the host comes from the bridge's gateway), puts every
+  // browser on one address's share; the log says so, with the setting that changes it.
   const trusting = hops !== false && hops !== 0 && hops !== '';
-  if (!trusting) {
-    const perAddressMax = timeouts.maxConnectionsPerAddress ?? 256;
-    const fromAddress = new Map<string, number>();
-    // Before the HTTP server's own listener, so a connection over the cap gets no parser at all.
-    app.server.prependListener('connection', (socket: Socket) => {
-      const key = addressKey(socket.remoteAddress);
-      const count = (fromAddress.get(key) ?? 0) + 1;
-      if (count > perAddressMax) {
-        socket.destroy();
-        return;
+  const perAddressMax = trusting
+    ? (timeouts.maxConnectionsPerProxy ?? Math.floor(app.server.maxConnections / 2))
+    : (timeouts.maxConnectionsPerAddress ?? 256);
+  const fromAddress = new Map<string, number>();
+  // Connections turned away at that cap since the log last said so, and when that was.
+  let refusedHere = 0;
+  let refusedHereToldAt = Number.NEGATIVE_INFINITY;
+  // Before the HTTP server's own listener, so a connection over the cap gets no parser at all.
+  app.server.prependListener('connection', (socket: Socket) => {
+    const key = addressKey(socket.remoteAddress);
+    const count = (fromAddress.get(key) ?? 0) + 1;
+    if (count > perAddressMax) {
+      socket.destroy();
+      // Said at most once a minute, as the cap above says it, with the address and how many.
+      refusedHere += 1;
+      if (steadyNow() - refusedHereToldAt >= 60_000) {
+        log.warn('turned connections away from one address at its cap', {
+          count: refusedHere,
+          cap: perAddressMax,
+          address: key,
+          ...(trusting
+            ? {}
+            : {
+                hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY: each browser then counts by its own address, and the proxy gets a higher cap',
+              }),
+        });
+        refusedHere = 0;
+        refusedHereToldAt = steadyNow();
       }
-      fromAddress.set(key, count);
-      socket.once('close', () => {
-        const left = (fromAddress.get(key) ?? 1) - 1;
-        if (left > 0) fromAddress.set(key, left);
-        else fromAddress.delete(key);
-      });
+      return;
+    }
+    fromAddress.set(key, count);
+    socket.once('close', () => {
+      const left = (fromAddress.get(key) ?? 1) - 1;
+      if (left > 0) fromAddress.set(key, left);
+      else fromAddress.delete(key);
     });
-  }
+  });
   const hub = new EventHub({
     bus: options.bus,
     actions: deps.actions,
@@ -274,20 +302,61 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
-  // Answers under way on each connection (see PIPELINED_MAX). An upgrade to a WebSocket leaves its count at one, and
-  // the connection then carries no more requests.
-  const underWay = new WeakMap<Socket, number>();
+  // Answers under way on each connection, and the requests waiting for a place among them (see PIPELINED_MAX). An
+  // upgrade to a WebSocket keeps its place, and the connection then carries no more requests.
+  interface Line {
+    underWay: number;
+    readonly held: ((go: boolean) => void)[];
+  }
+  const lines = new WeakMap<Socket, Line>();
+  // Requests refused past what a connection holds, since the log last said so, and when that was.
+  let refusedPipelined = 0;
+  let refusedPipelinedToldAt = Number.NEGATIVE_INFINITY;
   app.addHook('onRequest', async (request, reply) => {
     const socket = request.raw.socket;
-    const count = (underWay.get(socket) ?? 0) + 1;
-    if (count > PIPELINED_MAX) {
-      // Nothing is sent: the connection goes, with what it asked for.
-      reply.hijack();
-      socket.destroy();
-      return;
+    let line = lines.get(socket);
+    if (!line) {
+      const made: Line = { underWay: 0, held: [] };
+      lines.set(socket, made);
+      // A connection that closes lets go of the requests it held: nobody is left to answer.
+      socket.once('close', () => {
+        for (const release of made.held.splice(0)) release(false);
+      });
+      line = made;
     }
-    underWay.set(socket, count);
-    reply.raw.once('close', () => underWay.set(socket, (underWay.get(socket) ?? 1) - 1));
+    // Every place taken, or others already waiting (a newer request does not pass them): this one waits too.
+    if (line.underWay >= PIPELINED_MAX || line.held.length > 0) {
+      if (line.held.length >= PIPELINED_HELD) {
+        // Said in the log at most once a minute, with how many since it last said so.
+        refusedPipelined += 1;
+        if (steadyNow() - refusedPipelinedToldAt >= 60_000) {
+          log.warn('refused requests sent one after another on one connection, past what it holds at once', {
+            count: refusedPipelined,
+            cap: PIPELINED_MAX + PIPELINED_HELD,
+          });
+          refusedPipelined = 0;
+          refusedPipelinedToldAt = steadyNow();
+        }
+        return later(reply, 'rate-limited', TOO_MANY_READS, 1000);
+      }
+      const held = line.held;
+      const go = await new Promise<boolean>((resolve) => held.push(resolve));
+      // The connection closed while it waited: nothing is made for it.
+      if (!go) {
+        reply.hijack();
+        return;
+      }
+      // Otherwise it has the place of the answer that went out (handed on below), and the count stays as it is.
+    } else {
+      line.underWay += 1;
+    }
+    const own = line;
+    // An answer out: its place goes to the request waiting longest, or is free again.
+    reply.raw.once('close', () => {
+      const next = own.held.shift();
+      if (next) next(true);
+      else own.underWay -= 1;
+    });
   });
 
   // Responses by status class, for /metrics.
