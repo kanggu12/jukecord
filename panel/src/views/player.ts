@@ -156,8 +156,9 @@ function heartKey(track: Track): HTMLButtonElement {
   return heart;
 }
 
-// "added by Alice" / "added by the host".
+// "added by Alice" / "added by the host" / "added by Autoplay" (autoplay's rows carry "autoplay" for who added them).
 function addedBy(id: string | null, name: string | null): string {
+  if (id === 'autoplay') return t().byAutoplay;
   return id ? t().addedBy(name ?? id) : t().byHost;
 }
 
@@ -455,6 +456,14 @@ export function queueCard(): HTMLElement {
     icon('ellipsis'),
   );
   const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
+  // What happens when the queue runs out, beside its title: the mode in words, and a list of the three to choose from.
+  const autoKey = h(
+    'button',
+    // As tall as the search field beside it on the same row.
+    { class: 'key autoplay-key', type: 'button', 'data-act': 'autoplay', 'aria-haspopup': 'dialog' },
+    icon('infinity'),
+    h('span', { class: 'label' }),
+  );
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
@@ -462,11 +471,25 @@ export function queueCard(): HTMLElement {
       'div',
       { class: 'card-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
+      autoKey,
       searchField,
       h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear, toolsMore),
     ),
     list,
   );
+  const drawAutoplay = () => {
+    const words = t();
+    const mode = state.player?.autoplay ?? 'off';
+    const label = words.autoplayKey[mode] ?? words.autoplay;
+    (autoKey.querySelector('.label') as HTMLElement).textContent = label;
+    autoKey.title = label;
+    autoKey.setAttribute('aria-label', label);
+    autoKey.classList.toggle('on', mode !== 'off');
+    autoKey.disabled = !mayControl() || !state.player;
+  };
+  autoKey.onclick = () => autoplayDialog();
+  watch(['player', 'lang', 'guild', 'me'], drawAutoplay);
+  drawAutoplay();
 
   // Long queues draw their first rows only, a hundred more at each press of the last row's key: a thousand rows
   // rebuilt on every change would hold a phone still for seconds.
@@ -914,6 +937,42 @@ export function queueCard(): HTMLElement {
   return card;
 }
 
+// Autoplay's three modes to choose from, each with what it does; the one in use marked.
+function autoplayDialog(): void {
+  const words = t();
+  const mode = state.player?.autoplay ?? 'off';
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(words.autoplay, box);
+  const option = (value: Player['autoplay'], label: string, hint: string) => {
+    const button = h(
+      'button',
+      { class: 'choice', type: 'button', 'aria-current': String(value === mode), dataset: { mode: value } },
+      h(
+        'span',
+        { class: 'grow' },
+        h('span', { class: 'choice-name' }, label),
+        h('span', { class: 'choice-hint' }, hint),
+      ),
+      icon('check', 'check'),
+    );
+    button.onclick = () => {
+      dialog.close();
+      if (value !== mode) void act(null, () => api.autoplay(guild(), value));
+    };
+    return button;
+  };
+  fill(
+    box,
+    option('off', words.autoplayOff, words.autoplayOffHint),
+    option('history', words.autoplayHistory, words.autoplayHistoryHint),
+    option('related', words.autoplayRelated, words.autoplayRelatedHint),
+    // With a repeat on, the queue never runs out, so autoplay has nothing to do: said, not hidden.
+    state.player && state.player.repeat !== 'off'
+      ? h('p', { class: 'choice-note' }, icon('info', 'note-icon'), h('span', null, words.autoplayRepeat))
+      : null,
+  );
+}
+
 // A queued track's keys as a list (narrow cards and touch screens without dragging): play now, play next, one place
 // up or down, remove. The place is read when a key is pressed: the queue may change while the list is open.
 function trackMenu(id: number): void {
@@ -1133,7 +1192,18 @@ export function addCard(): HTMLElement {
   const why = h('p', { class: 'look-only', hidden: true });
   // While a link brought in from outside is held over the page: where it goes.
   const dropNote = h('p', { class: 'drop-note', hidden: true }, icon('list-plus'), h('span'));
-  const card = h('section', { class: 'card add-card', 'aria-label': 'add' }, form, found, said, why, dropNote);
+  // With autoplay on and nothing waiting: what happens when the queue runs out.
+  const autoNote = h('p', { class: 'auto-note', hidden: true }, icon('infinity'), h('span'));
+  const card = h(
+    'section',
+    { class: 'card add-card', 'aria-label': 'add' },
+    form,
+    found,
+    said,
+    why,
+    autoNote,
+    dropNote,
+  );
 
   // The key whose add is running: its words and its busy state stay while the card redraws for other reasons.
   let busy: HTMLButtonElement | null = null;
@@ -1159,6 +1229,10 @@ export function addCard(): HTMLElement {
       'invite',
       control && Boolean(state.player) && !state.player?.track && (state.queue?.items.length ?? 0) === 0,
     );
+    // Autoplay on and the queue empty: the card says what happens when it runs out.
+    const mode = state.player?.autoplay ?? 'off';
+    autoNote.hidden = mode === 'off' || (state.queue?.items.length ?? 0) > 0;
+    (autoNote.lastElementChild as HTMLElement).textContent = words.autoplayNote[mode] ?? '';
   };
 
   // ---- what a search found -----------------------------------------------------------------------------------

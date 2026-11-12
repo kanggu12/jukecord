@@ -53,6 +53,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   like: '/like',
   unlike: '/likes remove',
   'likes-add': '/likes add',
+  autoplay: '/autoplay',
 };
 
 // One command: English name and description, Korean name and description.
@@ -381,6 +382,24 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
               .setMinValue(1),
           ),
       ),
+    command('autoplay', 'What plays when the queue runs out', '자동재생', '대기열이 비었을 때 틀 곡').addStringOption(
+      (option) =>
+        option
+          .setName('mode')
+          .setDescription('Off, a track from this server’s plays, or one related to the last track')
+          .setNameLocalizations({ ko: '방식' })
+          .setDescriptionLocalizations({ ko: '끄기, 이 서버에서 들은 곡, 마지막 곡과 비슷한 곡' })
+          .setRequired(true)
+          .addChoices(
+            { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+            { name: "This server's plays", value: 'history', name_localizations: { ko: '이 서버에서 들은 곡' } },
+            {
+              name: 'Related to the last track',
+              value: 'related',
+              name_localizations: { ko: '마지막 곡과 비슷한 곡' },
+            },
+          ),
+    ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

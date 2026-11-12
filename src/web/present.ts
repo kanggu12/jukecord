@@ -7,7 +7,14 @@
  */
 import type { StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
-import type { HistoryEntry, LikedTrack, Playlist, QueueItem, Track } from '../core/types.ts';
+import {
+  AUTOPLAY,
+  type HistoryEntry,
+  type LikedTrack,
+  type Playlist,
+  type QueueItem,
+  type Track,
+} from '../core/types.ts';
 import type { Person, UserRepository } from '../store/store.ts';
 
 /** A track as the API shows it. */
@@ -30,8 +37,10 @@ export class Presenter {
     this.users = users;
   }
 
-  // The display name of an ID, or null for the host (no ID) and people jukecord has not met.
+  // The display name of an ID, or null for the host (no ID) and people jukecord has not met. Autoplay is named as it
+  // is (the panel and the bot say it in the reader's language).
   private nameOf(people: Map<string, Person>, id: string | null): string | null {
+    if (id === AUTOPLAY) return 'Autoplay';
     return id === null ? null : (people.get(id)?.name ?? null);
   }
 
@@ -66,6 +75,7 @@ export class Presenter {
       repeat: snapshot.repeat,
       progress: snapshot.progress,
       version: snapshot.version,
+      autoplay: snapshot.autoplay,
     };
   }
 

@@ -16,9 +16,10 @@ import { BusyError } from '../media/busy.ts';
 import type { Resolver } from '../media/resolver.ts';
 import type { Search } from '../media/search.ts';
 import { parseInput } from '../media/source.ts';
-import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
+import type { AutoplayMode, HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { LIKES_MAX, StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
+import type { Autoplay } from './autoplay.ts';
 
 /**
  * Every action by name. The four ways in each declare which of these they offer; the parity test fails when one is
@@ -60,6 +61,7 @@ export const ACTIONS = [
   'like',
   'unlike',
   'likes-add',
+  'autoplay',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -190,6 +192,8 @@ export interface ActionsOptions {
   readonly trackMaxMs?: number;
   /** Searching YouTube for words, to pick from (absent: searching is refused as not set up). */
   readonly search?: Search;
+  /** What picks a track when a queue runs out (told when a person stops the music); absent in tests that need none. */
+  readonly autoplay?: Autoplay;
 }
 
 /** What an add did: the new queue items, and how many tracks were left out and why. */
@@ -222,6 +226,9 @@ export function likesOwner(context: ActionContext): string {
 
 /** The repeat modes, for checking input from the panel, the API and the CLI. */
 export const REPEAT_MODES: readonly RepeatMode[] = ['off', 'track', 'queue'];
+
+/** The autoplay modes, for checking input the same way. */
+export const AUTOPLAY_MODES: readonly AutoplayMode[] = ['off', 'history', 'related'];
 
 export class Actions {
   private readonly options: ActionsOptions;
@@ -281,10 +288,13 @@ export class Actions {
       if (skippedFull > 0) throw new ActionError('conflict', `the queue is full (${queueMax} tracks)`);
       throw new ActionError('invalid', `longer than the ${Math.round(trackMax / 60_000)} minute limit`);
     }
+    // "At the end", for a person, is before the tracks autoplay queued to fill a queue that ran out: those play after
+    // what people add, and none of them is taken away.
+    const place = at === 'end' ? (this.options.store.queue.autoplayTail(context.guildId) ?? 'end') : at;
     const items = this.options.queue.add(
       context.guildId,
       fitting.map((track) => track.id),
-      at,
+      place,
       context.userId,
     );
     return { items, skippedTooLong, skippedFull };
@@ -355,11 +365,12 @@ export class Actions {
     return player.snapshot();
   }
 
-  /** Stops playing; the queue stays. */
+  /** Stops playing; the queue stays. Autoplay stops with it until a track starts again. */
   stop(context: ActionContext): PlayerSnapshot {
     this.control(context);
     const player = this.options.players.get(context.guildId);
     if (!player.stop()) throw new ActionError('conflict', 'nothing is playing');
+    this.options.autoplay?.stopped(context.guildId);
     return player.snapshot();
   }
 
@@ -644,6 +655,19 @@ export class Actions {
     );
     this.options.players.get(context.guildId).play();
     return result;
+  }
+
+  /**
+   * Sets what happens when the queue runs out: nothing, a track from this server's plays, or one related to the last
+   * track (see app/autoplay.ts). Kept with the player's state, like the repeat mode.
+   */
+  autoplay(context: ActionContext, mode: string): PlayerSnapshot {
+    this.control(context);
+    if (!AUTOPLAY_MODES.includes(mode as AutoplayMode))
+      throw new ActionError('invalid', `autoplay is one of ${AUTOPLAY_MODES.join(', ')}`);
+    const player = this.options.players.get(context.guildId);
+    player.setAutoplay(mode as AutoplayMode);
+    return player.snapshot();
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

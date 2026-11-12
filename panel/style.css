@@ -1763,6 +1763,63 @@ img {
   color: var(--ink-2);
 }
 
+/* ---- autoplay --------------------------------------------------------------------------------------------------- */
+/* The queue's autoplay key: on, it takes the tint of a key that is on (a contrast theme fills it, below). */
+.autoplay-key.on {
+  background: color-mix(in oklch, var(--load) 16%, transparent);
+  border-color: color-mix(in oklch, var(--load) 40%, transparent);
+}
+/* A narrow card keeps its icon; the words stay in its title and for screen readers. */
+@container card (max-width: 560px) {
+  .card-head .autoplay-key {
+    width: var(--control);
+    padding: 0;
+  }
+  .card-head .autoplay-key .label {
+    display: none;
+  }
+}
+@media (forced-colors: active) {
+  .autoplay-key.on {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+}
+/* A choice with what it does under its name (autoplay's modes). */
+.choice .choice-name {
+  display: block;
+}
+.choice .choice-hint {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.choice-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 6px 10px 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+/* Its icon level with the first line of words. */
+.note-icon {
+  margin-top: 1px;
+}
+/* The add card's line while autoplay is on and nothing waits. */
+.auto-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
 /* ---- likes ------------------------------------------------------------------------------------------------------ */
 /* A heart that likes a track: a line, and filled in the text's own colour once liked (the fill says it; it takes no
    tint, as other keys that are on do). A contrast theme marks it as it marks every key that is on. */

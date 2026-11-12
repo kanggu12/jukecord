@@ -236,6 +236,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return { ...result, items: deps.presenter.items(result.items) };
   },
 
+  autoplay: ({ context, body, deps }) => deps.presenter.player(deps.actions.autoplay(context, body.mode)),
+
   search: async ({ context, query, deps, signal }) => ({
     query: searchWords(query.q),
     results: (await deps.actions.search(context, query.q, query.limit ?? 8, signal)).map((found) => ({

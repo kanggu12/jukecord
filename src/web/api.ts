@@ -542,6 +542,21 @@ export const API = {
     body: Type.Object({ at: Type.Optional(At) }, strict),
     response: AddResultSchema,
   }),
+
+  // Autoplay.
+  autoplay: op({
+    method: 'PUT',
+    path: '/guilds/{guild}/player/autoplay',
+    summary: "When the queue runs out: nothing, a track from this server's plays, or one related to the last track",
+    tag: 'player',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object(
+      { mode: Type.Union([Type.Literal('off'), Type.Literal('history'), Type.Literal('related')]) },
+      strict,
+    ),
+    response: PlayerSchema,
+  }),
 } satisfies Record<OperationName, OperationSpec>;
 
 /** The operations in a stable order: the table's own. */

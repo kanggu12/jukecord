@@ -7,7 +7,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
-import type { HistoryEntry, LikedTrack, Playlist, QueueItem } from '../core/types.ts';
+import { AUTOPLAY, type HistoryEntry, type LikedTrack, type Playlist, type QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
 
 /** The two languages the bot answers in; anything else gets English. */
@@ -59,6 +59,9 @@ const TEXT = {
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
   likes: { en: 'Liked', ko: '좋아요 한 곡' },
   noLikes: { en: 'No liked tracks yet', ko: '아직 좋아요 한 곡 없음' },
+  autoplay: { en: 'Autoplay', ko: '자동 재생' },
+  autoplayHistory: { en: "Autoplay: this server's plays", ko: '자동 재생: 이 서버에서 들은 곡' },
+  autoplayRelated: { en: 'Autoplay: related to the last track', ko: '자동 재생: 마지막 곡과 비슷한 곡' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -74,7 +77,13 @@ export function problem(message: string): EmbedBuilder {
 // "Title" linked to its page, with length and who added it.
 function line(title: string, url: string, durationMs: number | null, addedBy: string | null, lang: Lang): string {
   const length = durationMs === null ? '' : ` · ${formatDuration(durationMs)}`;
-  const who = addedBy ? ` · ${TEXT.addedBy[lang]} <@${addedBy}>` : '';
+  // Autoplay is named; a person is mentioned (Discord shows their name in the reader's server).
+  const who =
+    addedBy === AUTOPLAY
+      ? ` · ${TEXT.addedBy[lang]} ${TEXT.autoplay[lang]}`
+      : addedBy
+        ? ` · ${TEXT.addedBy[lang]} <@${addedBy}>`
+        : '';
   // Square brackets in titles would break Discord's link syntax.
   return `[${title.replace(/[[\]]/g, '')}](${url})${length}${who}`;
 }
@@ -145,9 +154,16 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
-  // The repeat mode, when one is on, under the bar.
-  if (snapshot.repeat !== 'off')
-    embed.setFooter({ text: snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang] });
+  // The repeat mode and autoplay, when on, under the bar.
+  const footer = [
+    snapshot.repeat === 'off' ? null : snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang],
+    snapshot.autoplay === 'history'
+      ? TEXT.autoplayHistory[lang]
+      : snapshot.autoplay === 'related'
+        ? TEXT.autoplayRelated[lang]
+        : null,
+  ].filter((part) => part !== null);
+  if (footer.length > 0) embed.setFooter({ text: footer.join(' · ') });
   // The card's language travels in the buttons, so a press redraws the card in the language it was made in, not the
   // presser's (a card in the channel is everyone's).
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(

@@ -68,6 +68,7 @@ interface PlayerJson {
   repeat: string;
   progress: number | null;
   error: string | null;
+  autoplay?: string;
 }
 interface AddJson {
   items: ItemJson[];
@@ -106,7 +107,12 @@ function trackLine(track: TrackJson, by: string | null): string {
 
 function showPlayer(answer: unknown): string {
   const player = answer as PlayerJson;
-  const repeat = player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`;
+  const repeat =
+    (player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`) +
+    // Autoplay, when it is on, on a line of its own after the repeat.
+    (player.autoplay && player.autoplay !== 'off'
+      ? `\nAutoplay: ${player.autoplay === 'history' ? "from this server's plays" : 'related to the last track'}`
+      : '');
   if (!player.track) return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}`;
   // Where it is now: the snapshot's position plus the time since it was taken, while playing.
   const position =
@@ -577,6 +583,19 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'Add every track you liked to the queue',
     request: (words) => ({ body: { at: words.flags.has('next') ? 'next' : 'end' } }),
     show: showAdded,
+  },
+
+  autoplay: {
+    name: 'autoplay',
+    usage: '<off|history|related>',
+    summary: "When the queue runs out: nothing, this server's plays, or related tracks",
+    request: (words) => {
+      const mode = words.args[0];
+      if (mode !== 'off' && mode !== 'history' && mode !== 'related')
+        throw new UsageError('autoplay off, history or related');
+      return { body: { mode } };
+    },
+    show: showPlayer,
   },
 
   search: {

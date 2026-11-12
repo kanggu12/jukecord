@@ -244,6 +244,24 @@ const EN = {
   listChoice: 'List',
   noLiked: 'No liked tracks yet',
   addAll: 'Add all',
+  // Autoplay.
+  autoplay: 'Autoplay',
+  autoplayKey: { off: 'Autoplay off', history: 'Autoplay: plays', related: 'Autoplay: related' } as Record<
+    string,
+    string
+  >,
+  autoplayOff: 'Off',
+  autoplayOffHint: 'The music stops when the queue runs out',
+  autoplayHistory: "This server's plays",
+  autoplayHistoryHint: 'A track played here, the most played and liked more often, none of the last 30',
+  autoplayRelated: 'Related to the last track',
+  autoplayRelatedHint: "From YouTube's mix of the last track; this server's plays when there is none",
+  autoplayRepeat: 'While a repeat is on, the queue does not run out',
+  autoplayNote: {
+    history: 'Autoplay is on: when the queue runs out, it adds a track played here',
+    related: 'Autoplay is on: when the queue runs out, it adds a track related to the last one',
+  } as Record<string, string>,
+  byAutoplay: 'added by Autoplay',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -479,6 +497,20 @@ const KO: Strings = {
   listChoice: '목록',
   noLiked: '아직 좋아요 한 곡 없음',
   addAll: '모두 넣기',
+  autoplay: '자동 재생',
+  autoplayKey: { off: '자동 재생 꺼짐', history: '자동 재생: 들은 곡', related: '자동 재생: 비슷한 곡' },
+  autoplayOff: '끄기',
+  autoplayOffHint: '대기열이 비면 음악이 멈춤',
+  autoplayHistory: '이 서버에서 들은 곡',
+  autoplayHistoryHint: '이 서버에서 들은 곡 중에서 고름. 많이 듣고 좋아요 한 곡일수록 자주 나오고, 최근 30곡은 빠짐',
+  autoplayRelated: '마지막 곡과 비슷한 곡',
+  autoplayRelatedHint: '마지막 곡의 YouTube 믹스에서 고름. 믹스가 없으면 이 서버에서 들은 곡에서 고름',
+  autoplayRepeat: '반복이 켜져 있으면 대기열이 비지 않음',
+  autoplayNote: {
+    history: '자동 재생 켜짐: 대기열이 비면 이 서버에서 들은 곡을 넣음',
+    related: '자동 재생 켜짐: 대기열이 비면 마지막 곡과 비슷한 곡을 넣음',
+  },
+  byAutoplay: '자동 재생이 넣음',
 };
 
 /** The languages. */

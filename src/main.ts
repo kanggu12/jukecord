@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Access } from './app/access.ts';
 import { Actions, type Directory } from './app/actions.ts';
+import { Autoplay } from './app/autoplay.ts';
 import { runDoctor } from './app/doctor.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
@@ -157,6 +158,19 @@ async function main(): Promise<number> {
     recent: (source) => search?.recent(source) ?? null,
   });
   search = new Search({ ytdlp, slots: resolver, log: log.child('search') });
+  // A track when a queue runs out, for the servers that turn autoplay on.
+  const autoplay = new Autoplay({
+    bus,
+    players,
+    queue,
+    store,
+    slots: resolver,
+    ytdlp,
+    ...(checkAddress ? { checkAddress } : {}),
+    clock: systemClock,
+    log: log.child('autoplay'),
+    trackMaxMs: config.media.trackMaxMs,
+  });
   const actions = new Actions({
     store,
     queue,
@@ -167,11 +181,14 @@ async function main(): Promise<number> {
     queueMax: config.queueMax,
     trackMaxMs: config.media.trackMaxMs,
     search,
+    autoplay,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);
   if (restored > 0) log.info('restored what was playing before the restart, paused', { servers: restored });
   prefetcher.start();
+  // After the restore: a restored player's queue is looked at when it plays on, not all at once at the start.
+  autoplay.start();
 
   // The bot is made before the web server (whose logins ask it about members) and started after it, so the panel
   // answers while Discord connects.

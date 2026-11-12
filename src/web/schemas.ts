@@ -35,7 +35,9 @@ export const QueueItemSchema = Type.Object(
     id: Type.Integer(),
     position: Type.Integer({ description: '0 is next' }),
     track: TrackSchema,
-    addedBy: Nullable(Type.String({ description: 'Discord user ID; null for the host' })),
+    addedBy: Nullable(
+      Type.String({ description: 'Discord user ID; "autoplay" for what autoplay queued; null for the host' }),
+    ),
     addedByName: Nullable(Type.String()),
     addedAt: Type.Integer(),
   },
@@ -69,6 +71,9 @@ export const PlayerSchema = Type.Object(
     repeat: Type.Union([Type.Literal('off'), Type.Literal('track'), Type.Literal('queue')]),
     progress: Nullable(Type.Number({ description: 'Download progress (0 to 1) while loading' })),
     version: Type.Integer(),
+    autoplay: Type.Union([Type.Literal('off'), Type.Literal('history'), Type.Literal('related')], {
+      description: "When the queue runs out: nothing, a track from this server's plays, or one related to the last",
+    }),
   },
   { title: 'Player' },
 );

@@ -105,6 +105,7 @@ playlist) so a program does not need to ask again.
 | `seek` Go to a place in the current track | `POST /api/v1/guilds/{guild}/player/seek` | control | `jukecord seek` | `/seek` |
 | `repeat` Repeat nothing, the current track, or the queue | `PUT /api/v1/guilds/{guild}/player/repeat` | control | `jukecord repeat` | `/repeat` |
 | `stop` Stop playing; the queue stays | `POST /api/v1/guilds/{guild}/player/stop` | control | `jukecord stop` | `/stop` |
+| `autoplay` When the queue runs out: nothing, a track from this server's plays, or one related to the last track | `PUT /api/v1/guilds/{guild}/player/autoplay` | control | `jukecord autoplay` | `/autoplay` |
 
 ### Queue
 

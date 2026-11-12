@@ -711,6 +711,49 @@ await sweep('history-keys', DISCOVERY, async (page) => {
   await page.click('.library-seg [data-view="history"]');
   await page.waitForSelector('.history .row');
 });
+// Autoplay from the server's plays (the seeded history: nothing to fetch). Nothing playing and nothing queued: the add
+// card says autoplay is on, and the queue's key shows it.
+await api('DELETE', '/guilds/local/queue');
+await api('POST', '/guilds/local/player/stop').catch(() => {});
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'history' });
+await sweep(
+  'autoplay-empty',
+  [
+    [360, 780],
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ],
+  async (page) => {
+    await page.waitForSelector('.auto-note:not([hidden])');
+  },
+);
+await sweep(
+  'autoplay-menu',
+  [
+    [390, 844],
+    [1440, 900],
+  ],
+  async (page) => {
+    await page.click('[data-act="autoplay"]');
+    await page.waitForSelector('.dialog .choice[data-mode="history"]');
+  },
+);
+// One track added with nothing after it: when it starts, autoplay queues the next, which says who added it.
+{
+  const history = await api('GET', '/guilds/local/history?limit=1');
+  await api('POST', '/guilds/local/queue', { input: history[0].track.url });
+  let picked = false;
+  for (let i = 0; i < 50 && !picked; i += 1) {
+    picked = (await api('GET', '/guilds/local/queue')).items.some((item) => item.addedBy === 'autoplay');
+    if (!picked) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  if (!picked) throw new Error('autoplay queued nothing');
+}
+await sweep('autoplay-row', DISCOVERY, async (page) => {
+  await page.waitForSelector('.queue-list .row');
+});
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
 await api('DELETE', '/guilds/local/queue');
 
 await browser.close();

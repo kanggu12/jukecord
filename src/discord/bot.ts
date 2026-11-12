@@ -474,6 +474,11 @@ export class Bot implements Directory {
         case 'likes':
           await this.onLikes(interaction, context, lang);
           return;
+        case 'autoplay':
+          await interaction.editReply(
+            nowCard(actions.autoplay(context, options.getString('mode', true)), lang, this.options.panelUrl),
+          );
+          return;
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({

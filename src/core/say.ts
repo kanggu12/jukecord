@@ -130,6 +130,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['that track is not in your likes', '내 좋아요 목록에 없는 곡'],
   ['there are no liked tracks to add', '넣을 좋아요 곡 없음'],
   [/^your likes are full \((\d+) tracks\)$/, '좋아요 목록이 가득 참($1곡)'],
+  // Autoplay.
+  [/^autoplay is one of (.+)$/, '자동 재생은 $1 중 하나'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

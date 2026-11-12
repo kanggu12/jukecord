@@ -50,6 +50,7 @@ export const PANEL_ACTIONS = [
   'like',
   'unlike',
   'likes-add',
+  'autoplay',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -150,6 +151,7 @@ export interface Player {
   repeat: 'off' | 'track' | 'queue';
   progress: number | null;
   version: number;
+  autoplay: 'off' | 'history' | 'related';
 }
 export interface AddResult {
   items: QueueItem[];
@@ -318,6 +320,8 @@ export const api = {
   unlike: (guild: string, track: number) => request<unknown>('DELETE', `${g(guild)}/likes/${track}`),
   'likes-add': (guild: string, at: 'end' | 'next' = 'end') =>
     request<AddResult>('POST', `${g(guild)}/likes/queue`, { at }),
+  autoplay: (guild: string, mode: Player['autoplay']) =>
+    request<Player>('PUT', `${g(guild)}/player/autoplay`, { mode }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */
