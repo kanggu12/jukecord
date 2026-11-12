@@ -2213,7 +2213,8 @@ function libraryView(): 'history' | 'liked' {
 
 /**
  * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to play it now,
- * next or at the end. A narrow card keeps the heart and puts the rest behind one key (see libraryMenu).
+ * next or at the end. A narrow card, or a wide window short of height, keeps the heart and puts the rest behind one key
+ * (see libraryMenu).
  */
 function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTMLElement {
   const words = t();
@@ -2253,9 +2254,10 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
     h(
       'div',
       { class: 'text' },
+      // Two lines at most (style.css); the whole title is its title.
       h(
         'div',
-        { class: 'name' },
+        { class: 'name', title: track.title, 'data-clip': 'ok' },
         h('a', { href: track.url, target: '_blank', rel: 'noopener noreferrer' }, track.title),
       ),
       h('div', { class: 'sub' }, ...sub),
@@ -2264,7 +2266,7 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
   );
 }
 
-// A history or liked row's keys as a list, on a narrow card: play now, play next, add.
+// A history or liked row's keys as a list, on a narrow card or a short window: play now, play next, add.
 function libraryMenu(track: Track): void {
   const words = t();
   const box = h('div', { class: 'menu-list' });

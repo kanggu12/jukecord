@@ -1481,6 +1481,20 @@ img {
   grid-template-columns: 48px minmax(0, 1fr) auto;
   padding-left: 8px;
 }
+/* History and liked rows: two lines of a title at most, the whole title the row's tooltip (as a search's results have
+   it). Beside the heart and three keys the title has a narrow column, and in the side column under the voice card
+   (short on a laptop's window) a long one took five lines and left the list two whole rows. */
+.history .name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/* The title's ring drawn inside the link: the box that cuts the third line would cut a ring around it. */
+.history .name a:focus-visible {
+  outline-offset: -2px;
+}
 .badge {
   display: inline-flex;
   flex: none;
@@ -2019,6 +2033,17 @@ img {
     .history .row .acts > .lib-more {
       display: inline-flex;
     }
+  }
+}
+/* A wide window short of height (two columns, a mouse): the heart and one key too, as the queue's tools there are
+   icons, so a title and the line under it have the room of two more keys and the list under the voice card still
+   shows three whole rows; with four keys, at 1280 by 610, each took two lines and the list showed two rows. */
+@media (width > 1100px) and (max-height: 720px) and (pointer: fine) {
+  .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
+    display: none;
+  }
+  .history .row .acts > .lib-more {
+    display: inline-flex;
   }
 }
 
