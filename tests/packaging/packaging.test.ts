@@ -4,10 +4,11 @@
  * validated with helm and kubeconform when they are installed (CI installs both).
  */
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { LIVE_ACTIONS, PANEL_ACTIONS } from '../../panel/src/api.ts';
 import { withTable } from '../../scripts/api-doc.ts';
@@ -277,6 +278,67 @@ describe('Compose and the front door', () => {
       'down',
     ]) {
       assert.match(help, new RegExp(`\\./jukecord ${command}\\b`));
+    }
+  });
+});
+
+// The front door's check of a backup before a restore, as bash hands it to node inside the container: the
+// `check='...'` assignment of ./jukecord, evaluated by bash itself (its quoting included).
+function restoreCheck(): string {
+  const text = read('jukecord');
+  const start = text.indexOf("    check='");
+  const end = text.indexOf("}'\n", start) + 2;
+  assert.ok(start > 0 && end > start, 'the restore check is not in ./jukecord');
+  return execFileSync('bash', ['-c', `${text.slice(start, end)}\nprintf '%s' "$check"`], { encoding: 'utf8' });
+}
+
+describe('the front door checks a backup before a restore', () => {
+  // The check, run as the container runs it: an ES module, the backup on stdin, the data folder as the argument.
+  const check = (input: Buffer, folder: string) =>
+    spawnSync(
+      process.execPath,
+      ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', restoreCheck(), folder],
+      { input, encoding: 'utf8' },
+    );
+
+  it('runs the check in the image the way this test runs it', () => {
+    assert.match(read('jukecord'), /--input-type=module -e "\$check" \/data <"\$file"/);
+  });
+
+  it('reads a backup whole into the data folder (not the small /tmp), passes a whole one and leaves nothing', () => {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-restore-'));
+    try {
+      // A whole backup with jukecord's tables, made the way the backup command makes one (VACUUM INTO).
+      const live = new DatabaseSync(path.join(folder, 'live.db'));
+      live.exec('CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT)');
+      const insert = live.prepare('INSERT INTO tracks (title) VALUES (?)');
+      // In one transaction: one write to the disk instead of one per row.
+      live.exec('BEGIN');
+      for (let index = 0; index < 2000; index += 1) insert.run(`Track ${index} with a title long enough to fill pages`);
+      live.exec('COMMIT');
+      live.prepare('VACUUM INTO ?').run(path.join(folder, 'backup.db'));
+      live.close();
+      const backup = fs.readFileSync(path.join(folder, 'backup.db'));
+      fs.rmSync(path.join(folder, 'live.db'));
+      fs.rmSync(path.join(folder, 'backup.db'));
+      const target = path.join(folder, 'data');
+      fs.mkdirSync(target);
+      const whole = check(backup, target);
+      assert.equal(whole.status, 0, whole.stderr);
+      // The copy it read went into the data folder and is gone again.
+      assert.deepEqual(fs.readdirSync(target), []);
+      // A backup cut short (a copy that stopped half way) is refused, with SQLite's own words on the marked line.
+      const cut = check(backup.subarray(0, 20_000), target);
+      assert.equal(cut.status, 2);
+      assert.match(cut.stderr, /^restore-check: .*(malformed|not a database)/m);
+      assert.deepEqual(fs.readdirSync(target), []);
+      // A copy that cannot be written (no room, no folder) says why on a line of its own, not as a crash: a crash's
+      // last line is Node's version, which the front door showed as the reason before.
+      const nowhere = check(backup, path.join(folder, 'missing'));
+      assert.equal(nowhere.status, 2);
+      assert.match(nowhere.stderr, /^restore-copy: ENOENT/m);
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true });
     }
   });
 });

@@ -294,29 +294,51 @@ case "$command" in
       say "$file is not a jukecord backup (not an SQLite database); nothing was changed"
       exit 2
     fi
-    # Read whole, before anything is stopped, by the SQLite in the image (Node's), in a container of its own that
-    # touches nothing: a backup cut short has the right first bytes, and swapped in it would leave jukecord unable to
-    # start. The copy goes to that container's /tmp, which goes with it.
-    check='const fs = require("node:fs");
-fs.writeFileSync("/tmp/restore-check.db", fs.readFileSync(0));
-const { DatabaseSync } = require("node:sqlite");
+    # Read whole, before anything is stopped, by the SQLite in the image (Node's), in a container of its own: a backup
+    # cut short has the right first bytes, and swapped in it would leave jukecord unable to start. The copy it reads
+    # goes into the data volume beside the database, where the restore needs the room anyway (the container's /tmp is
+    # a small tmpfs, which a backup of 300 MB did not fit), under a name of its own, streamed rather than held in
+    # memory, and removed whatever the verdict. The verdict is one line, marked "restore-check:" when it is about the
+    # backup and "restore-copy:" when the copy could not be made (a full volume), which is what is shown.
+    check='import fs from "node:fs";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { pipeline } from "node:stream/promises";
+const copy = path.join(process.argv[1], "jukecord.db.restore-check");
 let verdict;
+let copied = false;
 try {
-  const db = new DatabaseSync("/tmp/restore-check.db", { readOnly: true });
-  verdict = db.prepare("PRAGMA quick_check").get().quick_check;
-  const tracks = db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get("table", "tracks");
-  if (verdict === "ok" && !tracks) verdict = "it has none of jukecord'"'"'s tables";
-  db.close();
+  await pipeline(process.stdin, fs.createWriteStream(copy, { mode: 0o600 }));
+  copied = true;
+  const db = new DatabaseSync(copy, { readOnly: true });
+  try {
+    verdict = db.prepare("PRAGMA quick_check").get().quick_check;
+    const tracks = db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get("table", "tracks");
+    if (verdict === "ok" && !tracks) verdict = "it has no jukecord tables";
+  } finally {
+    db.close();
+  }
 } catch (error) {
   verdict = error.message;
+} finally {
+  for (const part of ["", "-wal", "-shm", "-journal"]) fs.rmSync(copy + part, { force: true });
 }
 if (verdict !== "ok") {
-  console.error(verdict);
-  process.exit(2);
+  console.error((copied ? "restore-check: " : "restore-copy: ") + verdict);
+  process.exitCode = 2;
 }'
-    if ! problem=$(compose run --rm --no-deps -T --entrypoint node "$service" --disable-warning=ExperimentalWarning -e "$check" <"$file" 2>&1); then
-      say "$file is not a whole jukecord backup (${problem##*$'\n'}); nothing was changed"
-      exit 2
+    if ! problem=$(compose run --rm --no-deps -T --entrypoint node "$service" --disable-warning=ExperimentalWarning --input-type=module -e "$check" /data <"$file" 2>&1); then
+      # The check's own line when it said one; else the first line of an error (Docker's, or Node's), else the last.
+      reason=$(printf '%s\n' "$problem" | sed -n 's/^restore-check: //p' | head -n 1)
+      if [ -n "$reason" ]; then
+        say "$file is not a whole jukecord backup ($reason); nothing was changed"
+        exit 2
+      fi
+      reason=$(printf '%s\n' "$problem" | sed -n 's/^restore-copy: //p' | head -n 1)
+      [ -n "$reason" ] || reason=$(printf '%s\n' "$problem" | sed -n '/Error/{p;q;}')
+      [ -n "$reason" ] || reason=${problem##*$'\n'}
+      say "$file could not be checked in the data volume ($reason); nothing was changed"
+      exit 1
     fi
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
     # However it ends, jukecord runs again afterwards: with the restored database, or the old one when a step failed.
@@ -333,7 +355,11 @@ if (verdict !== "ok") {
     swap='set -e
 umask 077
 cd /data
-cat > jukecord.db.restoring
+if ! cat > jukecord.db.restoring; then
+  rm -f jukecord.db.restoring
+  echo "jukecord: the backup could not be copied into the volume (is it full?); nothing was changed" >&2
+  exit 1
+fi
 if [ "$(head -c 15 jukecord.db.restoring)" != "SQLite format 3" ]; then
   rm -f jukecord.db.restoring
   echo "jukecord: that file is not a jukecord backup (not an SQLite database); nothing was changed" >&2
