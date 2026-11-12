@@ -14,6 +14,9 @@
  *   the bar's toast, a dialog's shade over the bar);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
+ * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
+ *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track or a
+ *   chart's bar in the canvas's own colour (a contrast theme paints every background in its canvas colour);
  * - unsafe: on a screen with a notch, rounded corners or a home bar (safe-area insets), a key, a field or a card
  *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
@@ -320,6 +323,41 @@ window.__audit = () => {
     const counts = [...rows.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1]);
     if (counts.length > 1 && counts.at(-1) === 1 && Math.max(...counts) > 1)
       add('lone-key', keys, `keys in rows of ${counts.join(' + ')}`);
+  }
+
+  // States told apart by a fill alone must still be told apart, and what a fill alone draws must not be the
+  // canvas's colour (in a contrast theme every background is).
+  const look = (element) => {
+    const style = getComputedStyle(element);
+    return [style.backgroundColor, style.backgroundImage, style.color, style.borderTopColor, style.outlineStyle].join();
+  };
+  for (const on of document.querySelectorAll('.seg [aria-pressed="true"], .key[aria-pressed="true"]')) {
+    if (!shown(on)) continue;
+    const off = [...on.parentElement.children].find(
+      (other) =>
+        other !== on && other.matches('button') && other.getAttribute('aria-pressed') !== 'true' && shown(other),
+    );
+    if (off && !off.matches('.primary, .quiet') && look(on) === look(off))
+      add('unmarked', on, `drawn as ${describe(off)} is, which is not on`);
+  }
+  // The page's own colour (the canvas's, in a contrast theme).
+  const ground = rgba(getComputedStyle(document.body).backgroundColor);
+  const filled = [
+    ['.track .fill', null, "the seek bar's played part"],
+    ['.track .knob', null, "the seek bar's knob"],
+    ['.switch', '::before', "the switch's track"],
+    ['.bars .slot:not(.zero) .b', null, "a chart's bar"],
+    ['.rank .meter i', null, "a rank's meter"],
+  ];
+  for (const [selector, pseudo, what] of filled) {
+    const element = [...document.querySelectorAll(selector)].find(shown);
+    if (!element) continue;
+    const style = getComputedStyle(element, pseudo);
+    if (style.backgroundImage !== 'none' || Number.parseFloat(style.borderTopWidth) > 0) continue;
+    const colour = rgba(style.backgroundColor);
+    const same =
+      Math.abs(colour[0] - ground[0]) + Math.abs(colour[1] - ground[1]) + Math.abs(colour[2] - ground[2]) < 8;
+    if (colour[3] < 0.05 || same) add('unmarked', element, `${what} is drawn in the canvas's colour`);
   }
 
   // The safe area: what the screen's notch, corners and home bar leave (read from the browser itself, through a

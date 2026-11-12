@@ -2669,6 +2669,91 @@ kbd {
   }
 }
 
+/* ---- forced colours ------------------------------------------------------------------------------------------ */
+/* A contrast theme (Windows', and the like) paints every surface in the system's few colours: backgrounds become the
+   canvas and shadows go, so what a fill alone drew vanished (the seek bar, the switch, the choice in use, the chart's
+   bars) and what a tint alone told apart looked the same (Repeat on and off). Those take the system's own colours
+   here: Highlight for what is on, filled or chosen, CanvasText for a track or an outline. */
+@media (forced-colors: active) {
+  /* The light behind the glass and the glow behind the disc are pictures, which a contrast theme keeps: they would
+     light the canvas behind its words. */
+  .ambient,
+  .art::before {
+    display: none;
+  }
+  /* The seek bar: its groove outlined, what has played filled, the knob a dot in the text's colour. */
+  .track::before {
+    border: 1px solid CanvasText;
+  }
+  .track .fill,
+  .playing .track .fill,
+  .paused .track .fill {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+  .track .knob,
+  .playing .track .knob,
+  .paused .track .knob {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  /* The switch: an outlined track with a knob in the text's colour; on, both in the highlight's colours. */
+  .switch::before {
+    forced-color-adjust: none;
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+  .switch::after {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .switch[aria-checked="true"]::before {
+    background: Highlight;
+    border-color: Highlight;
+  }
+  .switch[aria-checked="true"]::after {
+    background: HighlightText;
+  }
+  /* A row of choices outlined as one, the choice in use filled; a key that is on (Repeat, listening, the table) the
+     same. */
+  .seg {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  .seg button[aria-pressed="true"],
+  .key[aria-pressed="true"],
+  .listen .key[data-act="listen"][aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+  /* The Listen key's dancing bars in the key's own colour on it. */
+  .listen .key[data-act="listen"][aria-pressed="true"] .eq {
+    color: HighlightText;
+  }
+  /* The main key solid, as it is in the panel's own colours: filled with the buttons' text colour, its words in
+     theirs. */
+  .key.primary {
+    forced-color-adjust: none;
+    background: ButtonText;
+    border-color: ButtonText;
+    color: ButtonFace;
+  }
+  /* The charts' bars and the ranks' meters in the text's colour, each meter's track outlined. */
+  .bars .b,
+  .rank .meter i {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .bars .slot.zero .b {
+    background: transparent;
+  }
+  .rank .meter {
+    border: 1px solid CanvasText;
+  }
+}
+
 /* ---- less transparency --------------------------------------------------------------------------------------- */
 /* People who ask their system for less transparency get solid surfaces: no light behind the cards, nothing seen
    through the bars. */

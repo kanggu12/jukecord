@@ -78,6 +78,7 @@ async function open({
   motion = 'off',
   discord = false,
   touch = width <= 744,
+  forced = false,
 }) {
   const context = await browser.newContext({
     viewport: { width, height },
@@ -86,6 +87,8 @@ async function open({
     locale: lang === 'ko' ? 'ko-KR' : 'en-US',
     isMobile: touch,
     hasTouch: touch,
+    // A contrast theme, as Windows has: the system's few colours on every surface.
+    ...(forced ? { forcedColors: 'active' } : {}),
   });
   await context.addInitScript(
     ([lang, motion]) => {
@@ -143,7 +146,7 @@ async function measure(page, name, setting, errors) {
 }
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
-async function sweep(name, sizes, act, { discord = false, touch } = {}) {
+async function sweep(name, sizes, act, { discord = false, touch, forced = false } = {}) {
   if (ONLY && !ONLY.has(name)) return;
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
@@ -154,6 +157,7 @@ async function sweep(name, sizes, act, { discord = false, touch } = {}) {
           ...setting,
           login: !name.startsWith('login'),
           discord,
+          forced,
           ...(touch === undefined ? {} : { touch }),
         });
         try {
@@ -506,6 +510,27 @@ await sweep(
     await page.locator('.row .more-key:visible').first().click();
     await page.waitForSelector('.dialog .menu-list .choice');
   },
+);
+// A contrast theme: the menu over the player (its choices, the switch; the seek bar under it) and the statistics (the
+// charts' bars and the meters), every state still told apart.
+await sweep(
+  'forced',
+  FEW,
+  async (page) => {
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .section');
+    await page.waitForTimeout(400);
+  },
+  { forced: true },
+);
+await sweep(
+  'forced-stats',
+  FEW,
+  async (page) => {
+    await page.goto(`${BASE}/stats`);
+    await page.waitForSelector('.bars .slot');
+  },
+  { forced: true },
 );
 await sweep('stats', SIZES, async (page) => {
   // The link in the bar on a wide window; on a narrow one the links are in the menu, so the address itself (waiting
