@@ -149,6 +149,51 @@ describe('the image', () => {
       assert.match(release, new RegExp(`--annotation "index:org\\.opencontainers\\.image\\.${annotation}=`));
   });
 
+  it("copies into the panel's stage every file from outside panel/ that the panel imports", () => {
+    // The panel's sources, then every file their relative imports reach, and those files' own imports in turn.
+    // Type-only imports are left out: esbuild drops them without opening the file.
+    const imports =
+      /^\s*(?:import|export)\s+(?!type\s)(?:[^'"]*?\sfrom\s+)?['"](\.{1,2}\/[^'"]+)['"]|\bimport\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/gm;
+    const pending = fs
+      .readdirSync('panel/src', { recursive: true })
+      .map(String)
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => path.join('panel/src', name));
+    const seen = new Set<string>();
+    const outside = new Set<string>();
+    for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const match of read(file).matchAll(imports)) {
+        const target = path.join(path.dirname(file), match[1] ?? match[2] ?? '');
+        if (!target.startsWith(`panel${path.sep}`)) outside.add(target);
+        if (fs.existsSync(target)) pending.push(target);
+      }
+    }
+    // What the stage copies from the build context to the same place under its working folder, which is where a
+    // relative import from panel/ looks for it.
+    const start = dockerfile.indexOf(' AS panel\n');
+    const stage = dockerfile.slice(start, dockerfile.indexOf('\nFROM ', start));
+    const copied: string[] = [];
+    for (const match of stage.matchAll(/^COPY ((?:--\S+ )*)(.+)$/gm)) {
+      if ((match[1] ?? '').includes('--from=')) continue;
+      const parts = (match[2] ?? '').trim().split(/\s+/);
+      const destination = parts.pop() ?? '';
+      for (const source of parts) {
+        // Several sources, or a destination ending in /, put each source into that folder under its own name.
+        const into =
+          parts.length > 1 || destination.endsWith('/') ? path.join(destination, path.basename(source)) : destination;
+        if (path.normalize(into) === path.normalize(source)) copied.push(path.normalize(source));
+      }
+    }
+    for (const file of outside) {
+      assert.ok(
+        copied.some((source) => file === source || file.startsWith(`${source}${path.sep}`)),
+        `the panel imports ${file}, which the Dockerfile's panel stage does not copy (COPY ${file} ./${path.dirname(file)}/)`,
+      );
+    }
+  });
+
   it('sends only what the build needs', () => {
     const ignore = read('.dockerignore');
     for (const entry of ['**', '!src/**', '!panel/**', '!scripts/**', 'panel/dist'])

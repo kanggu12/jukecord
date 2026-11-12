@@ -107,6 +107,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY scripts ./scripts
 COPY panel ./panel
+# The files outside panel/ that the panel's code imports: the refusals and failures in a person's language, which the
+# bot and the panel share, and the reasons they translate. Each lands where it is in the checkout, so the panel's
+# ../../../src/core imports resolve here as they do there (tests/packaging checks that every such import is copied).
+COPY src/core/say.ts src/core/reasons.ts ./src/core/
 RUN node scripts/build-panel.ts
 
 # ---- the image ------------------------------------------------------------------------------------------------------
