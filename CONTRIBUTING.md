@@ -61,7 +61,9 @@ Once a week Dependabot proposes newer versions of the actions the workflows use,
 (the `FROM` lines of the Dockerfile) and newer npm packages, each kind in one pull request; a new major version of an
 npm package comes on its own, and the next major version of Node is not proposed (moving to the next LTS is a decision).
 The outside actions (Docker's, `softprops/action-gh-release` and `azure/setup-helm`), which run where a job's token may
-write, are pinned by commit with the release beside it in a comment; Dependabot moves both together.
+write, are pinned by commit with the release beside it in a comment; Dependabot moves both together. The tools the
+workflows run with (helm, kind and kubeconform) are pinned by version, kubeconform and kind with their checksums, and
+are moved by hand.
 
 ## Versions and releases
 

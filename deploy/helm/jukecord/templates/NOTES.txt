@@ -47,5 +47,11 @@ The Ingress has no host, so it answers for every name, and jukecord has no addre
 for the Discord login and the bot's links. publicUrl takes the address people open.
 {{- end }}
 
+{{- if and .Values.ingress.enabled (include "jukecord.trustsProxy" .) (not .Values.networkPolicy.ingressFrom) }}
+
+jukecord believes the X-Forwarded-For of what reaches its port (one proxy in front: the Ingress controller), and with
+networkPolicy.ingressFrom empty any pod of the cluster may reach that port.
+{{- end }}
+
 Check every part it needs:
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "jukecord.fullname" . }} -- jukecord doctor

@@ -111,6 +111,15 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- $url -}}
 {{- end -}}
 
+{{/* Whether jukecord believes X-Forwarded-For: the chart sets that for the Ingress unless env or extraEnv sets it. */}}
+{{- define "jukecord.trustsProxy" -}}
+{{- if include "jukecord.userSets" (list . "JUKECORD_TRUST_PROXY") -}}
+{{- $set := toString (index (.Values.env | default dict) "JUKECORD_TRUST_PROXY" | default "") -}}
+{{- if not (has $set (list "" "false" "0")) -}}true{{- end -}}
+{{- else if .Values.ingress.enabled -}}true
+{{- end -}}
+{{- end -}}
+
 {{/* Whether the pod's public address comes from where the chart cannot read it (extraEnv's valueFrom). */}}
 {{- define "jukecord.publicUrlElsewhere" -}}
 {{- range .Values.extraEnv -}}{{- if and (eq .name "JUKECORD_PUBLIC_URL") .valueFrom -}}true{{- end -}}{{- end -}}

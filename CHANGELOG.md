@@ -22,7 +22,9 @@ All notable changes to jukecord are documented here. The format is based on
   (a size like `5K`, a host with a scheme, a label with a space, a range without its length, a variable with both a
   value and a source, a peer that names nothing) and takes what Kubernetes takes (`5k`, `1Pi`, IPv6 ranges). With
   `JUKECORD_PUBLIC_URL` taken from elsewhere (`extraEnv` with `valueFrom`), the notes after an install say so instead
-  of an address the pod does not get.
+  of an address the pod does not get, and with the Ingress on and `networkPolicy.ingressFrom` empty they say that any
+  pod of the cluster may reach the port whose `X-Forwarded-For` jukecord believes. docs/KUBERNETES.md says that a new
+  token in an existing Secret takes effect when the pod starts again.
 - The guides and the chart's values say how many tracks are fetched at once: up to the fetch limit ahead of time and
   twice that for tracks somebody is waiting for.
 - The workflows pin the Docker actions by commit too, as the other outside actions are, and give the release's token

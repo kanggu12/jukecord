@@ -31,6 +31,10 @@ The last line prints a one-time login link for the host. `kubectl -n jukecord ex
 checks every part jukecord needs. Without TLS on the Ingress (or in front of its controller), logins cross the network
 unencrypted; the notes Helm prints after the install say so.
 
+jukecord reads the token and the OAuth secret when it starts. A new token put in the Secret takes effect when the pod
+starts again: `kubectl -n jukecord rollout restart deploy/jukecord`. (With the token in the values instead, a
+`helm upgrade` with the new one restarts the pod by itself.)
+
 ## Values
 
 | Value                                                             | Default                                             | Sets                                                                                                                                                                                                                                                                                                           |

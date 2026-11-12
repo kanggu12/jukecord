@@ -496,7 +496,9 @@ describe('workflows and scripts', () => {
     }
   });
 
-  it('watches every pin for a newer release: yt-dlp and FFmpeg weekly, the rest through Dependabot', () => {
+  // The pins of what ships (the image and the packages) and of the actions; the tools CI runs with (helm, kind,
+  // kubeconform) are pinned by version and checksum in the workflows and moved by hand (CONTRIBUTING.md).
+  it('watches the pins of what ships for a newer release: yt-dlp and FFmpeg weekly, the rest through Dependabot', () => {
     assert.match(read('.github/workflows/ytdlp-release.yml'), /ARG YTDLP_VERSION=/);
     assert.match(read('.github/workflows/ffmpeg-release.yml'), /ARG FFMPEG_VERSION=/);
     const dependabot = read('.github/dependabot.yml');
