@@ -3391,9 +3391,6 @@ kbd {
   .listen .mini {
     display: flex;
   }
-  .listen .what .long {
-    display: none;
-  }
   .listen .volume input {
     width: 84px;
   }

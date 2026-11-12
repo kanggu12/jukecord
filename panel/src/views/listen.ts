@@ -277,14 +277,10 @@ export function listenBar(live: Live): HTMLElement {
     toggle.classList.toggle('sounding', state.listening && sync === 'in-sync' && player?.status === 'playing');
     label(toggle, 'headphones', state.listening && !retry ? words.stopListening : words.listenHere, true);
     // What plays, with this browser's state under it.
+    // Not listening here, the line says nothing: the Listen key beside it says what it does (a line telling people to
+    // press it was a hint nobody needed).
     const message = {
-      // Browser-only, or the bot in no voice channel: there is no voice channel to speak of.
-      off:
-        state.status?.mode === 'browser-only'
-          ? words.listenOffBrowser
-          : state.voice?.current
-            ? words.listenOff
-            : words.listenOffNoVoice,
+      off: '',
       waiting: words.waiting,
       catching: words.catchingUp,
       'in-sync': words.inSync,
@@ -303,14 +299,8 @@ export function listenBar(live: Live): HTMLElement {
       what,
       // One line, cut short with an ellipsis on a narrow bar; the whole title on hover and for screen readers.
       player?.track ? h('b', { title: player.track.title, 'data-clip': 'ok' }, player.track.title) : null,
-      // The long "off" hint is left out on phones, where the bar has room for the title and the keys only.
-      h(
-        'span',
-        {
-          class: `${sync === 'blocked' || sync === 'failed' ? 'text-bad' : ''} ${sync === 'off' ? 'long' : ''}`.trim(),
-        },
-        message,
-      ),
+      // How this browser plays along, while it does (a problem in the colour of one).
+      message ? h('span', sync === 'blocked' || sync === 'failed' ? { class: 'text-bad' } : null, message) : null,
     );
     // On a phone the now-playing card is far up the page: pause and skip are here too, with the main key's rule:
     // playing or loading shows pause; paused or idle shows play, which also starts a waiting queue.

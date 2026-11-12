@@ -182,7 +182,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     h(
       'div',
       { class: 'line', style: 'margin-top:10px' },
-      h('div', { class: 'grow' }, h('div', null, words.motion), h('div', { class: 'faint' }, words.motionHint)),
+      h('div', { class: 'grow' }, words.motion),
       (() => {
         const toggle = h('button', {
           class: 'switch',
