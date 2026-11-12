@@ -39,7 +39,8 @@ const FEW = [
 const SHOOT = new Set([412, 390, 1440, 1366]);
 // Only some states, for a quick look while working on one (ONLY=toast,menu tests/ui/run.sh <folder>): the other
 // states, the README's pictures and the playing-along check are skipped; ONLY=readme takes the README's pictures
-// alone. A whole walk leaves it unset.
+// alone, ONLY=pictures the panel's pictures and ONLY=listening the playing-along check. A whole walk leaves it unset,
+// or walks in groups at once whose names together are every state and those three.
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
 const report = [];
 fs.mkdirSync(OUT, { recursive: true });
@@ -447,7 +448,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
 }
 
 // Playing along: the audio must actually start and keep in time.
-if (!ONLY) {
+if (!ONLY || ONLY.has('listening')) {
   const { context, page, errors } = await open({ width: 1440, height: 900, theme: 'dark', lang: 'en', motion: 'on' });
   await page.click('[data-act="listen"]');
   let synced = false;
