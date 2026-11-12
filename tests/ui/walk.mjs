@@ -95,7 +95,7 @@ async function open({
     [lang, motion],
   );
   const page = await context.newPage();
-  if (discord) await asDiscord(page);
+  if (discord) await asDiscord(page, discord === true ? {} : discord);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -215,7 +215,8 @@ const MADE_UP = {
     count: 3,
   },
 };
-async function asDiscord(page) {
+// Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones.
+async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild } = {}) {
   await page.route(/\/api\/v1\/(status|me|guilds)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -224,8 +225,8 @@ async function asDiscord(page) {
       what === 'status'
         ? { ...body, discord: true, mode: 'discord', login: { discord: true } }
         : what === 'me'
-          ? { ...body, ...MADE_UP.me, bot: MADE_UP.bot }
-          : body.map((guild) => ({ ...guild, name: MADE_UP.guild, icon: null }));
+          ? { ...body, ...MADE_UP.me, name, bot: MADE_UP.bot }
+          : body.map((entry) => ({ ...entry, name: guild, icon: null }));
     await route.fulfill({ response, json });
   });
   // The page's side of each socket, so a state can say something of its own to the page (madeUpSay below).
@@ -264,6 +265,19 @@ await api('POST', '/guilds/local/player/resume');
 await until('playing');
 await sweep('playing', SIZES);
 await sweep('discord', SIZES, null, { discord: true });
+// The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
+// bar holds them on one line without the page growing wider than the screen.
+await sweep(
+  'long-names',
+  [
+    [360, 780],
+    [561, 900],
+    [600, 900],
+    [1024, 768],
+  ],
+  null,
+  { discord: { name: 'Maximilian Alexander von Hohenau', guild: 'The Late Night Listening Society' } },
+);
 // A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows.
 await sweep(
   'tablet',

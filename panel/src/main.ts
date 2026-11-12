@@ -132,7 +132,14 @@ function frame(): void {
   );
   const serverIcon = h('span', { class: 'guild-icon' });
   const serverName = h('span', { class: 'label' });
-  const server = h('button', { class: 'server', type: 'button' }, serverIcon, serverName, icon('chevron-down'));
+  // Its name cut short when long, given whole in its title (the mark for the layout's instrument).
+  const server = h(
+    'button',
+    { class: 'server', type: 'button', 'data-clip': 'ok' },
+    serverIcon,
+    serverName,
+    icon('chevron-down'),
+  );
   const pill = h('span', { class: 'pill' });
   const toasts = h('div', { class: 'toasts', 'aria-live': 'polite' });
   const nav = h('nav', { class: 'nav' });
@@ -210,7 +217,8 @@ function frame(): void {
       iconUrl ? h('img', { src: iconUrl, alt: '' }) : (guild?.name ?? '?').slice(0, 1),
     );
     serverName.textContent = guild?.name ?? '';
-    server.title = words.servers;
+    // A long name is cut short in the bar: the key's title gives it whole (and says what the key opens).
+    server.title = guild ? `${words.servers}: ${guild.name}` : words.servers;
     server.setAttribute('aria-label', `${words.servers}: ${guild?.name ?? ''}`);
     // Browser-only has one local queue (the bar's state says so); one server needs no chooser.
     server.hidden = state.status?.mode === 'browser-only';
@@ -271,7 +279,8 @@ function frame(): void {
         account,
         `${me.id}|${name}|${me.avatar}`,
         face(name, avatarUrl(me.id, me.avatar), 'sm'),
-        h('span', { class: 'name' }, name),
+        // Cut short when long (a Discord name can be 32 letters), with the whole name as its title.
+        h('span', { class: 'name', title: name, 'data-clip': 'ok' }, name),
         icon('menu'),
       );
     // The name the key shows, then what it opens (a screen reader hears what is on the key).

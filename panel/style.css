@@ -502,7 +502,18 @@ img {
   border-radius: var(--r);
   background: none;
   cursor: pointer;
-  flex: none;
+  /* It gives way to the bar's other parts with its name (a Discord name can be 32 letters), never with its face, its
+     menu icon or the room round them (4 + 20 + 8 + 16 + 8, and its border). */
+  flex: 0 1 auto;
+  min-width: 58px;
+}
+/* The person's name: at most about twenty letters, cut short with an ellipsis beyond (the key's title has it whole). */
+.account .name {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .account:hover,
 .account[aria-expanded="true"] {
