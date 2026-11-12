@@ -1609,12 +1609,17 @@ img {
   flex: 1 1 auto;
   min-height: 0;
 }
-/* Three rows of the queue, whatever its head takes (a head that wraps is taller): the list's room, not the card's. */
+/* Three rows of the queue, whatever its head takes (a head that wraps is taller): the list's room, not the card's. The
+   list is sized as if it were empty (contain: size), so the least the card can be is its head and those three rows:
+   measured with its rows, a long queue kept its whole height, and the column ran past the window (the page scrolled
+   and the results had no room). It fills what the card has beyond that. */
 .col:has(> .add-card.found-above) > .card.fill {
   min-height: auto;
 }
 .col:has(> .add-card.found-above) > .card.fill > .list {
+  flex: 1 1 0;
   min-height: 190px;
+  contain: size;
 }
 /* A column too short for both (a laptop's window under 880 px): while the results show, the queue gives the room of
    its rows to them (its head stays, with its count), and the results take the column down to the field. */
