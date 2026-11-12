@@ -45,6 +45,7 @@ export const PANEL_ACTIONS = [
   'token-create',
   'token-revoke',
   'logs',
+  'alerts-channel',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -195,6 +196,10 @@ export interface Stats {
 export interface Settings {
   djRoleId: string | null;
   roles: { id: string; name: string; color: number }[];
+  /** The text channel where jukecord tells this server about trouble, or null for nowhere. */
+  alertsChannelId: string | null;
+  /** The text channels the bot may post in, to choose it from. */
+  channels: { id: string; name: string }[];
 }
 export interface Status {
   version: string;
@@ -287,6 +292,8 @@ export const api = {
       if (value !== undefined && value !== '') params.set(key, String(value));
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
+  'alerts-channel': (guild: string, channelId: string | null) =>
+    request<Settings>('PUT', `${g(guild)}/settings/alerts-channel`, { channelId }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Static, TSchema } from 'typebox';
 import type { Access } from '../app/access.ts';
-import { type ActionContext, ActionError, type Actions, type Directory } from '../app/actions.ts';
+import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
 import type { DoctorReport } from '../app/doctor.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
@@ -143,14 +143,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return deps.actions.voiceChannels(context);
   },
 
-  settings: ({ context, deps }) => {
-    const settings = deps.actions.settings(context);
-    return { djRoleId: settings.djRoleId, roles: [...settings.roles] };
-  },
-  'dj-role': ({ context, body, deps }) => {
-    const settings = deps.actions.djRole(context, body.roleId);
-    return { djRoleId: settings.djRoleId, roles: [...settings.roles] };
-  },
+  settings: ({ context, deps }) => settingsAnswer(deps.actions.settings(context)),
+  'dj-role': ({ context, body, deps }) => settingsAnswer(deps.actions.djRole(context, body.roleId)),
   status: ({ deps }) => {
     const status = deps.actions.status();
     return {
@@ -221,4 +215,16 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const report = await deps.doctor();
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
   },
+
+  'alerts-channel': ({ context, body, deps }) => settingsAnswer(deps.actions.alertsChannel(context, body.channelId)),
 };
+
+// A server's settings as the API sends them (the schema's arrays are mutable).
+function settingsAnswer(view: SettingsView) {
+  return {
+    djRoleId: view.djRoleId,
+    roles: [...view.roles],
+    alertsChannelId: view.alertsChannelId,
+    channels: [...view.channels],
+  };
+}

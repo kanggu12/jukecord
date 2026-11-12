@@ -158,14 +158,26 @@ function showVoice(answer: unknown): string {
 }
 
 function showSettings(answer: unknown): string {
-  const settings = answer as { djRoleId: string | null; roles: { id: string; name: string }[] };
+  const settings = answer as {
+    djRoleId: string | null;
+    roles: { id: string; name: string }[];
+    alertsChannelId: string | null;
+    channels: { id: string; name: string }[];
+  };
   const role = settings.roles.find((entry) => entry.id === settings.djRoleId);
   const lines = [
     settings.djRoleId === null
       ? 'DJ role: none (everyone may change the music)'
       : `DJ role: ${role?.name ?? settings.djRoleId}`,
   ];
+  // Where jukecord tells the server about trouble, and the channels to choose it from.
+  const alerts = settings.channels.find((entry) => entry.id === settings.alertsChannelId);
+  lines.push(
+    settings.alertsChannelId === null ? 'Alerts: none' : `Alerts: #${alerts?.name ?? settings.alertsChannelId}`,
+  );
   if (settings.roles.length > 0) lines.push('Roles:', ...settings.roles.map((entry) => `  ${entry.id}  ${entry.name}`));
+  if (settings.channels.length > 0)
+    lines.push('Channels:', ...settings.channels.map((entry) => `  ${entry.id}  #${entry.name}`));
   return lines.join('\n');
 }
 
@@ -557,6 +569,18 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
     },
+  },
+
+  'alerts-channel': {
+    name: 'alerts',
+    usage: '<channel ID|none>',
+    summary: 'Where jukecord tells this server about trouble (none: nowhere)',
+    request: (words) => {
+      const channel = words.args[0];
+      if (!channel) throw new UsageError('say a channel ID (see jukecord settings) or none');
+      return { body: { channelId: channel === 'none' ? null : channel } };
+    },
+    show: showSettings,
   },
 };
 

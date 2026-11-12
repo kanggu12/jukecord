@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { FetchWatch } from '../app/alerts.ts';
 import { steadyNow } from '../core/clock.ts';
 import { fetchLimitMs, type MediaPreparer, type PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
@@ -34,6 +35,8 @@ export interface MediaOptions {
   readonly timeoutMs: number;
   /** How many fetches ahead of time may run at once, across every server (default: half the processors, 2 to 6). */
   readonly fetchLimit?: number;
+  /** Hears how each fetch from a site went (for YouTube's check for bots, see app/alerts.ts). */
+  readonly watch?: FetchWatch;
 }
 
 // A download in progress, shared by everyone waiting for the same track.
@@ -258,6 +261,8 @@ export class Media implements MediaPreparer {
           this.options.log.info('read a track from a whole file', { title: track.title });
         }
         cache.commit(key, tmp, { source: track.source, durationMs, loudness });
+        // Fetched from the site just now: it answers.
+        this.options.watch?.worked(track.url);
         if (loudness !== null) this.options.tracks.setLoudness(track.id, loudness);
         this.options.log.info('cached a track', {
           title: track.title,
@@ -268,6 +273,9 @@ export class Media implements MediaPreparer {
       } catch (error) {
         // A half-written file is useless and counts against the disk; remove it whatever went wrong.
         fs.rmSync(tmp, { force: true });
+        // Given up by everyone who wanted it is no answer from the site.
+        if (!abort.signal.aborted)
+          this.options.watch?.failed(track.url, error instanceof Error ? error.message : String(error));
         throw error;
       } finally {
         // Its place goes to the next fetch waiting, if any.

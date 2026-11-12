@@ -153,6 +153,8 @@ export interface EventHubOptions {
   /** The fewest milliseconds between queue messages and between listener messages of a server (tests shorten them). */
   readonly queueEveryMs?: number;
   readonly listenersEveryMs?: number;
+  /** Hears, when the log says so, that connections were refused at the cap of every live connection, and how many. */
+  readonly refused?: (count: number, limit: number) => void;
 }
 
 /** What a new connection asks for, where it comes from, and what its browser can take. */
@@ -304,6 +306,7 @@ export class EventHub {
             ? { hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY so each browser has its own address' }
             : {}),
         });
+        if (refusal.startsWith('jukecord has as many')) this.options.refused?.(this.refused, this.limits.total);
         this.refused = 0;
         this.refusedToldAt = steadyNow();
       }

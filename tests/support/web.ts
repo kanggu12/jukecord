@@ -35,6 +35,8 @@ export const OTHER_GUILD = '100000000000000002';
 export const ALICE = '300000000000000001';
 export const BOB = '300000000000000002';
 export const DJ_ROLE = '500000000000000001';
+/** The one text channel the fake bot may post in. */
+export const ALERTS_CHANNEL = '600000000000000001';
 /** The host token of every test server. */
 export const HOST_TOKEN = 'jkc_test-host-token-0123456789abcdef';
 
@@ -66,6 +68,11 @@ export class FakeDirectory implements Directory {
 
   roles(guildId: string): RoleInfo[] {
     return guildId === GUILD ? [{ id: DJ_ROLE, name: 'DJ', color: 0x3d7be0 }] : [];
+  }
+
+  // The text channels the bot may post in: one in the first server.
+  textChannels(guildId: string) {
+    return guildId === GUILD ? [{ id: ALERTS_CHANNEL, name: 'jukecord-alerts' }] : [];
   }
 
   async member(guildId: string, userId: string): Promise<MemberInfo | null> {

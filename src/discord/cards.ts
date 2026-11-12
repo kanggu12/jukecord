@@ -59,6 +59,9 @@ const TEXT = {
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿀 수 있음' },
+  alerts: { en: 'Alerts channel', ko: '알림 채널' },
+  alertsHere: { en: 'jukecord tells this server about trouble here', ko: 'jukecord가 이 서버의 문제를 여기에 알림' },
+  noAlerts: { en: 'jukecord tells this server about trouble nowhere', ko: 'jukecord가 이 서버에 문제를 알리지 않음' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -283,4 +286,11 @@ export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
   if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
   return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
+}
+
+/** Where jukecord tells the server about trouble (app/alerts.ts), or that it tells it nowhere. */
+export function alertsCard(settings: SettingsView, lang: Lang): EmbedBuilder {
+  const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.alerts[lang]);
+  if (settings.alertsChannelId === null) return embed.setDescription(TEXT.noAlerts[lang]);
+  return embed.setDescription(`<#${settings.alertsChannelId}>\n${TEXT.alertsHere[lang]}`);
 }

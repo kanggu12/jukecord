@@ -231,6 +231,10 @@ const EN = {
   reload: 'jukecord was updated: reload the page',
   // A track whose fetch waits for its place among every server's fetches.
   waitingTurn: 'Waiting for its turn',
+  // The alerts channel, in the menu (app/alerts.ts).
+  alerts: 'Alerts channel',
+  alertsHint: 'Where jukecord tells this server about trouble: YouTube refusing it, a restart, a full disk',
+  alertsOff: 'Nowhere',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -454,6 +458,9 @@ const KO: Strings = {
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
   waitingTurn: '차례를 기다리는 중',
+  alerts: '알림 채널',
+  alertsHint: 'jukecord가 이 서버에 문제를 알릴 채널: YouTube 차단, 다시 시작, 디스크 부족 등',
+  alertsOff: '알리지 않음',
 };
 
 /** The languages. */

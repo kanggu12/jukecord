@@ -53,6 +53,7 @@ export const ACTIONS = [
   'settings',
   'dj-role',
   'status',
+  'alerts-channel',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -144,6 +145,14 @@ export interface Directory {
   roles(guildId: string): RoleInfo[];
   /** The member's roles and rights, or null when they are not in the server. */
   member(guildId: string, userId: string): Promise<MemberInfo | null>;
+  /** The server's text channels the bot may post in, in Discord's order (for the alerts channel). */
+  textChannels?(guildId: string): TextChannelInfo[];
+}
+
+/** A text channel, for choosing where jukecord tells a server about trouble. */
+export interface TextChannelInfo {
+  readonly id: string;
+  readonly name: string;
 }
 
 /** A server's jukecord settings as the panel and the commands show them. */
@@ -152,6 +161,10 @@ export interface SettingsView {
   readonly djRoleId: string | null;
   /** The server's roles to choose from (empty in browser-only mode). */
   readonly roles: readonly RoleInfo[];
+  /** The text channel where jukecord tells the server about trouble (app/alerts.ts), or null for nowhere. */
+  readonly alertsChannelId: string | null;
+  /** The text channels the bot may post in, to choose it from (empty in browser-only mode). */
+  readonly channels: readonly TextChannelInfo[];
 }
 
 /** Listening figures over a span of days, with every day present (days without plays count zero). */
@@ -535,9 +548,15 @@ export class Actions {
   /** The server's settings and the roles to choose the DJ role from (anyone may look). */
   settings(context: ActionContext): SettingsView {
     const roles = this.options.directory?.roles(context.guildId) ?? null;
+    const saved = this.options.store.settings.get(context.guildId);
     // A deleted role is shown as none, which is how it counts (see djRoleNow).
-    const djRoleId = djRoleNow(this.options.store.settings.get(context.guildId).djRoleId, roles);
-    return { djRoleId, roles: roles ?? [] };
+    const djRoleId = djRoleNow(saved.djRoleId, roles);
+    // The same for a channel gone, or one the bot may no longer post in: nothing can be said there.
+    const channels = this.options.directory?.textChannels?.(context.guildId) ?? [];
+    const alertsChannelId = channels.some((channel) => channel.id === saved.alertsChannelId)
+      ? saved.alertsChannelId
+      : null;
+    return { djRoleId, roles: roles ?? [], alertsChannelId, channels };
   }
 
   /** Sets (or clears, with null) the role that may change the music. Needs Manage Server. */
@@ -563,6 +582,26 @@ export class Actions {
       discord: this.options.discordReady?.() ?? false,
       uptimeMs: Date.now() - (this.options.startedAt ?? Date.now()),
     };
+  }
+
+  /**
+   * Sets (or clears, with null) the text channel where jukecord tells this server about trouble: YouTube refusing it,
+   * a restart by the watchdog, a disk nearly full, a track taken out of the looping queue, connections turned away,
+   * a scheduled backup that failed (app/alerts.ts). Needs Manage Server.
+   */
+  alertsChannel(context: ActionContext, channelId: string | null): SettingsView {
+    if (!context.mayManage)
+      throw new ActionError('forbidden', 'only people who can manage the server can choose the alerts channel');
+    if (channelId !== null) {
+      // Only a channel the bot may post in: one it cannot would say nothing, and nobody would know why.
+      const channels = this.options.directory?.textChannels?.(context.guildId);
+      if (!channels)
+        throw new ActionError('unavailable', 'jukecord runs without a Discord bot here, so there are no channels');
+      if (!channels.some((channel) => channel.id === channelId))
+        throw new ActionError('not-found', 'that is not a channel of this server the bot may post in');
+    }
+    this.options.store.settings.setAlertsChannel(context.guildId, channelId);
+    return this.settings(context);
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

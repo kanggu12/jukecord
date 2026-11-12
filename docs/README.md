@@ -42,26 +42,33 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
   everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
   role deleted in Discord counts as none: everyone may change the music again until another is set.
 
+- A server can choose an **alerts channel**, where jukecord says when something goes wrong: YouTube refusing it (its
+  check for bots) and when that is over, jukecord restarting itself, its data's disk with less than 1 GiB free, a track
+  taken out of the server's looping queue, connections turned away at one of its caps, and a scheduled backup that
+  failed. Each kind at most once an hour; the same lines go to jukecord's log. People who can manage the server choose
+  it in the panel's menu, with `/alerts set`, or with `jukecord alerts <channel ID>`.
+
 ## Slash commands
 
-| Command                                      | Does                                                                |
-| :------------------------------------------- | :------------------------------------------------------------------ |
-| `/play`                                      | play now (an address or search words); the current track is skipped |
-| `/add`                                       | add to the queue (at the end, or next)                              |
-| `/skip` `/pause` `/resume` `/stop`           | the player (`/resume` also starts the queue after a stop)           |
-| `/seek`                                      | go to a place: `83`, `1:23` or `1m23s`                              |
-| `/repeat`                                    | repeat off, this track, or the queue                                |
-| `/np`                                        | what is playing, with pause and skip buttons                        |
-| `/queue`                                     | the queue, ten to a page                                            |
-| `/jump` `/remove` `/move`                    | a queued track by its number: play it now, remove it, move it       |
-| `/shuffle` `/dedupe` `/clear`                | the whole queue                                                     |
-| `/history`                                   | recently played                                                     |
-| `/playlist save, load, list, rename, delete` | saved playlists                                                     |
-| `/join` `/leave`                             | the voice channel (yours, or the one you name)                      |
-| `/listen`                                    | the panel's link, to listen in a browser                            |
-| `/stats`                                     | listening figures                                                   |
-| `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
-| `/version`                                   | the version                                                         |
+| Command                                      | Does                                                                 |
+| :------------------------------------------- | :------------------------------------------------------------------- |
+| `/play`                                      | play now (an address or search words); the current track is skipped  |
+| `/add`                                       | add to the queue (at the end, or next)                               |
+| `/skip` `/pause` `/resume` `/stop`           | the player (`/resume` also starts the queue after a stop)            |
+| `/seek`                                      | go to a place: `83`, `1:23` or `1m23s`                               |
+| `/repeat`                                    | repeat off, this track, or the queue                                 |
+| `/np`                                        | what is playing, with pause and skip buttons                         |
+| `/queue`                                     | the queue, ten to a page                                             |
+| `/jump` `/remove` `/move`                    | a queued track by its number: play it now, remove it, move it        |
+| `/shuffle` `/dedupe` `/clear`                | the whole queue                                                      |
+| `/history`                                   | recently played                                                      |
+| `/playlist save, load, list, rename, delete` | saved playlists                                                      |
+| `/join` `/leave`                             | the voice channel (yours, or the one you name)                       |
+| `/listen`                                    | the panel's link, to listen in a browser                             |
+| `/stats`                                     | listening figures                                                    |
+| `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                    |
+| `/version`                                   | the version                                                          |
+| `/alerts show, set, clear`                   | where jukecord tells this server about trouble (needs Manage Server) |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after

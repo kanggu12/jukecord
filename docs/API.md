@@ -154,6 +154,7 @@ playlist) so a program does not need to ask again.
 | `settings` The server's settings and its roles | `GET /api/v1/guilds/{guild}/settings` | read | `jukecord settings` | `/dj show` |
 | `dj-role` Set the role that may change the music (null: everyone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/dj-role` | admin | `jukecord dj` | `/dj set` |
 | `status` The version, the mode and whether Discord is connected | `GET /api/v1/status` | anyone | `jukecord status` | `/version` |
+| `alerts-channel` Set the text channel where jukecord tells this server about trouble (null: nowhere); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/alerts-channel` | admin | `jukecord alerts` | `/alerts set` |
 
 ### Your login
 

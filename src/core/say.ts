@@ -135,6 +135,13 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [/^the voice channel (.+) is full$/, '$1 음성 채널이 가득 참'],
   // A player that paused by itself with nobody hearing it anywhere (app/rest.ts).
   ['paused with nobody listening', '듣는 사람이 없어 일시정지함'],
+  // Choosing the alerts channel (app/alerts.ts).
+  [
+    'only people who can manage the server can choose the alerts channel',
+    '서버 관리 권한이 있어야 알림 채널을 정할 수 있음',
+  ],
+  ['jukecord runs without a Discord bot here, so there are no channels', '디스코드 봇 없이 실행 중이라 채널이 없음'],
+  ['that is not a channel of this server the bot may post in', '봇이 글을 올릴 수 있는 이 서버의 채널이 아님'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

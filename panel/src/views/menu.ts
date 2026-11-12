@@ -191,6 +191,8 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     ),
   );
   const dj = h('div', { class: 'section', hidden: true });
+  // The alerts channel, under the DJ role, for the same people.
+  const alerts = h('div', { class: 'section', hidden: true });
   const tokens = h('div', { class: 'section' });
   const end = h('div', { class: 'section' });
   // Keyboard shortcuts mean nothing on a touch screen without a keyboard; style.css hides this item there.
@@ -210,7 +212,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     location.assign('/login');
   };
   fill(end, shortcuts, out);
-  fill(body, who, pages, look, dj, tokens, end);
+  fill(body, who, pages, look, dj, alerts, tokens, end);
   // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
   // which runs in the same turn).
   if (focusLanguage) {
@@ -219,7 +221,10 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
 
   // The DJ role, for people who can manage the server (and only with Discord: browser-only has no roles).
   const guild = state.guild;
-  if (guild?.mayManage && state.status?.mode === 'discord') void drawDj(dj, guild.id);
+  if (guild?.mayManage && state.status?.mode === 'discord') {
+    void drawDj(dj, guild.id);
+    void drawAlerts(alerts, guild.id);
+  }
   void drawTokens(tokens);
 }
 
@@ -262,6 +267,43 @@ async function drawDj(box: HTMLElement, guild: string): Promise<void> {
     h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.djHint),
     option(null, words.everyone, 0),
     ...settings.roles.map((role) => option(role.id, role.name, role.color)),
+  );
+}
+
+// The alerts channel: nowhere, or one of the text channels the bot may post in.
+async function drawAlerts(box: HTMLElement, guild: string): Promise<void> {
+  let settings: Settings;
+  try {
+    settings = await api.settings(guild);
+  } catch (error) {
+    problem(error);
+    return;
+  }
+  const words = t();
+  const choose = (channelId: string | null) => async () => {
+    // A list left from another server (the server was switched meanwhile) changes nothing.
+    if (state.guild?.id !== guild) return;
+    const saved = await act(null, () => api['alerts-channel'](guild, channelId));
+    if (saved && state.guild?.id === guild) void drawAlerts(box, guild);
+  };
+  const option = (id: string | null, name: string) => {
+    const button = h(
+      'button',
+      { class: 'choice', type: 'button', 'aria-pressed': String(settings.alertsChannelId === id) },
+      icon(id ? 'hash' : 'bell-off'),
+      h('span', { class: 'grow' }, name),
+      icon('check', 'check'),
+    );
+    button.onclick = choose(id);
+    return button;
+  };
+  box.hidden = false;
+  fill(
+    box,
+    h('h3', null, words.alerts),
+    h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.alertsHint),
+    option(null, words.alertsOff),
+    ...settings.channels.map((channel) => option(channel.id, channel.name)),
   );
 }
 

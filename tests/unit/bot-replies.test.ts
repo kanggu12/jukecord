@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { Events } from 'discord.js';
 import { fakeBot, handlers, interaction } from '../support/discord.ts';
 import { flush } from '../support/fakes.ts';
 import { addTracks } from '../support/store.ts';
@@ -144,5 +145,46 @@ describe('the now-playing card in the channel', () => {
     await made.clock.advance(5000);
     assert.match(asked.shown.at(-1)?.text ?? '', /^Getting it ready \| \[Track 2\]/);
     await made.bot.client.destroy();
+  });
+});
+
+describe('the alerts channel in Discord', () => {
+  it('shows it to the person alone, and lets only managers choose it', async () => {
+    const { bot } = fakeBot();
+    const shown = interaction('command', 'alerts', { sub: 'show' }, { manage: true });
+    await handlers(bot).onCommand(shown.interaction);
+    assert.equal(shown.shown[0]?.ephemeral, true);
+    assert.equal(shown.shown[0]?.text, 'Alerts channel | jukecord tells this server about trouble nowhere');
+    const refused = interaction('command', 'alerts', { sub: 'clear' }, { locale: 'ko' });
+    await handlers(bot).onCommand(refused.interaction);
+    assert.equal(refused.shown.at(-1)?.ephemeral, true);
+    assert.equal(refused.shown.at(-1)?.text, '서버 관리 권한이 있어야 알림 채널을 정할 수 있음');
+    await bot.client.destroy();
+  });
+
+  it("posts an alert in the server's language once Discord is there, trouble in a problem's colour", async () => {
+    const { bot } = fakeBot();
+    const sent: { embeds: { toJSON(): { description?: string; color?: number } }[] }[] = [];
+    const channel = { isSendable: () => true, send: async (payload: (typeof sent)[number]) => sent.push(payload) };
+    (bot.client.guilds.cache as unknown as Map<string, unknown>).set('100000000000000001', {
+      id: '100000000000000001',
+      preferredLocale: 'ko',
+      channels: { cache: new Map([['600000000000000001', channel]]) },
+    });
+    // Just started: it waits for Discord before posting.
+    const posting = bot.post('100000000000000001', '600000000000000001', {
+      kind: 'disk',
+      guildId: null,
+      en: "The disk of jukecord's data has 812 MiB free",
+      ko: 'jukecord 데이터 디스크에 남은 공간: 812 MiB',
+    });
+    await flush();
+    assert.equal(sent.length, 0);
+    bot.client.emit(Events.ClientReady as never, bot.client as never);
+    await posting;
+    const embed = sent[0]?.embeds[0]?.toJSON();
+    assert.equal(embed?.description, 'jukecord 데이터 디스크에 남은 공간: 812 MiB');
+    assert.equal(embed?.color, 0xd0473f);
+    await bot.client.destroy();
   });
 });

@@ -6,6 +6,7 @@ import { MediaCache } from '../../src/media/cache.ts';
 import { API, API_PREFIX, OPERATIONS } from '../../src/web/api.ts';
 import { CSRF_HEADER, SESSION_COOKIE } from '../../src/web/auth.ts';
 import {
+  ALERTS_CHANNEL,
   ALICE,
   asHost,
   BOB,
@@ -199,6 +200,34 @@ describe('the HTTP API', () => {
       (await inject({ method: 'GET', url: api('/guilds'), headers: { cookie: bob.cookie } })).json(),
       [],
     );
+  });
+
+  it('sets the alerts channel for people who can manage the server, to a channel the bot may post in', async () => {
+    const { cookie, csrf } = sessionFor(server, ALICE);
+    const headers = { cookie, [CSRF_HEADER]: csrf };
+    const set = (payload: unknown, as: Record<string, string> = asHost) =>
+      inject({
+        method: 'PUT',
+        url: api(`/guilds/${GUILD}/settings/alerts-channel`),
+        headers: as,
+        payload: payload as never,
+      });
+    // Alice may not: choosing it needs Manage Server.
+    const refused = await set({ channelId: ALERTS_CHANNEL }, headers);
+    assert.equal(refused.statusCode, 403);
+    assert.equal(refused.json().error.message, 'only people who can manage the server can choose the alerts channel');
+    // A channel the bot cannot post in (or not this server's) is refused.
+    assert.equal((await set({ channelId: '600000000000000099' })).statusCode, 404);
+    const chosen = await set({ channelId: ALERTS_CHANNEL });
+    assert.equal(chosen.statusCode, 200);
+    assert.deepEqual(
+      { id: chosen.json().alertsChannelId, channels: chosen.json().channels },
+      { id: ALERTS_CHANNEL, channels: [{ id: ALERTS_CHANNEL, name: 'jukecord-alerts' }] },
+    );
+    // Anyone may see where it is; nowhere again with null.
+    const shown = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers });
+    assert.equal(shown.json().alertsChannelId, ALERTS_CHANNEL);
+    assert.equal((await set({ channelId: null })).json().alertsChannelId, null);
   });
 
   it('keeps the host operations to the host', async () => {

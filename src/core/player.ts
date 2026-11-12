@@ -107,6 +107,8 @@ export interface PlayerOptions {
   readonly seekCooldownMs?: number;
   /** How long past the end the player waits for an output to report the end before moving on by itself. */
   readonly endGraceMs?: number;
+  /** Hears that a track was taken out of a looping queue, with the full text of its failure (for app/alerts.ts). */
+  readonly onLeftLoop?: (guildId: string, track: Track, reason: string) => void;
 }
 
 // A track counts as listened to (and goes into the history) once it has played this long; a skip right after the
@@ -655,8 +657,9 @@ export class Player {
           why: permanent ? 'it will not work' : 'it failed on two passes in a row',
         });
         // Said to people too, and kept past the next track (which clears the failure itself): a track leaving a loop
-        // is otherwise seen by nobody.
+        // is otherwise seen by nobody. And to the server's alerts channel, when it has one.
         this.notice = `${track.title}: taken out of the looping queue`;
+        this.options.onLeftLoop?.(this.guildId, track, reason);
       }
     }
     this.failedInRow.push({ track, addedBy, putBack: !looping });

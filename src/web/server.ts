@@ -53,6 +53,11 @@ export interface WebServerOptions {
   readonly live?: Partial<LiveLimits>;
   /** Whether jukecord can serve requests (for /readyz). */
   readonly ready: () => boolean;
+  /**
+   * Hears, at most once a minute per cap, that connections were turned away at one: every connection's, one
+   * address's, or the live connections' (for app/alerts.ts).
+   */
+  readonly turnedAway?: (cap: TurnedAway) => void;
   readonly discordReady: () => boolean;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
   readonly rates?: {
@@ -79,6 +84,14 @@ export interface WebServerOptions {
     /** How long an audio request waits for an MP3 copy being made before it is told to ask again (default 5 s). */
     readonly mp3WaitMs?: number;
   };
+}
+
+/** Connections turned away at a cap since the log last said so: which cap, how many, the cap, and the address. */
+export interface TurnedAway {
+  readonly cap: 'connections' | 'address' | 'live';
+  readonly count: number;
+  readonly limit: number;
+  readonly address?: string;
 }
 
 export interface WebServer {
@@ -266,6 +279,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       count: turnedAway,
       cap: app.server.maxConnections,
     });
+    options.turnedAway?.({ cap: 'connections', count: turnedAway, limit: app.server.maxConnections });
     turnedAway = 0;
     turnedAwayToldAt = steadyNow();
   });
@@ -292,6 +306,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       // Said at most once a minute, as the cap above says it, with the address and how many.
       refusedHere += 1;
       if (steadyNow() - refusedHereToldAt >= 60_000) {
+        options.turnedAway?.({ cap: 'address', count: refusedHere, limit: perAddressMax, address: key });
         log.warn('turned connections away from one address at its cap', {
           count: refusedHere,
           cap: perAddressMax,
@@ -325,6 +340,12 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     queueVersion: (guildId) => options.queue.version(guildId),
     stillValid: (caller) => auth.stillValid(caller),
     limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
+    // Only the cap of every live connection is jukecord's trouble; one login's or one address's is that person's.
+    ...(options.turnedAway
+      ? {
+          refused: (count: number, limit: number) => options.turnedAway?.({ cap: 'live', count, limit }),
+        }
+      : {}),
   });
 
   // Aborted when the server closes: work shared by several requests (an MP3 copy) stops with jukecord, not with one

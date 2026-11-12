@@ -163,6 +163,16 @@ describe('the jukecord command', () => {
     }
   });
 
+  it('chooses where jukecord tells the server about trouble, and shows it with the settings', async () => {
+    const extra = { JUKECORD_GUILD: GUILD };
+    const chosen = await cli('alerts 600000000000000001', extra);
+    assert.equal(chosen.code, 0);
+    assert.match(chosen.out, /^Alerts: #jukecord-alerts$/m);
+    assert.match(chosen.out, /^ {2}600000000000000001 {2}#jukecord-alerts$/m);
+    assert.match((await cli('alerts none', extra)).out, /^Alerts: none$/m);
+    assert.equal((await cli('alerts', extra)).code, 2);
+  });
+
   it('prints help with every command', async () => {
     const help = await cli('--help');
     assert.equal(help.code, 0);

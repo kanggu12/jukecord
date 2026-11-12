@@ -485,6 +485,18 @@ export const API = {
     access: 'host',
     response: DoctorSchema,
   }),
+
+  // Server settings, added later.
+  'alerts-channel': op({
+    method: 'PUT',
+    path: '/guilds/{guild}/settings/alerts-channel',
+    summary: 'Set the text channel where jukecord tells this server about trouble (null: nowhere); needs Manage Server',
+    tag: 'server',
+    access: 'admin',
+    params: InGuild,
+    body: Type.Object({ channelId: Nullable(Snowflake) }, strict),
+    response: SettingsSchema,
+  }),
 } satisfies Record<OperationName, OperationSpec>;
 
 /** The operations in a stable order: the table's own. */

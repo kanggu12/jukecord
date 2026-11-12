@@ -11,13 +11,16 @@ import {
   ActivityType,
   type AutocompleteInteraction,
   type ButtonInteraction,
+  ChannelType,
   type ChatInputCommandInteraction,
   Client,
   Events,
   GatewayIntentBits,
   type Guild,
   MessageFlags,
+  type NewsChannel,
   PermissionFlagsBits,
+  type TextChannel,
 } from 'discord.js';
 import {
   type ActionContext,
@@ -28,7 +31,9 @@ import {
   type GuildInfo,
   type MemberInfo,
   type RoleInfo,
+  type TextChannelInfo,
 } from '../app/actions.ts';
+import type { Alert, AlertSink } from '../app/alerts.ts';
 import type { Bus } from '../core/bus.ts';
 import { type Clock, steadyNow, systemClock } from '../core/clock.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
@@ -39,6 +44,7 @@ import type { DiscordRepository, SettingsRepository, UserRepository, VoiceChanne
 import { parseTimestamp } from '../util/time.ts';
 import {
   addedCard,
+  alertsCard,
   djCard,
   historyCard,
   type Lang,
@@ -82,7 +88,7 @@ export interface BotOptions {
   readonly clock?: Clock;
 }
 
-export class Bot implements Directory {
+export class Bot implements Directory, AlertSink {
   readonly client: Client;
   readonly voice: VoiceManager;
   private readonly options: BotOptions;
@@ -224,6 +230,55 @@ export class Bot implements Directory {
   /** Whether the bot is logged in and receiving events. */
   ready(): boolean {
     return this.client.isReady();
+  }
+
+  /** A server's text channels the bot may post in (and embed in), in Discord's order: where alerts can go. */
+  textChannels(guildId: string): TextChannelInfo[] {
+    const guild = this.client.guilds.cache.get(guildId);
+    const me = guild?.members.me;
+    if (!guild || !me) return [];
+    const rights = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks];
+    return (
+      [...guild.channels.cache.values()]
+        // Text and announcement channels: where people read what jukecord says.
+        .filter(
+          (channel): channel is TextChannel | NewsChannel =>
+            channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement,
+        )
+        .filter((channel) => channel.permissionsFor(me)?.has(rights))
+        .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+        .map((channel) => ({ id: channel.id, name: channel.name }))
+    );
+  }
+
+  /** Posts an alert in a server's alerts channel (see app/alerts.ts), waiting for Discord after a start. */
+  async post(guildId: string, channelId: string, alert: Alert): Promise<void> {
+    await this.connected(120_000);
+    const guild = this.client.guilds.cache.get(guildId);
+    const channel = guild?.channels.cache.get(channelId);
+    if (!guild || !channel?.isSendable()) throw new Error('the alerts channel is not there, or not one to post in');
+    // The server's own language: nobody asked, so there is no one person's to answer in.
+    const lang = langOf(guild.preferredLocale);
+    const text = lang === 'ko' ? alert.ko : alert.en;
+    // Trouble has the colour of a problem; the end of it does not.
+    await channel.send({ embeds: [alert.over ? note(lang, text, text) : problem(text)] });
+  }
+
+  // Resolves once the bot is connected to Discord, or rejects after `ms`.
+  private connected(ms: number): Promise<void> {
+    if (this.client.isReady()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const ready = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        this.client.off(Events.ClientReady, ready);
+        reject(new Error('the bot did not connect to Discord in time'));
+      }, ms);
+      timer.unref();
+      this.client.once(Events.ClientReady, ready);
+    });
   }
 
   /** Logs in and starts answering. Resolves once logged in; registration of commands follows in the background. */
@@ -376,7 +431,8 @@ export class Bot implements Directory {
         ['version', 'queue', 'history', 'stats'].includes(interaction.commandName) ||
         !COMMAND_NAMES.has(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
-        (interaction.commandName === 'playlist' && sub === 'list');
+        (interaction.commandName === 'playlist' && sub === 'list') ||
+        (interaction.commandName === 'alerts' && sub === 'show');
       await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
       switch (interaction.commandName) {
         case 'add': {
@@ -530,6 +586,19 @@ export class Bot implements Directory {
           await interaction.editReply({
             embeds: [note(lang, `jukecord ${status.version}`, `jukecord ${status.version}`)],
           });
+          return;
+        }
+        case 'alerts': {
+          // Where jukecord tells this server about trouble: shown, chosen (a text channel), or nowhere.
+          const sub = options.getSubcommand();
+          const settings =
+            sub === 'show'
+              ? actions.settings(context)
+              : actions.alertsChannel(
+                  context,
+                  sub === 'set' ? (options.getChannel('channel', true)?.id ?? null) : null,
+                );
+          await interaction.editReply({ embeds: [alertsCard(settings, lang)] });
           return;
         }
         default:

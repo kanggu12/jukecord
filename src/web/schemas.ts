@@ -188,6 +188,10 @@ export const SettingsSchema = Type.Object(
   {
     djRoleId: Nullable(Type.String()),
     roles: Type.Array(Type.Object({ id: Type.String(), name: Type.String(), color: Type.Integer() })),
+    alertsChannelId: Nullable(Type.String({ description: 'Where jukecord tells this server about trouble' })),
+    channels: Type.Array(Type.Object({ id: Type.String(), name: Type.String() }), {
+      description: 'The text channels the bot may post in',
+    }),
   },
   { title: 'Settings' },
 );

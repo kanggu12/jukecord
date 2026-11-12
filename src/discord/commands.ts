@@ -47,6 +47,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   settings: '/dj show',
   'dj-role': '/dj set',
   status: '/version',
+  'alerts-channel': '/alerts set',
 };
 
 // One command: English name and description, Korean name and description.
@@ -318,6 +319,40 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿀 수 있음' }),
       ),
     command('version', 'The jukecord version', '버전', 'jukecord 버전'),
+    command('alerts', 'Where jukecord tells this server about trouble', '알림', 'jukecord가 문제를 알릴 채널')
+      // Shown in the command list only to people who can manage the server; Discord also enforces it.
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addSubcommand((sub) =>
+        sub
+          .setName('show')
+          .setDescription('Show the alerts channel')
+          .setNameLocalizations({ ko: '보기' })
+          .setDescriptionLocalizations({ ko: '알림 채널 보기' }),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('set')
+          .setDescription('Tell this server about trouble in a channel')
+          .setNameLocalizations({ ko: '정하기' })
+          .setDescriptionLocalizations({ ko: '문제를 알릴 채널 정하기' })
+          .addChannelOption((option) =>
+            option
+              .setName('channel')
+              .setDescription('A text channel the bot may post in')
+              .setNameLocalizations({ ko: '채널' })
+              .setDescriptionLocalizations({ ko: '봇이 글을 올릴 수 있는 텍스트 채널' })
+              .setRequired(true)
+              // Text channels only: that is where people read what jukecord says.
+              .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('clear')
+          .setDescription('Tell this server about trouble nowhere')
+          .setNameLocalizations({ ko: '끄기' })
+          .setDescriptionLocalizations({ ko: '문제를 어디에도 알리지 않음' }),
+      ),
   ];
   return commands.map((builder) => builder.toJSON());
 }
