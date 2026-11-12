@@ -23,6 +23,8 @@
  *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
  *   room for fewer than three whole rows (a short window left the queue one row beside the cards above it, or none);
+ * - adrift: the listen bar off the foot of the window: the page ran past the window and its bars scrolled with it (the
+ *   search's results once pushed the queue's column 170 px past a 900 px window, and nothing above said so);
  * - sizes: the font sizes in use (reported, not a finding).
  *
  * Colours are read through a canvas, so any CSS colour (oklch, color-mix) becomes plain sRGB.
@@ -447,6 +449,14 @@ window.__audit = () => {
         : box.width < 43.5 || box.height < 43.5;
       if (short) add('small-target', control, `${Math.round(box.width)}x${Math.round(box.height)}`);
     }
+  }
+
+  // The listen bar stands at the foot of the window in every layout (the page scrolls under it on a phone).
+  const listen = document.querySelector('.listen');
+  if (listen && shown(listen)) {
+    const foot = listen.getBoundingClientRect().bottom;
+    if (Math.abs(foot - window.innerHeight) > 1)
+      add('adrift', listen, `its foot at ${Math.round(foot)} in a window ${window.innerHeight}px tall`);
   }
 
   return { findings, sizes: Object.fromEntries([...sizes.entries()].sort((a, b) => b[1] - a[1])) };
