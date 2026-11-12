@@ -57,11 +57,19 @@ jobs:
       - name: Names
         id: v
         run: |
+          # The base the image is built on, from the Dockerfile's base stage (node:<tag>@sha256:<digest>).
+          base=$(sed -n 's/^FROM \(node:[^ ]*@sha256:[0-9a-f]*\) AS base$/\1/p' deploy/docker/Dockerfile)
+          test -n "$base"
           {
             echo "owner=${GITHUB_REPOSITORY_OWNER,,}"
             echo "arch=${{ matrix.platform }}" | sed 's#linux/##'
             # The image's version label is the version itself (1.2.3), as in the chart, not the tag (v1.2.3).
             echo "version=${GITHUB_REF_NAME#v}"
+            # When it was built: the tagged commit's time, the same on both runners, so a rebuild labels it alike.
+            echo "created=$(date -u -d "@$(git log -1 --format=%ct)" +%Y-%m-%dT%H:%M:%SZ)"
+            # A fully qualified name, as the OCI annotations ask, and the multi-platform index digest it is pinned by.
+            echo "base_name=docker.io/library/${base%@*}"
+            echo "base_digest=${base#*@}"
           } >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -78,6 +86,11 @@ jobs:
           build-args: |
             VERSION=${{ steps.v.outputs.version }}
             REVISION=${{ github.sha }}
+          # Labels only a release knows. They go into the image's settings, not its layers, so the cache still holds.
+          labels: |
+            org.opencontainers.image.created=${{ steps.v.outputs.created }}
+            org.opencontainers.image.base.name=${{ steps.v.outputs.base_name }}
+            org.opencontainers.image.base.digest=${{ steps.v.outputs.base_digest }}
           outputs: type=image,name=ghcr.io/${{ steps.v.outputs.owner }}/jukecord,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
@@ -128,7 +141,12 @@ jobs:
           if [ "${{ steps.v.outputs.pre }}" = false ]; then tags+=(-t "$image:latest"); fi
           sources=()
           for digest in /tmp/digests/*; do sources+=("$image@sha256:$(basename "$digest")"); done
-          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          # The index that joins the two architectures has no labels of its own; GitHub's package page reads the
+          # description and the repository from these annotations.
+          docker buildx imagetools create "${tags[@]}" \
+            --annotation "index:org.opencontainers.image.description=A self-hosted Discord music bot: one queue, heard in a voice channel and in the browser" \
+            --annotation "index:org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            "${sources[@]}"
           docker buildx imagetools inspect "$image:${{ steps.v.outputs.version }}"
           echo "digest=$(docker buildx imagetools inspect "$image:${{ steps.v.outputs.version }}" --format '{{json .Manifest}}' | jq -r .digest)" >> "$GITHUB_OUTPUT"
       - name: Where the image was built, signed by GitHub

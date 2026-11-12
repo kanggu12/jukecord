@@ -125,6 +125,30 @@ describe('the image', () => {
     assert.match(dockerfile, /find \/ -xdev -type f -perm \/6000 -exec chmod a-s \{\} \+/);
   });
 
+  it('declares what changes with a release after the steps a release takes from the cache, and labels it fully', () => {
+    // A build argument declared before a RUN is part of its cache key, so the release's version comes last.
+    const lastRun = dockerfile.lastIndexOf('\nRUN ');
+    for (const line of ['ARG VERSION=', 'ARG REVISION=', 'LABEL org.opencontainers.image.title=']) {
+      assert.ok(dockerfile.indexOf(`\n${line}`) > lastRun, `${line} comes before a RUN`);
+    }
+    // A pinned version comes after the tools its stage installs, so a bump takes those from the cache.
+    for (const [stage, pin] of [
+      ['ytdlp', 'YTDLP_VERSION'],
+      ['ffmpeg', 'FFMPEG_VERSION'],
+    ]) {
+      const from = dockerfile.indexOf(`AS ${stage}\n`);
+      assert.ok(dockerfile.indexOf('apt-get install', from) < dockerfile.indexOf(`ARG ${pin}=`, from), stage);
+    }
+    for (const label of ['url', 'documentation', 'source', 'licenses', 'version', 'revision'])
+      assert.match(dockerfile, new RegExp(`org\\.opencontainers\\.image\\.${label}=`));
+    // What only the release knows: when, and on which base; the index of both architectures gets annotations.
+    const release = read('.github/workflows/release.yml');
+    for (const label of ['created', 'base\\.name', 'base\\.digest'])
+      assert.match(release, new RegExp(`org\\.opencontainers\\.image\\.${label}=\\$\\{\\{ steps\\.v\\.outputs\\.`));
+    for (const annotation of ['description', 'source'])
+      assert.match(release, new RegExp(`--annotation "index:org\\.opencontainers\\.image\\.${annotation}=`));
+  });
+
   it('sends only what the build needs', () => {
     const ignore = read('.dockerignore');
     for (const entry of ['**', '!src/**', '!panel/**', '!scripts/**', 'panel/dist'])
