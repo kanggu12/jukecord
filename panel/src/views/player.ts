@@ -14,6 +14,7 @@ import type { Live } from '../live.ts';
 import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
+import { lightGlow } from './light.ts';
 import { lyricsOpen, toggleLyrics, whenLyricsChange } from './lyrics.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
@@ -113,6 +114,9 @@ export function ago(at: number): string {
 export function nowCard(live: Live): HTMLElement {
   const pill = h('span', { class: 'pill tone-idle' });
   const art = h('div', { class: 'art' });
+  // The glow that follows the music's low end while this browser listens (light.ts moves it; at rest it is not seen).
+  const beat = h('div', { class: 'beat', 'aria-hidden': 'true' });
+  lightGlow(beat);
   const title = h('h3', { class: 'title' });
   const meta = h('div', { class: 'meta' });
   const error = h('div', { class: 'error', role: 'status' });
@@ -191,7 +195,7 @@ export function nowCard(live: Live): HTMLElement {
     // The disc is rebuilt only when the track or the mode changes, so its spin is not restarted by every snapshot.
     const trackId = player?.track?.id ?? null;
     if (trackId !== drawnTrack || mode !== drawnMode) {
-      fill(art, disc('lg', player?.track ?? null, mode));
+      fill(art, disc('lg', player?.track ?? null, mode), beat);
       // The glow behind the disc takes the cover's colours.
       const cover = player?.track?.thumbnail;
       art.style.setProperty('--cover', cover ? cssUrl(cover) : 'none');

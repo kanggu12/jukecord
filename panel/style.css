@@ -3145,6 +3145,37 @@ button.lyric:hover {
     forced-color-adjust: none;
   }
 }
+
+/* ---- listening together: the light that moves with the music ------------------------------------------------- */
+/* While this browser listens, the glow behind the disc and the light behind the glass follow the music's low end
+   (views/light.ts sets their opacity and scale, the two things a browser changes without drawing again). At rest these
+   layers are not seen, and the look is the one above. */
+.art .beat {
+  position: absolute;
+  inset: 6%;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--cover, none) center / cover;
+  filter: blur(26px) saturate(1.6);
+  opacity: 0;
+  transform: scale(1.1);
+  will-change: opacity, transform;
+  pointer-events: none;
+}
+/* The field's extra light: the cover again (its place and blur are the field's layers', above), with no fade of its
+   own, as it follows the music frame by frame. */
+.ambient > .beat {
+  transition: none;
+}
+/* The field as a whole comes a little closer with the low end: its own layer, so that moves without drawing it. */
+.ambient {
+  will-change: transform;
+}
+@media (forced-colors: active) {
+  .art .beat {
+    display: none;
+  }
+}
 /* A guest's card: the people listening, a face and a name each, and the guest's link under them. */
 .guest-people {
   list-style: none;

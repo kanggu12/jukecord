@@ -155,3 +155,14 @@ In browser-only mode every friend needed the host's own link. A login link can n
 look and listen, or also change the music: a session of kind `friend` with that scope, never Manage Server, never
 tokens, and held to the rates and the caps on live connections as anyone but the host is. It is the host's way in, so
 it reaches every server the host has, and what a friend adds counts as the host's.
+
+## A light that follows the music, read without touching the sound
+
+The light needs the music's low end, which only WebAudio can measure. Routing the panel's audio element through an
+AudioContext (createMediaElementSource) would make the sound itself depend on WebAudio: on a phone that suspends audio
+contexts in the background, listening on a locked screen would stop. So the analyser reads a copy of the element's
+stream (captureStream), and the sound plays as it always did. Browsers without it (Safari, and Firefox, whose
+mozCaptureStream silences the element it copies) keep the glow's slow breathing. Only opacity and transform change, at
+most about 35 times a second and only when the change shows, and nothing runs, the audio context suspended, while the
+tab is hidden, the music is paused or not heard here, or motion is off: at rest the panel does exactly what it did
+before.

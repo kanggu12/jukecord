@@ -12,6 +12,7 @@ import { logoMark } from './logo.ts';
 import { collect, keep, liveWhy, mayControl, positionNow, state, t, update, watch } from './state.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { guestCard } from './views/guest.ts';
+import { lightField } from './views/light.ts';
 import { listenBar } from './views/listen.ts';
 import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
@@ -366,6 +367,11 @@ function frame(): void {
   const ambient = h('div', { class: 'ambient', 'aria-hidden': 'true' }, h('div'), h('div'));
   document.body.prepend(ambient);
   const layers = [...ambient.children] as HTMLElement[];
+  // A third layer of the same cover, unseen at rest, that brightens with the music's low end while this browser
+  // listens (light.ts); the field itself comes a little closer with it.
+  const beat = h('div', { class: 'beat' });
+  ambient.append(beat);
+  lightField(ambient, beat);
   // The cover asked for (the track playing now), the one on the top layer, and which layer is on top.
   let ambientCover: string | null = null;
   let shownCover: string | null = null;
@@ -393,6 +399,7 @@ function frame(): void {
       return;
     }
     free.style.backgroundImage = cssUrl(cover);
+    beat.style.backgroundImage = cssUrl(cover);
     // The new cover fades in over the old one, which fades out.
     free.classList.add('on');
     top.classList.remove('on');

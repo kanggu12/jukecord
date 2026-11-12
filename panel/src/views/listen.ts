@@ -13,6 +13,7 @@ import { api, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
+import { followMusic } from './light.ts';
 import { act, disc, listenerName } from './player.ts';
 import { sleepKey } from './sleep.ts';
 
@@ -29,6 +30,8 @@ export function listenBar(live: Live): HTMLElement {
   audio.hidden = true;
   audio.id = 'listen-audio';
   document.body.append(audio);
+  // The light follows this audio's low end while it plays here (light.ts).
+  followMusic(audio);
   // Opus in Ogg where the browser plays it; older Safari does not, and gets MP3.
   let format: 'opus' | 'mp3' = audio.canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'mp3';
   let loaded: string | null = null;

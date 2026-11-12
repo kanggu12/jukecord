@@ -132,6 +132,8 @@ people use most.
   without a Discord account: the player, the queue and **Listen here**, nothing to change. Its maker and Manage Server
   revoke it, which ends its guests at once. The host can also let a friend in to view or control with a one-time
   login link. Both come with a QR code drawn by the panel.
+- **A light that moves with the music.** While a browser listens, the glow behind the disc and the light behind the
+  glass follow the music's low end; it rests when the tab is hidden, the music pauses or motion is off.
 - **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
   `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
   the end of the track.
