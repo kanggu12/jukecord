@@ -106,18 +106,22 @@ store.transaction(() => {
 
 // A year of plays: the favourites more often, anyone adding them.
 const now = Date.now();
+const plays: Parameters<typeof store.history.add>[0][] = [];
+for (let play = 0; play < 10_000; play += 1) {
+  const track = tracks[Math.floor(random() ** 1.6 * tracks.length)];
+  if (!track) continue;
+  plays.push({
+    guildId: GUILD,
+    trackId: track.id,
+    addedBy: random() < 0.15 ? null : pick(PEOPLE).id,
+    playedAt: Math.round(now - random() * 365 * 86_400_000),
+    playedMs: Math.round(60_000 + random() * 240_000),
+  });
+}
+// Written oldest first, as a server writes them while it plays: the history is listed in the order it was written.
+plays.sort((a, b) => a.playedAt - b.playedAt);
 store.transaction(() => {
-  for (let play = 0; play < 10_000; play += 1) {
-    const track = tracks[Math.floor(random() ** 1.6 * tracks.length)];
-    if (!track) continue;
-    store.history.add({
-      guildId: GUILD,
-      trackId: track.id,
-      addedBy: random() < 0.15 ? null : pick(PEOPLE).id,
-      playedAt: Math.round(now - random() * 365 * 86_400_000),
-      playedMs: Math.round(60_000 + random() * 240_000),
-    });
-  }
+  for (const play of plays) store.history.add(play);
 });
 
 // A few saved playlists of different sizes.

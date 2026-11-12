@@ -134,16 +134,17 @@ const random = () => {
   seed = (seed * 1103515245 + 12345) % 2147483648;
   return seed / 2147483648;
 };
+const plays: Parameters<typeof store.history.add>[0][] = [];
 for (let day = 29; day >= 0; day -= 1) {
   const weekend = new Date(now - day * 86_400_000).getUTCDay() % 6 === 0;
-  const plays = Math.floor(random() * (weekend ? 18 : 9)) + (day % 7 === 3 ? 0 : 2);
-  for (let play = 0; play < plays; play += 1) {
+  const count = Math.floor(random() * (weekend ? 18 : 9)) + (day % 7 === 3 ? 0 : 2);
+  for (let play = 0; play < count; play += 1) {
     // Hours weighted towards the evening (in UTC+9, where the example people are).
     const hour = Math.floor(random() < 0.6 ? 10 + random() * 6 : random() * 24);
     const at = now - day * 86_400_000 - ((now / 3_600_000) % 24) * 3_600_000 + hour * 3_600_000 + random() * 3_600_000;
     const track = tracks[Math.floor(random() ** 1.6 * tracks.length)] ?? tracks[0];
     if (!track || at > now) continue;
-    store.history.add({
+    plays.push({
       guildId: GUILD,
       trackId: track.id,
       addedBy: random() < 0.15 ? null : (PEOPLE[Math.floor(random() * PEOPLE.length)]?.id ?? null),
@@ -152,6 +153,9 @@ for (let day = 29; day >= 0; day -= 1) {
     });
   }
 }
+// Written oldest first, as a server writes them while it plays: the history is listed in the order it was written.
+plays.sort((a, b) => a.playedAt - b.playedAt);
+for (const play of plays) store.history.add(play);
 
 // Saved playlists.
 store.playlists.save(
