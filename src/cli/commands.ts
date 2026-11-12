@@ -50,6 +50,29 @@ export class UsageError extends Error {
   override name = 'UsageError';
 }
 
+/** The largest file a playlist is imported from, as jukecord takes it. */
+const IMPORT_MAX = 1024 * 1024;
+
+/**
+ * The text of a playlist file, read here on this machine (jukecord gets the text): `-` reads it from the standard input,
+ * which is how ./jukecord hands over a file from where the command was typed (the command inside the container cannot
+ * see it there). `input` reads the standard input (tests give it their own).
+ */
+export function readImport(file: string, input: () => Buffer = () => fs.readFileSync(0)): string {
+  const what = file === '-' ? 'the standard input' : file;
+  let bytes: Buffer;
+  try {
+    // A file's size is known before it is read; the standard input's only after.
+    if (file !== '-' && fs.statSync(file).size > IMPORT_MAX) throw new UsageError(`${file} is larger than 1 MiB`);
+    bytes = file === '-' ? input() : fs.readFileSync(file);
+  } catch (error) {
+    if (error instanceof UsageError) throw error;
+    throw new UsageError(`${what} cannot be read`);
+  }
+  if (bytes.length > IMPORT_MAX) throw new UsageError(`${what} is larger than 1 MiB`);
+  return bytes.toString('utf8');
+}
+
 // Answers as the CLI reads them (the API's shapes, only the fields the text uses).
 interface TrackJson {
   title: string;
@@ -977,21 +1000,12 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'playlist-import': {
     name: 'playlist import',
-    usage: '<name> <file> (quote a spaced name)',
+    usage: '<name> <file> (quote a spaced name; - reads the file from the standard input)',
     summary: 'Make a playlist from a file: addresses, M3U or jukecord JSON',
     request: (words) => {
       const [name, file] = words.args;
       if (!name || !file) throw new UsageError('say the new playlist name and the file');
-      let content: string;
-      try {
-        // Read here, on this machine: jukecord gets the text.
-        if (fs.statSync(file).size > 1024 * 1024) throw new UsageError(`${file} is larger than 1 MiB`);
-        content = fs.readFileSync(file, 'utf8');
-      } catch (error) {
-        if (error instanceof UsageError) throw error;
-        throw new UsageError(`${file} cannot be read`);
-      }
-      return { body: { name, content } };
+      return { body: { name, content: readImport(file) } };
     },
     show: (answer) => {
       const result = answer as { playlist: { name: string }; tracks: number; leftOut: number };

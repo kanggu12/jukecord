@@ -207,6 +207,7 @@ front door, `./jukecord help <command>` asks the running jukecord. A few:
 ./jukecord search never gonna give you up
 ./jukecord autoplay history
 ./jukecord playlist export "Friday night" --format m3u > friday.m3u
+./jukecord playlist import "Friday again" friday.m3u
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it

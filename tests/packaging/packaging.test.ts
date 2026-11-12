@@ -329,8 +329,9 @@ describe('the front door with jukecord running', () => {
           '    case "$2" in',
           '      version) echo v2.30.0 ;;',
           '      ps) echo 0123456789ab ;;',
-          // exec [-T|-it] -e TZ=... jukecord jukecord ARGS: what follows the service and the command.
-          '      exec) shift 7; echo "inside: $*" ;;',
+          // exec [-T|-it] -e TZ=... jukecord jukecord ARGS: what follows the service and the command, and what came on
+          // its standard input when a word of it is "-".
+          '      exec) shift 7; echo "inside: $*"; case " $* " in *" - "*) cat ;; esac ;;',
           '    esac ;;',
           'esac',
           'exit 0',
@@ -350,9 +351,45 @@ describe('the front door with jukecord running', () => {
       const help = front('help', 'add');
       assert.equal(help.status, 0, help.stderr);
       assert.equal(help.stdout, 'inside: help add\n');
+      // A playlist imported from a file where the command was typed: the command inside gets its text on its standard
+      // input, the options and their values left as they are.
+      const typed = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-typed-'));
+      try {
+        fs.writeFileSync(path.join(typed, 'friday.m3u'), '#EXTM3U\nhttps://example.com/a\n');
+        const fromHere = (...words: string[]) =>
+          spawnSync('bash', [path.resolve('jukecord'), ...words], {
+            encoding: 'utf8',
+            cwd: typed,
+            env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+          });
+        const imported = fromHere('playlist', 'import', '--guild', '1234', 'Friday night', 'friday.m3u', '--json');
+        assert.equal(imported.status, 0, imported.stderr);
+        assert.equal(
+          imported.stdout,
+          'inside: playlist import --guild 1234 Friday night - --json\n#EXTM3U\nhttps://example.com/a\n',
+        );
+        // A file that is not there is a typing mistake here; nothing reaches the command.
+        const missing = fromHere('playlist', 'import', 'Friday', 'gone.m3u');
+        assert.equal(missing.status, 2);
+        assert.match(missing.stderr, /gone\.m3u is not there/);
+        assert.equal(missing.stdout, '');
+        // The standard input given already, and every other playlist command: passed on as they are.
+        assert.equal(fromHere('playlist', 'export', 'Friday').stdout, 'inside: playlist export Friday\n');
+      } finally {
+        fs.rmSync(typed, { recursive: true, force: true });
+      }
     } finally {
       fs.rmSync(bin, { recursive: true, force: true });
     }
+  });
+
+  it("reads the options that take a value as the jukecord command does, to find an import's file", () => {
+    // The front door's list and the command's own (src/cli/main.ts VALUED) must be the same words.
+    const door = /valued=' ([^']*) '/.exec(read('jukecord'))?.[1]?.split(' ') ?? [];
+    const own = /const VALUED = new Set\(\[([^\]]*)\]\)/.exec(read('src/cli/main.ts'))?.[1] ?? '';
+    const words = [...own.matchAll(/'([a-z-]+)'/g)].map((match) => `--${match[1]}`);
+    assert.ok(words.length > 5);
+    assert.deepEqual([...door].sort(), [...words].sort());
   });
 });
 

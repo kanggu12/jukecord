@@ -4,10 +4,13 @@
  * why, and the turns a list takes.
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { type ActionContext, ActionError, Actions } from '../../src/app/actions.ts';
 import { writePlaylist } from '../../src/app/playlist-files.ts';
-import { COMMANDS } from '../../src/cli/commands.ts';
+import { COMMANDS, readImport } from '../../src/cli/commands.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
@@ -253,5 +256,35 @@ describe('playlists in and out over HTTP and in the CLI', () => {
       COMMANDS['playlist-import'].show({ playlist: { name: 'Mix' }, tracks: 12, leftOut: 2 }),
       'Imported Mix: 12 tracks, 2 left out',
     );
+  });
+
+  it("reads an import's file here, or from the standard input with -, at most 1 MiB", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-import-'));
+    try {
+      const file = path.join(dir, 'friday.m3u');
+      fs.writeFileSync(file, '#EXTM3U\nhttps://example.com/a\n');
+      assert.equal(readImport(file), '#EXTM3U\nhttps://example.com/a\n');
+      // What ./jukecord hands over on the standard input, from where the command was typed.
+      assert.equal(
+        readImport('-', () => Buffer.from('https://example.com/b\n')),
+        'https://example.com/b\n',
+      );
+      assert.throws(
+        () => readImport('-', () => Buffer.alloc(1024 * 1024 + 1)),
+        /the standard input is larger than 1 MiB/,
+      );
+      fs.writeFileSync(file, Buffer.alloc(1024 * 1024 + 1));
+      assert.throws(() => readImport(file), /friday\.m3u is larger than 1 MiB/);
+      assert.throws(() => readImport(path.join(dir, 'gone.m3u')), /gone\.m3u cannot be read/);
+      assert.throws(
+        () =>
+          readImport('-', () => {
+            throw new Error('EAGAIN');
+          }),
+        /the standard input cannot be read/,
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
