@@ -236,4 +236,6 @@ one not prepared yet `409`.
 
 These three need no login. `/metrics` answers only a scraper beside jukecord (the same machine, cluster or local
 network): a request that came through a reverse proxy (it carries `X-Forwarded-For`) or from a public address gets a
-404, so the version and the counts are not given to the internet.
+404, so the version and the counts are not given to the internet. A proxy that adds no `X-Forwarded-For` (nginx
+without `proxy_set_header`, for one) cannot be told from a scraper beside jukecord; the examples in the installation
+guide answer 404 for `/metrics` at the proxy itself.

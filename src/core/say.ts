@@ -59,9 +59,9 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['the time zone offset is -720 to 840 minutes', '시간대 차이는 -720분부터 840분까지'],
   [
     'jukecord runs without a Discord bot here, so it cannot join voice',
-    '디스코드 봇 없이 도는 중이라 음성 채널에 들어갈 수 없음',
+    '디스코드 봇 없이 실행 중이라 음성 채널에 들어갈 수 없음',
   ],
-  ['jukecord runs without a Discord bot here, so there are no roles', '디스코드 봇 없이 도는 중이라 역할이 없음'],
+  ['jukecord runs without a Discord bot here, so there are no roles', '디스코드 봇 없이 실행 중이라 역할이 없음'],
   [
     /^"(.+)" is not a time in the track \(examples: 83, 1:23, 1m23s\)$/,
     '곡 안의 시간이 아님: "$1"(예: 83, 1:23, 1m23s)',
@@ -98,11 +98,11 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['jukecord has as many live connections as it allows', 'jukecord의 실시간 연결이 가득 참'],
   [
     'too many live connections for this login; close a tab or two',
-    '이 로그인의 실시간 연결이 너무 많음: 탭을 몇 개 닫으세요',
+    '이 로그인의 실시간 연결이 너무 많음: 탭을 한두 개 닫으세요',
   ],
   [
     'too many live connections from this address; close a tab or two',
-    '이 주소의 실시간 연결이 너무 많음: 탭을 몇 개 닫으세요',
+    '이 주소의 실시간 연결이 너무 많음: 탭을 한두 개 닫으세요',
   ],
   ['too many failed logins; wait ten minutes', '로그인 실패가 너무 많음: 10분 뒤 다시 시도하세요'],
   // The reasons a track could not be got (core/reasons.ts).

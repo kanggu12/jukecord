@@ -36,8 +36,11 @@ setInterval(() => {
   }
   const still = now - movedAt;
   if (still < workerData.limitMs) return;
-  fs.writeSync(2, 'jukecord: the main thread has not answered for ' + Math.round(still / 1000) +
-    ' s; ending the process so that it is started again\\n');
+  // The line is for the log; a stderr that cannot be written to (closed, full) must not keep the process from ending.
+  try {
+    fs.writeSync(2, 'jukecord: the main thread has not answered for ' + Math.round(still / 1000) +
+      ' s; ending the process so that it is started again\\n');
+  } catch {}
   process.kill(process.pid, 'SIGKILL');
 }, workerData.checkMs);
 `;
