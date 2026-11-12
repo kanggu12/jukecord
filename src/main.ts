@@ -29,6 +29,7 @@ import { Resolver } from './media/resolver.ts';
 import { YtDlp } from './media/ytdlp.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
+import { startWatchdog } from './watchdog.ts';
 import { Auth, ensureHostToken } from './web/auth.ts';
 import { Presenter } from './web/present.ts';
 import { createWebServer, type WebServer } from './web/server.ts';
@@ -268,6 +269,9 @@ async function main(): Promise<number> {
 
   await web.listen();
   log.info('the panel and the API are up', { listen: `${config.host}:${config.port}`, open: publicUrl });
+  // A main thread that stops answering for half a minute ends the process, so the restart policy starts it again
+  // (Docker restarts what exits, not what hangs).
+  startWatchdog(30_000);
 
   if (bot) {
     // A stop during the login ends the login too; that is the stop, not a failure to start.

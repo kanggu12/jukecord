@@ -5,7 +5,7 @@
  * playing) and what browsers that play Ogg Opus fetch. Loudness is evened out once, when the file is made.
  */
 import { spawn } from 'node:child_process';
-import { lastLines, ProcessError, run, watch } from './process.ts';
+import { childEnv, lastLines, ProcessError, run, watch } from './process.ts';
 import { parseProgress, type YtDlp, ytdlpFailure } from './ytdlp.ts';
 
 // The sound of every cached file: loudness -14 LUFS (streaming services' level) with true peaks under -1 dB and a
@@ -106,6 +106,7 @@ export class Ffmpeg {
       ['-hide_banner', '-nostats', '-loglevel', 'info', '-nostdin', '-i', 'pipe:0', ...ENCODE, '-y', outFile],
       {
         stdio: ['pipe', 'ignore', 'pipe'],
+        env: childEnv(),
       },
     );
     // A broken pipe when ffmpeg stops early is expected; the exit codes below say what really happened.
@@ -139,6 +140,7 @@ export class Ffmpeg {
       ['-hide_banner', '-nostats', '-loglevel', 'info', '-nostdin', '-i', inFile, ...ENCODE, '-y', outFile],
       {
         stdio: ['ignore', 'ignore', 'pipe'],
+        env: childEnv(),
       },
     );
     const result = await watch(encode, 'ffmpeg', { signal, timeoutMs });
@@ -207,7 +209,7 @@ export class Ffmpeg {
         '-y',
         outFile,
       ],
-      { stdio: ['ignore', 'ignore', 'pipe'] },
+      { stdio: ['ignore', 'ignore', 'pipe'], env: childEnv() },
     );
     const result = await watch(convert, 'ffmpeg', { signal, timeoutMs });
     if (result.code !== 0)

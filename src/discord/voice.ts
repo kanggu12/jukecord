@@ -37,6 +37,7 @@ import type { PlayerOutput, PreparedMedia } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
+import { childEnv } from '../media/process.ts';
 
 // Below this offset the file is played from its start: the 3 s fade-in at the top covers the difference.
 const FROM_START_MS = 50;
@@ -108,6 +109,8 @@ export class VoiceOutput implements PlayerOutput {
       // ffmpeg cuts from the offset and writes Ogg Opus to its stdout.
       const child = spawn(this.ffmpeg.program, this.ffmpeg.seekArgs(media.file, offsetMs), {
         stdio: ['ignore', 'pipe', 'ignore'],
+        // Not the bot's environment: its token stays in this process.
+        env: childEnv(),
       });
       this.process = child;
       this.stream = child.stdout;

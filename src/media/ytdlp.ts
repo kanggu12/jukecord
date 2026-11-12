@@ -10,7 +10,7 @@ import fs from 'node:fs';
 // YouTube's bot check is shared with the reasons people are shown (core/reasons.ts).
 import { BOT_CHECK } from '../core/reasons.ts';
 import type { NewTrack } from '../core/types.ts';
-import { lastLines, ProcessError, type RunOptions, type RunResult, run, watch } from './process.ts';
+import { childEnv, lastLines, ProcessError, type RunOptions, type RunResult, run, watch } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
 
 // WebM/Opus is what YouTube serves best and ffmpeg reads it from a pipe; anything else as a fallback.
@@ -241,7 +241,11 @@ export class YtDlp {
       url,
     ];
     // Its own process group, so a kill ends what yt-dlp started too (see process.ts).
-    const child = spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const child = spawn(this.options.binary, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+      env: childEnv(),
+    });
     const watching = watch(child, 'yt-dlp', { signal, timeoutMs });
     // Progress lines come on stdout when the audio goes to a file; both streams are read, line by line.
     if (onProgress) {
@@ -288,6 +292,6 @@ export class YtDlp {
       url,
     ];
     // Its own process group, so a kill ends what yt-dlp started too (ffmpeg, for sites that stream in pieces).
-    return spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    return spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: childEnv() });
   }
 }

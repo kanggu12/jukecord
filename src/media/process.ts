@@ -155,6 +155,20 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
 }
 
 /**
+ * The environment for a child program (yt-dlp, ffmpeg, and what yt-dlp starts in turn): the process's own, without
+ * jukecord's settings. Those include the bot's token and the OAuth secret, which no child needs and which a child fed
+ * with what a site sends could otherwise be made to read. Everything else (where programs are, the language, the time
+ * zone, proxies, certificates) is passed on as it is, since yt-dlp and ffmpeg may need any of it.
+ */
+export function childEnv(from: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(from)) {
+    if (value !== undefined && !name.startsWith('JUKECORD_')) env[name] = value;
+  }
+  return env;
+}
+
+/**
  * Runs a program to the end and returns what it printed. A non-zero exit is an error whose message carries the last
  * lines of stderr ("ERROR: Video unavailable" from yt-dlp, say).
  */
@@ -162,7 +176,7 @@ export async function run(command: string, args: readonly string[], options: Run
   const name = command.split('/').at(-1) ?? command;
   // stdin closed: none of these programs needs input, and ffmpeg would otherwise wait for a keypress on a terminal.
   // Its own process group, so a kill ends whatever it started as well (see watch).
-  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: childEnv() });
   const result = await watch(child, name, options);
   if (result.code !== 0) {
     throw new ProcessError(

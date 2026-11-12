@@ -17,6 +17,7 @@ import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
+import { isPrivateAddress } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import { MediaCache } from '../media/cache.ts';
 import { StoreError } from '../store/store.ts';
@@ -392,9 +393,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const ready = options.ready();
     return reply.code(ready ? 200 : 503).send({ ready, discord: options.discordReady() });
   });
-  app.get('/metrics', async (_request, reply) =>
-    reply.type('text/plain; version=0.0.4').send(metrics(options, hub, responses)),
-  );
+  // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), not for the
+  // internet: a request that came through the reverse proxy (it carries X-Forwarded-For) or from a public address
+  // gets the 404 any unknown path gets, so the version and the counts are not handed to everyone.
+  app.get('/metrics', async (request, reply) => {
+    const peer = request.socket.remoteAddress ?? '';
+    if (request.headers['x-forwarded-for'] !== undefined || !isPrivateAddress(peer)) {
+      return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
+    }
+    return reply.type('text/plain; version=0.0.4').send(metrics(options, hub, responses));
+  });
 
   // Anything else: the panel's page for a browser asking for a page (the panel draws /stats, /login ... itself), a
   // JSON 404 for the rest.

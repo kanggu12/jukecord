@@ -253,6 +253,15 @@ describe('the HTTP API', () => {
     assert.match(metrics, /^jukecord_http_responses_total\{class="2xx"\} \d+$/m);
   });
 
+  it('keeps the metrics from the internet: nothing through the proxy or from a public address', async () => {
+    // From a machine beside jukecord (the cluster, the same network): the numbers.
+    assert.equal((await inject({ method: 'GET', url: '/metrics', remoteAddress: '10.1.2.3' })).statusCode, 200);
+    // Through the reverse proxy, which adds X-Forwarded-For, or from a public address: an unknown path.
+    const proxied = await inject({ method: 'GET', url: '/metrics', headers: { 'x-forwarded-for': '203.0.113.9' } });
+    assert.equal(proxied.statusCode, 404);
+    assert.equal((await inject({ method: 'GET', url: '/metrics', remoteAddress: '203.0.113.9' })).statusCode, 404);
+  });
+
   it('sends security headers, and no caching of API answers', async () => {
     const page = await inject({
       method: 'GET',

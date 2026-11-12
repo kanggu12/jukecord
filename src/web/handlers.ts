@@ -62,6 +62,20 @@ function who(caller: Caller | null): Caller {
   return caller;
 }
 
+// How many backups stay in the data folder: a week of daily ones. Each is a whole copy of the database, so without a
+// limit they would fill the volume (the front door copies each one out, and Kubernetes users keep theirs there).
+export const KEEP_BACKUPS = 7;
+
+/** Removes all but the newest `keep` backups (their names sort by time) from the folder. */
+export function pruneBackups(dir: string, keep: number): void {
+  const backups = fs
+    .readdirSync(dir)
+    .filter((name) => /^jukecord-.+\.db$/.test(name))
+    .sort();
+  for (const name of backups.slice(0, Math.max(0, backups.length - keep)))
+    fs.rmSync(path.join(dir, name), { force: true });
+}
+
 const OK = { ok: true as const };
 
 /** Every operation's handler; a missing one fails the type check. */
@@ -199,7 +213,9 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const file = path.join(deps.backupDir, `jukecord-${stamp}.db`);
     deps.store.backup(file);
-    return { file, bytes: fs.statSync(file).size };
+    const bytes = fs.statSync(file).size;
+    pruneBackups(deps.backupDir, KEEP_BACKUPS);
+    return { file, bytes };
   },
   doctor: async ({ deps }) => {
     const report = await deps.doctor();
