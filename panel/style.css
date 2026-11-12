@@ -2850,6 +2850,19 @@ kbd {
     padding: 0;
   }
 }
+/* Two columns at most 1100 px wide and short of height, with a mouse (a laptop's 1024 by 768): the queue's tools show
+   as icons, named in their tooltips, so they stay on the title's line above the search and the queue under them still
+   shows three rows; with their words (Take turns among them) they took a line of their own, and with a title of two
+   lines playing it showed two. A tablet of that size has one column, and its words. */
+@media (width > 900px) and (width <= 1100px) and (height > 720px) and (max-height: 800px) and (pointer: fine) {
+  .card-head .tools:has(> .tools-more) .key:not(.table-key):has(.label) .label {
+    display: none;
+  }
+  .card-head .tools:has(> .tools-more) .key.sm:not(.table-key):has(.label) {
+    width: var(--control-sm);
+    padding: 0;
+  }
+}
 /* Shorter still (a 1920 by 1080 screen at 150 % with the browser's bars, about 1280 by 610): the gaps, the cards' heads,
    the add card and the playing card's rows tighten too, so the queue still shows three whole rows (it showed two). */
 @media (width > 1100px) and (max-height: 640px) and (pointer: fine) {
