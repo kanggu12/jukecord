@@ -134,9 +134,9 @@ people use most.
   again, one or all.
 - **Playlists in and out.** A saved playlist as a text file of addresses, an M3U or jukecord's own file, and a playlist
   made from any of those or from a pasted list of addresses or song names.
-- **Links from Deezer, Spotify and Apple Music.** Their tracks, albums and playlists are found on YouTube (the
-  recording of the same length, official audio first) and queued in order, the first playing while the rest are
-  found.
+- **Links from Deezer, Spotify and Apple Music.** A Deezer track, album or playlist, a Spotify track (albums and
+  playlists with the host's Spotify app) or an Apple Music track is found on YouTube (the recording of the same
+  length, official audio first) and queued in order, the first playing while the rest are found.
 
 ### Light on a small machine
 
