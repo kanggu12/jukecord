@@ -86,10 +86,13 @@ fingers.
 **What leaves my computer?**
 jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. For lyrics it asks
 [LRCLIB](https://lrclib.net), sending the song's title, artist, album and length, only for a track that is playing when
-someone opens its lyrics, once per track (`JUKECORD_LYRICS=off` turns it off). Every request jukecord makes, yt-dlp's,
-LRCLIB's and the covers', goes to public addresses only. It fetches each track's picture once from its site and keeps
-it with the track, and the panel shows it from jukecord; people's pictures come
-from Discord.
+someone opens its lyrics, once per track (`JUKECORD_LYRICS=off` turns it off). Searching sends YouTube the words typed;
+autoplay's "related" mode asks YouTube for the mix of the track playing (its "history" mode asks nobody). A Deezer,
+Spotify or Apple Music link is read from that service and its tracks searched on YouTube by artist and title;
+`JUKECORD_LINK_SERVICES` turns each of those services off. Every request jukecord makes, yt-dlp's, LRCLIB's, the covers'
+and the music services', goes to public addresses only. It fetches each track's picture once from its site and keeps it
+with the track, and the panel shows it from jukecord (a search's results, not tracks yet, from YouTube); people's
+pictures come from Discord.
 [Your data](../README.md#your-data) says what it keeps, and where.
 
 **Can people see servers they are not in?**

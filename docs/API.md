@@ -72,6 +72,11 @@ and changes are answered with `503` (`busy`) and `Retry-After`, until it has cau
 the browsers it logged in with a link) is held to neither rate, and its changes go through while jukecord is behind;
 its audio waits like everyone's, as sending audio is the work that can wait.
 
+`search`, which starts yt-dlp, is held to a rate of its own as well: one a second with five at once, counted as reads
+are (per person, or per address without a login), the host apart.
+
+Bodies are at most 64 KiB, but for `playlist-import`, which takes a file of up to 1 MiB.
+
 A request must arrive whole within 30 s, its headers within 15 s; a slower one is answered `408` and its connection
 closed. Sending an answer has no time limit while the reader takes it (audio to a slow line takes as long as it takes),
 but a connection on which nothing moves either way for two minutes is closed; a WebSocket is not (it is pinged every
@@ -110,6 +115,7 @@ playlist) so a program does not need to ask again.
 | `stop` Stop playing; the queue stays | `POST /api/v1/guilds/{guild}/player/stop` | control | `jukecord stop` | `/stop` |
 | `lyrics` The lyrics of the track playing, timed when they can be (from LRCLIB, kept once found) | `GET /api/v1/guilds/{guild}/lyrics` | read | `jukecord lyrics` | `/lyrics` |
 | `stop-after` Stop when the current track ends (on), or play on after it (off); the queue stays | `PUT /api/v1/guilds/{guild}/player/stop-after` | control | `jukecord stop-after` | `/stop` |
+| `autoplay` When the queue runs out: nothing, a track from this server's plays, or one related to the last track | `PUT /api/v1/guilds/{guild}/player/autoplay` | control | `jukecord autoplay` | `/autoplay` |
 
 ### Queue
 
@@ -124,6 +130,7 @@ playlist) so a program does not need to ask again.
 | `shuffle` Shuffle the queue | `POST /api/v1/guilds/{guild}/queue/shuffle` | control | `jukecord shuffle` | `/shuffle` |
 | `dedupe` Remove later copies of tracks queued twice | `POST /api/v1/guilds/{guild}/queue/dedupe` | control | `jukecord dedupe` | `/dedupe` |
 | `turns-now` Put the queue in turns once: each person's next track in turn | `POST /api/v1/guilds/{guild}/queue/turns` | control | `jukecord turns now` | `/turns now` |
+| `search` What YouTube finds for some words, to pick from before adding | `GET /api/v1/guilds/{guild}/search` | control | `jukecord search` | `/play` |
 
 ### History and statistics
 
@@ -132,6 +139,10 @@ playlist) so a program does not need to ask again.
 | `history` Played tracks, newest first | `GET /api/v1/guilds/{guild}/history` | read | `jukecord history` | `/history` |
 | `stats` Listening figures: plays per day and hour, most played tracks, who added most | `GET /api/v1/guilds/{guild}/stats` | read | `jukecord stats` | `/stats` |
 | `wrapped` The server's year (or a month, or the last 12 months) in music: totals, top five tracks and people, moments | `GET /api/v1/guilds/{guild}/wrapped` | read | `jukecord wrapped` | `/wrapped` |
+| `likes` The tracks you liked, newest first | `GET /api/v1/guilds/{guild}/likes` | read | `jukecord likes` | `/likes show` |
+| `like` Like a track this server is playing, has queued or played (the DJ role is not needed) | `PUT /api/v1/guilds/{guild}/likes/{track}` | control | `jukecord like` | `/like` |
+| `unlike` Take a like back | `DELETE /api/v1/guilds/{guild}/likes/{track}` | control | `jukecord unlike` | `/likes remove` |
+| `likes-add` Add every track you liked to the queue, newest first | `POST /api/v1/guilds/{guild}/likes/queue` | control | `jukecord likes add` | `/likes add` |
 
 ### Playlists
 
@@ -142,6 +153,8 @@ playlist) so a program does not need to ask again.
 | `playlist-load` Add a saved playlist to the queue | `POST /api/v1/guilds/{guild}/playlists/{name}/load` | control | `jukecord playlist load` | `/playlist load` |
 | `playlist-rename` Rename a saved playlist | `PATCH /api/v1/guilds/{guild}/playlists/{name}` | control | `jukecord playlist rename` | `/playlist rename` |
 | `playlist-delete` Delete a saved playlist | `DELETE /api/v1/guilds/{guild}/playlists/{name}` | control | `jukecord playlist delete` | `/playlist delete` |
+| `playlist-export` A saved playlist as a file: addresses (text), M3U, or jukecord's JSON | `GET /api/v1/guilds/{guild}/playlists/{name}/export` | read | `jukecord playlist export` | `/playlist export` |
+| `playlist-import` Make a playlist from a file (addresses, M3U or jukecord JSON) or a pasted list, under a new name | `POST /api/v1/guilds/{guild}/playlists/import` | control | `jukecord playlist import` | `/playlist import` |
 
 ### Voice
 

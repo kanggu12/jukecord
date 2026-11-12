@@ -11,7 +11,7 @@
  * flags the old code used to tell its own seeks apart from real changes.
  */
 import type { Logger } from '../log.ts';
-import type { HistoryRepository, PlayerStateRepository, RepeatMode } from '../store/store.ts';
+import type { AutoplayMode, HistoryRepository, PlayerStateRepository, RepeatMode } from '../store/store.ts';
 import type { Bus } from './bus.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { QueueService } from './queue.ts';
@@ -92,6 +92,8 @@ export interface PlayerSnapshot {
   readonly waiting: boolean;
   /** Whether the player stops when the current track ends (see Player.setStopAfter). */
   readonly stopAfter: boolean;
+  /** What happens when the queue runs out (see Player.setAutoplay). */
+  readonly autoplay: AutoplayMode;
 }
 
 export interface PlayerOptions {
@@ -162,6 +164,8 @@ export class Player {
   // See PlayerSnapshot.notice: set by the player itself, cleared by any change a person makes.
   private notice: string | null = null;
   private repeat: RepeatMode = 'off';
+  // What happens when the queue runs out; the autoplay module (app/autoplay.ts) reads it and does the work.
+  private autoplay: AutoplayMode = 'off';
   // Download progress of the loading track, and the timer that sends it at most four times a second.
   private progress: number | null = null;
   // Whether the loading track's fetch waits for its place among every server's fetches (see load).
@@ -246,6 +250,7 @@ export class Player {
       notice: this.notice,
       waiting: this.status === 'loading' && this.waiting,
       stopAfter: this.stopAfter,
+      autoplay: this.autoplay,
     };
   }
 
@@ -460,6 +465,17 @@ export class Player {
   /** Writes the current position, so a restart comes back here. Called on shutdown. */
   checkpoint(): void {
     this.persist();
+  }
+
+  /**
+   * Sets what happens when the queue runs out: nothing ('off'), or a track picked by autoplay ('history', 'related').
+   * The player only keeps and tells the choice, like the repeat mode; app/autoplay.ts picks the tracks.
+   */
+  setAutoplay(mode: AutoplayMode): boolean {
+    if (mode === this.autoplay) return false;
+    this.autoplay = mode;
+    this.emit();
+    return true;
   }
 
   /**
@@ -837,6 +853,7 @@ export class Player {
       status: this.status === 'idle' ? 'idle' : this.status === 'playing' ? 'playing' : 'paused',
       positionMs: this.position(),
       repeat: this.repeat,
+      autoplay: this.autoplay,
     });
   }
 

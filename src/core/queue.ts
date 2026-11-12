@@ -7,7 +7,7 @@
 import type { QueueRepository } from '../store/store.ts';
 import type { Bus } from './bus.ts';
 import { addInTurns, inTurns, type Playing } from './turns.ts';
-import type { QueueItem } from './types.ts';
+import { AUTOPLAY, type QueueItem } from './types.ts';
 
 /** Where new tracks go: after the last one, right after the one playing, or at a position. */
 export type InsertAt = 'end' | 'next' | number;
@@ -141,35 +141,72 @@ export class QueueService {
    * Adds tracks of one person in turns (see core/turns.ts), one after another: each goes after the last track of the
    * first round in which the person has none yet. `playing` says whose track plays (their turn under way). Returns the
    * new items with the places they ended up in; one change for all of them.
+   *
+   * Autoplay's tracks are nobody's turn: the rounds are people's tracks alone, and a track autoplay queued stays where
+   * it is among them, after the people's tracks before it and before a new track placed after those (people's tracks go
+   * before autoplay's, which only fill a queue that ran out).
    */
   addInTurns(guildId: string, trackIds: readonly number[], addedBy: string | null, playing: Playing): QueueItem[] {
     if (trackIds.length === 0) return [];
     const before = this.repo.owners(guildId);
+    // People's items, in order, and autoplay's by the people's item they follow (-1: before them all).
+    const people: { id: number; addedBy: string | null }[] = [];
+    const fillers = new Map<number, number[]>();
+    for (const item of before) {
+      if (item.addedBy !== AUTOPLAY) {
+        people.push(item);
+        continue;
+      }
+      const after = people.length - 1;
+      fillers.set(after, [...(fillers.get(after) ?? []), item.id]);
+    }
     // In at the end first (one insert), then the whole order written once with each new item in its turn.
     const items = this.repo.insert(guildId, trackIds, Number.MAX_SAFE_INTEGER, addedBy);
-    const order = addInTurns(
-      before.map((item) => item.addedBy),
+    const order: number[] = [];
+    // The people's item last written: the autoplay items after it come before the next people's item.
+    let last = -1;
+    const flush = () => {
+      for (const id of fillers.get(last) ?? []) order.push(id);
+      fillers.delete(last);
+    };
+    for (const index of addInTurns(
+      people.map((item) => item.addedBy),
       playing,
       addedBy,
       items.length,
-    ).flatMap((index) => {
+    )) {
       // An item already there by its index, a new one as -(its place among the new ones + 1).
-      const id = index >= 0 ? before[index]?.id : items[-index - 1]?.id;
-      return id === undefined ? [] : [id];
-    });
+      if (index >= 0) {
+        flush();
+        const id = people[index]?.id;
+        if (id !== undefined) order.push(id);
+        last = index;
+      } else {
+        const id = items[-index - 1]?.id;
+        if (id !== undefined) order.push(id);
+      }
+    }
+    flush();
     this.repo.reorder(guildId, order);
     this.changed(guildId);
     const places = new Map(order.map((id, index) => [id, index]));
     return items.map((item) => ({ ...item, position: places.get(item.id) ?? item.position }));
   }
 
-  /** Puts the whole queue in turns once (see core/turns.ts) and returns how many tracks changed place. */
+  /**
+   * Puts the whole queue in turns once (see core/turns.ts) and returns how many tracks changed place. Autoplay's tracks
+   * are nobody's turn: they go after people's, in their order.
+   */
   takeTurns(guildId: string, playing: Playing): number {
     const items = this.repo.owners(guildId);
-    const order = inTurns(
-      items.map((item) => item.addedBy),
-      playing,
-    ).flatMap((index) => (items[index] ? [items[index].id] : []));
+    const people = items.filter((item) => item.addedBy !== AUTOPLAY);
+    const order = [
+      ...inTurns(
+        people.map((item) => item.addedBy),
+        playing,
+      ).flatMap((index) => (people[index] ? [people[index].id] : [])),
+      ...items.filter((item) => item.addedBy === AUTOPLAY).map((item) => item.id),
+    ];
     const moved = order.filter((id, index) => items[index]?.id !== id).length;
     // Already in turns: nothing written, and no change for the panels.
     if (moved === 0) return 0;

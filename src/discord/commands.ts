@@ -62,6 +62,15 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   'person-limit': '/limit',
   volume: '/volume',
   sound: '/sound',
+  // Discord's suggestions under /play's and /add's input, as it is typed (see Bot.onAutocomplete).
+  search: '/play',
+  likes: '/likes show',
+  like: '/like',
+  unlike: '/likes remove',
+  'likes-add': '/likes add',
+  autoplay: '/autoplay',
+  'playlist-export': '/playlist export',
+  'playlist-import': '/playlist import',
 };
 
 // One command: English name and description, Korean name and description.
@@ -77,7 +86,7 @@ function command(name: string, description: string, koName: string, koDescriptio
   );
 }
 
-// The "what to play" option shared by /add and /play.
+// The "what to play" option shared by /add and /play, with what a search finds suggested as the words are typed.
 function inputOption(option: SlashCommandStringOption): SlashCommandStringOption {
   return option
     .setName('input')
@@ -85,7 +94,8 @@ function inputOption(option: SlashCommandStringOption): SlashCommandStringOption
     .setNameLocalizations({ ko: '입력' })
     .setDescriptionLocalizations({ ko: '링크(유튜브, 사운드클라우드, 재생목록 등) 또는 검색어' })
     .setRequired(true)
-    .setMaxLength(500);
+    .setMaxLength(500)
+    .setAutocomplete(true);
 }
 
 // A saved playlist's name, with suggestions as people type.
@@ -284,6 +294,42 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setNameLocalizations({ ko: '지우기' })
           .setDescriptionLocalizations({ ko: '플레이리스트 지우기' })
           .addStringOption(playlistName),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('export')
+          .setDescription('A saved playlist as a file')
+          .setNameLocalizations({ ko: '내보내기' })
+          .setDescriptionLocalizations({ ko: '저장한 플레이리스트를 파일로 받기' })
+          .addStringOption(playlistName)
+          .addStringOption((option) =>
+            option
+              .setName('format')
+              .setDescription('The kind of file (default: addresses, one per line)')
+              .setNameLocalizations({ ko: '형식' })
+              .setDescriptionLocalizations({ ko: '파일 형식(기본: 한 줄에 주소 하나)' })
+              .addChoices(
+                { name: 'Addresses (text)', value: 'text', name_localizations: { ko: '주소 목록(텍스트)' } },
+                { name: 'M3U', value: 'm3u', name_localizations: { ko: 'M3U' } },
+                { name: 'jukecord (JSON)', value: 'json', name_localizations: { ko: 'jukecord(JSON)' } },
+              ),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('import')
+          .setDescription('Make a playlist from a file: addresses, M3U or jukecord JSON')
+          .setNameLocalizations({ ko: '가져오기' })
+          .setDescriptionLocalizations({ ko: '파일로 플레이리스트 만들기: 주소 목록, M3U, jukecord JSON' })
+          .addStringOption((option) => playlistName(option).setAutocomplete(false))
+          .addAttachmentOption((option) =>
+            option
+              .setName('file')
+              .setDescription('The file (up to 1 MiB)')
+              .setNameLocalizations({ ko: '파일' })
+              .setDescriptionLocalizations({ ko: '파일(1MiB까지)' })
+              .setRequired(true),
+          ),
       ),
     command(
       'join',
@@ -538,6 +584,80 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           { name: 'Brighter', value: 'bright', name_localizations: { ko: '밝게' } },
           { name: 'Softer at night', value: 'night', name_localizations: { ko: '밤에 부드럽게' } },
         ),
+    ),
+    command(
+      'like',
+      'Like the track playing now (your likes are yours alone)',
+      '좋아요',
+      '지금 곡에 좋아요(내 목록에만 남음)',
+    ),
+    command('likes', 'The tracks you liked', '좋아요목록', '내가 좋아요 한 곡')
+      .addSubcommand((sub) =>
+        sub
+          .setName('show')
+          .setDescription('Show the tracks you liked, newest first')
+          .setNameLocalizations({ ko: '보기' })
+          .setDescriptionLocalizations({ ko: '좋아요 한 곡 보기(최근 것부터)' })
+          .addIntegerOption((option) =>
+            option
+              .setName('page')
+              .setDescription('Page')
+              .setNameLocalizations({ ko: '페이지' })
+              .setDescriptionLocalizations({ ko: '페이지' })
+              .setMinValue(1),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Add every track you liked to the queue')
+          .setNameLocalizations({ ko: '모두넣기' })
+          .setDescriptionLocalizations({ ko: '좋아요 한 곡을 모두 대기열에 넣기' })
+          .addStringOption((option) =>
+            option
+              .setName('where')
+              .setDescription('Where in the queue (default: the end)')
+              .setNameLocalizations({ ko: '위치' })
+              .setDescriptionLocalizations({ ko: '대기열 어디에(기본: 맨 뒤)' })
+              .addChoices(
+                { name: 'At the end', value: 'end', name_localizations: { ko: '맨 뒤' } },
+                { name: 'Next', value: 'next', name_localizations: { ko: '다음 곡으로' } },
+              ),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('Take back a like')
+          .setNameLocalizations({ ko: '빼기' })
+          .setDescriptionLocalizations({ ko: '좋아요 취소' })
+          .addIntegerOption((option) =>
+            option
+              .setName('position')
+              .setDescription('Its number in /likes show')
+              .setNameLocalizations({ ko: '번호' })
+              .setDescriptionLocalizations({ ko: '/좋아요목록 보기 의 번호' })
+              .setRequired(true)
+              .setMinValue(1),
+          ),
+      ),
+    command('autoplay', 'What plays when the queue runs out', '자동재생', '대기열이 비었을 때 틀 곡').addStringOption(
+      (option) =>
+        option
+          .setName('mode')
+          .setDescription('Off, a track from this server’s plays, or one related to the last track')
+          .setNameLocalizations({ ko: '방식' })
+          .setDescriptionLocalizations({ ko: '끄기, 이 서버에서 들은 곡, 마지막 곡과 비슷한 곡' })
+          .setRequired(true)
+          .addChoices(
+            { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+            { name: "This server's plays", value: 'history', name_localizations: { ko: '이 서버에서 들은 곡' } },
+            {
+              name: 'Related to the last track',
+              value: 'related',
+              name_localizations: { ko: '마지막 곡과 비슷한 곡' },
+            },
+          ),
     ),
   ];
   return commands.map((builder) => builder.toJSON());

@@ -9,7 +9,7 @@ import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/act
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
 import type { Sound } from '../core/sound.ts';
-import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
+import { AUTOPLAY, type HistoryEntry, type LikedTrack, type Playlist, type QueueItem } from '../core/types.ts';
 import type { LyricsAnswer } from '../media/lyrics.ts';
 import type { ListenLinkRow } from '../store/store.ts';
 import { formatDuration } from '../util/time.ts';
@@ -100,6 +100,11 @@ const TEXT = {
     en: (votes: number, needed: number) => `Votes to skip: ${votes} of ${needed}`,
     ko: (votes: number, needed: number) => `건너뛰기 투표: ${needed}표 중 ${votes}표`,
   },
+  likes: { en: 'Liked', ko: '좋아요 한 곡' },
+  noLikes: { en: 'No liked tracks yet', ko: '아직 좋아요 한 곡 없음' },
+  autoplay: { en: 'Autoplay', ko: '자동 재생' },
+  autoplayHistory: { en: "Autoplay: this server's plays", ko: '자동 재생: 이 서버에서 들은 곡' },
+  autoplayRelated: { en: 'Autoplay: related to the last track', ko: '자동 재생: 마지막 곡과 비슷한 곡' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -115,7 +120,13 @@ export function problem(message: string): EmbedBuilder {
 // "Title" linked to its page, with length and who added it.
 function line(title: string, url: string, durationMs: number | null, addedBy: string | null, lang: Lang): string {
   const length = durationMs === null ? '' : ` · ${formatDuration(durationMs)}`;
-  const who = addedBy ? ` · ${TEXT.addedBy[lang]} <@${addedBy}>` : '';
+  // Autoplay is named; a person is mentioned (Discord shows their name in the reader's server).
+  const who =
+    addedBy === AUTOPLAY
+      ? ` · ${TEXT.addedBy[lang]} ${TEXT.autoplay[lang]}`
+      : addedBy
+        ? ` · ${TEXT.addedBy[lang]} <@${addedBy}>`
+        : '';
   // Square brackets in titles would break Discord's link syntax.
   return `[${title.replace(/[[\]]/g, '')}](${url})${length}${who}`;
 }
@@ -161,6 +172,12 @@ export function addedCard(result: AddResult, lang: Lang, playingNow = false): Em
       lang === 'ko'
         ? `한 사람당 곡 수 제한으로 ${result.skippedLimit}곡 못 넣음`
         : `${result.skippedLimit} did not fit, the limit per person`,
+    );
+  if (result.skippedNotFound > 0)
+    left.push(
+      lang === 'ko'
+        ? `YouTube에서 못 찾은 ${result.skippedNotFound}곡 뺌`
+        : `${result.skippedNotFound} not found on YouTube, left out`,
     );
   if (left.length > 0) embed.setFooter({ text: left.join(' · ') });
   return embed;
@@ -209,10 +226,13 @@ export function nowCard(
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}${notice}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
-  // The repeat mode, when one is on, a stop asked for after this track, and a vote to skip under way, under the bar.
+  // The repeat mode, when one is on, autoplay, when on, a stop asked for after this track, and a vote to skip under
+  // way, under the bar.
   const footer: string[] = [];
   if (snapshot.repeat !== 'off')
     footer.push(snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang]);
+  if (snapshot.autoplay === 'history') footer.push(TEXT.autoplayHistory[lang]);
+  else if (snapshot.autoplay === 'related') footer.push(TEXT.autoplayRelated[lang]);
   if (snapshot.stopAfter) footer.push(TEXT.stopsAfter[lang]);
   if (votes) footer.push(TEXT.votesLine[lang](votes.votes, votes.needed));
   if (footer.length > 0) embed.setFooter({ text: footer.join(' · ') });
@@ -579,4 +599,25 @@ export function listenLinksCard(links: readonly ListenLinkRow[], lang: Lang): Em
         )
         .join('\n'),
     );
+}
+
+/** One page of the tracks a person liked (10 per page), newest first, numbered for /likes remove. */
+export function likesCard(entries: readonly LikedTrack[], page: number, lang: Lang): EmbedBuilder {
+  if (entries.length === 0) return new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.noLikes[lang]);
+  const pages = Math.max(1, Math.ceil(entries.length / 10));
+  const current = Math.min(Math.max(1, page), pages);
+  const first = (current - 1) * 10;
+  return new EmbedBuilder()
+    .setColor(COLOUR.neutral)
+    .setTitle(`${TEXT.likes[lang]} (${entries.length})`)
+    .setDescription(
+      entries
+        .slice(first, first + 10)
+        .map(
+          (entry, index) =>
+            `${first + index + 1}. ${line(entry.track.title, entry.track.url, entry.track.durationMs, null, lang)}`,
+        )
+        .join('\n'),
+    )
+    .setFooter({ text: `${TEXT.page[lang]} ${current}/${pages}` });
 }

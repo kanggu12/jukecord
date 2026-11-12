@@ -1112,6 +1112,196 @@ if (!ONLY || ONLY.has('listening-sound')) {
 await api('PUT', '/guilds/local/voice/sound', { preset: 'off' });
 await api('PUT', '/guilds/local/voice/volume', { percent: 100 });
 
+// ---- discovery: search and pick, a link dropped on the page ------------------------------------------------------
+// Phones (upright, by touch), the tablet, a short laptop and a wide one: where the list opens under the field and
+// where it opens over it (the card at the foot of the left column).
+const DISCOVERY = [
+  [360, 780],
+  [390, 844],
+  [744, 1000],
+  [1024, 768],
+  [1440, 900],
+];
+// A made-up search: the seeded tracks as YouTube would list them (title, channel, length, cover), put between the
+// page and jukecord, so no search reaches a site.
+const FOUND = [];
+for (const entry of await api('GET', '/guilds/local/history?limit=60')) {
+  if (FOUND.length >= 8 || FOUND.some((found) => found.url === entry.track.url)) continue;
+  const { id, url, title, uploader, durationMs } = entry.track;
+  // The seed's covers are pictures in jukecord's cache (their own addresses lead nowhere): shown from jukecord, as a
+  // site's picture would be shown from the site.
+  FOUND.push({ url, title, uploader, durationMs, thumbnail: `${BASE}/api/v1/guilds/local/tracks/${id}/cover` });
+}
+async function searchFor(page, words) {
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
+    route.fulfill({ json: { query: new URL(route.request().url()).searchParams.get('q') ?? '', results: FOUND } }),
+  );
+  await page.locator('#add-input').fill(words);
+  await page.waitForSelector('#add-found [role="option"]');
+}
+// The queue as people have it while they look for more.
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+await sweep('search', DISCOVERY, async (page) => {
+  await searchFor(page, 'paper boats');
+  // The keyboard on the second result.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+});
+// Nothing found for the words: the list says so.
+await sweep(
+  'search-none',
+  [
+    [360, 780],
+    [1440, 900],
+  ],
+  async (page) => {
+    await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
+      route.fulfill({ json: { query: 'zzz', results: [] } }),
+    );
+    await page.locator('#add-input').fill('nothing like this');
+    await page.waitForSelector('.found-state:not([hidden])');
+  },
+);
+// A link from another window held over the page: the add card says where it goes.
+await sweep(
+  'drop-link',
+  [
+    [390, 844],
+    [1440, 900],
+  ],
+  async (page) => {
+    const held = await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.setData('text/uri-list', 'https://media.example/demo001');
+      return transfer;
+    });
+    await page.dispatchEvent('main', 'dragenter', { dataTransfer: held });
+    await page.waitForSelector('.add-card.drop-target');
+  },
+);
+// Likes: the playing track's heart, and the liked list beside the history (the walk logs in as the host, whose likes
+// these are).
+// Loading the playlist above started it already; resume refuses when it plays, which is fine.
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+{
+  const playing = await api('GET', '/guilds/local/player');
+  await api('PUT', `/guilds/local/likes/${playing.track.id}`);
+  const liked = new Set([playing.track.id]);
+  for (const entry of await api('GET', '/guilds/local/history?limit=40')) {
+    if (liked.size >= 6 || liked.has(entry.track.id)) continue;
+    await api('PUT', `/guilds/local/likes/${entry.track.id}`);
+    liked.add(entry.track.id);
+  }
+}
+await sweep('liked', DISCOVERY, async (page) => {
+  await page.click('.library-seg [data-view="liked"]');
+  await page.waitForSelector('.history .row .like-key[aria-pressed="true"]');
+});
+// A liked row's keys behind its one key, on a phone.
+await sweep('liked-menu', [[360, 780]], async (page) => {
+  await page.click('.library-seg [data-view="liked"]');
+  await page.locator('.history .row .lib-more:visible').first().click();
+  await page.waitForSelector('.dialog .menu-list .choice');
+});
+await sweep('history-keys', DISCOVERY, async (page) => {
+  await page.click('.library-seg [data-view="history"]');
+  await page.waitForSelector('.history .row');
+});
+// Autoplay from the server's plays (the seeded history: nothing to fetch). Nothing playing and nothing queued: the add
+// card says autoplay is on, and the queue's key shows it.
+await api('DELETE', '/guilds/local/queue');
+await api('POST', '/guilds/local/player/stop').catch(() => {});
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'history' });
+await sweep(
+  'autoplay-empty',
+  [
+    [360, 780],
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ],
+  async (page) => {
+    await page.waitForSelector('.auto-note:not([hidden])');
+  },
+);
+await sweep(
+  'autoplay-menu',
+  [
+    [390, 844],
+    [1440, 900],
+  ],
+  async (page) => {
+    // Its own key on a wide card, the tools list on a narrow one (phones), as the queue's tools.
+    await tool(page, 'autoplay');
+    await page.waitForSelector('.dialog .choice[data-mode="history"]');
+  },
+);
+// One track added with nothing after it: when it starts, autoplay queues the next, which says who added it.
+{
+  const history = await api('GET', '/guilds/local/history?limit=1');
+  await api('POST', '/guilds/local/queue', { input: history[0].track.url });
+  let picked = false;
+  for (let i = 0; i < 50 && !picked; i += 1) {
+    picked = (await api('GET', '/guilds/local/queue')).items.some((item) => item.addedBy === 'autoplay');
+    if (!picked) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  if (!picked) throw new Error('autoplay queued nothing');
+}
+await sweep('autoplay-row', DISCOVERY, async (page) => {
+  await page.waitForSelector('.queue-list .row');
+});
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
+await api('DELETE', '/guilds/local/queue');
+// Playlists in and out: a playlist's three kinds of file, and the import with a list pasted in.
+await sweep(
+  'playlist-export',
+  [
+    [390, 844],
+    [1440, 900],
+  ],
+  async (page) => {
+    await tool(page, 'load');
+    await page.locator('.dialog .channel [data-key="export"]').first().click();
+    await page.waitForSelector('.dialog .choice[data-format="m3u"]');
+  },
+);
+await sweep(
+  'playlist-import',
+  [
+    [360, 780],
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ],
+  async (page) => {
+    await tool(page, 'load');
+    await page.click('.dialog [data-act="import"]');
+    await page.waitForSelector('.dialog .paste');
+    await page.locator('.dialog .import-form input[type="text"]').fill('Saturday');
+    await page
+      .locator('.dialog .paste')
+      .fill(
+        ['https://media.example/demo001', 'https://media.example/demo002', 'Example Band - Velvet Hours'].join('\n'),
+      );
+  },
+);
+// The queue's tools behind their key on a phone, autoplay among them with its mode.
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'history' });
+await sweep(
+  'queue-tools',
+  [
+    [360, 780],
+    [390, 844],
+  ],
+  async (page) => {
+    await page.click('[data-act="queue-tools"]');
+    await page.waitForSelector('.dialog [data-tool="autoplay"]');
+  },
+);
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
+
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

@@ -15,6 +15,8 @@ import {
   GuildId,
   GuildSchema,
   HistoryEntrySchema,
+  ImportResultSchema,
+  LikedSchema,
   ListenLinkCreatedSchema,
   ListenLinkSchema,
   LogRecordSchema,
@@ -24,10 +26,12 @@ import {
   Nullable,
   OkSchema,
   PlayerSchema,
+  PlaylistFileSchema,
   PlaylistSchema,
   QueueSchema,
   RemovedSchema,
   ScopeSchema,
+  SearchSchema,
   SettingsSchema,
   SkipSchema,
   Snowflake,
@@ -81,6 +85,8 @@ export interface OperationSpec {
   readonly query?: TObject;
   readonly body?: TObject;
   readonly response: TSchema;
+  /** The largest body it takes, in bytes, when more than the server's usual 64 KiB (an imported playlist file). */
+  readonly bodyLimit?: number;
 }
 
 // Keeps each entry's exact types (the literal method, the schemas), which the handlers' types are computed from.
@@ -92,6 +98,7 @@ function op<const S extends OperationSpec>(spec: S): S {
 const InGuild = Type.Object({ guild: GuildId });
 const InGuildItem = Type.Object({ guild: GuildId, item: Type.Integer({ minimum: 1, description: 'A queue item ID' }) });
 const InGuildPlaylist = Type.Object({ guild: GuildId, name: Type.String({ minLength: 1, maxLength: 100 }) });
+const InGuildTrack = Type.Object({ guild: GuildId, track: Type.Integer({ minimum: 1, description: 'A track ID' }) });
 
 // What to play: an address or words to search for (the same limit as the slash commands).
 const Input = Type.String({ minLength: 1, maxLength: 500, description: 'An address or words to search for' });
@@ -657,6 +664,109 @@ export const API = {
     params: InGuild,
     body: Type.Object({ preset: SoundPresetSchema }, strict),
     response: SoundSchema,
+  }),
+
+  // Discovery: searching, held to a rate of its own (see web/limits.ts).
+  search: op({
+    method: 'GET',
+    path: '/guilds/{guild}/search',
+    summary: 'What YouTube finds for some words, to pick from before adding',
+    tag: 'queue',
+    access: 'control',
+    params: InGuild,
+    query: Type.Object({
+      q: Type.String({ minLength: 1, maxLength: 200, description: 'Words to search for (an address is refused)' }),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, default: 8 })),
+    }),
+    response: SearchSchema,
+  }),
+
+  // Likes: each login's own, in any server it opens.
+  likes: op({
+    method: 'GET',
+    path: '/guilds/{guild}/likes',
+    summary: 'The tracks you liked, newest first',
+    tag: 'history',
+    access: 'read',
+    params: InGuild,
+    response: Type.Array(LikedSchema),
+  }),
+  like: op({
+    method: 'PUT',
+    path: '/guilds/{guild}/likes/{track}',
+    summary: 'Like a track this server is playing, has queued or played (the DJ role is not needed)',
+    tag: 'history',
+    access: 'control',
+    params: InGuildTrack,
+    response: LikedSchema,
+  }),
+  unlike: op({
+    method: 'DELETE',
+    path: '/guilds/{guild}/likes/{track}',
+    summary: 'Take a like back',
+    tag: 'history',
+    access: 'control',
+    params: InGuildTrack,
+    response: OkSchema,
+  }),
+  'likes-add': op({
+    method: 'POST',
+    path: '/guilds/{guild}/likes/queue',
+    summary: 'Add every track you liked to the queue, newest first',
+    tag: 'history',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object({ at: Type.Optional(At) }, strict),
+    response: AddResultSchema,
+  }),
+
+  // Autoplay.
+  autoplay: op({
+    method: 'PUT',
+    path: '/guilds/{guild}/player/autoplay',
+    summary: "When the queue runs out: nothing, a track from this server's plays, or one related to the last track",
+    tag: 'player',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object(
+      { mode: Type.Union([Type.Literal('off'), Type.Literal('history'), Type.Literal('related')]) },
+      strict,
+    ),
+    response: PlayerSchema,
+  }),
+
+  // Playlists in and out, as files.
+  'playlist-export': op({
+    method: 'GET',
+    path: '/guilds/{guild}/playlists/{name}/export',
+    summary: "A saved playlist as a file: addresses (text), M3U, or jukecord's JSON",
+    tag: 'playlists',
+    access: 'read',
+    params: InGuildPlaylist,
+    query: Type.Object({
+      format: Type.Optional(
+        Type.Union([Type.Literal('text'), Type.Literal('m3u'), Type.Literal('json')], { default: 'text' }),
+      ),
+    }),
+    response: PlaylistFileSchema,
+  }),
+  'playlist-import': op({
+    method: 'POST',
+    path: '/guilds/{guild}/playlists/import',
+    summary: 'Make a playlist from a file (addresses, M3U or jukecord JSON) or a pasted list, under a new name',
+    tag: 'playlists',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object(
+      {
+        name: Type.String({ minLength: 1, maxLength: 100 }),
+        content: Type.String({ minLength: 1, maxLength: 1_048_576, description: "The file's text (up to 1 MiB)" }),
+      },
+      strict,
+    ),
+    response: ImportResultSchema,
+    // A file of 500 tracks with their titles, written as JSON inside JSON.
+    bodyLimit: 2 * 1024 * 1024,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

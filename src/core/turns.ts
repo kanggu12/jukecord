@@ -6,6 +6,7 @@
  * track playing counts as its person's first (that turn is under way). A person with k tracks waiting, the one playing
  * included, adds into round k: after its last item, and never before a track of their own; when nobody has a track in
  * that round yet, at the end. Who added a track is a Discord ID, or null for the host, who counts as one person.
+ * Autoplay's tracks are nobody's turn: the queue service leaves them out of the rounds and keeps them after people's.
  *
  * Pure functions over who added each item, in queue order: the queue service turns their answers into places.
  */

@@ -6,6 +6,7 @@
  * exist. People type 1-based queue numbers, as /queue and the panel show them; the commands look the item up.
  */
 
+import fs from 'node:fs';
 import { sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
@@ -26,6 +27,10 @@ export interface Request {
 /** What a command may ask before building its request: the queue, to turn a number into an item. */
 export interface Lookups {
   queueItemId(position: number): Promise<number>;
+  /** The track playing now (for `like`); a refusal when nothing is. */
+  currentTrackId(): Promise<number>;
+  /** The track at a 1-based number of `jukecord likes` (for `unlike`). */
+  likedTrackId(position: number): Promise<number>;
 }
 
 export interface Command {
@@ -68,12 +73,14 @@ interface PlayerJson {
   error: string | null;
   notice: string | null;
   waiting: boolean;
+  autoplay?: string;
 }
 interface AddJson {
   items: ItemJson[];
   skippedTooLong: number;
   skippedFull: number;
   skippedLimit?: number;
+  skippedNotFound?: number;
 }
 
 // The text of the words joined, for inputs typed without quotes ("jukecord add never gonna give you up").
@@ -121,7 +128,12 @@ function hoursMinutes(ms: number): string {
 
 function showPlayer(answer: unknown): string {
   const player = answer as PlayerJson;
-  const repeat = player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`;
+  const repeat =
+    (player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`) +
+    // Autoplay, when it is on, on a line of its own after the repeat.
+    (player.autoplay && player.autoplay !== 'off'
+      ? `\nAutoplay: ${player.autoplay === 'history' ? "from this server's plays" : 'related to the last track'}`
+      : '');
   // What the player did by itself (a track taken out of the loop), on a line of its own.
   const notice = player.notice ? `\n${sayNotice(player.notice, 'en')}` : '';
   if (!player.track)
@@ -150,6 +162,7 @@ function showAdded(answer: unknown): string {
   if (added.skippedTooLong > 0) lines.push(`${added.skippedTooLong} left out: longer than the limit`);
   if (added.skippedFull > 0) lines.push(`${added.skippedFull} left out: the queue is full`);
   if ((added.skippedLimit ?? 0) > 0) lines.push(`${added.skippedLimit} left out: your limit of tracks in the queue`);
+  if ((added.skippedNotFound ?? 0) > 0) lines.push(`${added.skippedNotFound} left out: not found on YouTube`);
   return lines.join('\n');
 }
 
@@ -899,6 +912,113 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       return { body: { preset } };
     },
     show: showSound,
+  },
+
+  likes: {
+    name: 'likes',
+    usage: '',
+    summary: 'The tracks you liked, newest first',
+    request: () => ({}),
+    show: (answer) => {
+      const liked = answer as { track: TrackJson }[];
+      if (liked.length === 0) return 'No liked tracks';
+      return liked.map((entry, index) => `${index + 1}. ${trackLine(entry.track, null)}`).join('\n');
+    },
+  },
+  like: {
+    name: 'like',
+    usage: '',
+    summary: 'Like the track playing now',
+    request: async (_words, lookups) => ({ params: { track: await lookups.currentTrackId() } }),
+    show: (answer) => `Liked: ${(answer as { track: TrackJson }).track.title}`,
+  },
+  unlike: {
+    name: 'unlike',
+    usage: '<number>',
+    summary: 'Take back a like (its number in jukecord likes)',
+    request: async (words, lookups) => ({
+      params: { track: await lookups.likedTrackId(number(words.args[0], 'the number')) },
+    }),
+    show: showOk,
+  },
+  'likes-add': {
+    name: 'likes add',
+    usage: '[--next]',
+    summary: 'Add every track you liked to the queue',
+    request: (words) => ({ body: { at: words.flags.has('next') ? 'next' : 'end' } }),
+    show: showAdded,
+  },
+
+  autoplay: {
+    name: 'autoplay',
+    usage: '<off|history|related>',
+    summary: "When the queue runs out: nothing, this server's plays, or related tracks",
+    request: (words) => {
+      const mode = words.args[0];
+      if (mode !== 'off' && mode !== 'history' && mode !== 'related')
+        throw new UsageError('autoplay off, history or related');
+      return { body: { mode } };
+    },
+    show: showPlayer,
+  },
+
+  'playlist-export': {
+    name: 'playlist export',
+    usage: '<name> [--format text|m3u|json]',
+    summary: 'A saved playlist as a file, printed (redirect it into one)',
+    request: (words) => {
+      const format = words.flags.get('format') ?? 'text';
+      if (format !== 'text' && format !== 'm3u' && format !== 'json')
+        throw new UsageError('--format text, m3u or json');
+      return { params: { name: rest(words, 'which playlist') }, query: { format } };
+    },
+    // The file as it is, so `> name.m3u` makes the file.
+    show: (answer) => (answer as { content: string }).content.replace(/\n$/, ''),
+  },
+  'playlist-import': {
+    name: 'playlist import',
+    usage: '<name> <file> (quote a spaced name)',
+    summary: 'Make a playlist from a file: addresses, M3U or jukecord JSON',
+    request: (words) => {
+      const [name, file] = words.args;
+      if (!name || !file) throw new UsageError('say the new playlist name and the file');
+      let content: string;
+      try {
+        // Read here, on this machine: jukecord gets the text.
+        if (fs.statSync(file).size > 1024 * 1024) throw new UsageError(`${file} is larger than 1 MiB`);
+        content = fs.readFileSync(file, 'utf8');
+      } catch (error) {
+        if (error instanceof UsageError) throw error;
+        throw new UsageError(`${file} cannot be read`);
+      }
+      return { body: { name, content } };
+    },
+    show: (answer) => {
+      const result = answer as { playlist: { name: string }; tracks: number; leftOut: number };
+      const left = result.leftOut > 0 ? `, ${result.leftOut} left out` : '';
+      return `Imported ${result.playlist.name}: ${result.tracks} tracks${left}`;
+    },
+  },
+
+  search: {
+    name: 'search',
+    usage: '<words> [--limit 8]',
+    summary: 'What YouTube finds, each with the address that adds it',
+    request: (words) => ({ query: { q: rest(words, 'what to search for'), limit: option(words, 'limit', 8) } }),
+    show: (answer) => {
+      const found = answer as {
+        results: { url: string; title: string; uploader: string | null; durationMs: number | null }[];
+      };
+      if (found.results.length === 0) return 'Nothing was found';
+      // "1. Title · Channel · 3:45", the address under it: what `jukecord add` or `jukecord play` takes.
+      return found.results
+        .map((result, index) => {
+          const parts = [result.title, ...(result.uploader ? [result.uploader] : [])];
+          if (result.durationMs !== null) parts.push(formatDuration(result.durationMs));
+          return `${index + 1}. ${parts.join(' · ')}\n   ${result.url}`;
+        })
+        .join('\n');
+    },
   },
 };
 

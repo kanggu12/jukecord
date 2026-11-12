@@ -34,6 +34,7 @@ const playing: PlayerSnapshot = {
   notice: null,
   waiting: false,
   stopAfter: false,
+  autoplay: 'off',
 };
 
 // The labels of a card's buttons.

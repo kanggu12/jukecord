@@ -275,6 +275,17 @@ describe('what a guest must not reach', () => {
       ['POST', '/tokens', { name: 'mine', scope: 'read' }],
       ['POST', '/login-links', {}],
       ['POST', '/backups'],
+      // How the server's people share the music, and its sound.
+      ['PUT', `/guilds/${GUILD}/settings/vote-skip`, { on: false }],
+      ['POST', `/guilds/${GUILD}/queue/turns`],
+      ['PUT', `/guilds/${GUILD}/voice/volume`, { percent: 50 }],
+      ['PUT', `/guilds/${GUILD}/voice/sound`, { preset: 'bass' }],
+      // Likes, autoplay and playlists from files: a guest has no login of its own to like with, and adds nothing.
+      ['PUT', `/guilds/${GUILD}/likes/1`],
+      ['DELETE', `/guilds/${GUILD}/likes/1`],
+      ['POST', `/guilds/${GUILD}/likes/queue`, {}],
+      ['PUT', `/guilds/${GUILD}/player/autoplay`, { mode: 'history' }],
+      ['POST', `/guilds/${GUILD}/playlists/import`, { name: 'mine', content: 'https://media.example/one' }],
     ];
     for (const [method, route, payload] of changes) {
       const answer = await as(method, route, payload);
@@ -284,7 +295,7 @@ describe('what a guest must not reach', () => {
     assert.equal(server.players.get(GUILD).snapshot().repeat, 'off');
   });
 
-  it('reaches no statistics, history, playlists, settings, channels, logs, tokens or links', async () => {
+  it('reaches no statistics, history, playlists, settings, channels, logs, tokens, links, searches or likes', async () => {
     for (const route of [
       `/guilds/${GUILD}/stats`,
       `/guilds/${GUILD}/history`,
@@ -292,6 +303,10 @@ describe('what a guest must not reach', () => {
       `/guilds/${GUILD}/settings`,
       `/guilds/${GUILD}/voice`,
       `/guilds/${GUILD}/listen-links`,
+      // A search, the likes and a playlist's file: a guest neither adds nor likes.
+      `/guilds/${GUILD}/search?q=paper%20boats`,
+      `/guilds/${GUILD}/likes`,
+      `/guilds/${GUILD}/playlists/mine/export`,
       '/logs',
       '/tokens',
       '/doctor',

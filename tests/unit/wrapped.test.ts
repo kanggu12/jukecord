@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { type ActionContext, ActionError } from '../../src/app/actions.ts';
 import { COMMANDS } from '../../src/cli/commands.ts';
 import { parseLine } from '../../src/cli/main.ts';
+import { AUTOPLAY } from '../../src/core/types.ts';
 import { relativePeriod, wrappedCard } from '../../src/discord/cards.ts';
 import { HISTORY_KEEP } from '../../src/store/store.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
@@ -91,6 +92,37 @@ describe('Wrapped', () => {
         ],
       );
       assert.equal(shown.firstTrack?.addedByName, 'Bob');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves autoplay's plays out of who added most and of the people, as the statistics do", async () => {
+    const server = await testServer();
+    try {
+      const { store, actions } = server;
+      const [a, b] = addTracks(store, 2);
+      assert.ok(a && b);
+      const play = (trackId: number, at: number, by: string | null) =>
+        store.history.add({ guildId: GUILD, trackId, addedBy: by, playedAt: at, playedMs: 180_000 });
+      // Autoplay played most; Alice twice; the host once.
+      for (let n = 0; n < 5; n += 1) play(b.id, Date.UTC(2026, 3, 1 + n, 12), AUTOPLAY);
+      play(a.id, Date.UTC(2026, 3, 10, 12), ALICE);
+      play(a.id, Date.UTC(2026, 3, 11, 12), ALICE);
+      play(a.id, Date.UTC(2026, 3, 12, 12), null);
+      const view = actions.wrapped(look, '2026', 0, NOW);
+      // Every play counts as a play; autoplay is no person.
+      assert.equal(view.plays, 8);
+      assert.equal(view.people, 2);
+      assert.deepEqual(
+        view.topPeople.map((entry) => [entry.userId, entry.plays]),
+        [
+          [ALICE, 2],
+          [null, 1],
+        ],
+      );
+      // The song of the year is still the track autoplay played on the most days: it is the music, not who added it.
+      assert.equal(view.song?.track.id, b.id);
     } finally {
       await server.close();
     }
@@ -220,7 +252,11 @@ describe('Wrapped', () => {
 
 describe('Wrapped in the jukecord command', () => {
   const request = (line: string) =>
-    COMMANDS.wrapped.request(parseLine(line.split(' ').filter(Boolean)), { queueItemId: async () => 0 }) as {
+    COMMANDS.wrapped.request(parseLine(line.split(' ').filter(Boolean)), {
+      queueItemId: async () => 0,
+      currentTrackId: async () => 0,
+      likedTrackId: async () => 0,
+    }) as {
       query: Record<string, string | number>;
     };
 

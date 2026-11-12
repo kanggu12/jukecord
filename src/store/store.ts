@@ -11,7 +11,15 @@ import path from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { isPreset, type SoundPreset } from '../core/sound.ts';
-import type { HistoryEntry, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
+import {
+  AUTOPLAY,
+  type HistoryEntry,
+  type LikedTrack,
+  type NewTrack,
+  type Playlist,
+  type QueueItem,
+  type Track,
+} from '../core/types.ts';
 import { MIGRATIONS } from './schema.ts';
 
 /** A row as the driver returns it. */
@@ -91,6 +99,7 @@ export class Store {
   readonly music: MusicRepository;
   readonly listenLinks: ListenLinkRepository;
   readonly guests: GuestSessionRepository;
+  readonly likes: LikeRepository;
   // How deep the current transaction is nested; inner ones become savepoints.
   private depth = 0;
 
@@ -112,6 +121,7 @@ export class Store {
     this.music = new MusicRepository(this, now);
     this.listenLinks = new ListenLinkRepository(this, now);
     this.guests = new GuestSessionRepository(this, now);
+    this.likes = new LikeRepository(this, now);
   }
 
   /**
@@ -564,6 +574,26 @@ export class QueueRepository {
       .get(guildId, addedBy) as Row;
     return int(row, 'n');
   }
+
+  /**
+   * Where the run of tracks autoplay queued at the end of a server's queue starts: the place after the last track a
+   * person (or the host) queued, 0 when only autoplay's are there, and null when the queue does not end in autoplay's.
+   * A person's track added "at the end" goes there, before autoplay's, which only fill a queue that ran out.
+   */
+  autoplayTail(guildId: string): number | null {
+    // Read from the index on (guild, position): the last row, and the last row that is not autoplay's.
+    const last = this.store.db
+      .prepare('SELECT position, added_by FROM queue_items WHERE guild_id = ? ORDER BY position DESC, id DESC LIMIT 1')
+      .get(guildId) as Row | undefined;
+    if (!last || textOrNull(last, 'added_by') !== AUTOPLAY) return null;
+    const person = this.store.db
+      .prepare(
+        `SELECT position FROM queue_items WHERE guild_id = ? AND (added_by IS NULL OR added_by != ?)
+         ORDER BY position DESC, id DESC LIMIT 1`,
+      )
+      .get(guildId, AUTOPLAY) as Row | undefined;
+    return person ? int(person, 'position') + 1 : 0;
+  }
 }
 
 // The most history rows kept per server: years of listening for a group of friends, and a bound on the database.
@@ -654,13 +684,14 @@ export class HistoryRepository {
    */
   stats(guildId: string, since: number, offsetMs: number, top = 10): HistoryStats {
     const db = this.store.db;
+    // Autoplay is not a person: its plays count as plays, but not among the people who added (NULL is not counted).
     const totals = db
       .prepare(
-        `SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms,
-                COUNT(DISTINCT track_id) AS tracks, COUNT(DISTINCT COALESCE(added_by, '')) AS people
+        `SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms, COUNT(DISTINCT track_id) AS tracks,
+                COUNT(DISTINCT CASE WHEN added_by IS ? THEN NULL ELSE COALESCE(added_by, '') END) AS people
          FROM history WHERE guild_id = ? AND played_at >= ?`,
       )
-      .get(guildId, since) as Row;
+      .get(AUTOPLAY, guildId, since) as Row;
     // The timestamps are milliseconds; unixepoch wants seconds, and integer division keeps whole seconds.
     const days = db
       .prepare(
@@ -684,13 +715,14 @@ export class HistoryRepository {
          GROUP BY h.track_id ORDER BY plays DESC, played_ms DESC, h.track_id LIMIT ?`,
       )
       .all(guildId, since, top) as Row[];
+    // Who added most: people and the host, not autoplay.
     const people = db
       .prepare(
         `SELECT added_by, COUNT(*) AS plays, SUM(played_ms) AS played_ms
-         FROM history WHERE guild_id = ? AND played_at >= ?
+         FROM history WHERE guild_id = ? AND played_at >= ? AND added_by IS NOT ?
          GROUP BY added_by ORDER BY plays DESC, played_ms DESC, added_by LIMIT ?`,
       )
-      .all(guildId, since, top) as Row[];
+      .all(guildId, since, AUTOPLAY, top) as Row[];
     // Twenty-four slots, zero where nothing played, so a chart can draw every hour.
     const byHour = Array.from({ length: 24 }, () => 0);
     for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
@@ -746,13 +778,14 @@ export class HistoryRepository {
       playedMs: int(row, 'played_ms'),
       days: int(row, 'days'),
     }));
+    // Each person's plays: people and the host, not autoplay, which is no person (as in the statistics).
     const perPerson = (
       db
         .prepare(
-          `SELECT h.added_by, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms FROM history h WHERE ${span}
-           GROUP BY h.added_by`,
+          `SELECT h.added_by, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms FROM history h
+           WHERE ${span} AND h.added_by IS NOT ? GROUP BY h.added_by`,
         )
-        .all(...within) as Row[]
+        .all(...within, AUTOPLAY) as Row[]
     ).map((row) => ({
       userId: textOrNull(row, 'added_by'),
       plays: int(row, 'plays'),
@@ -853,6 +886,35 @@ export class HistoryRepository {
       full: int(reach, 'plays') >= HISTORY_KEEP,
     };
   }
+
+  /** The tracks of a server's newest `count` plays, newest first, each once. */
+  recentTrackIds(guildId: string, count: number): number[] {
+    const rows = this.store.db
+      .prepare('SELECT track_id FROM history WHERE guild_id = ? ORDER BY id DESC LIMIT ?')
+      .all(guildId, count) as Row[];
+    return [...new Set(rows.map((row) => int(row, 'track_id')))];
+  }
+
+  /**
+   * Every track a server played (within the history kept), with how often it played there and how many logins liked
+   * it, for autoplay's picks; with its length, so a track over the limit is not picked.
+   */
+  playCounts(guildId: string): { trackId: number; plays: number; likes: number; durationMs: number | null }[] {
+    const rows = this.store.db
+      .prepare(
+        `SELECT h.track_id, COUNT(*) AS plays, t.duration_ms,
+                (SELECT COUNT(*) FROM likes l WHERE l.track_id = h.track_id) AS likes
+         FROM history h JOIN tracks t ON t.id = h.track_id
+         WHERE h.guild_id = ? GROUP BY h.track_id`,
+      )
+      .all(guildId) as Row[];
+    return rows.map((row) => ({
+      trackId: int(row, 'track_id'),
+      plays: int(row, 'plays'),
+      likes: int(row, 'likes'),
+      durationMs: intOrNull(row, 'duration_ms'),
+    }));
+  }
 }
 
 /** A server's time in music, for Wrapped (see HistoryRepository.wrapped). */
@@ -861,7 +923,7 @@ export interface HistoryWrapped {
   readonly playedMs: number;
   /** Distinct tracks played. */
   readonly tracks: number;
-  /** Distinct people whose tracks were played; the host counts as one, as in the statistics. */
+  /** Distinct people whose tracks were played; the host counts as one and autoplay as none, as in the statistics. */
   readonly people: number;
   /** The days with any music. */
   readonly days: number;
@@ -1042,6 +1104,12 @@ function playlistFrom(row: Row): Playlist {
 /** The repeat modes of a player. */
 export type RepeatMode = 'off' | 'track' | 'queue';
 
+/**
+ * What a player does when its queue runs out: nothing, a track from the server's own plays, or one from YouTube's mix
+ * of the last track (the server's plays when there is none).
+ */
+export type AutoplayMode = 'off' | 'history' | 'related';
+
 /** What a server was playing when it was last saved. */
 export interface SavedPlayerState {
   readonly guildId: string;
@@ -1054,6 +1122,8 @@ export interface SavedPlayerState {
   /** What happens at the end of a track: nothing special, the same track again, or the track back to the queue's end. */
   readonly repeat: RepeatMode;
   readonly updatedAt: number;
+  /** What happens when the queue runs out (see AutoplayMode). */
+  readonly autoplay: AutoplayMode;
 }
 
 /** The current track of each server, written on every change so a restart can come back to it. */
@@ -1066,14 +1136,15 @@ export class PlayerStateRepository {
     this.now = now;
   }
 
-  save(state: Omit<SavedPlayerState, 'updatedAt'>): void {
+  // The autoplay mode may be left out (callers from before it existed): it is off then.
+  save(state: Omit<SavedPlayerState, 'updatedAt' | 'autoplay'> & { readonly autoplay?: AutoplayMode }): void {
     this.store.db
       .prepare(
-        `INSERT INTO player_state (guild_id, track_id, added_by, status, position_ms, repeat, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO player_state (guild_id, track_id, added_by, status, position_ms, repeat, updated_at, autoplay)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (guild_id) DO UPDATE SET track_id = excluded.track_id, added_by = excluded.added_by,
            status = excluded.status, position_ms = excluded.position_ms, repeat = excluded.repeat,
-           updated_at = excluded.updated_at`,
+           updated_at = excluded.updated_at, autoplay = excluded.autoplay`,
       )
       .run(
         state.guildId,
@@ -1083,6 +1154,7 @@ export class PlayerStateRepository {
         Math.max(0, Math.round(state.positionMs)),
         state.repeat,
         this.now(),
+        state.autoplay ?? 'off',
       );
   }
 
@@ -1105,6 +1177,7 @@ function savedStateFrom(row: Row): SavedPlayerState {
   // An unknown status (a newer version's, or a hand edit) is read as idle rather than trusted.
   const known = status === 'playing' || status === 'paused' ? status : 'idle';
   const repeat = text(row, 'repeat');
+  const autoplay = text(row, 'autoplay');
   return {
     guildId: text(row, 'guild_id'),
     trackId: intOrNull(row, 'track_id'),
@@ -1114,6 +1187,8 @@ function savedStateFrom(row: Row): SavedPlayerState {
     // Read like the status: an unknown value falls back to the safe default.
     repeat: repeat === 'track' || repeat === 'queue' ? repeat : 'off',
     updatedAt: int(row, 'updated_at'),
+    // The same for autoplay: a value this version does not know is off.
+    autoplay: autoplay === 'history' || autoplay === 'related' ? autoplay : 'off',
   };
 }
 
@@ -1876,5 +1951,58 @@ export class GuestSessionRepository {
   /** Deletes the expired sessions of guests and returns how many went. */
   prune(): number {
     return Number(this.store.db.prepare('DELETE FROM guest_sessions WHERE expires_at <= ?').run(this.now()).changes);
+  }
+}
+
+/** The most tracks one login keeps liked: a long list for a person, and a bound on the table. */
+export const LIKES_MAX = 1000;
+
+/** The tracks each login liked; "owner" is a Discord user ID, or "host" for the host's login. */
+export class LikeRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** Likes a track; false when it was liked already (liking twice changes nothing, not even when). */
+  add(owner: string, trackId: number): boolean {
+    const result = this.store.db
+      .prepare('INSERT OR IGNORE INTO likes (owner, track_id, created_at) VALUES (?, ?, ?)')
+      .run(owner, trackId, this.now());
+    return Number(result.changes) > 0;
+  }
+
+  /** Takes a like back; false when there was none. */
+  remove(owner: string, trackId: number): boolean {
+    const result = this.store.db.prepare('DELETE FROM likes WHERE owner = ? AND track_id = ?').run(owner, trackId);
+    return Number(result.changes) > 0;
+  }
+
+  /** Whether a login liked a track. */
+  has(owner: string, trackId: number): boolean {
+    return (
+      this.store.db.prepare('SELECT 1 AS found FROM likes WHERE owner = ? AND track_id = ?').get(owner, trackId) !==
+      undefined
+    );
+  }
+
+  /** How many tracks a login liked. */
+  count(owner: string): number {
+    const row = this.store.db.prepare('SELECT COUNT(*) AS n FROM likes WHERE owner = ?').get(owner) as Row;
+    return int(row, 'n');
+  }
+
+  /** A login's liked tracks, newest first (by the index on owner and time). */
+  list(owner: string, limit = LIKES_MAX): LikedTrack[] {
+    const rows = this.store.db
+      .prepare(
+        `SELECT l.created_at, ${TRACK_COLUMNS} FROM likes l JOIN tracks t ON t.id = l.track_id
+         WHERE l.owner = ? ORDER BY l.created_at DESC, l.track_id DESC LIMIT ?`,
+      )
+      .all(owner, limit) as Row[];
+    return rows.map((row) => ({ track: trackFrom(row), likedAt: int(row, 'created_at') }));
   }
 }

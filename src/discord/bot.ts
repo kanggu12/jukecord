@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import {
   ActivityType,
+  AttachmentBuilder,
   type AutocompleteInteraction,
   type ButtonInteraction,
   ChannelType,
@@ -39,6 +40,7 @@ import { type Clock, steadyNow, systemClock } from '../core/clock.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
+import type { PublicFetch } from '../media/fetch.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
 import type { DiscordRepository, SettingsRepository, UserRepository, VoiceChannelRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
@@ -49,6 +51,7 @@ import {
   historyCard,
   type Lang,
   langOf,
+  likesCard,
   listenLinkCard,
   listenLinksCard,
   lyricsCard,
@@ -70,6 +73,7 @@ const COMMAND_NAMES: ReadonlySet<string> = new Set(commandDefinitions().map((def
 import { sayError } from './errors.ts';
 import { CardKeeper, type CardPayload, type KeptCard } from './keeper.ts';
 import { VoiceMemory } from './rejoin.ts';
+import { suggestions } from './suggest.ts';
 import { VoiceManager } from './voice.ts';
 
 export interface BotOptions {
@@ -92,6 +96,8 @@ export interface BotOptions {
   readonly voiceChannels?: VoiceChannelRepository;
   /** The clock the cards kept current are edited by (tests pass a fake one). */
   readonly clock?: Clock;
+  /** How a file attached to /playlist import is fetched (public addresses only); without it, that is refused. */
+  readonly fetch?: PublicFetch;
 }
 
 export class Bot implements Directory, AlertSink {
@@ -426,7 +432,9 @@ export class Bot implements Directory, AlertSink {
 
   // Who is asking and whether they may change the music: everyone, unless the server set a DJ role (one deleted in
   // Discord since counts as none, see djRoleNow). People who can manage the server always may.
-  private context(interaction: ChatInputCommandInteraction | ButtonInteraction): ActionContext | null {
+  private context(
+    interaction: ChatInputCommandInteraction | ButtonInteraction | AutocompleteInteraction,
+  ): ActionContext | null {
     if (!interaction.inGuild()) return null;
     const role = djRoleNow(
       this.options.settings.get(interaction.guildId).djRoleId,
@@ -456,12 +464,15 @@ export class Bot implements Directory, AlertSink {
       // history and the statistics too, and a command this version no longer has. The now-playing card (/np) is the
       // channel's, with its keys for everyone.
       const sub = interaction.options.getSubcommand(false);
+      // A like and a person's likes are theirs alone, so they are answered to that person too (adding them all to the
+      // queue is everyone's, and said in the channel).
       const lookup =
-        ['version', 'queue', 'history', 'stats', 'lyrics', 'share'].includes(interaction.commandName) ||
+        ['version', 'queue', 'history', 'stats', 'lyrics', 'share', 'like'].includes(interaction.commandName) ||
         !COMMAND_NAMES.has(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
-        (interaction.commandName === 'playlist' && sub === 'list') ||
-        (interaction.commandName === 'alerts' && sub === 'show');
+        (interaction.commandName === 'playlist' && (sub === 'list' || sub === 'export')) ||
+        (interaction.commandName === 'alerts' && sub === 'show') ||
+        (interaction.commandName === 'likes' && sub !== 'add');
       await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
       switch (interaction.commandName) {
         case 'add': {
@@ -733,6 +744,22 @@ export class Bot implements Directory, AlertSink {
           await interaction.editReply({ embeds: [soundCard(sound, lang)] });
           return;
         }
+        case 'like': {
+          const track = actions.nowPlaying(context).track;
+          if (!track) throw new ActionError('conflict', 'nothing is playing');
+          const liked = actions.like(context, track.id);
+          const title = liked.track.title;
+          await interaction.editReply({
+            embeds: [note(lang, `Liked "${title}"`, `좋아요 목록에 넣음: "${title}"`)],
+          });
+          return;
+        }
+        case 'likes':
+          await this.onLikes(interaction, context, lang);
+          return;
+        case 'autoplay':
+          await this.replyCard(interaction, actions.autoplay(context, options.getString('mode', true)), lang);
+          return;
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
@@ -790,6 +817,70 @@ export class Bot implements Directory, AlertSink {
         const name = options.getString('name', true);
         actions.playlistDelete(context, name);
         await interaction.editReply({ embeds: [note(lang, `Deleted "${name}"`, `"${name}" 지움`)] });
+        return;
+      }
+      case 'export': {
+        // The file itself, attached to the answer (to the person who asked).
+        const file = actions.playlistExport(
+          context,
+          options.getString('name', true),
+          options.getString('format') ?? 'text',
+        );
+        await interaction.editReply({
+          embeds: [note(lang, `"${file.name}" as a file`, `"${file.name}" 파일`)],
+          files: [new AttachmentBuilder(Buffer.from(file.content, 'utf8'), { name: file.filename })],
+        });
+        return;
+      }
+      case 'import': {
+        const attachment = options.getAttachment('file', true);
+        if (attachment.size > 1024 * 1024) throw new ActionError('invalid', 'the file is larger than 1 MiB');
+        if (!this.options.fetch) throw new ActionError('unavailable', 'importing a file is not set up here');
+        // Discord keeps the file at a public address; jukecord fetches it as it fetches anything (public addresses).
+        const fetched = await this.options.fetch(attachment.url, { maxBytes: 1024 * 1024, timeoutMs: 15_000 });
+        if (fetched.status !== 200) throw new ActionError('unavailable', 'Discord did not hand over the file');
+        const result = await actions.playlistImport(context, options.getString('name', true), fetched.text);
+        const name = result.playlist.name;
+        const left = result.leftOut;
+        await interaction.editReply({
+          embeds: [
+            note(
+              lang,
+              `Imported "${name}": ${result.tracks} tracks${left > 0 ? `, ${left} left out` : ''}`,
+              `"${name}" 가져옴: ${result.tracks}곡${left > 0 ? `, ${left}곡 빠짐` : ''}`,
+            ),
+          ],
+        });
+        return;
+      }
+    }
+  }
+
+  // A person's likes: the list, all of them into the queue, one taken back.
+  private async onLikes(interaction: ChatInputCommandInteraction, context: ActionContext, lang: Lang): Promise<void> {
+    const actions = this.options.actions;
+    const options = interaction.options;
+    switch (options.getSubcommand()) {
+      case 'show':
+        await interaction.editReply({
+          embeds: [likesCard(actions.likes(context), options.getInteger('page') ?? 1, lang)],
+        });
+        return;
+      case 'add': {
+        const result = actions.likesAdd(context, options.getString('where') === 'next' ? 'next' : 'end');
+        await interaction.editReply({ embeds: [addedCard(result, lang)] });
+        await this.autoJoin(interaction, context, lang);
+        return;
+      }
+      case 'remove': {
+        // The 1-based numbers of /likes show.
+        const entry = actions.likes(context)[options.getInteger('position', true) - 1];
+        if (!entry) throw new ActionError('not-found', 'that track is not in your likes');
+        actions.unlike(context, entry.track.id);
+        const title = entry.track.title;
+        await interaction.editReply({
+          embeds: [note(lang, `Took back the like of "${title}"`, `좋아요 취소함: "${title}"`)],
+        });
         return;
       }
     }
@@ -896,10 +987,33 @@ export class Bot implements Directory, AlertSink {
     );
   }
 
-  // Playlist names as people type them.
+  // The searches under way for Discord's suggestions, one per person: Discord asks again as the words change, and the
+  // newer question stops the older search, which would only hold a lookup slot the newer one needs.
+  private readonly suggesting = new Map<string, AbortController>();
+
+  // Suggestions as people type: what a search finds for /play's and /add's input, playlist names for the playlists.
   private async onAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
     if (!interaction.inGuild()) return;
-    const typed = interaction.options.getFocused().toLowerCase();
+    const focused = interaction.options.getFocused(true);
+    if (focused.name === 'input') {
+      const context = this.context(interaction);
+      if (!context) return;
+      const person = interaction.user.id;
+      this.suggesting.get(person)?.abort();
+      const mine = new AbortController();
+      this.suggesting.set(person, mine);
+      const choices = await suggestions(
+        focused.value,
+        (words, signal) => this.options.actions.search(context, words, 10, signal),
+        mine.signal,
+      );
+      if (this.suggesting.get(person) === mine) this.suggesting.delete(person);
+      // A newer question from the same person is answered instead; this one's time is over anyway.
+      if (mine.signal.aborted) return;
+      await interaction.respond(choices).catch(() => {});
+      return;
+    }
+    const typed = String(focused.value).toLowerCase();
     const names = this.options.actions
       .playlists({ guildId: interaction.guildId, userId: interaction.user.id, mayControl: false, mayManage: false })
       .map((playlist) => playlist.name)

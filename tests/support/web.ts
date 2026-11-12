@@ -24,6 +24,7 @@ import { MediaCache } from '../../src/media/cache.ts';
 import { Covers, type Picture } from '../../src/media/covers.ts';
 import type { LyricsSource } from '../../src/media/lyrics.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
+import { type Search, searchWords } from '../../src/media/search.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
@@ -165,6 +166,7 @@ export interface TestServerOptions {
   readonly rates?: {
     readonly changes?: Rate;
     readonly fetches?: Rate;
+    readonly searches?: Rate;
     readonly now?: () => number;
     readonly covers?: Rate;
   };
@@ -176,6 +178,8 @@ export interface TestServerOptions {
   readonly mp3?: WebServerOptions['mp3'];
   /** Where lyrics come from (a stand-in for LRCLIB); without it, lyrics are off as with JUKECORD_LYRICS=off. */
   readonly lyrics?: LyricsSource;
+  /** What a search finds for some words (anything else finds nothing). */
+  readonly searched?: Record<string, NewTrack[]>;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -220,6 +224,14 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return tracks.map((track) => store.tracks.upsert(track));
     },
   } as unknown as Resolver;
+  // The search answers from its table, as many as asked for, and remembers who asked.
+  const searched = options.searched ?? {};
+  const search = {
+    find: async (words: string, ask: { limit?: number } = {}) =>
+      (searched[searchWords(words)] ?? []).slice(0, ask.limit ?? 8),
+    cached: () => null,
+    recent: () => null,
+  } as unknown as Search;
   const directory = new FakeDirectory();
   const voice = new FakeVoice();
   // The votes to skip, counting the fake voice channel and the browsers of the real live updates (once they exist).
@@ -242,6 +254,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     lyrics: options.lyrics ?? null,
     votes,
     bus,
+    search,
   });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });

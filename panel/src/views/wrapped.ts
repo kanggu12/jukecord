@@ -173,7 +173,16 @@ export function wrappedPage(): HTMLElement {
                   'div',
                   { class: 'sub' },
                   h('span', null, firstWhen(first.playedAt, wrapped.period)),
-                  h('span', null, first.addedBy ? words.addedBy(first.addedByName ?? first.addedBy) : words.byHost),
+                  // Who added it: a person, the host, or autoplay (which played it when the queue ran out).
+                  h(
+                    'span',
+                    null,
+                    first.addedBy === 'autoplay'
+                      ? words.byAutoplay
+                      : first.addedBy
+                        ? words.addedBy(first.addedByName ?? first.addedBy)
+                        : words.byHost,
+                  ),
                 ),
               ),
             ),

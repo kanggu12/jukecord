@@ -10,17 +10,25 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
 
 - **Now playing**: the track on a disc that turns while it plays, who added it, a progress bar you can click or drag to
   seek, and the keys: play or pause, skip, stop, repeat (off, the queue, this track) and remove (drops the track
-  without counting it as played).
-- **Queue**: drag a track by its handle to move it, or use its keys: play now, play next, remove. Above the list:
-  search, shuffle, take turns now (see [the server's settings](#the-servers-settings)), remove duplicates, save as a
-  playlist, load a playlist, clear. On a phone or in a narrow window, a track's keys and moves wait behind its **⋯**
-  key, and the queue's tools behind the one beside **Shuffle**. A long queue shows a hundred tracks at a time
-  (**Show more** brings the next hundred); search covers all of it.
-- **Add**: paste an address (a video, a playlist, a SoundCloud page ...) or type search words. **Add** puts it at the end
-  of the queue; **Play now** plays it at once.
+  without counting it as played). The heart beside the title likes the track.
+- **Queue**: drag a track by its handle to move it, or use its keys: play now, play next, remove; its **⋯** key also
+  likes it (on a phone or in a narrow window, the other keys and the moves wait there too). Above the list: autoplay
+  (beside the title), search, shuffle, take turns now (see [the server's settings](#the-servers-settings)), remove
+  duplicates, save as a playlist, load a playlist, clear; on a narrow window the queue's tools wait behind the key
+  beside **Shuffle**. A long queue shows a hundred tracks at a time (**Show more** brings the next hundred); search
+  covers all of it.
+- **Add**: paste an address (a video, a playlist, a SoundCloud page, a Deezer, Spotify or Apple Music link ...) or type
+  search words. **Add** puts it at the end of the queue, **Play next** right after the track playing, **Play now**
+  plays it at once. Words show what YouTube found under the field a moment after you stop typing: press a result to add
+  it, or its play now and play next marks; with the keyboard, the arrows choose one and Enter adds it (<kbd>Shift</kbd>
+  <kbd>Enter</kbd> plays it next, <kbd>Ctrl</kbd> <kbd>Enter</kbd> now). A link pasted anywhere on the page, or
+  dropped on it from another window, is added the same way.
 - **Voice channel**: where the bot is, the channels it may join (with how many people are in each), the voice
   channel's volume and sound (see [the sound](#the-voice-channels-sound)), and who is listening in a browser.
-- **Recently played**: the history, with a key to add a track again.
+- **Recently played** and **Liked** (two lists in one card): what played, and the tracks you liked, each with keys
+  to play it now, next or at the end, and its heart; **Add all** puts every liked track in the queue. Likes are each
+  login's own, in every server it opens (a track can be liked in a server that plays it, queued it, played it or keeps
+  it in a playlist).
 - **Statistics** (top bar): plays per day and per hour of the day, the most played tracks, who added most, and the
   time listened, over 7, 30 or 90 days or a year. Each chart has a table view.
 - **Wrapped** (a key on the statistics): the server's year in music, or a month, or the last 12 months. The song of
@@ -45,6 +53,19 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   panel installs and opens in its own window, and opens when jukecord cannot be reached, saying so. On Android, an
   installed panel is among the apps a video can be shared to: the shared address opens a page that adds it to the
   queue on a press of **Add**, **Play next** or **Play now**.
+- **Autoplay** (the **∞** key beside the queue's title, among the tools behind the key beside **Shuffle** on a narrow
+  window): what plays when the queue runs out. Off; **this server's plays**, a track played here before (the more it
+  was played and the more people liked it, the more often; none of the last 30); or **related to the last track**, from
+  YouTube's mix of it (this server's plays when there is none). Autoplay queues one track when the last one starts; its
+  row says "added by Autoplay", a track you add at the end goes before it, **Stop** ends it until a track starts again,
+  and it waits while a repeat is on.
+- **Saved playlists** (**Load**): load, rename, delete, export (a text file of addresses, an M3U, or jukecord's own
+  file, which keeps titles, lengths and pictures), and **Import**: a file of any of those, or a list pasted in (a line
+  that is not an address is searched on YouTube; at most a hundred lines are looked up).
+- **Links from other services**: a Deezer track, album or playlist, a Spotify track (albums and playlists too with the
+  host's Spotify app, below) or an Apple Music track is read for its tracks' titles, artists and lengths, and each
+  track is found on YouTube (the recording within a few seconds of its length, an official audio upload first). At
+  most 100 tracks of a link; the first plays while the rest are found, three at a time.
 
 At the bottom, **Listen here** plays the music in this browser, in time with the voice channel; the volume is this
 browser's own. The page title shows what is playing, and the media keys and the lock screen of your computer or phone
@@ -76,8 +97,8 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
   and the code travels after a `#`, which never reaches a server's or a proxy's log.
 - **Friends** come in with a **login link** the host makes (`Invite` in the panel, or `jukecord link --scope read` or
   `--scope control`): one browser, once, within ten minutes, as the host's friend in every server here, to look and
-  listen (view) or also to change the music (control), never to change settings or tokens. What a friend adds counts
-  as the host's.
+  listen (view) or also to change the music (control), never to change settings or tokens. What a friend adds, and
+  likes, counts as the host's.
 
 - A server can choose an **alerts channel**, where jukecord says when something goes wrong: YouTube refusing it (its
   check for bots) and when that is over, jukecord restarting itself, its data's disk with less than 1 GiB free, a track
@@ -90,12 +111,12 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 People who can manage the server (and the host) choose these in the panel's menu, with slash commands or with the
 `jukecord` command; anyone may look (`/dj show`, `jukecord settings`).
 
-| Setting           | Default  | What it does                                                                                                                                                                                                              | Change it with                      |
-| :---------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------- |
-| Vote to skip      | on       | with a DJ role set, Skip from anyone else is a vote (see above)                                                                                                                                                           | `/voteskip`, `jukecord voteskip on` |
-| Take turns        | off      | a track added at the end goes after the last track of the first round in which its person has none yet: people take turns instead of waiting behind one person's long run (the track playing counts as its person's turn) | `/turns set`, `jukecord turns on`   |
-| Tracks per person | no limit | the most tracks one person may have in the queue; what an add brings over it is left out, and the answer says how many (the host has no limit)                                                                            | `/limit`, `jukecord limit 5`        |
-| Stay in voice     | off      | the bot stays in its voice channel when everyone has left                                                                                                                                                                 | `/stay`, `jukecord stay on`         |
+| Setting           | Default  | What it does                                                                                                                                                                                                                                                                            | Change it with                      |
+| :---------------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------- |
+| Vote to skip      | on       | with a DJ role set, Skip from anyone else is a vote (see above)                                                                                                                                                                                                                         | `/voteskip`, `jukecord voteskip on` |
+| Take turns        | off      | a track added at the end goes after the last track of the first round in which its person has none yet: people take turns instead of waiting behind one person's long run (the track playing counts as its person's turn); autoplay's tracks are nobody's turn, and stay after people's | `/turns set`, `jukecord turns on`   |
+| Tracks per person | no limit | the most tracks one person may have in the queue; what an add brings over it is left out, and the answer says how many (the host has no limit, and autoplay's tracks are nobody's)                                                                                                      | `/limit`, `jukecord limit 5`        |
+| Stay in voice     | off      | the bot stays in its voice channel when everyone has left                                                                                                                                                                                                                               | `/stay`, `jukecord stay on`         |
 
 **Take turns now** (the queue's tools, `/turns now`, `jukecord turns now`) puts the queue as it is in turns once, with
 the setting on or off; it changes the music, so it needs what any change needs (the DJ role where one is set).
@@ -140,6 +161,10 @@ channel gets each cached track as it is; otherwise jukecord decodes, filters and
 | `/turns set` `/turns now`                    | take turns, or not (Manage Server); the queue in turns now           |
 | `/limit`                                     | the most tracks one person may have queued (needs Manage Server)     |
 | `/volume` `/sound`                           | the voice channel's volume and sound (browsers apply the sound too)  |
+| `/playlist export, import`                   | a saved playlist as a file, and a playlist from an attached file     |
+| `/like`                                      | like the track playing (answered to you alone)                       |
+| `/likes show, add, remove`                   | your liked tracks: the list, all of them into the queue, one off     |
+| `/autoplay`                                  | when the queue runs out: off, this server's plays, related tracks    |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
@@ -151,6 +176,9 @@ bot goes back to the voice channel it was in when people are there (or, where th
 case), and says so in that channel's chat with the now-playing card, paused. The newest now-playing card in a server
 (from `/np`, `/pause` and the like, or a press of its keys) is kept current as the music changes, from anywhere, and
 its Skip button with the votes to skip, at most once every five seconds.
+
+While you type in `/play` or `/add`, Discord suggests what YouTube finds for the words; a suggestion adds exactly
+that track.
 
 ## The jukecord command
 
@@ -176,6 +204,9 @@ front door, `./jukecord help <command>` asks the running jukecord. A few:
 ./jukecord lyrics --synced
 ./jukecord stop --after-track
 ./jukecord share --days 30
+./jukecord search never gonna give you up
+./jukecord autoplay history
+./jukecord playlist export "Friday night" --format m3u > friday.m3u
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it
@@ -209,6 +240,9 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_YTDLP_COOKIES`                                             |                    | a cookies file for YouTube's sign-in check ([Troubleshooting](TROUBLESHOOTING.md))             |
 | `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                                     |
 | `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                             |
+| `JUKECORD_LINK_SERVICES`                                             | all three          | the services whose links are read: `deezer`, `spotify`, `apple-music` (`none`: none)           |
+| `JUKECORD_SPOTIFY_CLIENT_ID`, `JUKECORD_SPOTIFY_CLIENT_SECRET`       |                    | your own Spotify app (developer.spotify.com), for Spotify albums and playlists                 |
+| `JUKECORD_SPOTIFY_CLIENT_SECRET_FILE`                                |                    | the Spotify app's secret read from a file                                                      |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                                      |
 | `JUKECORD_REST_AFTER`                                                | `2m`               | how long a server nobody hears plays on before it pauses (`0`: it plays on)                    |
 | `JUKECORD_BACKUP_AT`                                                 | `off`              | a backup of the database every day at this time (`04:30`, in jukecord's time zone)             |

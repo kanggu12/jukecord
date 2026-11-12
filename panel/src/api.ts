@@ -64,6 +64,14 @@ export const PANEL_ACTIONS = [
   'person-limit',
   'volume',
   'sound',
+  'search',
+  'likes',
+  'like',
+  'unlike',
+  'likes-add',
+  'autoplay',
+  'playlist-export',
+  'playlist-import',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -104,8 +112,8 @@ export function whenLoggedOut(fn: () => void): void {
   onLoggedOut = fn;
 }
 
-/** Sends a request to /api/v1 and returns the JSON answer. */
-export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** Sends a request to /api/v1 and returns the JSON answer; `signal` drops it (a search typed over). */
+export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' };
   if (method !== 'GET' && csrf) headers['x-jukecord-csrf'] = csrf;
   if (body !== undefined) headers['content-type'] = 'application/json';
@@ -114,6 +122,7 @@ export async function request<T>(method: string, path: string, body?: unknown): 
     headers,
     credentials: 'same-origin',
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(signal ? { signal } : {}),
   });
   const text = await response.text();
   let json: unknown = null;
@@ -177,6 +186,7 @@ export interface Player {
   waiting: boolean;
   /** Whether the player stops when this track ends. */
   stopAfter: boolean;
+  autoplay: 'off' | 'history' | 'related';
 }
 /** A skip's answer: the player after it, and how the vote stands when it was a vote the track did not go by. */
 export interface SkipAnswer extends Player {
@@ -198,6 +208,7 @@ export interface AddResult {
   skippedTooLong: number;
   skippedFull: number;
   skippedLimit: number;
+  skippedNotFound: number;
 }
 export interface HistoryEntry {
   id: number;
@@ -331,6 +342,36 @@ export interface LogRecord {
   msg: string;
   fields: Record<string, unknown>;
 }
+/** A track a search found, not added yet: its address adds it. */
+export interface SearchResult {
+  url: string;
+  title: string;
+  uploader: string | null;
+  durationMs: number | null;
+  thumbnail: string | null;
+}
+export interface Found {
+  query: string;
+  results: SearchResult[];
+}
+/** A track this login liked, with when. */
+export interface Liked {
+  track: Track;
+  likedAt: number;
+}
+/** A saved playlist as a file. */
+export interface PlaylistFile {
+  name: string;
+  format: 'text' | 'm3u' | 'json';
+  filename: string;
+  content: string;
+}
+/** What an import made. */
+export interface Imported {
+  playlist: Playlist;
+  tracks: number;
+  leftOut: number;
+}
 
 const g = (guild: string) => `/guilds/${encodeURIComponent(guild)}`;
 
@@ -411,6 +452,24 @@ export const api = {
     request<Settings>('PUT', `${g(guild)}/settings/person-limit`, { tracks }),
   volume: (guild: string, percent: number) => request<Sound>('PUT', `${g(guild)}/voice/volume`, { percent }),
   sound: (guild: string, preset: SoundPreset) => request<Sound>('PUT', `${g(guild)}/voice/sound`, { preset }),
+  search: (guild: string, words: string, limit: number, signal?: AbortSignal) =>
+    request<Found>(
+      'GET',
+      `${g(guild)}/search?${new URLSearchParams({ q: words, limit: String(limit) })}`,
+      undefined,
+      signal,
+    ),
+  likes: (guild: string) => request<Liked[]>('GET', `${g(guild)}/likes`),
+  like: (guild: string, track: number) => request<Liked>('PUT', `${g(guild)}/likes/${track}`),
+  unlike: (guild: string, track: number) => request<unknown>('DELETE', `${g(guild)}/likes/${track}`),
+  'likes-add': (guild: string, at: 'end' | 'next' = 'end') =>
+    request<AddResult>('POST', `${g(guild)}/likes/queue`, { at }),
+  autoplay: (guild: string, mode: Player['autoplay']) =>
+    request<Player>('PUT', `${g(guild)}/player/autoplay`, { mode }),
+  'playlist-export': (guild: string, name: string, format: PlaylistFile['format']) =>
+    request<PlaylistFile>('GET', `${g(guild)}/playlists/${encodeURIComponent(name)}/export?format=${format}`),
+  'playlist-import': (guild: string, name: string, content: string) =>
+    request<Imported>('POST', `${g(guild)}/playlists/import`, { name, content }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

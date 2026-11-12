@@ -73,7 +73,9 @@ export const QueueItemSchema = Type.Object(
     id: Type.Integer(),
     position: Type.Integer({ description: '0 is next' }),
     track: TrackSchema,
-    addedBy: Nullable(Type.String({ description: 'Discord user ID; null for the host' })),
+    addedBy: Nullable(
+      Type.String({ description: 'Discord user ID; "autoplay" for what autoplay queued; null for the host' }),
+    ),
     addedByName: Nullable(Type.String()),
     addedAt: Type.Integer(),
   },
@@ -114,6 +116,9 @@ export const PlayerSchema = Type.Object(
     ),
     waiting: Type.Boolean({ description: 'Whether the loading track waits for its turn among the fetches' }),
     stopAfter: Type.Boolean({ description: 'Whether the player stops when the current track ends' }),
+    autoplay: Type.Union([Type.Literal('off'), Type.Literal('history'), Type.Literal('related')], {
+      description: "When the queue runs out: nothing, a track from this server's plays, or one related to the last",
+    }),
   },
   { title: 'Player' },
 );
@@ -138,6 +143,9 @@ export const AddResultSchema = Type.Object(
     skippedTooLong: Type.Integer(),
     skippedFull: Type.Integer(),
     skippedLimit: Type.Integer({ description: "Left out: over the server's limit of tracks per person" }),
+    skippedNotFound: Type.Integer({
+      description: 'Tracks of a Deezer, Spotify or Apple Music link not found on YouTube',
+    }),
   },
   { title: 'AddResult' },
 );
@@ -465,3 +473,53 @@ export const SoundSchema = Type.Object(
 
 /** How many queued tracks a change moved to another place. */
 export const MovedSchema = Type.Object({ moved: Type.Integer() }, { title: 'Moved' });
+
+/** One thing a search found: a track not added yet, so without an ID (its address adds it). */
+export const SearchResultSchema = Type.Object(
+  {
+    url: Type.String({ description: 'The page of the track: give it to add or play-now' }),
+    title: Type.String(),
+    uploader: Nullable(Type.String()),
+    durationMs: Nullable(Type.Integer()),
+    thumbnail: Nullable(Type.String()),
+  },
+  { title: 'SearchResult' },
+);
+
+export const SearchSchema = Type.Object(
+  {
+    query: Type.String({ description: 'The words searched for, as the search read them' }),
+    results: Type.Array(SearchResultSchema),
+  },
+  { title: 'Search' },
+);
+
+/** A track a login liked, with when. */
+export const LikedSchema = Type.Object(
+  {
+    track: TrackSchema,
+    likedAt: Type.Integer({ description: 'When it was liked, in milliseconds since the epoch' }),
+  },
+  { title: 'Liked' },
+);
+
+/** A saved playlist as a file. */
+export const PlaylistFileSchema = Type.Object(
+  {
+    name: Type.String(),
+    format: Type.Union([Type.Literal('text'), Type.Literal('m3u'), Type.Literal('json')]),
+    filename: Type.String({ description: 'A name to save it under' }),
+    content: Type.String({ description: "The file's text" }),
+  },
+  { title: 'PlaylistFile' },
+);
+
+/** What an import made. */
+export const ImportResultSchema = Type.Object(
+  {
+    playlist: PlaylistSchema,
+    tracks: Type.Integer({ description: 'How many tracks the playlist holds' }),
+    leftOut: Type.Integer({ description: 'Entries left out: not found, not an address, or past the limits' }),
+  },
+  { title: 'ImportResult' },
+);

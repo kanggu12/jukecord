@@ -187,6 +187,62 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [/^the limit is 0 \(none\) to (\d+) tracks$/, '제한은 0(없음)부터 $1곡까지'],
   [/^the volume is 0 to (\d+) percent$/, '음량은 0부터 $1퍼센트까지'],
   [/^the sound is one of (.+)$/, '음색은 $1 중 하나'],
+  // Searching (the add field's list, Discord's suggestions, the API).
+  ['searching is not set up here', '여기서는 검색을 쓸 수 없음'],
+  ['nothing to search for', '찾을 말이 없음'],
+  ['a search takes words, not an address', '검색어로 주소를 쓸 수 없음'],
+  ['too many searches at once; try again in a moment', '한꺼번에 너무 많이 검색함: 잠시 뒤 다시 시도하세요'],
+  // Likes.
+  [
+    'that track is not playing, queued, played or in a playlist in this server',
+    '이 서버에서 재생 중이거나 대기열이나 플레이리스트에 있거나 들은 곡이 아님',
+  ],
+  ['that track is not in your likes', '내 좋아요 목록에 없는 곡임'],
+  ['there are no liked tracks to add', '넣을 좋아요 곡 없음'],
+  [/^your likes are full \((\d+) tracks\)$/, '좋아요 목록이 가득 참($1곡)'],
+  // Autoplay.
+  [/^autoplay is one of (.+)$/, '자동 재생은 $1 중 하나'],
+  // Playlists in and out.
+  [/^the format is one of (.+)$/, '형식은 $1 중 하나'],
+  ['there is nothing to import in it', '가져올 것이 없음'],
+  ['nothing in it could be found', '그 안의 곡을 하나도 찾지 못함'],
+  ['the file is not valid JSON', '올바른 JSON 파일이 아님'],
+  ['the JSON is not a jukecord playlist', 'jukecord 플레이리스트 JSON이 아님'],
+  ['the file is larger than 1 MiB', '파일이 1MiB보다 큼'],
+  ['importing a file is not set up here', '여기서는 파일 가져오기를 쓸 수 없음'],
+  ['Discord did not hand over the file', '디스코드가 파일을 넘겨주지 않음'],
+  [
+    'jukecord is still adding a list of yours; try again when it is done',
+    '내 목록을 아직 넣는 중: 끝나면 다시 시도하세요',
+  ],
+  // Links of other music services.
+  ['that is not a link jukecord reads', 'jukecord가 읽는 링크가 아님'],
+  [/^jukecord does not read (.+) links here$/, '여기서는 $1 링크를 읽지 않음'],
+  [/^there are no tracks at that (.+) link$/, '그 $1 링크에는 곡이 없음'],
+  [/^that (.+) link leads to nothing jukecord reads$/, '그 $1 링크는 jukecord가 읽는 곳으로 이어지지 않음'],
+  [
+    'jukecord reads single Apple Music tracks, not albums or playlists',
+    'Apple Music은 곡 하나만 읽음: 앨범과 플레이리스트는 읽지 않음',
+  ],
+  ['Deezer has nothing at that link', 'Deezer에 그 링크의 곡이 없음'],
+  [
+    'Spotify albums and playlists need the host’s Spotify app (JUKECORD_SPOTIFY_CLIENT_ID and JUKECORD_SPOTIFY_CLIENT_SECRET)',
+    'Spotify 앨범과 플레이리스트는 호스트의 Spotify 앱이 있어야 읽음(JUKECORD_SPOTIFY_CLIENT_ID, JUKECORD_SPOTIFY_CLIENT_SECRET)',
+  ],
+  ['Spotify has nothing at that link', 'Spotify에 그 링크의 곡이 없음'],
+  [
+    'Spotify refused the host’s Spotify app (JUKECORD_SPOTIFY_CLIENT_ID)',
+    'Spotify가 호스트의 Spotify 앱을 거절함(JUKECORD_SPOTIFY_CLIENT_ID)',
+  ],
+  ['Spotify is not set up here', '여기서는 Spotify를 쓸 수 없음'],
+  ['the Spotify page does not say what the track is', 'Spotify 페이지에 곡 정보가 없음'],
+  ['Apple Music has nothing at that link', 'Apple Music에 그 링크의 곡이 없음'],
+  ['the Apple Music page does not say what the track is', 'Apple Music 페이지에 곡 정보가 없음'],
+  [/^(\S+) did not answer$/, '$1에서 답이 없음'],
+  ['the music service is busy', '음악 서비스가 바쁨'],
+  ['the music service answered something that is not JSON', '음악 서비스가 JSON이 아닌 답을 보냄'],
+  ['none of its tracks was found on YouTube', 'YouTube에서 그 곡들을 하나도 찾지 못함'],
+  ['links of other services are not read here', '여기서는 다른 음악 서비스의 링크를 읽지 않음'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

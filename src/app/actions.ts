@@ -12,13 +12,18 @@ import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
 import { plainReason, REASONS } from '../core/reasons.ts';
 import { isPreset, SOUND_PRESETS, type Sound, VOLUME_MAX } from '../core/sound.ts';
-import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
+import type { HistoryEntry, LikedTrack, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
-import { AddressError } from '../media/address.ts';
+import { type AddressCheck, AddressError } from '../media/address.ts';
+import { BATCH_MOST, BatchLookups } from '../media/batch.ts';
 import { BusyError } from '../media/busy.ts';
+import { LinkError, type Links } from '../media/links.ts';
 import { type LyricsAnswer, type LyricsSource, LyricsUnavailable } from '../media/lyrics.ts';
 import type { Resolver } from '../media/resolver.ts';
+import type { Search } from '../media/search.ts';
+import { canonicalSource, parseInput, youtubeVideoId } from '../media/source.ts';
 import type {
+  AutoplayMode,
   CommunitySettings,
   HistoryStats,
   HistoryWrapped,
@@ -26,8 +31,18 @@ import type {
   RepeatMode,
   Store,
 } from '../store/store.ts';
-import { StoreError } from '../store/store.ts';
+import { LIKES_MAX, StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
+import type { Autoplay } from './autoplay.ts';
+import {
+  fileName,
+  PLAYLIST_FORMATS,
+  type PlaylistFile,
+  PlaylistFileError,
+  type PlaylistFormat,
+  readPlaylist,
+  writePlaylist,
+} from './playlist-files.ts';
 import type { SkipVotes, VotesView } from './votes.ts';
 
 /**
@@ -79,6 +94,14 @@ export const ACTIONS = [
   'person-limit',
   'volume',
   'sound',
+  'search',
+  'likes',
+  'like',
+  'unlike',
+  'likes-add',
+  'autoplay',
+  'playlist-export',
+  'playlist-import',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -265,6 +288,16 @@ export interface ActionsOptions {
   readonly votes?: SkipVotes;
   /** Where a change of a voice channel's sound is announced (the panels apply its preset); absent in some tests. */
   readonly bus?: Bus;
+  /** Searching YouTube for words, to pick from (absent: searching is refused as not set up). */
+  readonly search?: Search;
+  /** What picks a track when a queue runs out (told when a person stops the music); absent in tests that need none. */
+  readonly autoplay?: Autoplay;
+  /** The turns of lookups that come in lists (an imported playlist's lines); one of its own when absent. */
+  readonly batch?: BatchLookups;
+  /** The check of addresses a file brings (private networks refused); none: every address passes. */
+  readonly checkAddress?: AddressCheck;
+  /** Links of Deezer, Spotify and Apple Music, read and found on YouTube (absent: they are addresses like any). */
+  readonly links?: Links;
 }
 
 /** What a skip did: the player after it, and how the vote stands when it was a vote the track did not go by. */
@@ -281,6 +314,24 @@ export const GUESTS_PER_LINK = 25;
 // How many listening links a server may have working at once: plenty for friends, and a bound on the table.
 const LINKS_PER_SERVER = 50;
 
+/** A playlist as a file (see playlist-files.ts). */
+export interface PlaylistExport {
+  readonly name: string;
+  readonly format: PlaylistFormat;
+  readonly filename: string;
+  readonly content: string;
+}
+
+/** What an import made: the playlist, how many tracks it holds, and how many entries were left out. */
+export interface ImportResult {
+  readonly playlist: Playlist;
+  readonly tracks: number;
+  readonly leftOut: number;
+}
+
+/** The most entries an import takes (as many as a playlist added from a site). */
+export const IMPORT_MOST = 500;
+
 /** What an add did: the new queue items, and how many tracks were left out and why. */
 export interface AddResult {
   readonly items: QueueItem[];
@@ -290,6 +341,8 @@ export interface AddResult {
   readonly skippedFull: number;
   /** Tracks that did not fit because the person reached the server's limit of tracks per person. */
   readonly skippedLimit: number;
+  /** Tracks of a link from another service (Deezer, Spotify, Apple Music) not found on YouTube. */
+  readonly skippedNotFound: number;
 }
 
 /**
@@ -306,8 +359,19 @@ export function djRoleNow(chosen: string | null, roles: readonly RoleInfo[] | nu
 /** The highest limit of tracks per person a server may set. */
 export const PERSON_LIMIT_MAX = 1000;
 
+/**
+ * Whose likes an action reads and writes: the Discord user's, or the host's (the host has no Discord ID, and no Discord
+ * ID is the word "host").
+ */
+export function likesOwner(context: ActionContext): string {
+  return context.userId ?? 'host';
+}
+
 /** The repeat modes, for checking input from the panel, the API and the CLI. */
 export const REPEAT_MODES: readonly RepeatMode[] = ['off', 'track', 'queue'];
+
+/** The autoplay modes, for checking input the same way. */
+export const AUTOPLAY_MODES: readonly AutoplayMode[] = ['off', 'history', 'related'];
 
 export class Actions {
   private readonly options: ActionsOptions;
@@ -315,9 +379,12 @@ export class Actions {
   // (a page reloaded, the picture's page and a card) is answered without walking the history again, until a play is
   // added. Bounded: the oldest answer goes past the limit.
   private readonly wrappedKept = new Map<string, WrappedView>();
+  // The turns of lookups that come in lists, shared by every import (and the links of other services).
+  private readonly batch: BatchLookups;
 
   constructor(options: ActionsOptions) {
     this.options = options;
+    this.batch = options.batch ?? new BatchLookups();
   }
 
   /** Called by the web server once it is up, so a revoked listening link ends its guests' live connections. */
@@ -359,6 +426,7 @@ export class Actions {
   /** Adds what an address or search finds (all of a playlist) and starts playing if nothing was. */
   async add(context: ActionContext, input: string, at: InsertAt = 'end', signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
+    if (this.options.links?.handles(input)) return this.addLink(context, input, at, false, signal);
     const result = this.enqueue(context, await this.lookup(input, signal, context), at);
     this.options.players.get(context.guildId).play();
     return result;
@@ -392,23 +460,111 @@ export class Actions {
       throw new ActionError('invalid', `longer than the ${Math.round(trackMax / 60_000)} minute limit`);
     }
     const ids = fitting.map((track) => track.id);
-    // In turns: the track playing counts as its person's turn under way.
-    const snapshot = this.options.players.get(context.guildId).snapshot();
-    const items =
-      at === 'end' && community.takeTurns
-        ? this.options.queue.addInTurns(
-            context.guildId,
-            ids,
-            context.userId,
-            snapshot.track ? { owner: snapshot.addedBy } : null,
-          )
-        : this.options.queue.add(context.guildId, ids, at, context.userId);
-    return { items, skippedTooLong, skippedFull, skippedLimit };
+    let items: QueueItem[];
+    if (at === 'end' && community.takeTurns) {
+      // In turns: the track playing counts as its person's turn under way; autoplay's tracks are nobody's turn, and
+      // stay after people's (see QueueService.addInTurns).
+      const snapshot = this.options.players.get(context.guildId).snapshot();
+      items = this.options.queue.addInTurns(
+        context.guildId,
+        ids,
+        context.userId,
+        snapshot.track ? { owner: snapshot.addedBy } : null,
+      );
+    } else {
+      // "At the end", for a person, is before the tracks autoplay queued to fill a queue that ran out: those play
+      // after what people add, and none of them is taken away.
+      const place = at === 'end' ? (this.options.store.queue.autoplayTail(context.guildId) ?? 'end') : at;
+      items = this.options.queue.add(context.guildId, ids, place, context.userId);
+    }
+    return { items, skippedTooLong, skippedFull, skippedLimit, skippedNotFound: 0 };
+  }
+
+  // A link of Deezer, Spotify or Apple Music: its tracks, found on YouTube, go into the queue as they are found and in
+  // the link's order, so the first one plays while the rest are searched (see media/links.ts). `now` plays the first
+  // at once, as Play now does.
+  private async addLink(
+    context: ActionContext,
+    input: string,
+    at: InsertAt,
+    now: boolean,
+    signal?: AbortSignal,
+  ): Promise<AddResult> {
+    const links = this.options.links;
+    if (!links) throw new ActionError('unavailable', 'links of other services are not read here');
+    const player = this.options.players.get(context.guildId);
+    const items: QueueItem[] = [];
+    let skippedTooLong = 0;
+    let skippedFull = 0;
+    // Held to the server's limit of tracks per person as any add is (see enqueue).
+    let skippedLimit = 0;
+    let started = false;
+    const take = (tracks: Track[]) => {
+      // After this link's last track still waiting, so the link's order holds whatever else changes meanwhile (one
+      // that started playing leaves the next place to the rest); "at the end" stays at the end.
+      let place: InsertAt = at;
+      const last = items.at(-1);
+      if (last && at !== 'end') {
+        const waiting = this.options.store.queue.get(last.id);
+        place = waiting && waiting.guildId === context.guildId ? waiting.position + 1 : 'next';
+      }
+      let part: AddResult;
+      try {
+        part = this.enqueue(context, tracks, place);
+      } catch (error) {
+        // Nothing of this part fitted: counted, and the link goes on (a later part may be shorter). The person's limit
+        // reached is a conflict too, told apart from a full queue by what it says.
+        if (error instanceof ActionError && error.code === 'conflict' && error.message.startsWith('each person may'))
+          skippedLimit += tracks.length;
+        else if (error instanceof ActionError && error.code === 'conflict') skippedFull += tracks.length;
+        else if (error instanceof ActionError && error.code === 'invalid') skippedTooLong += tracks.length;
+        else throw error;
+        return;
+      }
+      items.push(...part.items);
+      skippedTooLong += part.skippedTooLong;
+      skippedFull += part.skippedFull;
+      skippedLimit += part.skippedLimit;
+      if (!started) {
+        started = true;
+        // The first track found plays now (the current one skipped), or starts the player if nothing played.
+        if (now) {
+          if (!player.play()) player.skip();
+        } else {
+          player.play();
+        }
+      }
+    };
+    let notFound: number;
+    try {
+      notFound = (await links.resolve(input, { who: context.userId, ...(signal ? { signal } : {}), each: take }))
+        .notFound;
+    } catch (error) {
+      if (error instanceof LinkError) throw new ActionError(error.code, error.message);
+      if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+      throw error;
+    }
+    if (items.length === 0) {
+      if (skippedFull > 0)
+        throw new ActionError('conflict', `the queue is full (${this.options.queueMax ?? 1000} tracks)`);
+      if (skippedLimit > 0) {
+        const limit = this.options.store.settings.community(context.guildId).personLimit;
+        throw new ActionError('conflict', `each person may have ${limit} tracks in the queue here`);
+      }
+      if (skippedTooLong > 0)
+        throw new ActionError(
+          'invalid',
+          `longer than the ${Math.round((this.options.trackMaxMs ?? 3 * 3_600_000) / 60_000)} minute limit`,
+        );
+      throw new ActionError('not-found', 'none of its tracks was found on YouTube');
+    }
+    return { items, skippedTooLong, skippedFull, skippedLimit, skippedNotFound: notFound };
   }
 
   /** Puts what an input finds first and plays it now; the current track is skipped. */
   async playNow(context: ActionContext, input: string, signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
+    if (this.options.links?.handles(input)) return this.addLink(context, input, 'next', true, signal);
     const result = this.enqueue(context, await this.lookup(input, signal, context), 'next');
     const player = this.options.players.get(context.guildId);
     // Idle: play starts the first of the new items. Otherwise skipping moves on to it.
@@ -502,11 +658,12 @@ export class Actions {
     return player.snapshot();
   }
 
-  /** Stops playing; the queue stays. */
+  /** Stops playing; the queue stays. Autoplay stops with it until a track starts again. */
   stop(context: ActionContext): PlayerSnapshot {
     this.control(context);
     const player = this.options.players.get(context.guildId);
     if (!player.stop()) throw new ActionError('conflict', 'nothing is playing');
+    this.options.autoplay?.stopped(context.guildId);
     return player.snapshot();
   }
 
@@ -904,6 +1061,220 @@ export class Actions {
     this.options.store.listenLinks.remove(id);
     this.options.endGuests?.(id);
     this.options.log.info('revoked a listening link', { guild: context.guildId, link: id });
+  }
+
+  /**
+   * What YouTube finds for some words, to pick from before adding: the add field's list, the API, the command and
+   * Discord's suggestions. Words only: an address is added as it is, with nothing to pick. Only for people who may
+   * change the music (it is the first step of adding), and held to the lookups' shares like an add.
+   */
+  async search(context: ActionContext, words: string, limit = 8, signal?: AbortSignal): Promise<NewTrack[]> {
+    this.control(context);
+    const search = this.options.search;
+    if (!search) throw new ActionError('unavailable', 'searching is not set up here');
+    let input: ReturnType<typeof parseInput>;
+    try {
+      input = parseInput(words);
+    } catch {
+      throw new ActionError('invalid', 'nothing to search for');
+    }
+    if (input.kind === 'url') throw new ActionError('invalid', 'a search takes words, not an address');
+    try {
+      return await search.find(input.query, {
+        limit,
+        who: context.userId,
+        server: context.guildId,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      // The asker went away (the next key was typed): its own abort, as it is.
+      if (signal?.aborted) throw error;
+      if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+      throw new ActionError('not-found', plainReason(error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  /** The tracks this login liked, newest first (anyone may look at their own). */
+  likes(context: ActionContext): LikedTrack[] {
+    return this.options.store.likes.list(likesOwner(context));
+  }
+
+  /**
+   * Likes a track for this login. A like is personal, so the DJ role is not needed; the track must be one this server
+   * shows (playing, queued, played here or in one of its playlists): a track number from elsewhere would show another
+   * server's music in the list.
+   */
+  like(context: ActionContext, trackId: number): LikedTrack {
+    const store = this.options.store;
+    const track = store.tracks.get(trackId);
+    // Each question one lookup by an index, as for the covers (web/server.ts): the player, the queue, the history,
+    // the playlists.
+    const here =
+      track !== null &&
+      (this.options.players.existing(context.guildId)?.snapshot().track?.id === trackId ||
+        this.options.queue.contains(context.guildId, trackId) ||
+        store.history.has(context.guildId, trackId) ||
+        store.playlists.has(context.guildId, trackId));
+    if (!track || !here)
+      throw new ActionError('not-found', 'that track is not playing, queued, played or in a playlist in this server');
+    const owner = likesOwner(context);
+    if (!store.likes.has(owner, trackId) && store.likes.count(owner) >= LIKES_MAX)
+      throw new ActionError('conflict', `your likes are full (${LIKES_MAX} tracks)`);
+    store.likes.add(owner, trackId);
+    const liked = store.likes.list(owner).find((entry) => entry.track.id === trackId);
+    return liked ?? { track, likedAt: Date.now() };
+  }
+
+  /** Takes a like back. */
+  unlike(context: ActionContext, trackId: number): void {
+    if (!this.options.store.likes.remove(likesOwner(context), trackId))
+      throw new ActionError('not-found', 'that track is not in your likes');
+  }
+
+  /** Adds every track this login liked to the queue, newest liked first, and starts playing if nothing was. */
+  likesAdd(context: ActionContext, at: InsertAt = 'end'): AddResult {
+    this.control(context);
+    const liked = this.options.store.likes.list(likesOwner(context));
+    if (liked.length === 0) throw new ActionError('invalid', 'there are no liked tracks to add');
+    const result = this.enqueue(
+      context,
+      liked.map((entry) => entry.track),
+      at,
+    );
+    this.options.players.get(context.guildId).play();
+    return result;
+  }
+
+  /**
+   * Sets what happens when the queue runs out: nothing, a track from this server's plays, or one related to the last
+   * track (see app/autoplay.ts). Kept with the player's state, like the repeat mode.
+   */
+  autoplay(context: ActionContext, mode: string): PlayerSnapshot {
+    this.control(context);
+    if (!AUTOPLAY_MODES.includes(mode as AutoplayMode))
+      throw new ActionError('invalid', `autoplay is one of ${AUTOPLAY_MODES.join(', ')}`);
+    const player = this.options.players.get(context.guildId);
+    player.setAutoplay(mode as AutoplayMode);
+    return player.snapshot();
+  }
+
+  /** A saved playlist as a file: its addresses (text), an M3U, or jukecord's JSON (anyone may look). */
+  playlistExport(context: ActionContext, name: string, format: string): PlaylistExport {
+    if (!PLAYLIST_FORMATS.includes(format as PlaylistFormat))
+      throw new ActionError('invalid', `the format is one of ${PLAYLIST_FORMATS.join(', ')}`);
+    const store = this.options.store;
+    const playlist = store.playlists.find(context.guildId, name);
+    if (!playlist) throw new ActionError('not-found', `there is no playlist named "${name.trim()}"`);
+    const kind = format as PlaylistFormat;
+    return {
+      name: playlist.name,
+      format: kind,
+      filename: fileName(playlist.name, kind),
+      content: writePlaylist(playlist.name, store.playlists.tracks(playlist.id), kind),
+    };
+  }
+
+  /**
+   * Makes a playlist from a file or a pasted list (see playlist-files.ts), under a name not taken yet. An address
+   * jukecord knows is that track; one the file describes (jukecord's JSON, an M3U's line) is stored as the file says,
+   * after the same check as a typed address; the rest (addresses alone, words) are looked up, three at a time and at
+   * most a hundred. What cannot be found is left out and counted.
+   */
+  async playlistImport(
+    context: ActionContext,
+    name: string,
+    content: string,
+    signal?: AbortSignal,
+  ): Promise<ImportResult> {
+    this.control(context);
+    const store = this.options.store;
+    const clean = name.trim();
+    if (clean.length === 0 || clean.length > 100)
+      throw new ActionError('invalid', 'a playlist name is 1 to 100 characters');
+    if (store.playlists.find(context.guildId, clean))
+      throw new ActionError('conflict', `a playlist named "${clean}" exists`);
+    let file: PlaylistFile;
+    try {
+      file = readPlaylist(content);
+    } catch (error) {
+      if (error instanceof PlaylistFileError) throw new ActionError('invalid', error.message);
+      throw error;
+    }
+    if (file.entries.length === 0) throw new ActionError('invalid', 'there is nothing to import in it');
+    const entries = file.entries.slice(0, IMPORT_MOST);
+    // Each entry's tracks (a line may be a playlist's address), or null when nothing was found for it.
+    const found: (Track[] | null)[] = entries.map(() => null);
+    const toLook: number[] = [];
+    for (const [index, entry] of entries.entries()) {
+      if (entry.url) {
+        const url = new URL(entry.url);
+        const source = canonicalSource(url);
+        const known = store.tracks.bySource(source);
+        if (known) {
+          found[index] = [known];
+          continue;
+        }
+        if (entry.title) {
+          // What the file says about an address jukecord does not know, after the check every address added gets.
+          try {
+            await this.options.checkAddress?.(url);
+          } catch {
+            continue;
+          }
+          found[index] = [
+            store.tracks.upsert({
+              source,
+              url: youtubeVideoId(url) ? source : url.href,
+              title: entry.title,
+              uploader: entry.uploader,
+              durationMs: entry.durationMs,
+              thumbnail: entry.thumbnail,
+            }),
+          ];
+          continue;
+        }
+      }
+      if (entry.url || entry.words) toLook.push(index);
+    }
+    // At most a hundred lookups; the entries past them are left out.
+    const asked = toLook.slice(0, BATCH_MOST);
+    if (asked.length > 0) {
+      let results: (Track[] | Error)[];
+      try {
+        results = await this.batch.map(
+          context.userId,
+          asked,
+          (index, stop) =>
+            this.options.resolver.resolveListed(entries[index]?.url ?? entries[index]?.words ?? '', stop),
+          signal ? { signal } : {},
+        );
+      } catch (error) {
+        if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+        throw error;
+      }
+      results.forEach((result, at) => {
+        const index = asked[at];
+        if (index !== undefined && !(result instanceof Error)) found[index] = result;
+      });
+    }
+    // In the file's order, at most as many as a playlist takes (a line that was a playlist's address adds several).
+    const tracks = found.flatMap((entry) => entry ?? []).slice(0, IMPORT_MOST);
+    const leftOut = file.entries.length - entries.length + found.filter((entry) => entry === null).length;
+    if (tracks.length === 0) throw new ActionError('not-found', 'nothing in it could be found');
+    // Taken while the lookups ran: refused as before, rather than saved over.
+    if (store.playlists.find(context.guildId, clean))
+      throw new ActionError('conflict', `a playlist named "${clean}" exists`);
+    try {
+      const playlist = store.playlists.save(
+        context.guildId,
+        clean,
+        tracks.map((track) => track.id),
+        context.userId,
+      );
+      return { playlist, tracks: tracks.length, leftOut };
+    } catch (error) {
+      throw this.fromStore(error);
+    }
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

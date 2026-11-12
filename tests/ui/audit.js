@@ -11,11 +11,11 @@
  * - align: controls on one row of a group that differ in height or centre by more than 1px;
  * - crossing: a floating layer (toast, sheet, chart tip) whose edge cuts across another box;
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
- *   the bar's toast, a dialog's shade over the bar);
+ *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest;
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
- *   that is (the shortcuts' list in a short dialog);
+ *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
  *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track or a
  *   chart's bar in the canvas's own colour (a contrast theme paints every background in its canvas colour);
@@ -23,6 +23,8 @@
  *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
  *   room for fewer than three whole rows (a short window left the queue one row beside the cards above it, or none);
+ * - adrift: the listen bar off the foot of the window: the page ran past the window and its bars scrolled with it (the
+ *   search's results once pushed the queue's column 170 px past a 900 px window, and nothing above said so);
  * - sizes: the font sizes in use (reported, not a finding).
  *
  * Colours are read through a canvas, so any CSS colour (oklch, color-mix) becomes plain sRGB.
@@ -321,8 +323,12 @@ window.__audit = () => {
     if (crossed > 0) add('crossing', layer, `${crossed} boxes: ${names.join(', ')}`);
   }
 
-  // The middle of a sheet, a dialog or a toast must be that layer (not a scrim or a sheet drawn over it).
+  // The middle of a sheet, a dialog or a toast must be that layer (not a scrim or a sheet drawn over it). A dialog
+  // opened over another one (a playlist's file kinds over the playlists, a rename) covers the one under it by design:
+  // only the newest dialog, the last in the page, is held to it.
+  const dialogs = [...document.querySelectorAll('.dialog')].filter(shown);
   for (const layer of [...document.querySelectorAll('.sheet, .dialog, .toast')].filter(shown)) {
+    if (layer.matches('.dialog') && layer !== dialogs.at(-1)) continue;
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);
@@ -349,6 +355,12 @@ window.__audit = () => {
     if (!/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) continue;
     if (element.scrollHeight <= element.clientHeight + 2 && element.scrollWidth <= element.clientWidth + 2) continue;
     if (!shown(element) || element.matches(focusable) || element.querySelector(focusable)) continue;
+    // A listbox that a combobox controls is reached from its field, whose arrow keys move through it (and scroll it).
+    if (
+      element.matches('[role="listbox"][id]') &&
+      document.querySelector(`[role="combobox"][aria-controls="${element.id}"]`)
+    )
+      continue;
     add('unreachable', element, `${element.scrollHeight} high in ${element.clientHeight}, with nothing to stop on`);
   }
 
@@ -451,6 +463,14 @@ window.__audit = () => {
         : box.width < 43.5 || box.height < 43.5;
       if (short) add('small-target', control, `${Math.round(box.width)}x${Math.round(box.height)}`);
     }
+  }
+
+  // The listen bar stands at the foot of the window in every layout (the page scrolls under it on a phone).
+  const listen = document.querySelector('.listen');
+  if (listen && shown(listen)) {
+    const foot = listen.getBoundingClientRect().bottom;
+    if (Math.abs(foot - window.innerHeight) > 1)
+      add('adrift', listen, `its foot at ${Math.round(foot)} in a window ${window.innerHeight}px tall`);
   }
 
   return { findings, sizes: Object.fromEntries([...sizes.entries()].sort((a, b) => b[1] - a[1])) };

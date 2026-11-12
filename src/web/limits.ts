@@ -28,6 +28,13 @@ export const CHANGES: Rate = { perSecond: 10, burst: 20 };
 export const FETCHES: Rate = { perSecond: 2, burst: 5 };
 
 /**
+ * Searches, per login and per address, on top of the reads': each one starts yt-dlp (a second or two of a process).
+ * One a second, five at once: the panel searches a moment after typing stops, and Discord's suggestions come one
+ * per pause too.
+ */
+export const SEARCHES: Rate = { perSecond: 1, burst: 5 };
+
+/**
  * Reads: thirty a second, sixty at once. A panel reads a handful when it opens and gets the rest over its live
  * connection; a burst of the heavier reads (a year of statistics, a thousand-track queue) sent in one go would hold the
  * event loop for as long as the work takes.

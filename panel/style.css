@@ -1627,6 +1627,396 @@ img {
   font-size: 12px;
 }
 
+/* ---- what a search found -------------------------------------------------------------------------------------- */
+/* Under the add field (over it where the card stands at the foot of a page that does not scroll), in the card itself:
+   a solid reading surface, so titles read the same over any light behind the glass. The form keeps its height; the
+   list gives way when the column is short, and scrolls. */
+.add-card > .add {
+  flex: none;
+}
+.add-card .found {
+  display: flex;
+  flex-direction: column;
+  margin: 0 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  background: var(--panel-solid);
+  box-shadow: var(--rim);
+}
+.found-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: calc(5.5 * 52px + 8px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+/* Over the field, at the foot of a column that does not scroll: the card grows upwards and the field stays put. The
+   queue above keeps three rows in sight on a window taller than 880 px (below), and the list gives way to them. */
+.add-card.found-above {
+  min-height: 0;
+}
+.add-card.found-above .found {
+  order: -1;
+  margin: 12px 12px 0;
+  /* It gives way inside its own box: whatever it cannot show scrolls, and nothing of it reaches over the form. */
+  min-height: 0;
+  overflow: hidden;
+}
+.add-card.found-above .found-list {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Three rows of the queue, whatever its head takes (a head that wraps is taller): the list's room, not the card's. The
+   list is sized as if it were empty (contain: size), so the least the card can be is its head and those three rows:
+   measured with its rows, a long queue kept its whole height, and the column ran past the window (the page scrolled
+   and the results had no room). It fills what the card has beyond that. */
+.col:has(> .add-card.found-above) > .card.fill {
+  min-height: auto;
+}
+.col:has(> .add-card.found-above) > .card.fill > .queue-list {
+  flex: 1 1 0;
+  min-height: 190px;
+  contain: size;
+}
+/* A column too short for both (a laptop's window under 880 px). Nothing found yet (or nothing at all): the line takes
+   what it needs and the queue keeps the rest; giving up its rows for it left one line over an empty box. */
+@media (max-height: 880px) {
+  .col:has(> .add-card.found-above) > .card.fill > .queue-list {
+    min-height: 0;
+  }
+  /* Any result: the queue keeps its head with its count and gives the room of its rows to the results, which sit on
+     the field (beside them, what was left of the rows was one row or a sliver of one). */
+  .col:has(> .add-card.found-above .result) > .card.fill {
+    flex: none;
+    min-height: 0;
+  }
+  .col:has(> .add-card.found-above .result) > .card.fill > .queue-list {
+    display: none;
+  }
+  .add-card.found-above:has(.result) {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+  .add-card.found-above:has(.result) .found-list {
+    max-height: none;
+  }
+}
+.found-list:empty {
+  display: none;
+}
+/* While the next words are looked up, the results shown fade a little. */
+.found-list[aria-busy="true"] {
+  opacity: 0.6;
+}
+.found-list .result {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.found-list .result:hover {
+  background: var(--hover-tint);
+}
+/* The result the arrow keys are on: the focus ring, drawn inside the row. */
+.found-list .result[aria-selected="true"] {
+  background: var(--hover-tint);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.result .cover {
+  width: 40px;
+  height: 40px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--raised-2);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
+}
+.result .cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.result .cover .note {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ink-3);
+}
+.result .text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Two lines of a title at most; the whole title is the row's tooltip. */
+.result .name {
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/* The channel and the length on one line, cut short when long (the whole is its title). */
+.result .sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result .picks {
+  display: flex;
+  gap: 2px;
+}
+.result .pick {
+  display: grid;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border-radius: var(--r);
+  color: var(--ink-2);
+}
+.result .pick:hover {
+  background: var(--hover-tint);
+  color: var(--ink);
+}
+.found-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--ink-2);
+}
+/* The keys that pick, for a keyboard; a touch screen has none, and nothing found has nothing to pick. */
+.found-keys {
+  margin: 0;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+@media (hover: none) and (pointer: coarse) {
+  .found-keys {
+    display: none;
+  }
+}
+.found-list:empty + .found-keys {
+  display: none;
+}
+/* A link from outside held over the page: the card it goes to is ringed in the focus colour and says so. Over the
+   card's breathing ring (which it replaces while it shows), steady. */
+.card.add-card.drop-target::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px dashed color-mix(in oklch, var(--focus) 70%, transparent);
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 1;
+  animation: none;
+}
+.drop-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--ink-2);
+}
+
+/* ---- autoplay --------------------------------------------------------------------------------------------------- */
+/* The queue's autoplay key: on, it takes the tint of a key that is on (a contrast theme fills it, below). */
+.autoplay-key.on {
+  background: color-mix(in oklch, var(--load) 16%, transparent);
+  border-color: color-mix(in oklch, var(--load) 40%, transparent);
+}
+/* A card narrower than its head's words (the queue's tools keep theirs to 980 px) keeps the key's icon and its tint;
+   the words stay in its title and for screen readers, and the head stays on one line. */
+@container card (max-width: 1100px) {
+  .card-head .autoplay-key {
+    width: var(--control);
+    padding: 0;
+  }
+  .card-head .autoplay-key .label {
+    display: none;
+  }
+}
+/* A narrow card (a phone) lists autoplay with the tools behind the queue's tools key (see toolsMore), at the width
+   the rule for the tools uses: beside the title, Shuffle and that key, its key took the head onto a second line. */
+@container (max-width: 560px) {
+  .card-head .autoplay-key {
+    display: none;
+  }
+}
+@media (forced-colors: active) {
+  .autoplay-key.on {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+}
+/* A choice with what it does under its name (autoplay's modes). */
+.choice .choice-name {
+  display: block;
+}
+.choice .choice-hint {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.choice-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 6px 10px 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+/* Its icon level with the first line of words. */
+.note-icon {
+  margin-top: 1px;
+}
+/* The add card's line while autoplay is on and nothing waits. */
+.auto-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ---- playlists in and out -------------------------------------------------------------------------------------- */
+/* The import dialog: what it takes, the name, the list (pasted, or a file's), and its keys. */
+.import-form {
+  display: grid;
+  gap: 10px;
+}
+.import-text {
+  margin: 0;
+  color: var(--ink-2);
+}
+/* The list sunk into the dialog like a field, in a fixed-width face (addresses and files line up), growing downwards. */
+.paste {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  padding: 8px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--sunk);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font:
+    12px / 1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+.paste::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+  font-family: var(--font);
+}
+.paste:focus-visible {
+  outline: 0;
+  border-color: var(--focus);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.18),
+    0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+}
+/* Smaller text in a field makes Safari zoom the page. */
+@media (max-width: 900px) {
+  .paste {
+    font-size: 16px;
+  }
+}
+.import-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* ---- likes ------------------------------------------------------------------------------------------------------ */
+/* A heart that likes a track: a line, and filled in the text's own colour once liked (the fill says it; it takes no
+   tint, as other keys that are on do). A contrast theme marks it as it marks every key that is on. */
+.like-key[aria-pressed="true"] {
+  background: none;
+  border-color: transparent;
+  color: var(--ink);
+}
+.like-key[aria-pressed="true"]:hover {
+  background: var(--hover-tint);
+}
+/* The shape is an inner SVG that says fill="none" itself; a rule on it is what overrides that. */
+.key.like-key[aria-pressed="true"] .icon svg {
+  fill: currentColor;
+}
+/* The playing track's title and its heart side by side, the heart at the height of the title's first line. */
+.now .title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.title-row .title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* The heart centred on the title's first line (20 px at a line height of 1.3: 26 px) however tall a key is (32 px, or
+   44 px for fingers, which put it 9 px low): it reaches as far above that line as below, so the row keeps the title's
+   height. */
+.now .title-row .like-key {
+  margin-block: calc((26px - var(--control-sm)) / 2);
+}
+/* The history card's title: its two lists, as a row of two choices, each with its count. */
+.seg .seg-count {
+  margin-left: 6px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+/* A queued track's menu key, for everyone, at every width: it holds Like (and the moves, for people who may). */
+.queue-list .row .acts > .more-key {
+  display: inline-flex;
+}
+/* History and liked rows: the heart and three keys; on a narrow card the heart and one key for the rest. */
+.history .row .acts > .lib-more {
+  display: none;
+}
+@container card (max-width: 340px) {
+  .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
+    display: none;
+  }
+  .history .row .acts > .lib-more {
+    display: inline-flex;
+  }
+}
+/* By touch the keys are a finger wide, so the row runs out of room sooner. */
+@media (pointer: coarse) {
+  @container card (max-width: 480px) {
+    .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
+      display: none;
+    }
+    .history .row .acts > .lib-more {
+      display: inline-flex;
+    }
+  }
+}
+
 /* ---- voice ------------------------------------------------------------------------------------------------------ */
 .voice-now {
   display: flex;

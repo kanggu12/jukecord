@@ -6,13 +6,23 @@
  * The progress bar moves on a 4-per-second timer only while something plays; nothing moves while idle or paused.
  */
 
-import { sayFailure, sayNotice, translate } from '../../../src/core/say.ts';
+import { sayError, sayFailure, sayNotice, translate } from '../../../src/core/say.ts';
 import { SOUND_PRESETS } from '../../../src/core/sound.ts';
-import { ApiError, api, coverUrl, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
+import {
+  ApiError,
+  api,
+  coverUrl,
+  type HistoryEntry,
+  type Player,
+  type PlaylistFile,
+  type QueueItem,
+  type SearchResult,
+  type Track,
+} from '../api.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
-import { liveWhy, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
+import { isLiked, keep, liveWhy, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
 import { lightGlow } from './light.ts';
@@ -124,8 +134,66 @@ export async function skipOrVote(button: HTMLButtonElement | null): Promise<bool
   return answer.votes === null;
 }
 
-// "added by Alice" / "added by the host".
+/** The tracks this login liked, asked again (when the panel opens, after a reconnection, on another server). */
+export async function refreshLikes(): Promise<void> {
+  const id = guild();
+  // A guest of a listening link has no likes: jukecord refuses it them, and the panel shows it none.
+  if (!id || state.me?.kind === 'guest') return;
+  try {
+    const liked = await api.likes(id);
+    if (state.guild?.id === id) update({ liked });
+  } catch {
+    // Kept as they were: the hearts say what was known, and the next refresh tries again.
+  }
+}
+
+/**
+ * Likes a track, or takes the like back: on the page at once (every heart of the track fills or empties), then asked
+ * of jukecord; a refusal puts the hearts back and says why.
+ */
+export async function toggleLike(track: Track): Promise<void> {
+  const before = state.liked ?? [];
+  const liked = before.some((entry) => entry.track.id === track.id);
+  update({
+    liked: liked ? before.filter((entry) => entry.track.id !== track.id) : [{ track, likedAt: Date.now() }, ...before],
+  });
+  try {
+    if (liked) await api.unlike(guild(), track.id);
+    else await api.like(guild(), track.id);
+  } catch (error) {
+    update({ liked: before });
+    problem(error);
+  }
+}
+
+// Whether this login may like (a token that may only look may not).
+function mayLike(): boolean {
+  return Boolean(state.me) && state.me?.scope !== 'read';
+}
+
+// A heart that likes a track (pressed: liked), small for rows.
+function heartKey(track: Track): HTMLButtonElement {
+  const words = t();
+  const heart = h(
+    'button',
+    {
+      class: 'key sm square quiet like-key',
+      type: 'button',
+      title: words.like,
+      'aria-label': words.like,
+      'aria-pressed': String(isLiked(track.id)),
+      dataset: { key: 'like' },
+    },
+    icon('heart'),
+  );
+  heart.disabled = !mayLike();
+  heart.onclick = () => void toggleLike(track);
+  return heart;
+}
+
+// "added by Alice" / "added by the host" / "added by Autoplay" (autoplay's rows carry "autoplay" for who added them).
 function addedBy(id: string | null, name: string | null): string {
+  if (id === 'autoplay') return t().byAutoplay;
   return id ? t().addedBy(name ?? id) : t().byHost;
 }
 
@@ -169,7 +237,14 @@ export function nowCard(live: Live): HTMLElement {
   const drop = h('button', { class: 'key bad', type: 'button', 'data-act': 'drop' });
   const repeat = h('button', { class: 'key square', type: 'button', 'data-act': 'repeat' });
   const keys = h('div', { class: 'keys' }, pause, skip, stop, repeat, drop);
-  const info = h('div', { class: 'info' }, title, meta, error, notice, liveNote, progress, keys);
+  // The heart beside the title: liking is about the track, not the player, so it is not among the keys.
+  const like = h(
+    'button',
+    { class: 'key sm square quiet like-key', type: 'button', 'data-act': 'like' },
+    icon('heart'),
+  );
+  const titleRow = h('div', { class: 'title-row' }, title, like);
+  const info = h('div', { class: 'info' }, titleRow, meta, error, notice, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
   // The keys in the card's head: the lyrics (they open beside the player, or as a sheet on a phone).
   const lyricsKey = h(
@@ -351,6 +426,12 @@ export function nowCard(live: Live): HTMLElement {
     setOff(repeat, !control || !player, pause, addField);
     bar.setAttribute('aria-disabled', String(!control || !track || status === 'loading'));
     bar.setAttribute('aria-label', words.seekLabel);
+    // A guest has no likes (as it has no keys); someone who may only look sees the heart, not to press.
+    like.hidden = !track || state.me?.kind === 'guest';
+    like.title = words.like;
+    like.setAttribute('aria-label', words.like);
+    like.setAttribute('aria-pressed', String(track !== null && isLiked(track.id)));
+    like.disabled = !mayLike();
     tick();
   };
 
@@ -443,6 +524,10 @@ export function nowCard(live: Live): HTMLElement {
     });
   };
   stop.onclick = () => void act(stop, () => api.stop(guild()));
+  like.onclick = () => {
+    const track = state.player?.track;
+    if (track) void toggleLike(track);
+  };
   drop.onclick = () => void act(drop, () => api['remove-current'](guild()));
   repeat.onclick = () => {
     // Off, then the queue, then this track, then off again: the order music players use.
@@ -450,7 +535,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'status', 'votes'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'status', 'votes', 'liked'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {
@@ -481,7 +566,8 @@ export function queueCard(): HTMLElement {
   const load = tool('folder-open', 'load');
   const clear = tool('trash-2', 'clear');
   clear.classList.add('quiet', 'bad');
-  // Narrow cards (phones): Shuffle keeps its place and the other tools open from this key as a list.
+  // Narrow cards (phones): Shuffle keeps its place and the other tools (and autoplay's key) open from this key as a
+  // list.
   const toolsMore = h(
     'button',
     { class: 'key sm square quiet tools-more', type: 'button', 'data-act': 'queue-tools' },
@@ -490,6 +576,14 @@ export function queueCard(): HTMLElement {
   const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
   // The queue's tools: none for a guest, who can change nothing.
   const tools = h('div', { class: 'tools' }, shuffle, turns, dedupe, save, load, clear, toolsMore);
+  // What happens when the queue runs out, beside its title: the mode in words, and a list of the three to choose from.
+  const autoKey = h(
+    'button',
+    // As tall as the search field beside it on the same row.
+    { class: 'key autoplay-key', type: 'button', 'data-act': 'autoplay', 'aria-haspopup': 'dialog' },
+    icon('infinity'),
+    h('span', { class: 'label' }),
+  );
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
@@ -497,11 +591,27 @@ export function queueCard(): HTMLElement {
       'div',
       { class: 'card-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
+      autoKey,
       searchField,
       tools,
     ),
     list,
   );
+  const drawAutoplay = () => {
+    const words = t();
+    const mode = state.player?.autoplay ?? 'off';
+    const label = words.autoplayKey[mode] ?? words.autoplay;
+    (autoKey.querySelector('.label') as HTMLElement).textContent = label;
+    autoKey.title = label;
+    autoKey.setAttribute('aria-label', label);
+    autoKey.classList.toggle('on', mode !== 'off');
+    autoKey.disabled = !mayControl() || !state.player;
+    // A guest changes nothing: no key, as for the queue's other tools.
+    autoKey.hidden = state.me?.kind === 'guest';
+  };
+  autoKey.onclick = () => autoplayDialog();
+  watch(['player', 'lang', 'guild', 'me'], drawAutoplay);
+  drawAutoplay();
 
   // Long queues draw their first rows only, a hundred more at each press of the last row's key: a thousand rows
   // rebuilt on every change would hold a phone still for seconds.
@@ -652,7 +762,13 @@ export function queueCard(): HTMLElement {
           h('span', null, addedBy(item.addedBy, item.addedByName)),
         ),
       ),
-      control ? h('div', { class: 'acts' }, jump, next, remove, more) : h('div'),
+      // The keys that change the queue for those who may; the menu key (it holds Like) for anyone who may like too. A
+      // guest or a login that may only look has neither: no key that does nothing.
+      control
+        ? h('div', { class: 'acts' }, jump, next, remove, more)
+        : mayLike()
+          ? h('div', { class: 'acts' }, more)
+          : h('div'),
     );
     if (control) {
       // Only the grip starts a drag, so text in the row can still be selected and links clicked.
@@ -942,6 +1058,8 @@ export function queueCard(): HTMLElement {
     };
     fill(
       box,
+      // Autoplay's key waits here too on a narrow card (style.css), named with its mode as the key is.
+      choice(autoKey, 'infinity', words.autoplayKey[state.player?.autoplay ?? 'off'] ?? words.autoplay),
       choice(turns, 'users', words.takeTurnsNow),
       choice(dedupe, 'list-x', words.dedupe),
       choice(save, 'save', words.save),
@@ -1032,6 +1150,42 @@ function nowMenu(): void {
   fill(box, stopAfter, mayInvite() ? invite : null);
 }
 
+// Autoplay's three modes to choose from, each with what it does; the one in use marked.
+function autoplayDialog(): void {
+  const words = t();
+  const mode = state.player?.autoplay ?? 'off';
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(words.autoplay, box);
+  const option = (value: Player['autoplay'], label: string, hint: string) => {
+    const button = h(
+      'button',
+      { class: 'choice', type: 'button', 'aria-current': String(value === mode), dataset: { mode: value } },
+      h(
+        'span',
+        { class: 'grow' },
+        h('span', { class: 'choice-name' }, label),
+        h('span', { class: 'choice-hint' }, hint),
+      ),
+      icon('check', 'check'),
+    );
+    button.onclick = () => {
+      dialog.close();
+      if (value !== mode) void act(null, () => api.autoplay(guild(), value));
+    };
+    return button;
+  };
+  fill(
+    box,
+    option('off', words.autoplayOff, words.autoplayOffHint),
+    option('history', words.autoplayHistory, words.autoplayHistoryHint),
+    option('related', words.autoplayRelated, words.autoplayRelatedHint),
+    // With a repeat on, the queue never runs out, so autoplay has nothing to do: said, not hidden.
+    state.player && state.player.repeat !== 'off'
+      ? h('p', { class: 'choice-note' }, icon('info', 'note-icon'), h('span', null, words.autoplayRepeat))
+      : null,
+  );
+}
+
 // A queued track's keys as a list (narrow cards and touch screens without dragging): play now, play next, one place
 // up or down, remove. The place is read when a key is pressed: the queue may change while the list is open.
 function trackMenu(id: number): void {
@@ -1057,17 +1211,32 @@ function trackMenu(id: number): void {
     };
     return button;
   };
+  // Like or Unlike: the track's, whoever may change the music.
+  const liked = isLiked(item.track.id);
+  const likeChoice = h(
+    'button',
+    { class: 'choice', type: 'button' },
+    icon('heart'),
+    h('span', { class: 'grow' }, liked ? words.unlike : words.like),
+  );
+  likeChoice.disabled = !mayLike();
+  likeChoice.onclick = () => {
+    dialog.close();
+    void toggleLike(item.track);
+  };
+  const control = mayControl();
   fill(
     box,
-    choice('play', words.playNow, () => api.jump(guild(), id)),
-    item.position > 0 ? choice('arrow-up-to-line', words.playNext, () => api.move(guild(), id, 0)) : null,
-    item.position > 0
+    control ? choice('play', words.playNow, () => api.jump(guild(), id)) : null,
+    control && item.position > 0 ? choice('arrow-up-to-line', words.playNext, () => api.move(guild(), id, 0)) : null,
+    control && item.position > 0
       ? choice('arrow-up', words.moveUp, (position) => api.move(guild(), id, Math.max(0, position - 1)))
       : null,
-    item.position < length - 1
+    control && item.position < length - 1
       ? choice('arrow-down', words.moveDown, (position) => api.move(guild(), id, position + 1))
       : null,
-    choice('x', words.remove, () => api.remove(guild(), id), true),
+    likeChoice,
+    control ? choice('x', words.remove, () => api.remove(guild(), id), true) : null,
   );
 }
 
@@ -1077,9 +1246,19 @@ async function playlistsDialog(): Promise<void> {
   const box = h('ul', { class: 'list', style: 'padding: 0' });
   // For someone who may only look: why the list has no keys.
   const why = mayControl() ? null : h('p', { class: 'look-only' }, words.playlistsLookOnly);
-  const dialog = showDialog(words.playlists, why ? h('div', null, why, box) : box);
-  // The dialog's Close key: where the keyboard goes when no playlist is left to stand on.
-  const closeKey = () => box.closest('.dialog')?.querySelector<HTMLElement>('.dialog-keys .key') ?? null;
+  // A playlist from a file or a pasted list, beside the Close key (for those who may change the music).
+  const importKey = h(
+    'button',
+    { class: 'key', type: 'button', 'data-act': 'import' },
+    icon('upload'),
+    words.importKey,
+  );
+  importKey.hidden = !mayControl();
+  importKey.onclick = () => importDialog(() => void draw());
+  const dialog = showDialog(words.playlists, why ? h('div', null, why, box) : box, [importKey]);
+  // The dialog's Close key (the last of its keys): where the keyboard goes when no playlist is left to stand on.
+  const closeKey = () =>
+    [...(box.closest('.dialog')?.querySelectorAll<HTMLElement>('.dialog-keys .key') ?? [])].at(-1) ?? null;
   const draw = async () => {
     let playlists: Awaited<ReturnType<typeof api.playlists>>;
     try {
@@ -1133,6 +1312,19 @@ async function playlistsDialog(): Promise<void> {
       },
       icon('trash-2'),
     );
+    // The playlist as a file, of the kind chosen next.
+    const exportKey = h(
+      'button',
+      {
+        class: 'key sm square quiet',
+        type: 'button',
+        title: words.exportKey,
+        'aria-label': `${words.exportKey}: ${playlist.name}`,
+        dataset: { key: 'export' },
+      },
+      icon('download'),
+    );
+    exportKey.onclick = () => exportDialog(playlist.name);
     loadKey.onclick = async () => {
       const result = await act(loadKey, () => api['playlist-load'](guild(), playlist.name));
       if (result) {
@@ -1178,6 +1370,7 @@ async function playlistsDialog(): Promise<void> {
       ),
       control ? renameKey : null,
       control ? deleteKey : null,
+      exportKey,
       control ? loadKey : null,
     );
   };
@@ -1187,8 +1380,119 @@ async function playlistsDialog(): Promise<void> {
   if (document.activeElement === closeKey()) box.querySelector<HTMLElement>('[data-key="load"]')?.focus();
 }
 
+// A playlist as a file: the three kinds to choose from, each with what it holds; the choice is saved by the browser.
+function exportDialog(name: string): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(words.exportTitle(name), box);
+  const kind = (format: PlaylistFile['format'], label: string, hint: string) => {
+    const button = h(
+      'button',
+      { class: 'choice', type: 'button', dataset: { format } },
+      icon('download'),
+      h(
+        'span',
+        { class: 'grow' },
+        h('span', { class: 'choice-name' }, label),
+        h('span', { class: 'choice-hint' }, hint),
+      ),
+    );
+    button.onclick = () => {
+      dialog.close();
+      void act(null, async () => {
+        const file = await api['playlist-export'](guild(), name, format);
+        // A link to the text, pressed and let go: the browser saves it under the file's name.
+        const type = format === 'json' ? 'application/json' : format === 'm3u' ? 'audio/x-mpegurl' : 'text/plain';
+        const link = h('a', { href: URL.createObjectURL(new Blob([file.content], { type })), download: file.filename });
+        document.body.append(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+      });
+    };
+    return button;
+  };
+  fill(
+    box,
+    kind('text', words.formatText, words.formatTextHint),
+    kind('m3u', words.formatM3u, words.formatM3uHint),
+    kind('json', words.formatJson, words.formatJsonHint),
+  );
+}
+
+// A playlist from a file or a pasted list: its name, the list (a file chosen fills it), and the key that imports it.
+// `done` redraws the playlists under it.
+function importDialog(done: () => void): void {
+  const words = t();
+  const name = h('input', {
+    type: 'text',
+    maxlength: '100',
+    placeholder: words.playlistName,
+    'aria-label': words.playlistName,
+  });
+  const paste = h('textarea', {
+    class: 'paste',
+    rows: '7',
+    placeholder: words.importPaste,
+    'aria-label': words.importPaste,
+  });
+  const picker = h('input', {
+    type: 'file',
+    accept: '.txt,.m3u,.m3u8,.json,text/plain,application/json,audio/x-mpegurl',
+    hidden: true,
+  });
+  const choose = h('button', { class: 'key', type: 'button' }, icon('folder-open'), words.chooseFile);
+  const go = h('button', { class: 'key primary', type: 'button' }, icon('upload'), words.importKey);
+  const box = h(
+    'div',
+    { class: 'import-form' },
+    h('p', { class: 'import-text' }, words.importText),
+    h('label', { class: 'field' }, name),
+    paste,
+    picker,
+    h('div', { class: 'import-keys' }, choose, go),
+  );
+  const dialog = showDialog(words.importTitle, box);
+  choose.onclick = () => picker.click();
+  picker.onchange = async () => {
+    const file = picker.files?.[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+      toast(words.fileTooLarge, 'bad', 'circle-alert');
+      return;
+    }
+    paste.value = await file.text();
+    // No name yet: the file's own, without its extension.
+    if (!name.value.trim()) name.value = file.name.replace(/\.[a-z0-9]{2,5}$/i, '').slice(0, 100);
+  };
+  go.onclick = async () => {
+    const title = name.value.trim();
+    if (!title) {
+      name.focus();
+      return;
+    }
+    if (!paste.value.trim()) {
+      paste.focus();
+      return;
+    }
+    fill(go, icon('loader-circle', 'spin'), words.importing);
+    const result = await act(go, () => api['playlist-import'](guild(), title, paste.value));
+    fill(go, icon('upload'), words.importKey);
+    if (!result) return;
+    toast(words.imported(result.playlist.name, result.tracks, result.leftOut), result.leftOut > 0 ? 'pause' : 'play');
+    dialog.close();
+    done();
+  };
+}
+
 // What an add did, as a toast: how many went in and what was left out.
-function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: number; skippedLimit?: number }): void {
+function added(result: {
+  items: unknown[];
+  skippedTooLong: number;
+  skippedFull: number;
+  skippedLimit?: number;
+  skippedNotFound?: number;
+}): void {
   const words = t();
   const parts = [words.added(result.items.length)];
   if (result.skippedTooLong > 0) parts.push(words.leftLong(result.skippedTooLong));
@@ -1196,7 +1500,10 @@ function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: 
   // A jukecord from before the limit per person says nothing of it.
   const limited = result.skippedLimit ?? 0;
   if (limited > 0) parts.push(words.leftLimit(limited));
-  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + limited > 0 ? 'pause' : 'play');
+  // A link of another service: its tracks not found on YouTube.
+  const notFound = result.skippedNotFound ?? 0;
+  if (notFound > 0) parts.push(words.leftNotFound(notFound));
+  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + limited + notFound > 0 ? 'pause' : 'play');
 }
 
 // An add's refusal as the add card says it: "Could not add:" and jukecord's reason in the panel's language, in the middle
@@ -1205,25 +1512,76 @@ function refusal(reason: unknown): string {
   return reason instanceof ApiError ? t().couldNotAdd(translate(reason.message, state.lang)) : messageOf(reason);
 }
 
-/** Adding: an address or search words, to the end of the queue or to play now. */
+/**
+ * Whether typed text is an address (with or without its scheme) rather than search words, by the rule the server
+ * reads it with (src/media/source.ts, parseInput): an address is added as it is, words are searched.
+ */
+export function looksLikeAddress(text: string): boolean {
+  const trimmed = text.trim();
+  if (/\s/.test(trimmed)) return false;
+  return /^https?:\/\/\S+$/i.test(trimmed) || /^[a-z0-9-]+(\.[a-z0-9-]+)+\/\S*$/i.test(trimmed);
+}
+
+// Where an add puts what it finds: the end of the queue, next, or playing now.
+type Where = 'end' | 'next' | 'now';
+
+/**
+ * Adding: an address or search words, to the end of the queue, next, or to play now. Words show what YouTube found
+ * under the field a moment after typing stops (a list to pick from, with the keyboard or the pointer); a link pasted
+ * or dropped anywhere on the player's page is added as the field would add it.
+ */
 export function addCard(): HTMLElement {
-  const input = h('input', { type: 'text', autocomplete: 'off', enterkeyhint: 'go', id: 'add-input' });
+  // A combobox: the field keeps the keyboard, and the arrows move through the list it controls.
+  const input = h('input', {
+    type: 'text',
+    autocomplete: 'off',
+    enterkeyhint: 'go',
+    id: 'add-input',
+    role: 'combobox',
+    'aria-autocomplete': 'list',
+    'aria-expanded': 'false',
+    'aria-controls': 'add-found',
+    'aria-describedby': 'add-found-keys',
+  });
   const field = h('label', { class: 'field' }, icon('link'), input);
-  const add = h('button', { class: 'key', type: 'submit' });
-  const now = h('button', { class: 'key primary', type: 'button' });
-  const form = h('form', { class: 'add' }, field, add, now);
+  const add = h('button', { class: 'key', type: 'submit', dataset: { at: 'end' } });
+  const next = h('button', { class: 'key', type: 'button', dataset: { at: 'next' } });
+  const now = h('button', { class: 'key primary', type: 'button', dataset: { at: 'now' } });
+  const form = h('form', { class: 'add' }, field, add, next, now);
+  // What a search found: a listbox of results, a line for the state of the search, and the keys that pick.
+  const list = h('ul', { class: 'found-list', id: 'add-found', role: 'listbox' });
+  const searchState = h('p', { class: 'found-state' });
+  const keysHint = h('p', { class: 'found-keys', id: 'add-found-keys' });
+  const found = h('div', { class: 'found', hidden: true }, searchState, list, keysHint);
+  // How many were found, said to screen readers as the list changes.
+  const said = h('p', { class: 'sr', role: 'status' });
   // Why the keys are off for someone who may only look, in words a touch screen shows too (a title it does not).
   const why = h('p', { class: 'look-only', hidden: true });
   // Why the last add did not go through, under the field it came from (the bar's toast is far from it on a desktop).
   // Not an alert of its own: the toast says it out loud already, and a screen reader heard it twice.
   const failed = h('p', { class: 'add-failed', hidden: true });
-  const card = h('section', { class: 'card add-card', 'aria-label': 'add' }, form, failed, why);
+  // While a link brought in from outside is held over the page: where it goes.
+  const dropNote = h('p', { class: 'drop-note', hidden: true }, icon('list-plus'), h('span'));
+  // With autoplay on and nothing waiting: what happens when the queue runs out.
+  const autoNote = h('p', { class: 'auto-note', hidden: true }, icon('infinity'), h('span'));
+  const card = h(
+    'section',
+    { class: 'card add-card', 'aria-label': 'add' },
+    form,
+    failed,
+    found,
+    said,
+    why,
+    autoNote,
+    dropNote,
+  );
 
-  // The key whose lookup is running: its words and its busy state stay while the card redraws for other reasons.
+  // The key whose add is running: its words and its busy state stay while the card redraws for other reasons.
   let busy: HTMLButtonElement | null = null;
   // The last add's refusal and the server it was for: said in the panel's language of the moment, and only while that
   // server is shown (another server's refusal is not this one's).
   let refused: { guild: string; reason: unknown } | null = null;
+  const keyOf = (where: Where) => (where === 'end' ? add : where === 'next' ? next : now);
   const draw = () => {
     const words = t();
     if (refused && refused.guild !== guild()) refused = null;
@@ -1233,34 +1591,249 @@ export function addCard(): HTMLElement {
     input.setAttribute('aria-label', words.addPlaceholder);
     card.setAttribute('aria-label', words.add);
     if (busy !== add) fill(add, icon('list-plus'), words.add);
+    if (busy !== next) fill(next, icon('arrow-up-to-line'), words.playNext);
     if (busy !== now) fill(now, icon('play'), words.playNow);
     const control = mayControl();
     input.disabled = !control;
-    // While a lookup runs the keys are busy, not disabled: a disabled key drops the keyboard focus.
-    add.disabled = !control;
-    now.disabled = !control;
-    for (const key of [add, now]) {
+    // While an add runs the keys are busy, not disabled: a disabled key drops the keyboard focus.
+    for (const key of [add, next, now]) {
+      key.disabled = !control;
       if (busy !== null) key.setAttribute('aria-disabled', 'true');
       else key.removeAttribute('aria-disabled');
     }
     field.title = control ? '' : words.lookOnlyHint;
     why.hidden = control || !state.guild;
     why.textContent = words.lookOnlyHint;
+    list.setAttribute('aria-label', words.foundLabel);
+    keysHint.textContent = words.foundKeys;
     // Nothing playing and nothing waiting: the card glows to say where music comes from.
     card.classList.toggle(
       'invite',
       control && Boolean(state.player) && !state.player?.track && (state.queue?.items.length ?? 0) === 0,
     );
+    // Autoplay on and the queue empty: the card says what happens when it runs out.
+    const mode = state.player?.autoplay ?? 'off';
+    autoNote.hidden = mode === 'off' || (state.queue?.items.length ?? 0) > 0;
+    (autoNote.lastElementChild as HTMLElement).textContent = words.autoplayNote[mode] ?? '';
   };
-  // Both keys look the input up; while that runs (a playlist can take seconds) the keys say so.
-  const submit = async (button: HTMLButtonElement, playNow: boolean) => {
-    // A lookup under way already (Enter again, the other key): one at a time.
-    if (busy !== null) return;
+
+  // ---- what a search found -----------------------------------------------------------------------------------
+  // The results shown, the words they are for, the one the arrows are on (-1: none), and what this page found
+  // lately, by the words in lower case (typing back a letter shows the earlier results at once).
+  let results: SearchResult[] = [];
+  let resultsFor = '';
+  let active = -1;
+  const known = new Map<string, SearchResult[]>();
+  // The search under way, the wait after the last key, and whether the list is drawn over the field.
+  let asking: AbortController | null = null;
+  let typing = 0;
+
+  // Words worth searching: two letters or more, not an address, from someone who may add.
+  const searchable = (text: string) => text.length >= 2 && !looksLikeAddress(text) && mayControl();
+
+  const setActive = (index: number) => {
+    active = index;
+    const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+    options.forEach((option, at) => {
+      option.setAttribute('aria-selected', String(at === index));
+    });
+    const chosen = options[index];
+    if (chosen) {
+      input.setAttribute('aria-activedescendant', chosen.id);
+      chosen.scrollIntoView({ block: 'nearest' });
+    } else {
+      input.removeAttribute('aria-activedescendant');
+    }
+  };
+
+  const close = () => {
+    found.hidden = true;
+    card.classList.remove('found-above');
+    input.setAttribute('aria-expanded', 'false');
+    setActive(-1);
+  };
+
+  // Opens the list where it is seen without moving the field: over the field when the card stands at the foot of a
+  // page that does not scroll (the two columns, the add card under the queue), under it everywhere else.
+  const open = () => {
+    if (!found.hidden) return;
+    const pageScrolls = document.documentElement.scrollHeight > window.innerHeight + 1;
+    const listen = document.querySelector('.listen')?.getBoundingClientRect().top ?? window.innerHeight;
+    const above = !pageScrolls && card.getBoundingClientRect().bottom > listen - 120;
+    card.classList.toggle('found-above', above);
+    found.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+
+  // One result as an option: its cover, title, channel and length, and the three picks a pointer can press (the
+  // keyboard picks with Enter, Shift+Enter and Ctrl+Enter, which the line under the list says).
+  const option = (result: SearchResult, index: number): HTMLElement => {
+    const words = t();
+    const picture = result.thumbnail
+      ? h('img', { src: result.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' })
+      : null;
+    const cover = h('span', { class: 'cover' }, picture ?? h('span', { class: 'note' }, icon('music-2')));
+    if (picture)
+      picture.onerror = () => {
+        picture.remove();
+        cover.append(h('span', { class: 'note' }, icon('music-2')));
+      };
+    const pick = (where: Where, name: IconName, label: string) =>
+      h('span', { class: 'pick', title: label, dataset: { pick: where } }, icon(name));
+    // The length first, as the queue's rows have it: on a phone the line is cut, and the channel can lose its end.
+    const sub = [result.durationMs === null ? null : clock(result.durationMs), result.uploader].filter(Boolean);
+    const element = h(
+      'li',
+      { class: 'result', role: 'option', id: `add-found-${index}`, 'aria-selected': 'false' },
+      cover,
+      h(
+        'span',
+        { class: 'text' },
+        // Two lines at most; the whole title is its title.
+        h('span', { class: 'name', title: result.title, 'data-clip': 'ok' }, result.title),
+        sub.length > 0 ? h('span', { class: 'sub', title: sub.join(' · '), 'data-clip': 'ok' }, sub.join(' · ')) : null,
+      ),
+      // For the pointer only: a screen reader hears the option, and its keys from the field's description.
+      h(
+        'span',
+        { class: 'picks', 'aria-hidden': 'true' },
+        pick('now', 'play', words.playNow),
+        pick('next', 'arrow-up-to-line', words.playNext),
+        pick('end', 'list-plus', words.add),
+      ),
+    );
+    // A press on a pick plays or queues it; anywhere else on the row adds it, as Enter does. The field keeps the
+    // keyboard (a pointer press on the list must not take it away and close the list).
+    element.onpointerdown = (event) => event.preventDefault();
+    element.onclick = (event) => {
+      const where = (event.target as Element).closest<HTMLElement>('[data-pick]')?.dataset.pick as Where | undefined;
+      void submit(where ?? 'end', result.url);
+    };
+    return element;
+  };
+
+  // Draws the results for the words (and the state of the search) and opens the list.
+  const show = (text: string, shown: SearchResult[]) => {
+    const words = t();
+    results = shown;
+    resultsFor = text;
+    fill(list, ...results.map(option));
+    list.removeAttribute('aria-busy');
+    searchState.hidden = results.length > 0;
+    fill(searchState, results.length > 0 ? null : words.foundNone);
+    said.textContent = results.length > 0 ? words.foundCount(results.length) : words.foundNone;
+    setActive(-1);
+    open();
+  };
+
+  // Asks jukecord what YouTube finds for the words; an older question still under way is dropped.
+  const ask = async (text: string) => {
+    asking?.abort();
+    const mine = new AbortController();
+    asking = mine;
+    const words = t();
+    // While it looks: the earlier results stay (marked busy), or a line says it is looking.
+    if (results.length === 0) {
+      fill(searchState, icon('loader-circle', 'spin'), words.searching);
+      searchState.hidden = false;
+      open();
+    } else {
+      list.setAttribute('aria-busy', 'true');
+    }
+    try {
+      const answer = await api.search(guild(), text, 8, mine.signal);
+      known.set(text.toLowerCase(), answer.results);
+      // Only for the words still in the field: typing on asked again already.
+      if (input.value.trim() === text) show(text, answer.results);
+    } catch (error) {
+      if (mine.signal.aborted) return;
+      list.removeAttribute('aria-busy');
+      // Too many searches at once (typing fast): the results shown stay, and the next pause asks again.
+      if (error instanceof ApiError && error.status === 429) return;
+      // Otherwise why, in the list's place (a refusal, every lookup slot taken, YouTube refusing jukecord).
+      const message = error instanceof ApiError ? sayError(error.message, state.lang) : words.networkFailed;
+      results = [];
+      fill(list);
+      fill(searchState, icon('circle-alert'), message);
+      searchState.hidden = false;
+      said.textContent = message;
+      open();
+    } finally {
+      if (asking === mine) asking = null;
+    }
+  };
+
+  input.oninput = () => {
     const text = input.value.trim();
-    if (!text) {
+    window.clearTimeout(typing);
+    if (!searchable(text)) {
+      asking?.abort();
+      results = [];
+      resultsFor = '';
+      close();
+      return;
+    }
+    // Known on this page already: at once. Otherwise a moment after the last key.
+    const seen = known.get(text.toLowerCase());
+    if (seen) {
+      asking?.abort();
+      show(text, seen);
+      return;
+    }
+    typing = window.setTimeout(() => void ask(text), 350);
+  };
+
+  input.onkeydown = (event) => {
+    const options = results.length;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      // Closed with results for these words (after Escape): the arrows open it again.
+      if (found.hidden && options > 0 && resultsFor === input.value.trim()) open();
+      if (found.hidden || options === 0) return;
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      // From none, Down goes to the first and Up to the last; past either end, round to the other.
+      setActive(active < 0 ? (step > 0 ? 0 : options - 1) : (active + step + options) % options);
+    } else if (event.key === 'Escape' && !found.hidden) {
+      // The list closes; the words stay.
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    } else if (event.key === 'Enter') {
+      // Enter adds, Shift+Enter plays next, Ctrl+Enter (Cmd+Enter on a Mac) plays now: the result the arrows are on,
+      // or what is typed.
+      event.preventDefault();
+      const where: Where = event.ctrlKey || event.metaKey ? 'now' : event.shiftKey ? 'next' : 'end';
+      const chosen = !found.hidden ? results[active] : undefined;
+      void submit(where, chosen?.url);
+    }
+  };
+  // Back in the field with results for its words: they show again.
+  input.onfocus = () => {
+    if (results.length > 0 && resultsFor === input.value.trim() && searchable(resultsFor)) open();
+  };
+  // Out of the card (Tab past the keys, a click elsewhere): the list closes. Within it (the keys) it stays.
+  card.addEventListener('focusout', (event) => {
+    const to = event.relatedTarget as Node | null;
+    if (!to || !card.contains(to)) close();
+  });
+
+  // ---- adding --------------------------------------------------------------------------------------------------
+  // What waits for its turn: links pasted or dropped while an add runs (one at a time from this card, in order).
+  const waiting: { where: Where; text: string; fromField: boolean }[] = [];
+  // Every key looks the input up; while that runs (a playlist can take seconds) the key says so. `text` is what to
+  // add: a picked result's address, a dropped link, or (left out) what is typed.
+  const submit = async (where: Where, text?: string, fromField = true): Promise<void> => {
+    const what = (text ?? input.value).trim();
+    if (!what) {
       input.focus();
       return;
     }
+    if (busy) {
+      // A link dropped meanwhile waits its turn; a second press of a key (Enter again, another key) is the first one's.
+      if (!fromField && waiting.length < 10) waiting.push({ where, text: what, fromField });
+      return;
+    }
+    const button = keyOf(where);
     busy = button;
     refused = null;
     fill(button, icon('loader-circle', 'spin'), t().adding);
@@ -1268,7 +1841,7 @@ export function addCard(): HTMLElement {
     let failure: unknown = null;
     let result: Awaited<ReturnType<typeof api.add>> | null = null;
     try {
-      result = await (playNow ? api['play-now'](guild(), text) : api.add(guild(), text));
+      result = await (where === 'now' ? api['play-now'](guild(), what) : api.add(guild(), what, where));
     } catch (error) {
       failure = error;
     }
@@ -1276,14 +1849,22 @@ export function addCard(): HTMLElement {
     busy = null;
     draw();
     if (result) {
-      input.value = '';
+      // From the field (typed, or a result picked): the field is cleared and the list goes.
+      if (fromField) {
+        input.value = '';
+        results = [];
+        resultsFor = '';
+        close();
+      }
       added(result);
-      return;
+    } else {
+      // Said under the field as well as in the bar (see refusal below).
+      toast(refusal(failure), 'bad', 'circle-alert');
+      refused = { guild: guild(), reason: failure };
+      draw();
     }
-    // Said under the field as well as in the bar (see refusal below).
-    toast(refusal(failure), 'bad', 'circle-alert');
-    refused = { guild: guild(), reason: failure };
-    draw();
+    const after = waiting.shift();
+    if (after) void submit(after.where, after.text, after.fromField);
   };
   // A new try (typing) takes the last refusal away.
   input.addEventListener('input', () => {
@@ -1292,10 +1873,98 @@ export function addCard(): HTMLElement {
   });
   form.onsubmit = (event) => {
     event.preventDefault();
-    void submit(add, false);
+    const chosen = !found.hidden ? results[active] : undefined;
+    void submit('end', chosen?.url);
   };
-  now.onclick = () => void submit(now, true);
+  // Play next and Play now act on the result the arrows are on, when the list is open; else on what is typed.
+  for (const [key, where] of [
+    [next, 'next'],
+    [now, 'now'],
+  ] as const) {
+    key.onclick = () => {
+      const chosen = !found.hidden ? results[active] : undefined;
+      void submit(where, chosen?.url);
+    };
+  }
+
+  // ---- links pasted or dropped anywhere on the player's page -----------------------------------------------
+  // Only on the player's page, with nothing open over it, for someone who may add: the same add, busy state and
+  // refusals as the field's.
+  const welcome = () =>
+    mayControl() && !card.closest('[hidden]') && !document.querySelector('.dialog, .sheet') && Boolean(state.guild);
+  document.addEventListener('paste', (event) => {
+    const target = event.target as HTMLElement | null;
+    // Pasting into a field is typing.
+    if (target?.closest('input, textarea, [contenteditable]') || !welcome()) return;
+    const text = event.clipboardData?.getData('text')?.trim() ?? '';
+    if (!looksLikeAddress(text)) return;
+    event.preventDefault();
+    void submit('end', text, false);
+  });
+  // A drag that started on this page (a queue row, a title link) is the page's own, not a link brought in.
+  let ownDrag = false;
+  document.addEventListener('dragstart', () => {
+    ownDrag = true;
+  });
+  document.addEventListener('dragend', () => {
+    ownDrag = false;
+  });
+  // Something brought in from outside: the add card says where it goes while it is held over the page.
+  let over = 0;
+  const holding = (on: boolean) => {
+    card.classList.toggle('drop-target', on);
+    dropNote.hidden = !on;
+    (dropNote.lastElementChild as HTMLElement).textContent = t().dropHere;
+  };
+  const bringsLink = (event: DragEvent) =>
+    !ownDrag &&
+    [...(event.dataTransfer?.types ?? [])].some((type) => type === 'text/uri-list' || type === 'text/plain');
+  document.addEventListener('dragenter', (event) => {
+    if (!bringsLink(event) || !welcome()) return;
+    over += 1;
+    holding(true);
+  });
+  document.addEventListener('dragleave', (event) => {
+    if (!bringsLink(event)) return;
+    over = Math.max(0, over - 1);
+    if (over === 0) holding(false);
+  });
+  document.addEventListener('dragover', (event) => {
+    if (!bringsLink(event) || !welcome()) return;
+    // Taken here, so the browser does not open the link in place of the panel (and stop the music here).
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  });
+  document.addEventListener('drop', (event) => {
+    if (!bringsLink(event) || !welcome()) return;
+    event.preventDefault();
+    over = 0;
+    holding(false);
+    // The first address of a link list, else the text as it is.
+    const list = event.dataTransfer?.getData('text/uri-list') ?? '';
+    const text =
+      list
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line && !line.startsWith('#')) ??
+      event.dataTransfer?.getData('text/plain')?.trim() ??
+      '';
+    if (looksLikeAddress(text)) void submit('end', text, false);
+  });
+
   watch(['lang', 'guild', 'me', 'player', 'queue'], draw);
+  // Another server: its results are its own to look up.
+  watch(['guild'], () => {
+    asking?.abort();
+    known.clear();
+    results = [];
+    resultsFor = '';
+    close();
+  });
+  watch(['lang'], () => {
+    // The words of the list's state and its count follow the language; the results stay.
+    if (!found.hidden && results.length > 0) show(resultsFor, results);
+  });
   draw();
   return card;
 }
@@ -1524,68 +2193,179 @@ function soundDialog(): void {
   );
 }
 
-/** What played recently, with a key to add it again. */
+// Which list the history card shows: what played lately, or what this login liked (kept in this browser).
+function libraryView(): 'history' | 'liked' {
+  try {
+    return localStorage.getItem('jukecord.library') === 'liked' ? 'liked' : 'history';
+  } catch {
+    return 'history';
+  }
+}
+
+/**
+ * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to play it now,
+ * next or at the end. A narrow card keeps the heart and puts the rest behind one key (see libraryMenu).
+ */
+function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTMLElement {
+  const words = t();
+  const control = mayControl();
+  const key = (name: IconName, label: string, data: string, run: () => Promise<unknown>) => {
+    const button = h(
+      'button',
+      { class: 'key sm square quiet', type: 'button', title: label, 'aria-label': label, dataset: { key: data } },
+      icon(name),
+    );
+    button.disabled = !control;
+    button.onclick = () => void act(button, run);
+    return button;
+  };
+  const now = key('play', words.playNow, 'now', async () => added(await api['play-now'](guild(), track.url)));
+  const next = key('arrow-up-to-line', words.playNext, 'next', async () =>
+    added(await api.add(guild(), track.url, 'next')),
+  );
+  const again = key('list-plus', words.addAgain, 'again', async () => added(await api.add(guild(), track.url)));
+  const more = h(
+    'button',
+    {
+      class: 'key sm square quiet lib-more',
+      type: 'button',
+      title: words.trackMenu,
+      'aria-label': words.trackMenu,
+      dataset: { key: 'more' },
+    },
+    icon('ellipsis'),
+  );
+  more.disabled = !control;
+  more.onclick = () => libraryMenu(track);
+  return h(
+    'li',
+    { class: 'row', dataset: { id } },
+    album(track),
+    h(
+      'div',
+      { class: 'text' },
+      h(
+        'div',
+        { class: 'name' },
+        h('a', { href: track.url, target: '_blank', rel: 'noopener noreferrer' }, track.title),
+      ),
+      h('div', { class: 'sub' }, ...sub),
+    ),
+    h('div', { class: 'acts' }, heartKey(track), now, next, again, more),
+  );
+}
+
+// A history or liked row's keys as a list, on a narrow card: play now, play next, add.
+function libraryMenu(track: Track): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(track.title, box);
+  const choice = (name: IconName, text: string, run: () => Promise<unknown>) => {
+    const button = h('button', { class: 'choice', type: 'button' }, icon(name), h('span', { class: 'grow' }, text));
+    button.onclick = () => {
+      dialog.close();
+      void act(null, run);
+    };
+    return button;
+  };
+  fill(
+    box,
+    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
+    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
+    choice('list-plus', words.addAgain, async () => added(await api.add(guild(), track.url))),
+  );
+}
+
+/** What played recently and what this login liked, one list at a time, with keys to play each again. */
 export function historyCard(): HTMLElement {
   const count = h('span', { class: 'count' });
   const list = h('ol', { class: 'list scroll history' });
+  // The two lists, as a row of two choices; the card's heading names both, for screen readers.
+  let view = libraryView();
+  const choices = h('div', { class: 'seg library-seg', role: 'group' });
+  const heading = h('h2', { id: 'history-h', class: 'sr' });
+  // With the liked tracks shown: all of them into the queue.
+  const addAll = h('button', { class: 'key sm', type: 'button', 'data-act': 'likes-add' });
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'history-h' },
-    h('div', { class: 'card-head' }, h('h2', { id: 'history-h' }, h('span', { class: 'name' }), count)),
+    h('div', { class: 'card-head' }, heading, choices, count, h('div', { class: 'tools' }, addAll)),
     list,
   );
-  const row = (entry: HistoryEntry) => {
+  const drawChoices = () => {
     const words = t();
-    const again = h(
-      'button',
-      {
-        class: 'key sm square quiet',
-        type: 'button',
-        title: words.addAgain,
-        'aria-label': words.addAgain,
-        dataset: { key: 'again' },
-      },
-      icon('list-plus'),
-    );
-    again.disabled = !mayControl();
-    again.onclick = () =>
-      void act(again, async () => {
-        added(await api.add(guild(), entry.track.url));
-      });
-    return h(
-      'li',
-      { class: 'row', dataset: { id: `${entry.playedAt}-${entry.track.id}` } },
-      album(entry.track),
-      h(
-        'div',
-        { class: 'text' },
-        h(
-          'div',
-          { class: 'name' },
-          h('a', { href: entry.track.url, target: '_blank', rel: 'noopener noreferrer' }, entry.track.title),
-        ),
-        h(
-          'div',
-          { class: 'sub' },
-          h('span', { dataset: { at: String(entry.playedAt) } }, ago(entry.playedAt)),
-          entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
-          h('span', null, addedBy(entry.addedBy, entry.addedByName)),
-        ),
-      ),
-      h('div', { class: 'acts' }, again),
+    choices.setAttribute('aria-label', words.listChoice);
+    const likedCount = state.liked?.length ?? 0;
+    fill(
+      choices,
+      ...(
+        [
+          ['history', words.history, null],
+          ['liked', words.liked, likedCount > 0 ? likedCount : null],
+        ] as const
+      ).map(([value, label, number]) => {
+        const button = h(
+          'button',
+          { type: 'button', 'aria-pressed': String(view === value), dataset: { view: value } },
+          label,
+          number === null ? null : h('span', { class: 'seg-count' }, String(number)),
+        );
+        button.onclick = () => {
+          if (view === value) return;
+          view = value;
+          keep('library', value);
+          draw();
+          // The likes asked again when their list is opened: another tab or Discord may have changed them.
+          if (value === 'liked') void refreshLikes();
+        };
+        return button;
+      }),
     );
   };
   const draw = () => {
     const words = t();
-    (card.querySelector('#history-h .name') as HTMLElement).textContent = words.history;
+    heading.textContent = words.library;
     // No count: it would only ever say how many entries were asked for.
     count.textContent = '';
+    drawChoices();
+    fill(addAll, icon('list-plus'), words.addAll);
+    addAll.hidden = view !== 'liked';
+    addAll.disabled = !mayControl() || (state.liked?.length ?? 0) === 0;
     keepingFocus(list, () => {
+      if (view === 'liked') {
+        const liked = state.liked ?? [];
+        if (liked.length === 0) fill(list, h('li', { class: 'empty' }, icon('heart'), words.noLiked));
+        else
+          fill(
+            list,
+            ...liked.map((entry) =>
+              libraryRow(entry.track, `liked-${entry.track.id}`, [
+                entry.track.uploader ? h('span', null, entry.track.uploader) : null,
+                entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
+              ]),
+            ),
+          );
+        return;
+      }
       if (state.history.length === 0) fill(list, h('li', { class: 'empty' }, icon('history'), words.noHistory));
-      else fill(list, ...state.history.map(row));
+      else
+        fill(
+          list,
+          ...state.history.map((entry: HistoryEntry) =>
+            libraryRow(entry.track, `${entry.playedAt}-${entry.track.id}`, [
+              h('span', { dataset: { at: String(entry.playedAt) } }, ago(entry.playedAt)),
+              entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
+              h('span', null, addedBy(entry.addedBy, entry.addedByName)),
+            ]),
+          ),
+        );
     });
   };
-  watch(['history', 'lang', 'me', 'guild'], draw);
+  addAll.onclick = () =>
+    void act(addAll, async () => {
+      added(await api['likes-add'](guild()));
+    });
+  watch(['history', 'lang', 'me', 'guild', 'liked'], draw);
   draw();
   // "3 min ago" keeps up once a minute by changing those words only: rebuilt rows would drop the keyboard focus.
   window.setInterval(() => {

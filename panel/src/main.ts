@@ -30,7 +30,7 @@ import { listenBar } from './views/listen.ts';
 import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
-import { act, addCard, historyCard, nowCard, queueCard, skipOrVote, voiceCard } from './views/player.ts';
+import { act, addCard, historyCard, nowCard, queueCard, refreshLikes, skipOrVote, voiceCard } from './views/player.ts';
 import { addPage } from './views/shared.ts';
 import { wrappedPage } from './views/wrapped.ts';
 
@@ -461,6 +461,8 @@ function frame(): void {
   if (state.guild) live.show(state.guild.id);
   // At once on opening; later refreshes wait a moment for the server to write the entry.
   void refreshHistory(0);
+  // This login's likes, for the hearts and the liked list.
+  void refreshLikes();
   shortcuts();
   // Whether Discord is connected is asked again now and then (it is not part of the live updates).
   window.setInterval(async () => {
@@ -501,6 +503,7 @@ function choose(id: string): void {
   });
   live.show(guild.id);
   void refreshHistory();
+  void refreshLikes();
 }
 
 // Messages from the live connection.
@@ -522,8 +525,10 @@ function receive(message: Record<string, unknown>): void {
         // Nor, before the sound, a sound: the track as it is.
         sound: (message.sound as typeof state.sound | undefined) ?? PLAIN,
       });
-      // A whole state comes after (re)connecting: tracks may have played while this page was away.
+      // A whole state comes after (re)connecting: tracks may have played while this page was away, and likes may have
+      // changed in another tab or in Discord.
       void refreshHistory(0);
+      void refreshLikes();
       return;
     case 'player': {
       const next = message.player as Player;

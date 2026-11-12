@@ -11,6 +11,7 @@ import { type ActionContext, ActionError, type Actions, type Directory, type Set
 import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
 import type { DoctorReport } from '../app/doctor.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
+import { searchWords } from '../media/search.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
@@ -52,6 +53,8 @@ export interface HandlerInput<S extends OperationSpec> {
   /** What the caller may do in the server named in the path; null for operations not on a server. */
   readonly context: Part<S, 'params'> extends { guild: string } ? ActionContext : null;
   readonly deps: HandlerDeps;
+  /** Aborted when the caller goes away before the answer (a search for words typed over already). */
+  readonly signal: AbortSignal;
 }
 
 export type Handler<S extends OperationSpec> = (
@@ -261,6 +264,38 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'person-limit': ({ context, body, deps }) => settingsAnswer(deps.actions.personLimit(context, body.tracks)),
   volume: ({ context, body, deps }) => ({ ...deps.actions.volume(context, body.percent) }),
   sound: ({ context, body, deps }) => ({ ...deps.actions.sound(context, body.preset) }),
+
+  likes: ({ context, deps }) => deps.actions.likes(context).map((entry) => deps.presenter.liked(entry)),
+  like: ({ context, params, deps }) => deps.presenter.liked(deps.actions.like(context, params.track)),
+  unlike: ({ context, params, deps }) => {
+    deps.actions.unlike(context, params.track);
+    return OK;
+  },
+  'likes-add': ({ context, body, deps }) => {
+    const result = deps.actions.likesAdd(context, body.at ?? 'end');
+    return { ...result, items: deps.presenter.items(result.items) };
+  },
+
+  autoplay: ({ context, body, deps }) => deps.presenter.player(deps.actions.autoplay(context, body.mode)),
+
+  'playlist-export': ({ context, params, query, deps }) => ({
+    ...deps.actions.playlistExport(context, params.name, query.format ?? 'text'),
+  }),
+  'playlist-import': async ({ context, body, deps, signal }) => {
+    const result = await deps.actions.playlistImport(context, body.name, body.content, signal);
+    return { playlist: deps.presenter.playlist(result.playlist), tracks: result.tracks, leftOut: result.leftOut };
+  },
+
+  search: async ({ context, query, deps, signal }) => ({
+    query: searchWords(query.q),
+    results: (await deps.actions.search(context, query.q, query.limit ?? 8, signal)).map((found) => ({
+      url: found.url,
+      title: found.title,
+      uploader: found.uploader,
+      durationMs: found.durationMs,
+      thumbnail: found.thumbnail,
+    })),
+  }),
 };
 
 // A server's settings as the API sends them: every setting (the DJ role, the alerts channel, how people share the

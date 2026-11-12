@@ -39,7 +39,19 @@ class Unreachable extends Error {
 }
 
 // Options that take a value, and the switches; anything else starting with -- is a typing mistake.
-const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope', 'year', 'month']);
+const VALUED = new Set([
+  'url',
+  'token',
+  'guild',
+  'limit',
+  'level',
+  'component',
+  'days',
+  'scope',
+  'year',
+  'month',
+  'format',
+]);
 const SWITCHES = new Set(['json', 'help', 'version', 'next', 'last', 'synced', 'after-track']);
 
 // What people type from Discord's names, to the command it means here.
@@ -50,6 +62,8 @@ const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [
     ['dj', 'none'],
   ],
   [['playlist', 'list'], ['playlists']],
+  [['likes', 'show'], ['likes']],
+  [['likes', 'remove'], ['unlike']],
 ];
 
 /** Splits the command line into options and words. "--name value" and "--name=value" both work. */
@@ -189,12 +203,13 @@ export class Client {
     }
     let response: Response;
     try {
-      // Lookups (yt-dlp) can take a while for a long playlist; a minute and a half covers them.
+      // Lookups (yt-dlp) can take a while: a hundred of an imported list or a link from another service, three at a
+      // time, take about a minute; three minutes cover them.
       response = await fetch(url, {
         method: spec.method,
         headers,
         ...(body === undefined ? {} : { body }),
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(180_000),
       });
     } catch (error) {
       throw new Unreachable(
@@ -315,6 +330,23 @@ export async function run(
         if (!item)
           throw new UsageError(`there is no track number ${position} in the queue (it has ${queue.items.length})`);
         return item.id;
+      },
+      // The track playing now, for liking it.
+      currentTrackId: async () => {
+        const player = (await client.call('now-playing', { params: { guild: await guildOf() } })) as {
+          track: { id: number } | null;
+        };
+        if (!player.track) throw new ApiError('conflict', 'nothing is playing');
+        return player.track.id;
+      },
+      // The liked track at a 1-based number, as `jukecord likes` shows them.
+      likedTrackId: async (position: number) => {
+        const liked = (await client.call('likes', { params: { guild: await guildOf() } })) as {
+          track: { id: number };
+        }[];
+        const entry = liked[position - 1];
+        if (!entry) throw new UsageError(`there is no liked track number ${position} (there are ${liked.length})`);
+        return entry.track.id;
       },
     };
     const request = await command.request({ args: rest, flags: words.flags }, lookups);

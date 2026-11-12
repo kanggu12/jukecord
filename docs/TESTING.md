@@ -12,7 +12,9 @@
 
 The integration tests need ffmpeg with libopus; they are skipped (and say so) without it. Nothing in the tests talks
 to Discord, YouTube or any other site: yt-dlp is replaced by `tests/support/fake-yt-dlp.mjs`, Discord's API by fakes,
-and every example address is on example.com or media.example.
+and every example address is on example.com or media.example. What YouTube, Deezer, Spotify and Apple Music answer
+(a search, a mix, Deezer's track, album and playlist, a Spotify and an Apple Music track's page) was read once from
+the real services and is kept in `tests/fixtures` in its real shape, with every value made up.
 
 ## The panel
 
@@ -27,7 +29,10 @@ statistics), the shortcuts on a short window (a page zoomed to 200 %), and the l
 The panel with a Discord bot is walked too: a made-up server, its voice channels and people listening in browsers are
 put between the page and the server, which runs browser-only. In it, someone without the DJ role sees a vote to skip
 under way at every width, and someone who manages the server opens the server's settings; the walk also takes turns from
-the queue's tools, opens the voice channel's sounds, and plays along as sounds are put on while it plays. The README's
+the queue's tools, opens the voice channel's sounds, and plays along as sounds are put on while it plays. It also types
+words in the add field (the search's answer is the walk's own, made from the seeded tracks), holds a link from another
+window over the page, opens the liked list, autoplay's choices and a row autoplay queued (from the seeded plays: nothing
+is fetched), a playlist's export and import, and the queue's tools on a phone with autoplay among them. The README's
 pictures come from the same walk. The seed's history is a year long (the server new a year ago, with a few plays in its
 first month), and its covers are PNG pictures in jukecord's cache, as jukecord keeps the ones it fetches: Wrapped is
 walked over the year, over that first month and over a year with no plays, with its times to choose from, its "Save as
@@ -39,8 +44,9 @@ composited), controls on one row that differ in height or centre, floating layer
 a dialog or a toast that something else covers, a page wider than the screen, a badge whose word breaks out of it, the
 playing card's keys leaving one key alone on a row, a list in a card with room for fewer than three rows, a box that
 scrolls with nothing in it the keyboard can stop on, a state told by a fill alone drawn like its absence (as a contrast
-theme paints), keys and cards under a screen's notch or home bar, and touch targets under 44 pixels (keys, fields, the
-switch, the sliders and the seek bar, the logo). On the pages it photographs it also runs axe-core's accessibility
+theme paints), keys and cards under a screen's notch or home bar, touch targets under 44 pixels (keys, fields, the
+switch, the sliders and the seek bar, the logo), and a listen bar pushed off the foot of the window (a page that ran
+past the window and scrolled its bars with it). On the pages it photographs it also runs axe-core's accessibility
 rules (names, roles, landmarks, headings). It also presses **Listen here** and waits for the browser to be in time
 with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
 

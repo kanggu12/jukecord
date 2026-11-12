@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { Access } from './app/access.ts';
 import { Actions, type Directory } from './app/actions.ts';
 import { type AlertSink, Alerts, leftLoopAlert, restartedAlert, turnedAwayAlert } from './app/alerts.ts';
+import { Autoplay } from './app/autoplay.ts';
 import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
@@ -24,15 +25,19 @@ import { QueueService } from './core/queue.ts';
 import { Bot } from './discord/bot.ts';
 import { ConsoleSink, createLogger, FileSink } from './log.ts';
 import { publicAddressesOnly } from './media/address.ts';
+import { BatchLookups } from './media/batch.ts';
 import { MediaCache } from './media/cache.ts';
 import { Covers } from './media/covers.ts';
 import { startEgressGuard } from './media/egress.ts';
+import { publicFetch } from './media/fetch.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
+import { Links } from './media/links.ts';
 import { LrclibClient, Lyrics } from './media/lyrics.ts';
 import { outbound } from './media/outbound.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
+import { Search } from './media/search.ts';
 import { YtDlp } from './media/ytdlp.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
@@ -172,14 +177,46 @@ async function main(): Promise<number> {
     log: log.child('prefetch'),
     count: config.media.prefetch,
   });
+  // The search is made after the resolver, whose lookup slots it shares; the resolver asks it for picked results.
+  let search: Search | null = null;
+  // One check of addresses for everything that adds a track (a typed address, a playlist's entries, autoplay's picks).
+  const checkAddress = config.media.allowPrivate ? null : publicAddressesOnly();
   const resolver = new Resolver({
     ytdlp,
     tracks: store.tracks,
     log: log.child('lookup'),
-    ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
+    ...(checkAddress ? { checkAddress } : {}),
     watch: alerts,
     // What YouTube says a recording is, kept for finding its lyrics.
     music: store.music,
+    recent: (source) => search?.recent(source) ?? null,
+  });
+  search = new Search({ ytdlp, slots: resolver, log: log.child('search') });
+  // jukecord's own requests (Deezer, Spotify, Apple Music, a file attached in Discord): public addresses only.
+  const fetchOut = publicFetch({ allowPrivate: config.media.allowPrivate });
+  // Lookups that come in lists (an imported playlist, a link's tracks), three at a time across every list.
+  const batch = new BatchLookups();
+  const links = new Links({
+    fetch: fetchOut,
+    ytdlp,
+    tracks: store.tracks,
+    batch,
+    log: log.child('links'),
+    services: config.links.services,
+    spotify: config.links.spotify,
+  });
+  // A track when a queue runs out, for the servers that turn autoplay on.
+  const autoplay = new Autoplay({
+    bus,
+    players,
+    queue,
+    store,
+    slots: resolver,
+    ytdlp,
+    ...(checkAddress ? { checkAddress } : {}),
+    clock: systemClock,
+    log: log.child('autoplay'),
+    trackMaxMs: config.media.trackMaxMs,
   });
   // The tracks' covers, fetched once into the cache by the same address rule as yt-dlp's (src/media/covers.ts).
   const covers = new Covers({ cache, log: log.child('covers'), allowPrivate: config.media.allowPrivate });
@@ -223,11 +260,18 @@ async function main(): Promise<number> {
     lyrics,
     votes,
     bus,
+    search,
+    autoplay,
+    ...(checkAddress ? { checkAddress } : {}),
+    batch,
+    links,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);
   if (restored > 0) log.info('restored what was playing before the restart, paused', { servers: restored });
   prefetcher.start();
+  // After the restore: a restored player's queue is looked at when it plays on, not all at once at the start.
+  autoplay.start();
 
   // The bot is made before the web server (whose logins ask it about members) and started after it, so the panel
   // answers while Discord connects.
@@ -245,6 +289,8 @@ async function main(): Promise<number> {
         log: log.child('discord'),
         panelUrl: config.publicUrl,
         voiceChannels: store.voiceChannels,
+        // Files attached to /playlist import, from Discord's public addresses (the address rule as yt-dlp's).
+        fetch: fetchOut,
       })
     : null;
   const directory = (): Directory | null => bot;

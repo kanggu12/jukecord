@@ -242,4 +242,24 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE guild_settings ADD COLUMN sound        TEXT    NOT NULL DEFAULT 'off';
     `,
   },
+  {
+    version: 8,
+    sql: `
+      -- The tracks each login liked. "owner" is the Discord user ID, or "host" for the host's login (no Discord ID is
+      -- a word). A track is liked once per login; the newest first by the index, for the list.
+      CREATE TABLE likes (
+        owner      TEXT    NOT NULL,
+        track_id   INTEGER NOT NULL REFERENCES tracks(id),
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (owner, track_id)
+      );
+      CREATE INDEX likes_by_owner ON likes(owner, created_at DESC);
+      -- How many logins liked a track, which autoplay weighs, without reading every like.
+      CREATE INDEX likes_by_track ON likes(track_id);
+
+      -- What a server's player does when its queue runs out (off, history, related), kept across restarts with the
+      -- rest of its state, as the repeat mode is.
+      ALTER TABLE player_state ADD COLUMN autoplay TEXT NOT NULL DEFAULT 'off';
+    `,
+  },
 ];

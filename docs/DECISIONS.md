@@ -270,3 +270,56 @@ compressors work differently, so the two would not sound the same, and the cache
 0 dB (the cached peaks are under -1 dB); above 100 % the voice channel's volume passes a limiter at -1 dB. A browser
 hands its audio to WebAudio only once a sound is on, and keeps it there (an element can be handed over once); its own
 volume then comes after the sound, as the voice channel's volume does.
+
+## Search shows what it found, in the add card
+
+Adding the first result of a search blindly was the usual way a wrong song started. Words now show YouTube's results
+under the field a moment after typing stops, and Discord's suggestions under `/play` and `/add` show the same. A search
+is one flat listing by yt-dlp (titles, channels, lengths and pictures in one request, about a second and a half), in the
+resolver's lookup slots and at a rate of its own; it is kept for half an hour by its words and shared while it runs, and
+one nobody waits for any more (the next key was typed) is stopped, so typing does not use up the slots. A result picked
+is added from what the search learned, with nothing fetched until it plays. The list is part of the add card rather
+than a layer over the page, as the panel's other parts are: over the field where the card stands at the foot of a
+window that does not scroll (the field stays where the eyes are), under it everywhere else. While it shows there, the
+queue keeps three rows in sight on a window taller than 880 px; on a shorter one it keeps its head and gives the
+results the room of its rows (a line saying nothing was found takes only what it needs). It is an ARIA combobox and
+listbox, so the keyboard and screen readers move through it from the field.
+
+## Autoplay from the server's own plays
+
+When the queue runs out, a recommender service would know what plays and when; jukecord already knows what each server
+played and liked. "This server's plays" draws a track from its history, more often the ones played more and liked by
+more people, none of the last thirty plays, so it sounds like that server and asks nobody. "Related to the last track"
+asks YouTube (through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a server that
+wants something new, and falls back to the history. One track is queued when the last one starts, so it is fetched in
+time; its row says Autoplay, people's tracks added at the end go before it, and statistics and Wrapped leave it out of
+who added most. It is nobody's turn when people take turns (its tracks stay after people's), and the limit of tracks per
+person does not count it. A Stop ends it until a track starts again: the music does not start by itself after someone
+stopped it, and a stop asked for after this track is a Stop too. It picks only while the music goes on: a player paused
+by a person, or resting with nobody listening, gets its pick when it plays again.
+
+## Likes belong to a login, and show only what a server shows
+
+A like is a person's, so it needs no DJ role, and the list is theirs in every server they open, as a library is. A track
+may be liked only where it plays, waits, played or is saved in a playlist of the server: likes are listed with their
+titles, and a like by track number alone would let anyone read what other servers played. A login keeps up to a
+thousand. A friend the host let in likes as the host, as what it adds counts as the host's; a guest of a listening link
+has no likes.
+
+## Links of other services are found on YouTube
+
+Deezer, Spotify and Apple Music do not let a self-hosted program play their audio, and yt-dlp cannot either; their
+links still say exactly which songs are meant. jukecord reads the link (Deezer's public API, Spotify's Web API with the
+host's own app or a track's public page, an Apple Music track's public page) for each track's title, artists and
+length, and searches YouTube for it, keeping the recording within a few seconds of the length (a different length is
+usually a live take or a video with a long intro), an official audio upload first, and nothing that names another
+version (live, cover, remix) the track does not. A link gives at most a hundred tracks, searched three at a time in
+turns shared with imported playlists, apart from the lookups people wait for; the first one plays while the rest are
+found.
+
+## jukecord's own requests follow yt-dlp's address rule
+
+Reading a Deezer answer, a Spotify or Apple Music page, or a file attached to `/playlist import` is jukecord fetching
+an address someone gave. Those requests resolve the name themselves, refuse it when any of its addresses is on a
+private network, connect to the very address checked, and check each redirect again, as the proxy in front of yt-dlp
+does; each has a time and a size limit. `JUKECORD_ALLOW_PRIVATE_ADDRESSES` turns the rule off for them as for yt-dlp.

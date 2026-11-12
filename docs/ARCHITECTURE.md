@@ -97,6 +97,12 @@ track's cover is fetched once too, by jukecord itself under the same address rul
 shows it from jukecord. The cache keeps the files up to its size limit, removing the least recently used first (a cover
 by its own use) and never the one playing or the next ones.
 
+Search words can also be searched first (`src/media/search.ts`): the results are kept for a while, and the one
+picked is added from what the search learned. A link of Deezer, Spotify or Apple Music (`src/media/links.ts`) is
+read from that service for its tracks, each found on YouTube; such lists, and an imported playlist's lines, take
+their turns three at a time (`src/media/batch.ts`), apart from the lookups people wait for. Autoplay
+(`src/app/autoplay.ts`) listens to the players and queues one track when a queue is about to run out.
+
 yt-dlp reaches the internet only through a small proxy inside jukecord (`--proxy` to 127.0.0.1). The proxy resolves
 each name itself, refuses addresses on private networks, and connects to the very address it checked, so a redirect, a
 playlist entry or a name that answers differently the second time cannot make the server fetch from its own network.

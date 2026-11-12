@@ -12,7 +12,7 @@ import path from 'node:path';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { ActionError } from '../app/actions.ts';
+import { ActionError, likesOwner } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
@@ -29,7 +29,7 @@ import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, ty
 import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
-import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS } from './limits.ts';
+import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
 import { type FieldSchema, misfit } from './schemas.ts';
 
@@ -67,6 +67,7 @@ export interface WebServerOptions {
     readonly changes?: Rate;
     readonly fetches?: Rate;
     readonly reads?: Rate;
+    readonly searches?: Rate;
     readonly now?: () => number;
     /** Covers that are not cached yet, which jukecord fetches when asked. */
     readonly covers?: Rate;
@@ -143,6 +144,7 @@ const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 const TOO_MANY_READS = 'too many requests at once; try again in a moment';
 // What an audio request is told while the MP3 copy it asked for is still being made.
 const MAKING_MP3 = 'jukecord is making the MP3 copy of this track; try again in a moment';
+const TOO_MANY_SEARCHES = 'too many searches at once; try again in a moment';
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
 // do; undici with pipelining and benchmark tools do. A client that sends many in one go and reads nothing had each one
@@ -371,6 +373,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const reads = new Buckets(options.rates?.reads ?? READS, { now: clock });
   // Covers asked for that jukecord must fetch first (a cached one costs what a file of the panel costs, and is free).
   const coverFetches = new Buckets(options.rates?.covers ?? COVERS, { now: clock });
+  const searches = new Buckets(options.rates?.searches ?? SEARCHES, { now: clock });
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
@@ -544,6 +547,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     app.route({
       method: spec.method,
       url: routePath(spec),
+      // An operation that takes a file may take more than the usual 64 KiB.
+      ...(spec.bodyLimit ? { bodyLimit: spec.bodyLimit } : {}),
       schema: {
         ...(spec.params ? { params: plain(spec.params) } : {}),
         ...(spec.query ? { querystring: plain(spec.query) } : {}),
@@ -602,11 +607,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           const keys = caller
             ? [caller.principal.kind === 'user' ? `person ${caller.principal.userId}` : `login ${loginKey(caller)}`]
             : [`address ${addressKey(request.ip)}`];
-          const wait = reads.wait(keys);
-          if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
+          // A search, which starts yt-dlp, is held to its own rate as well, by the same keys (both must have a token).
+          const searching = name === 'search';
+          const forSearch = searching ? searches.wait(keys) : 0;
+          const wait = Math.max(reads.wait(keys), forSearch);
+          if (wait > 0) return later(reply, 'rate-limited', forSearch > 0 ? TOO_MANY_SEARCHES : TOO_MANY_READS, wait);
           reads.take(keys);
+          if (searching) searches.take(keys);
         }
         const params = (request.params ?? {}) as Record<string, unknown>;
+        // Aborted when the caller goes away before its answer is sent (a search whose words were typed over), so the
+        // work it started can stop.
+        const gone = new AbortController();
+        reply.raw.once('close', () => {
+          if (!reply.raw.writableFinished) gone.abort();
+        });
         try {
           const context =
             typeof params.guild === 'string' && caller
@@ -619,6 +634,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             caller,
             context: context as never,
             deps,
+            signal: gone.signal,
           });
         } catch (error) {
           if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) giveBack?.();
@@ -691,13 +707,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       const context = await deps.access.context(caller.principal, request.params.guild);
       const id = Number(request.params.track);
       const valid = Number.isSafeInteger(id) && id > 0;
-      // Each question is one lookup by an index, cheapest first: the player, the queue, the history, the playlists.
+      // Each question is one lookup by an index, cheapest first: the player, the queue, the history, the playlists, and
+      // this login's likes (a login's own in every server it opens, so its liked list shows them here too; a guest has
+      // none).
       const shown =
         valid &&
         (options.players.get(context.guildId).snapshot().track?.id === id ||
           options.queue.contains(context.guildId, id) ||
           deps.store.history.has(context.guildId, id) ||
-          deps.store.playlists.has(context.guildId, id));
+          deps.store.playlists.has(context.guildId, id) ||
+          (caller.principal.kind !== 'guest' && deps.store.likes.has(likesOwner(context), id)));
       const track = shown ? deps.store.tracks.get(id) : null;
       if (!track) return failure(reply, 'not-found', 'that track is not in this server');
       // A track without a picture, or one whose picture cannot be had: the browser need not ask again for an hour,

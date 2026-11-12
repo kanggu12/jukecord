@@ -103,6 +103,30 @@ describe('covers through jukecord', () => {
     }
   });
 
+  it('sends the cover of a track this login liked in another server, which its liked list shows here', async () => {
+    const server = await serverWithPictures();
+    const inject = (options: InjectOptions) => server.web.app.inject(options);
+    try {
+      // Played in the other server, and liked by Alice there: not in this server's player, queue, history or lists.
+      const other = server.store.tracks.upsert(pictured('other'));
+      server.store.history.add({
+        guildId: OTHER_GUILD,
+        trackId: other.id,
+        addedBy: ALICE,
+        playedAt: 1,
+        playedMs: 60_000,
+      });
+      server.store.likes.add(ALICE, other.id);
+      const url = api(`/guilds/${GUILD}/tracks/${other.id}/cover`);
+      const alice = sessionFor(server, ALICE);
+      assert.equal((await inject({ method: 'GET', url, headers: { cookie: alice.cookie } })).statusCode, 200);
+      // In nobody else's likes: not in this server for them.
+      assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('says a cover that cannot be had is not there, for an hour, without asking the site again', async () => {
     const server = await serverWithPictures();
     try {

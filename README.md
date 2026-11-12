@@ -156,6 +156,18 @@ people use most.
 - **One sound for everyone.** A volume for the voice channel up to 200 % and sounds to choose (more bass, clearer
   voices, brighter, softer at night). Browsers listening along apply the same sound, so the voice channel and every
   browser hear the same.
+- **Search and pick.** Search words show what YouTube found beside the add field as you type (title, channel, length,
+  cover), to play now, next or add; Discord suggests the same under `/play` and `/add`. A link pasted or dropped
+  anywhere on the page is added.
+- **Autoplay.** When the queue runs out, a track from the server's own plays (the ones played and liked more, more
+  often) or one related to the last track, from YouTube's mix of it. No outside recommender.
+- **Likes.** A heart on the playing track, the queue and the history, and a list of each login's liked tracks to play
+  again, one or all.
+- **Playlists in and out.** A saved playlist as a text file of addresses, an M3U or jukecord's own file, and a playlist
+  made from any of those or from a pasted list of addresses or song names.
+- **Links from Deezer, Spotify and Apple Music.** A Deezer track, album or playlist, a Spotify track (albums and
+  playlists with the host's Spotify app) or an Apple Music track is found on YouTube (the recording of the same
+  length, official audio first) and queued in order, the first playing while the rest are found.
 
 ### Light on a small machine
 
@@ -208,10 +220,12 @@ Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecor
 The queues, the history, the playlists, the settings and the logins are in one SQLite file in jukecord's data folder,
 and the fetched tracks beside it, with their pictures, up to `JUKECORD_CACHE_MAX`. Logins and tokens are kept only as
 hashes, and the logs mask tokens. jukecord itself talks to Discord, to the sites the tracks come from and, for lyrics,
-to LRCLIB (it sends the song's title, artist, album and length; `JUKECORD_LYRICS=off` stops it), and sends no
-telemetry; the panel shows the tracks' pictures from jukecord and people's pictures from Discord. Docker Compose
-publishes the panel on this computer only, until you give it a
-[public address](docs/INSTALL.md#friends-on-other-machines).
+to LRCLIB (it sends the song's title, artist, album and length; `JUKECORD_LYRICS=off` stops it), and sends no telemetry;
+the panel shows the tracks' pictures from jukecord and people's pictures from Discord. A link from Deezer, Spotify or
+Apple Music is read from that service (Deezer's public API is sent the link's ID; Spotify, the ID, and with the host's
+own app its ID and secret for a token; Apple Music and Spotify's pages, the address) and its tracks are searched on
+YouTube by their artist and title; `JUKECORD_LINK_SERVICES` turns each service off. Docker Compose publishes the panel
+on this computer only, until you give it a [public address](docs/INSTALL.md#friends-on-other-machines).
 
 ## Guides
 

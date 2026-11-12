@@ -48,6 +48,8 @@ export class Players {
     for (const saved of states.all()) {
       // The repeat mode comes back even for a server that was idle: it is a choice, not a state of the moment.
       if (saved.repeat !== 'off') this.get(saved.guildId).setRepeat(saved.repeat);
+      // So does autoplay, for the same reason.
+      if (saved.autoplay !== 'off') this.get(saved.guildId).setAutoplay(saved.autoplay);
       // A server that was idle, or whose track has since disappeared from the database, has nothing to come back to.
       if (saved.status === 'idle' || saved.trackId === null) continue;
       const track = tracks.get(saved.trackId);
