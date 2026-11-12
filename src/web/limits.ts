@@ -34,6 +34,12 @@ export const FETCHES: Rate = { perSecond: 2, burst: 5 };
  */
 export const READS: Rate = { perSecond: 30, burst: 60 };
 
+/**
+ * Covers jukecord must fetch before it can send them (src/media/covers.ts): ten a second, sixty at once. A panel shows
+ * a few dozen at most when it opens; a cached cover takes nothing from this.
+ */
+export const COVERS: Rate = { perSecond: 10, burst: 60 };
+
 // One bucket: what it held at time `at`.
 interface Bucket {
   tokens: number;

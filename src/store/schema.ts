@@ -144,4 +144,12 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    sql: `
+      -- Whether a server ever played a track, asked for every cover the panel shows (the history and Wrapped show
+      -- covers of tracks no longer queued): without it the question walked up to 10,000 rows of the server's history.
+      CREATE INDEX history_by_guild_track ON history(guild_id, track_id);
+    `,
+  },
 ];

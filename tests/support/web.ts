@@ -20,6 +20,7 @@ import { QueueService } from '../../src/core/queue.ts';
 import type { NewTrack } from '../../src/core/types.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
+import { Covers, type Picture } from '../../src/media/covers.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
@@ -111,6 +112,9 @@ export interface TestServer {
   readonly players: Players;
   readonly queue: QueueService;
   readonly cache: MediaCache;
+  readonly covers: Covers;
+  /** The pictures asked of the made-up image hosts, by address, in order. */
+  readonly pictureRequests: string[];
   readonly logs: MemorySink;
   readonly dataDir: string;
   /** The base address once listening (`listen: true`); empty otherwise. */
@@ -130,10 +134,17 @@ export interface TestServerOptions {
   readonly panelDir?: string | null;
   /** What the resolver finds for each input. */
   readonly found?: Record<string, NewTrack[]>;
+  /** What the made-up image hosts answer for each picture's address (an Error: that picture cannot be had). */
+  readonly pictures?: Record<string, Picture | Error>;
   /** The caps on live connections (lower than the defaults to test them). */
   readonly live?: Partial<LiveLimits>;
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
-  readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
+  readonly rates?: {
+    readonly changes?: Rate;
+    readonly fetches?: Rate;
+    readonly now?: () => number;
+    readonly covers?: Rate;
+  };
   readonly behind?: () => boolean;
   /** Shorter request and idle timeouts and lower connection caps (to test them). */
   readonly trustProxy?: boolean;
@@ -204,6 +215,19 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-web-'));
   const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log });
   cache.init();
+  // Covers come from a table instead of the internet; every picture asked for is noted.
+  const pictureRequests: string[] = [];
+  const covers = new Covers({
+    cache,
+    log,
+    fetch: async (address) => {
+      pictureRequests.push(address);
+      const picture = options.pictures?.[address];
+      if (!picture) throw new Error('no such picture');
+      if (picture instanceof Error) throw picture;
+      return picture;
+    },
+  });
   const web = await createWebServer({
     host: '127.0.0.1',
     port: 0,
@@ -215,6 +239,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     queue,
     cache,
     mp3: async () => null,
+    covers,
     log,
     ...(options.live ? { live: options.live } : {}),
     ...(options.rates ? { rates: options.rates } : {}),
@@ -252,6 +277,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     players,
     queue,
     cache,
+    covers,
+    pictureRequests,
     logs,
     dataDir,
     url,

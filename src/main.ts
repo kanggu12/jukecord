@@ -21,6 +21,7 @@ import { Bot } from './discord/bot.ts';
 import { ConsoleSink, createLogger, FileSink } from './log.ts';
 import { publicAddressesOnly } from './media/address.ts';
 import { MediaCache } from './media/cache.ts';
+import { Covers } from './media/covers.ts';
 import { startEgressGuard } from './media/egress.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
 import { Prefetcher } from './media/prefetch.ts';
@@ -150,6 +151,8 @@ async function main(): Promise<number> {
     log: log.child('lookup'),
     ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
   });
+  // The tracks' covers, fetched once into the cache by the same address rule as yt-dlp's (src/media/covers.ts).
+  const covers = new Covers({ cache, log: log.child('covers'), allowPrivate: config.media.allowPrivate });
   const actions = new Actions({
     store,
     queue,
@@ -209,6 +212,7 @@ async function main(): Promise<number> {
     queue,
     cache,
     mp3: (track, signal) => media.mp3(track, signal),
+    covers,
     log: log.child('web'),
     // Open panels at once (JUKECORD_LIVE_MAX); the caps per login and per address stay at their defaults.
     live: { total: config.liveMax },
@@ -252,6 +256,8 @@ async function main(): Promise<number> {
       process.exit(1);
     }, 10_000).unref();
     prefetcher.stop();
+    // Covers being fetched stop with jukecord (each would end by its own time limit otherwise).
+    covers.stop();
     players.checkpointAll();
     // The panels are told first (they reconnect to the next jukecord), then Discord, then the database.
     void web

@@ -22,13 +22,14 @@ import type { Logger } from '../log.ts';
 import { isPrivateAddress } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import { MediaCache } from '../media/cache.ts';
+import type { CoverFile, Covers } from '../media/covers.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
 import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
-import { Buckets, CHANGES, FETCHES, Pressure, type Rate, READS } from './limits.ts';
+import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
 
 export interface WebServerOptions {
@@ -47,6 +48,8 @@ export interface WebServerOptions {
   readonly cache: MediaCache;
   /** Makes the MP3 copy of a cached track for browsers without Opus. */
   readonly mp3: (track: Track, signal: AbortSignal) => Promise<string | null>;
+  /** The tracks' covers, served from the cache and fetched once (src/media/covers.ts). */
+  readonly covers: Covers;
   readonly log: Logger;
   /** How many live connections there may be (in all, per login, per address); tests and the settings change it. */
   readonly live?: Partial<LiveLimits>;
@@ -59,6 +62,8 @@ export interface WebServerOptions {
     readonly fetches?: Rate;
     readonly reads?: Rate;
     readonly now?: () => number;
+    /** Covers that are not cached yet, which jukecord fetches when asked. */
+    readonly covers?: Rate;
   };
   /** Whether jukecord has fallen behind and sheds what can wait (tests set it; by default the event loop says). */
   readonly behind?: () => boolean;
@@ -250,6 +255,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
   const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
   const reads = new Buckets(options.rates?.reads ?? READS, { now: clock });
+  // Covers asked for that jukecord must fetch first (a cached one costs what a file of the panel costs, and is free).
+  const coverFetches = new Buckets(options.rates?.covers ?? COVERS, { now: clock });
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
@@ -292,7 +299,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           "default-src 'self'",
           "script-src 'self'",
           "style-src 'self'",
-          // Thumbnails come from the sites tracks are on (YouTube, SoundCloud, ...) and avatars from Discord.
+          // Covers come from jukecord itself; people's avatars and the servers' icons from Discord.
           "img-src 'self' data: https:",
           "media-src 'self' blob:",
           `connect-src 'self'${sockets}`,
@@ -501,6 +508,58 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     },
   );
 
+  // A track's cover, from jukecord itself (src/media/covers.ts): only for a track the server shows somewhere (playing,
+  // queued, in its history or in one of its playlists), to a login that can open that server. A cached cover is sent
+  // as a file; one not cached yet is fetched once, within the cover rate of the login and its address, and not while
+  // jukecord is behind.
+  app.get<{ Params: { guild: string; track: string } }>(
+    `${API_PREFIX}/guilds/:guild/tracks/:track/cover`,
+    async (request, reply) => {
+      const { caller, blocked } = identify(request, reply);
+      if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
+      if (!caller) return failure(reply, 'unauthorized', 'log in first');
+      const context = await deps.access.context(caller.principal, request.params.guild);
+      const id = Number(request.params.track);
+      const valid = Number.isSafeInteger(id) && id > 0;
+      // Each question is one lookup by an index, cheapest first: the player, the queue, the history, the playlists.
+      const shown =
+        valid &&
+        (options.players.get(context.guildId).snapshot().track?.id === id ||
+          options.queue.contains(context.guildId, id) ||
+          deps.store.history.has(context.guildId, id) ||
+          deps.store.playlists.has(context.guildId, id));
+      const track = shown ? deps.store.tracks.get(id) : null;
+      if (!track) return failure(reply, 'not-found', 'that track is not in this server');
+      // A track without a picture, or one whose picture cannot be had: the browser need not ask again for an hour,
+      // which is as long as jukecord remembers the failure.
+      const none = () =>
+        failure(reply.header('cache-control', 'private, max-age=3600'), 'not-found', 'that track has no cover');
+      if (!track.thumbnail) return none();
+      let cover: CoverFile | null = options.covers.cached(track);
+      if (!cover) {
+        if (behind()) return later(reply, 'busy', BUSY, 2000);
+        // The host is not held to a rate, as for every other request.
+        if (caller.principal.kind !== 'host') {
+          const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
+          const wait = coverFetches.wait(keys);
+          if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
+          coverFetches.take(keys);
+        }
+        try {
+          cover = await options.covers.get(track);
+        } catch (error) {
+          if (error instanceof BusyError) return later(reply, 'busy', error.message, 2000);
+          throw error;
+        }
+        if (!cover) return none();
+      }
+      // A track's cover does not change once fetched; the browser may keep it for a day, then ask whether it did.
+      return reply
+        .header('cache-control', 'private, max-age=86400')
+        .sendFile(path.basename(cover.path), path.dirname(cover.path));
+    },
+  );
+
   // Live updates. A browser's cookie is only accepted from the panel's own pages (another site could otherwise open
   // a connection with it).
   app.get<{ Querystring: LiveQuery }>(`${API_PREFIX}/events`, { websocket: true }, (socket, request) => {
@@ -697,6 +756,7 @@ function metrics(
   gauge('jukecord_queue_tracks', 'Tracks waiting in all queues.', [['', queued]]);
   gauge('jukecord_cache_bytes', 'Bytes in the media cache.', [['', options.cache.size()]]);
   gauge('jukecord_cache_tracks', 'Tracks in the media cache.', [['', options.cache.count()]]);
+  gauge('jukecord_cache_covers', "Tracks' covers in the media cache.", [['', options.cache.coverCount()]]);
   gauge('jukecord_panel_connections', 'Open live connections from panels.', [['', counts.connections]]);
   gauge('jukecord_browser_listeners', 'Browsers playing along.', [['', counts.listening]]);
   // How far behind the event loop is: above 0.2 s, audio (for everyone) and changes from anyone but the host are

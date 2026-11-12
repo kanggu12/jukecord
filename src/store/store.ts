@@ -539,6 +539,14 @@ export class HistoryRepository {
     return row ? historyFrom(row) : null;
   }
 
+  /** Whether a server's history has a track (asked of the index on server and track, for each cover shown). */
+  has(guildId: string, trackId: number): boolean {
+    const row = this.store.db
+      .prepare('SELECT 1 AS found FROM history WHERE guild_id = ? AND track_id = ? LIMIT 1')
+      .get(guildId, trackId);
+    return row !== undefined;
+  }
+
   /** The newest `limit` entries of a server; `beforeId` pages further back. */
   list(guildId: string, limit = 50, beforeId?: number): HistoryEntry[] {
     // Newest first by ID, the order entries were written in, which is also what the cursor pages by: the index on
@@ -719,6 +727,17 @@ export class PlaylistRepository {
       )
       .all(guildId);
     return rows.map((row) => playlistFrom(row as Row));
+  }
+
+  /** Whether one of a server's playlists holds a track (a server has a few lists of a few hundred tracks at most). */
+  has(guildId: string, trackId: number): boolean {
+    const row = this.store.db
+      .prepare(
+        `SELECT 1 AS found FROM playlist_items i JOIN playlists p ON p.id = i.playlist_id
+         WHERE p.guild_id = ? AND i.track_id = ? LIMIT 1`,
+      )
+      .get(guildId, trackId);
+    return row !== undefined;
   }
 
   /** The tracks of a playlist in their saved order. */
