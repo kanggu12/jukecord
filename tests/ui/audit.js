@@ -741,8 +741,13 @@ window.__audit = () => {
         (Math.abs(line.left - box.right) < 24 || Math.abs(box.left - line.right) < 24),
     );
     if (beside.length === 0) continue;
-    // The first of them: an icon belongs on the first line of what it marks.
-    const off = middle(box) - middle(beside[0]);
+    // The first of them: an icon belongs on the first line of what it marks. A mark taller than that line (a face
+    // beside a name and the line under it) cannot stand on one line: it is centred on the lines beside it.
+    // A line's height is the distance from one line to the next (the boxes read are the letters', inside their lines).
+    const block = { top: beside[0].top, bottom: beside.at(-1).bottom };
+    const pitch = beside.length > 1 ? beside[1].top - beside[0].top : Number.POSITIVE_INFINITY;
+    const target = height(box) > pitch + HALF ? block : beside[0];
+    const off = middle(box) - middle(target);
     if (Math.abs(off) > HALF) add('icon', holder, `${describe(mark)} ${px(off)} px off its words' centre`);
   }
 
@@ -877,6 +882,41 @@ window.__audit = () => {
           add('column', column, `${what} ${px(gap)} px apart: ${describe(a.element)}, ${describe(b.element)}`);
         }
       }
+  }
+
+  // A row that wraps onto more lines (a card's head with its tools under its title) starts each line at one left
+  // edge, the first thing seen on each, as a column does: nothing indents a wrapped line on purpose, so any difference
+  // counts (up to 24 px; a row that centres or right-aligns its lines is not held to it).
+  for (const row of document.querySelectorAll('body *')) {
+    if (!isRow(row) || !seen(row) || row.closest(APART) || row.matches(CONTROL) || row.parentElement?.closest(CONTROL))
+      continue;
+    const style = getComputedStyle(row);
+    if (style.flexWrap !== 'wrap' || !/^(normal|flex-start|start|left)$/.test(style.justifyContent)) continue;
+    const items = [...row.children]
+      .filter((child) => inFlow(child) && seen(child) && !child.matches(OFF_COLUMN))
+      .map((child) => ({ element: child, box: child.getBoundingClientRect() }));
+    // The first item of each line: the leftmost of the items sharing a line.
+    const firsts = bands(items).map((line) => line.reduce((a, b) => (b.box.left < a.box.left ? b : a)));
+    if (firsts.length < 2) continue;
+    const starts = firsts
+      .map((first) => {
+        const leaves = leavesOf(first.element, !first.element.matches(ROWISH));
+        return leaves.length
+          ? { element: first.element, left: Math.min(...leaves.map((leaf) => leaf.box.left)) }
+          : null;
+      })
+      .filter(Boolean);
+    const lefts = starts.map((start) => start.left);
+    const spread = Math.max(...lefts) - Math.min(...lefts);
+    if (spread > HALF && spread <= 24)
+      add(
+        'column',
+        row,
+        `its wrapped lines start ${px(spread)} px apart: ${starts
+          .map((start) => describe(start.element))
+          .slice(0, 3)
+          .join(', ')}`,
+      );
   }
 
   // Words side by side on one line share a baseline: a name and its version, a title and its count, a label and its
