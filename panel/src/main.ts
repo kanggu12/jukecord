@@ -5,7 +5,7 @@
  * Pages: / (the player), /stats, /logs (the host only) and /login. Moving between them keeps the player screen and
  * the listening bar alive, so the music in this browser does not stop when someone looks at the statistics.
  */
-import { ApiError, api, type Player, setCsrf, whenLoggedOut } from './api.ts';
+import { ApiError, api, coverUrl, type Player, setCsrf, whenLoggedOut } from './api.ts';
 import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
@@ -350,7 +350,9 @@ function frame(): void {
     shownCover = cover;
   };
   watch(['player'], () => {
-    const cover = state.player?.track?.thumbnail ?? null;
+    // The cover from jukecord's own address (see coverUrl).
+    const playing = state.player;
+    const cover = playing?.track ? coverUrl(playing.guildId, playing.track) : null;
     if (cover === ambientCover) return;
     ambientCover = cover;
     // A change already waiting takes the newest cover when its turn comes.

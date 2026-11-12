@@ -1,7 +1,8 @@
 /**
  * Fills a data directory with example data for looking at the panel: tracks with made-up titles and covers
- * (covers.ts), a queue, a month of history from a few people, playlists, and a cached audio file for every track, so
- * playing works with no network. Nothing here points at a real site, song or person.
+ * (covers.ts), a queue, a year of history from a few people (the server new a year ago, with a month of plays as the
+ * walk has always had at its end), playlists, and a cached audio file and cover for every track, so playing works with
+ * no network. Nothing here points at a real site, song or person.
  *
  *   node tests/ui/seed.ts <data directory> [--queue N] [--ffmpeg path]
  *
@@ -10,6 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createLogger } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import { Store } from '../../src/store/store.ts';
 import { cover } from './covers.ts';
@@ -72,6 +74,13 @@ for (const person of PEOPLE) store.users.upsert({ id: person.id, name: person.na
 // One audio file, copied for every track: a soft three-minute tone (the panel needs real Opus to play along).
 const cacheDir = path.join(dataDir, 'cache');
 fs.mkdirSync(cacheDir, { recursive: true });
+// The cache itself, for the covers: each put where jukecord keeps a cover it fetched, by the cache's own naming.
+const cache = new MediaCache({
+  dir: cacheDir,
+  maxBytes: 2 * 1024 ** 3,
+  log: createLogger({ level: 'error', sinks: [] }),
+});
+cache.init();
 const sample = path.join(dataDir, 'sample.opus');
 execFileSync(ffmpeg, [
   '-hide_banner',
@@ -98,10 +107,12 @@ const tracks = TITLES.map((title, index) => {
     title,
     uploader: ARTISTS[index % ARTISTS.length] ?? null,
     durationMs: 180_000,
-    thumbnail: cover(index),
+    // A picture's address on the made-up site, as yt-dlp gives one; jukecord has it cached already (below).
+    thumbnail: `https://media.example/${id}/cover.png`,
   });
-  // Cached as jukecord would have left it: the file and the facts beside it.
+  // Cached as jukecord would have left it: the file and the facts beside it, and the cover.
   const key = MediaCache.keyOf(track.source);
+  cache.putCover(key, cover(index), 'png');
   fs.copyFileSync(sample, path.join(cacheDir, `${key}.opus`));
   fs.writeFileSync(
     path.join(cacheDir, `${key}.json`),
@@ -153,9 +164,45 @@ for (let day = 29; day >= 0; day -= 1) {
     });
   }
 }
+// Before that month, the rest of the year, from a sequence of its own (the month above stays as it was): a server that
+// started small, a play every few days in its first month, and grew, more on Fridays and Saturdays, with one long
+// night of music in the summer.
+let older = 11;
+const earlier = () => {
+  older = (older * 1103515245 + 12345) % 2147483648;
+  return older / 2147483648;
+};
+for (let day = 364; day >= 30; day -= 1) {
+  const started = 364 - day;
+  const weekday = new Date(now - day * 86_400_000).getUTCDay();
+  const weekend = weekday === 5 || weekday === 6;
+  const grown = Math.min(1, started / 200);
+  const count =
+    day === 140
+      ? 46
+      : started < 30
+        ? Number(earlier() < 0.16)
+        : Math.floor(earlier() * (2 + 9 * grown) * (weekend ? 1.7 : 1));
+  for (let play = 0; play < count; play += 1) {
+    // As above: evenings in UTC+9; the long night from the evening into the small hours.
+    const hour = day === 140 ? 9 + (play / count) * 9 : earlier() < 0.6 ? 10 + earlier() * 6 : earlier() * 24;
+    const at = now - day * 86_400_000 - ((now / 3_600_000) % 24) * 3_600_000 + hour * 3_600_000 + earlier() * 600_000;
+    const track = tracks[Math.floor(earlier() ** 1.6 * tracks.length)] ?? tracks[0];
+    if (!track) continue;
+    plays.push({
+      guildId: GUILD,
+      trackId: track.id,
+      addedBy: earlier() < 0.15 ? null : (PEOPLE[Math.floor(earlier() * PEOPLE.length)]?.id ?? null),
+      playedAt: Math.round(at),
+      playedMs: Math.round(60_000 + earlier() * 120_000),
+    });
+  }
+}
 // Written oldest first, as a server writes them while it plays: the history is listed in the order it was written.
 plays.sort((a, b) => a.playedAt - b.playedAt);
-for (const play of plays) store.history.add(play);
+store.transaction(() => {
+  for (const play of plays) store.history.add(play);
+});
 
 // Saved playlists.
 store.playlists.save(
@@ -177,4 +224,4 @@ store.playlists.save(
   null,
 );
 store.close();
-process.stdout.write(`seeded ${dataDir}: ${tracks.length} tracks, ${items.length} queued\n`);
+process.stdout.write(`seeded ${dataDir}: ${tracks.length} tracks, ${items.length} queued, ${plays.length} plays\n`);

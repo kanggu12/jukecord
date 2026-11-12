@@ -9,7 +9,7 @@
  * Safari plays an element later only if play() ran during a press, so the Listen key calls it right there (muted for
  * a moment when the music is paused); the position is set once the file is known.
  */
-import { api, type Player } from '../api.ts';
+import { api, coverUrl, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
@@ -185,11 +185,13 @@ export function listenBar(live: Live): HTMLElement {
       session.metadata = null;
       return;
     }
+    // The lock screen's picture from jukecord's own address too (see coverUrl).
+    const cover = coverUrl(state.player?.guildId ?? state.guild?.id ?? '', track);
     session.metadata = new MediaMetadata({
       title: track.title,
       artist: track.uploader ?? '',
       album: state.guild?.name ?? 'jukecord',
-      ...(track.thumbnail ? { artwork: [{ src: track.thumbnail }] } : {}),
+      ...(cover ? { artwork: [{ src: cover }] } : {}),
     });
   };
 

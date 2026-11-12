@@ -293,3 +293,11 @@ export async function logOut(): Promise<void> {
     credentials: 'same-origin',
   });
 }
+
+/**
+ * The address of a track's cover, which jukecord serves from its own cache (the browser never asks the image hosts,
+ * and a canvas may draw it), or null when the site gave the track no picture.
+ */
+export function coverUrl(guild: string, track: Track): string | null {
+  return track.thumbnail ? `/api/v1${g(guild)}/tracks/${track.id}/cover` : null;
+}

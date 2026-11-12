@@ -7,7 +7,7 @@
  */
 
 import { sayFailure } from '../../../src/core/say.ts';
-import { api, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
+import { api, coverUrl, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
@@ -16,9 +16,9 @@ import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/laye
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
 export function disc(size: 'lg' | 'sm', track: Track | null, mode: 'playing' | 'paused' | 'idle'): HTMLElement {
-  const picture = track?.thumbnail
-    ? h('img', { src: track.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' })
-    : null;
+  // The cover from jukecord's own address (see coverUrl).
+  const cover = track ? coverUrl(guild(), track) : null;
+  const picture = cover ? h('img', { src: cover, alt: '', loading: 'lazy', decoding: 'async' }) : null;
   if (picture) picture.onerror = () => picture.remove();
   return h(
     'div',
@@ -30,9 +30,9 @@ export function disc(size: 'lg' | 'sm', track: Track | null, mode: 'playing' | '
 
 /** A row's album: the cover in its case, and the disc half out of it with the cover again on its label. */
 export function album(track: Track): HTMLElement {
-  const picture = track.thumbnail
-    ? h('img', { src: track.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' })
-    : null;
+  // The cover from jukecord's own address (see coverUrl).
+  const cover = coverUrl(guild(), track);
+  const picture = cover ? h('img', { src: cover, alt: '', loading: 'lazy', decoding: 'async' }) : null;
   const vinyl = h('div', { class: 'vinyl' });
   const box = h('div', { class: 'case' }, picture ?? h('span', { class: 'note' }, icon('music-2')));
   if (picture) {
@@ -157,7 +157,7 @@ export function nowCard(live: Live): HTMLElement {
     if (trackId !== drawnTrack || mode !== drawnMode) {
       fill(art, disc('lg', player?.track ?? null, mode));
       // The glow behind the disc takes the cover's colours.
-      const cover = player?.track?.thumbnail;
+      const cover = player?.track ? coverUrl(guild(), player.track) : null;
       art.style.setProperty('--cover', cover ? cssUrl(cover) : 'none');
       // Another track (not the first drawing): it comes in from below.
       if (drawnTrack !== undefined && trackId !== drawnTrack && trackId !== null) {
