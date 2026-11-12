@@ -98,14 +98,14 @@ async function main(): Promise<number> {
     log: log.child('alerts'),
     clock: systemClock,
   });
-  // The watchdog ended the last run (its mark, src/watchdog.ts): said once, here and in the alerts channels.
+  // The watchdog ended the last run (its mark, src/watchdog.ts): said once, here and in the alerts channels (those
+  // once the bot is there to post them, below).
   const watchdogMark = path.join(config.dataDir, 'watchdog.json');
   const lastRun = takeWatchdogMark(watchdogMark);
   if (lastRun) {
     log.warn('the watchdog ended the last run: its main thread had stopped answering', {
       stillSeconds: Math.round(lastRun.stillMs / 1000),
     });
-    alerts.raise(restartedAlert(lastRun.stillMs));
   }
   // A listener that fails is logged with its server; the others still hear the change (see Bus).
   const bus = new Bus((event, guildId, error) => log.error('a listener failed', { event, guild: guildId, error }));
@@ -212,6 +212,9 @@ async function main(): Promise<number> {
   if (bot) actions.setVoice(bot.voice, () => bot.ready(), bot);
   // The bot posts the alerts (it waits for Discord after a start); browser-only, the log alone says them.
   alertSink = bot;
+  // The watchdog's restart, read at the start: raised now that the bot is there to post it (raised before, it found no
+  // one to post it and was dropped).
+  if (lastRun) alerts.raise(restartedAlert(lastRun.stillMs));
   // A disk that runs low is said once (and again once it had room again).
   alerts.watchDisk(config.dataDir);
 
