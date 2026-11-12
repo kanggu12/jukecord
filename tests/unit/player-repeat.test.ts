@@ -164,10 +164,10 @@ describe('Player repeat and a track that keeps failing', () => {
       }
     }
     // The site works (the others were fetched from it), the track does not: out of the loop on its second failure.
-    assert.deepEqual(
-      [player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)].sort(),
-      ['Track 1', 'Track 2'],
-    );
+    assert.deepEqual([player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)].sort(), [
+      'Track 1',
+      'Track 2',
+    ]);
   });
 
   it('says that a track was taken out of the loop, until a person changes the player', async () => {
