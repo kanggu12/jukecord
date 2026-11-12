@@ -99,8 +99,20 @@ describe('the image', () => {
   it('runs as a fixed non-root user with a health check, and carries the panel and the command', () => {
     assert.match(dockerfile, /^USER 10001:10001$/m);
     assert.match(dockerfile, /^HEALTHCHECK /m);
-    assert.match(dockerfile, /COPY --from=panel (--chmod=0755 )?\/app\/panel\/dist \.\/panel\/dist/);
+    assert.match(dockerfile, /COPY --from=panel (--chmod=\S+ )?\/app\/panel\/dist \.\/panel\/dist/);
     assert.match(dockerfile, /\/usr\/local\/bin\/jukecord/);
+  });
+
+  it('copies its own files readable and not executable, and keeps no npm and no setuid program', () => {
+    // The symbolic mode needs a newer Dockerfile frontend than the octal one; X is execute for folders only.
+    assert.match(dockerfile, /^# syntax=docker\/dockerfile:1\n/);
+    assert.doesNotMatch(dockerfile, /--chmod=0?7/);
+    assert.equal(dockerfile.match(/^COPY (--from=panel )?--chmod=u=rwX,go=rX /gm)?.length, 3);
+    assert.match(
+      dockerfile,
+      /rm -rf \/usr\/local\/lib\/node_modules\/npm \/usr\/local\/bin\/npm \/usr\/local\/bin\/npx/,
+    );
+    assert.match(dockerfile, /find \/ -xdev -type f -perm \/6000 -exec chmod a-s \{\} \+/);
   });
 
   it('sends only what the build needs', () => {

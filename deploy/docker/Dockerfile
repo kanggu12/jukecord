@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 #
 # The jukecord image, for linux/amd64 and linux/arm64: Node 26 LTS on Debian 13, FFmpeg built here for audio (Opus,
 # MP3), and the official yt-dlp build for the image's architecture, checked against the release's published checksum.
@@ -115,9 +115,14 @@ LABEL org.opencontainers.image.title="jukecord" \
       org.opencontainers.image.revision="${REVISION}"
 # tini as PID 1 forwards SIGTERM to Node and reaps the yt-dlp and ffmpeg processes jukecord starts. libopus and LAME
 # are the two libraries FFmpeg was built against that the base does not have (OpenSSL comes with ca-certificates).
+# npm and npx go: jukecord installs nothing while it runs, and a package manager is a tool for anyone who gets in
+# (and what scanners report on). No program keeps a setuid or setgid bit (passwd, su, mount ...): jukecord's user never
+# takes on another's rights, which Compose and the chart forbid anyway.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini libopus0 libmp3lame0 \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+ && find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=ffmpeg /opt/ffmpeg/share/doc/ffmpeg /usr/local/share/doc/ffmpeg
 # The program starts with the libraries this stage has (a missing one fails the build here, not at the first track).
@@ -125,10 +130,11 @@ RUN ffmpeg -hide_banner -encoders | grep -q libopus
 COPY --from=ytdlp /opt/yt-dlp /opt/yt-dlp
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-# Readable by jukecord's user (10001) whatever umask the checkout was made with (0755: directories need x).
-COPY --chmod=0755 package.json LICENSE ./
-COPY --chmod=0755 src ./src
-COPY --from=panel --chmod=0755 /app/panel/dist ./panel/dist
+# Readable by jukecord's user (10001) whatever umask the checkout was made with, and not executable: files 644,
+# folders 755 (X gives execute to folders, and to nothing else here).
+COPY --chmod=u=rwX,go=rX package.json LICENSE ./
+COPY --chmod=u=rwX,go=rX src ./src
+COPY --from=panel --chmod=u=rwX,go=rX /app/panel/dist ./panel/dist
 # Inside a container the panel listens on every interface (compose publishes it on 127.0.0.1); data lives in /data.
 ENV NODE_ENV=production \
     JUKECORD_HOST=0.0.0.0 \
