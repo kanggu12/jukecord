@@ -590,7 +590,8 @@ function metrics(
   gauge('jukecord_cache_tracks', 'Tracks in the media cache.', [['', options.cache.count()]]);
   gauge('jukecord_panel_connections', 'Open live connections from panels.', [['', counts.connections]]);
   gauge('jukecord_browser_listeners', 'Browsers playing along.', [['', counts.listening]]);
-  // How far behind the event loop is: above 0.2 s, audio and changes from anyone but the host are turned away.
+  // How far behind the event loop is: above 0.2 s, audio (for everyone) and changes from anyone but the host are
+  // turned away.
   if (pressure) {
     gauge('jukecord_event_loop_delay_seconds', "The 99th percentile of the event loop's delay over the last second.", [
       ['', Math.round(pressure.delayMs) / 1000],

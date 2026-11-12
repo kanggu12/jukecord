@@ -78,8 +78,8 @@ before it tries again, later than after a drop.
 Changes are held to a rate per login and per address (token buckets: ten a second with twenty at once, and two a
 second for the ones that start a fetch, like skip), answered with 429 and Retry-After beyond it. One process serves
 every server, so while its event loop has fallen behind (the 99th percentile of its delay over the last second above
-0.2 s) it turns away what can wait, audio and changes from anyone but the host, with 503 and Retry-After until it has
-caught up. The voice of every server and the panels' live updates are what it catches up on. Fetches somebody waits
+0.2 s) it turns away what can wait (audio for everyone, and changes from anyone but the host) with 503 and Retry-After
+until it has caught up. The voice of every server and the panels' live updates are what it catches up on. Fetches somebody waits
 for run at most twice the fetch limit at once (four on two cores): in a storm of skips the newest waits a moment for
 a place, and the ones skipped while they waited never start.
 

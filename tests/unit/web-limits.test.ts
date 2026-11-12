@@ -149,7 +149,7 @@ describe('the rates of changes and shedding when behind', () => {
     }
   });
 
-  it('turns away audio and changes from anyone but the host while behind, and nothing a panel needs to come back', async () => {
+  it('turns away audio, and changes from anyone but the host, while behind; nothing a panel needs to come back', async () => {
     let behind = false;
     const server = await testServer({ behind: () => behind });
     try {
