@@ -7,7 +7,7 @@
 import { EventEmitter } from 'node:events';
 import type { PlayerSnapshot } from './player.ts';
 
-/** A server's queue changed; `version` grows by one with each change, so a client can tell it missed one. */
+/** A server's queue changed; `version` grows by one with each change, so the highest is the newest. */
 export interface QueueChanged {
   readonly guildId: string;
   readonly version: number;

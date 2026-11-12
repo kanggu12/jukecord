@@ -17,8 +17,9 @@ export type Random = () => number;
 export class QueueService {
   private readonly repo: QueueRepository;
   private readonly bus: Bus;
-  // The change counter of each server, starting at 0 when jukecord starts. Clients compare it with the last one
-  // they saw; a gap means they missed an event and should fetch the whole queue again.
+  // The change counter of each server, starting at 0 when jukecord starts. Every live message carries the whole queue
+  // with its counter, so a client keeps the newest it has seen; changes close together can arrive as one message, and
+  // the counter then jumps (see web/events.ts).
   private readonly versions = new Map<string, number>();
 
   constructor(repo: QueueRepository, bus: Bus) {

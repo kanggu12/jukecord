@@ -159,16 +159,25 @@ playlist) so a program does not need to ask again.
 panel's cookie; a cookie is accepted from the panel's own pages only). Every message is JSON with `v`, the protocol
 version (now `1`), and `type`:
 
-| From jukecord | When                                    | Carries                                                 |
-| :------------ | :-------------------------------------- | :------------------------------------------------------ |
-| `hello`       | on connecting                           | `serverTime`, `you` (the login's name)                  |
-| `state`       | after `subscribe`                       | the server's `player`, `queue`, `voice` and `listeners` |
-| `player`      | every change of the player              | `player` (the same shape as `GET .../player`)           |
-| `queue`       | every change of the queue               | `queue` (the whole queue, as `GET .../queue`)           |
-| `voice`       | joining or leaving voice                | `voice` (as `GET .../voice`)                            |
-| `listeners`   | a browser starts or stops playing along | `listeners`: `people` and `count`                       |
-| `pong`        | answer to `ping`                        | `t` (yours) and `serverTime`                            |
-| `error`       | a refused `subscribe`                   | `code` and `message`                                    |
+| From jukecord | When                                                                    | Carries                                                                |
+| :------------ | :---------------------------------------------------------------------- | :--------------------------------------------------------------------- |
+| `hello`       | on connecting                                                           | `serverTime`, `you` (the login's name)                                 |
+| `state`       | after `subscribe`                                                       | the server's `player`, `queue`, `voice` and `listeners`                |
+| `player`      | every change of the player                                              | `player` (the same shape as `GET .../player`)                          |
+| `queue`       | a change of the queue, at most four times a second                      | `queue`: the whole queue as it is now (as `GET .../queue`)             |
+| `voice`       | joining or leaving voice                                                | `voice` (as `GET .../voice`)                                           |
+| `listeners`   | a browser starts or stops playing along, at most once a second          | `listeners`: `people` (the first twenty) and `count` (every browser)   |
+| `pong`        | answer to `ping`                                                        | `t` (yours) and `serverTime`                                           |
+| `error`       | a refused `subscribe`                                                   | `code` and `message`                                                   |
+
+Changes made close together come as one `queue` message with the queue as it is after the last of them, so its `version`
+can jump by more than one: keep the message with the highest `version`, there is nothing to fetch.
+
+Add `gzip=1` to the address (`/api/v1/events?gzip=1`) when the client can decompress gzip: messages over 2 KiB (a
+`queue` or `state` with more than a few tracks) then come as binary frames holding the JSON as gzip, the same bytes for
+everyone showing that server. The panel asks for it when the browser has `DecompressionStream`, and handles messages
+strictly in the order they arrived, since unpacking one takes a moment. Without `gzip=1` every message is text. jukecord
+does not use the WebSocket's own per-message compression.
 
 | To jukecord | Does                                                                            |
 | :---------- | :------------------------------------------------------------------------------ |

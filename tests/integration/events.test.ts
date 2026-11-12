@@ -18,28 +18,42 @@ import {
   testServer,
 } from '../support/web.ts';
 
-// A WebSocket client that collects messages and hands them out by type, in the order they came.
+// A WebSocket client that collects messages and hands them out by type, in the order they came. Binary messages are
+// gzip, unpacked as the panel does (DecompressionStream, one message after another in the order they arrived).
 class Socket {
   readonly messages: Record<string, unknown>[] = [];
   readonly socket: WebSocket;
+  // How each message came: true for a binary (gzip) frame.
+  readonly binary: boolean[] = [];
   // Messages not handed out yet, and the waits for messages not come yet.
   private readonly inbox: Record<string, unknown>[] = [];
   private readonly waiting: { type: string; resolve: (message: Record<string, unknown>) => void }[] = [];
+  // Unpacking is asynchronous: each message waits for the one before it.
+  private order: Promise<void> = Promise.resolve();
   readonly closed: Promise<{ code: number; reason: string }>;
 
   constructor(url: string, headers: Record<string, string>) {
     // Node's WebSocket takes headers through this non-standard option (undici); browsers send cookies themselves.
     this.socket = new WebSocket(url, { headers } as unknown as string[]);
+    this.socket.binaryType = 'arraybuffer';
     this.closed = new Promise((resolve) => {
       this.socket.addEventListener('close', (event) => resolve({ code: event.code, reason: event.reason }));
     });
     this.socket.addEventListener('message', (event) => {
-      const message = JSON.parse(String(event.data)) as Record<string, unknown>;
-      this.messages.push(message);
-      const index = this.waiting.findIndex((entry) => entry.type === message.type);
-      const [entry] = index >= 0 ? this.waiting.splice(index, 1) : [];
-      if (entry) entry.resolve(message);
-      else this.inbox.push(message);
+      const data = event.data as string | ArrayBuffer;
+      this.order = this.order.then(async () => {
+        const text =
+          typeof data === 'string'
+            ? data
+            : await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+        const message = JSON.parse(text) as Record<string, unknown>;
+        this.binary.push(typeof data !== 'string');
+        this.messages.push(message);
+        const index = this.waiting.findIndex((entry) => entry.type === message.type);
+        const [entry] = index >= 0 ? this.waiting.splice(index, 1) : [];
+        if (entry) entry.resolve(message);
+        else this.inbox.push(message);
+      });
     });
   }
 
@@ -80,7 +94,7 @@ describe('live updates', () => {
   });
   after(() => server.close());
 
-  it('agrees to compress messages with a client that offers it, keeping no context between them', async () => {
+  it('does not compress per connection, even for a client that offers it', async () => {
     // The upgrade by hand, to read the extension the server agreed to (a WebSocket object hides it).
     const headers = await new Promise<http.IncomingHttpHeaders>((resolve, reject) => {
       const request = http.request(`${server.url}/api/v1/events`, {
@@ -101,9 +115,8 @@ describe('live updates', () => {
       request.on('error', reject);
       request.end();
     });
-    const agreed = String(headers['sec-websocket-extensions'] ?? '');
-    assert.match(agreed, /permessage-deflate/);
-    assert.match(agreed, /server_no_context_takeover/);
+    // Declined: big messages are compressed once for everyone instead (see the gzip test below).
+    assert.equal(headers['sec-websocket-extensions'], undefined);
   });
 
   it('says hello, sends the whole state on subscribe, then each change', async () => {
@@ -117,12 +130,12 @@ describe('live updates', () => {
     const added = socket.next('queue');
     const playerEvent = socket.next('player');
     await server.actions.add({ guildId: GUILD, userId: ALICE, mayControl: true, mayManage: false }, 'two');
-    // In the order things happened: both tracks queued, then the first taken out to play.
-    const first = (await added).queue as { items: { addedByName: string }[] };
-    assert.equal(first.items.length, 2);
-    assert.equal(first.items[0]?.addedByName, 'Alice');
-    const taken = await socket.next('queue');
-    assert.equal((taken.queue as { items: unknown[] }).items.length, 1);
+    // Both tracks queued, then the first taken out to play, in one moment: one message with the queue as it ended,
+    // its version counting both changes.
+    const latest = (await added).queue as { items: { addedByName: string }[]; version: number };
+    assert.equal(latest.items.length, 1);
+    assert.equal(latest.items[0]?.addedByName, 'Alice');
+    assert.equal(latest.version, 2);
     const player = (await playerEvent).player as { status: string; track: { title: string } };
     assert.equal(player.status, 'loading');
     assert.equal(player.track.title, 'Track a');
@@ -153,6 +166,35 @@ describe('live updates', () => {
     alice.close();
     assert.deepEqual(((await gone).listeners as { count: number }).count, 0);
     host.close();
+  });
+
+  it('sends a big state and queue as gzip to a panel that says it can decompress, and as text otherwise', async () => {
+    // A queue of a hundred tracks is about 30 KB of JSON: over the size below which messages stay text.
+    const many = Array.from({ length: 100 }, (_, index) => exampleTrack(`big${index}`));
+    const stored = many.map((track) => server.store.tracks.upsert(track).id);
+    server.queue.add(OTHER_GUILD, stored, 'end', null);
+    const packed = new Socket(`${base}/api/v1/events?guild=${OTHER_GUILD}&gzip=1`, {
+      authorization: `Bearer ${HOST_TOKEN}`,
+    });
+    const plain = new Socket(`${base}/api/v1/events?guild=${OTHER_GUILD}`, { authorization: `Bearer ${HOST_TOKEN}` });
+    const [packedState, plainState] = await Promise.all([packed.next('state'), plain.next('state')]);
+    // The same state either way; only the frame differs.
+    assert.deepEqual(packedState, plainState);
+    assert.equal((packedState.queue as { items: unknown[] }).items.length, 100);
+    const first = packed.messages.indexOf(packedState);
+    assert.equal(packed.binary[first], true);
+    assert.equal(plain.binary[plain.messages.indexOf(plainState)], false);
+    // A change goes out the same way, and a small message (the pong) stays text for both.
+    const changed = Promise.all([packed.next('queue'), plain.next('queue')]);
+    server.queue.shuffle(OTHER_GUILD);
+    const [packedQueue, plainQueue] = await changed;
+    assert.deepEqual(packedQueue, plainQueue);
+    packed.send({ type: 'ping', t: 1 });
+    await packed.next('pong');
+    assert.equal(packed.binary.at(-1), false);
+    packed.close();
+    plain.close();
+    server.queue.clear(OTHER_GUILD);
   });
 
   it('refuses a connection without a login, and a cookie from another site', async () => {

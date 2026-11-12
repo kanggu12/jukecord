@@ -95,3 +95,14 @@ picture costs far less than a large one, and it changes only when the track does
 (the disc, its rim, the glow's slow breathing) changes only position, size and opacity, which a browser animates
 without drawing anything again; the menu's motion switch and the system's own setting stop all of it, and the system's
 setting for less transparency turns the glass solid.
+
+## Live messages made once, not compressed per connection
+
+The panel replaces its whole queue with every queue message, which keeps it simple and always right, but a
+thousand-track queue is about 350 KB of JSON. With the WebSocket's per-message compression, every change was
+compressed again for every panel (about 3 ms of a processor each) and every connection kept a compressor (about a
+quarter of a MiB): on two cores, 200 panels at three changes a second used the machine up and the slowest panels were
+cut off. Sending only what changed would be smaller still, but every panel would then have to apply changes in order
+and ask again after a gap. Instead the queue's messages are combined (at most four a second, each with the latest
+queue) and each message is compressed once, as gzip that the browser unpacks itself (`DecompressionStream`), and sent
+as the same bytes to every panel; a client that cannot unpack gzip gets the JSON as text.

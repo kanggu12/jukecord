@@ -38,7 +38,7 @@ flowchart LR
   player --> voice
   player --> bus
   queue --> bus
-  bus -- "WebSocket: every change" --> browsers
+  bus -- "WebSocket: every change, made once for all" --> browsers
   cache -- "audio with Range" --> browsers
   queue & player & actions --> store
 ```
@@ -60,6 +60,16 @@ paused. It decides where in the track everyone is. Every change ends in a snapsh
 browsers get the snapshot over WebSocket and play the same file from the same place, correcting themselves when they
 drift more than 300 ms. Each start of the outputs gets a session number, so an "ended" from a stream already replaced
 (by a seek, or a skip) is recognised and ignored.
+
+## Live updates for a crowd
+
+Every panel showing a server gets the same messages, so each is made once for all of them (`src/web/events.ts`). The
+queue goes out whole, at most four times a second: changes made close together are one message with the queue as it
+ended, and the panel replaces its queue with each one. Who is listening goes out at most once a second, naming the
+first twenty people. A big message is compressed once, as gzip, and the same bytes go to every panel whose browser can
+unpack it; the WebSocket's own compression, which compressed every message again for each connection and kept a
+compressor per connection, is off. A server's queue is serialised once per change, and a panel subscribing takes it
+from there, adding only its own part (its voice channels).
 
 ## Getting a track
 

@@ -10,6 +10,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { chromium } from 'playwright';
 
 const BASE = process.env.BASE ?? 'http://jk-ui:8795';
@@ -217,7 +218,8 @@ async function asDiscord(page) {
     server.onMessage((message) => {
       let data;
       try {
-        data = JSON.parse(String(message));
+        // A big message comes as gzip (the panel says it can unpack it): unpacked here, changed, passed on as text.
+        data = JSON.parse(typeof message === 'string' ? message : zlib.gunzipSync(message).toString('utf8'));
       } catch {
         ws.send(message);
         return;

@@ -2,6 +2,11 @@
  * The live connection: a WebSocket to /api/v1/events that delivers every change of the server shown, and the clock
  * exchange that lets this browser play the same second as the voice channel.
  *
+ * A browser that can decompress gzip (it has DecompressionStream) says so with `gzip=1`, and jukecord then sends big
+ * messages (a long queue) as gzip binary frames, made once for every panel. Unpacking one takes a moment and happens
+ * off the page's thread, so messages are handled strictly one after another in the order they arrived: a small one
+ * that came after a big one waits for it.
+ *
  * It reconnects by itself (about 1 s, then doubling up to about 10 s, each wait spread at random) and subscribes again
  * after each reconnect, so a laptop waking up or jukecord restarting needs nothing from the person. A jukecord that has just started may not know its
  * Discord servers yet and answers "unavailable"; the subscription is then asked again the same way, and the
@@ -40,6 +45,8 @@ export class Live {
   private resubscribeTimer = 0;
   // Clock samples: offset (server minus this browser) and the round trip it was measured over.
   private samples: { offset: number; rtt: number }[] = [];
+  // The messages being handled, one after another (unpacking a gzip one is asynchronous).
+  private inbox: Promise<void> = Promise.resolve();
   /** Milliseconds to add to this browser's clock to get the server's. */
   offset = 0;
   private readonly handlers: LiveHandlers;
@@ -92,8 +99,15 @@ export class Live {
     this.subscribed = false;
     this.handlers.status('connecting');
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    const query = this.guild ? `?guild=${encodeURIComponent(this.guild)}` : '';
+    const params = new URLSearchParams();
+    if (this.guild) params.set('guild', this.guild);
+    // Only a browser that can unpack gzip asks for it; any other gets every message as text.
+    if (typeof DecompressionStream !== 'undefined') params.set('gzip', '1');
+    // toString(), not .size: Safari before 17 has DecompressionStream but not URLSearchParams.size.
+    const query = params.toString() ? `?${params.toString()}` : '';
     const socket = new WebSocket(`${scheme}://${location.host}/api/v1/events${query}`);
+    // Binary frames (gzip) arrive as bytes to unpack, not as a Blob.
+    socket.binaryType = 'arraybuffer';
     this.socket = socket;
     socket.onopen = () => {
       this.retry = 1000;
@@ -110,40 +124,18 @@ export class Live {
       this.pingTimer = window.setInterval(() => this.ping(), 30_000);
     };
     socket.onmessage = (event) => {
-      let message: Record<string, unknown>;
-      try {
-        message = JSON.parse(String(event.data)) as Record<string, unknown>;
-      } catch {
-        return;
-      }
-      if (typeof message.v === 'number' && message.v > PROTOCOL) {
-        this.handlers.outdated();
-        return;
-      }
-      if (message.type === 'pong') this.pong(message);
-      else if (message.type === 'hello' && typeof message.serverTime === 'number' && this.samples.length === 0) {
-        // A first rough difference until the pings come back.
-        this.offset = message.serverTime - Date.now();
-      } else if (message.type === 'state' && message.guild === this.guild) {
-        // Only the state of the server shown counts: one for a server left behind can still be on its way.
-        this.subscribed = true;
-        this.resubscribe = 1000;
-        this.handlers.status('open');
-      } else if (message.type === 'error' && !this.subscribed && this.guild) {
-        if (message.code === 'unavailable') {
-          // Just started and not connected to Discord yet: asked again shortly, without a message each time.
-          const guild = this.guild;
-          window.clearTimeout(this.resubscribeTimer);
-          this.resubscribeTimer = window.setTimeout(() => {
-            if (this.guild === guild && !this.subscribed) this.send({ type: 'subscribe', guild });
-          }, this.resubscribe);
-          this.resubscribe = Math.min(10_000, this.resubscribe * 2);
-          return;
-        }
-        // Refused for good (the server cannot be opened): the connection itself works, the panel says why.
-        this.handlers.status('open');
-      }
-      this.handlers.message(message);
+      // When it arrived, for the clock: a pong waiting behind a big message must not count the wait as network time.
+      const arrived = Date.now();
+      const data = event.data as string | ArrayBuffer;
+      this.inbox = this.inbox
+        .then(async () => {
+          const text = typeof data === 'string' ? data : await unpack(data);
+          // A message of a socket replaced meanwhile says nothing about the new one.
+          if (this.socket === socket) this.handle(JSON.parse(text) as Record<string, unknown>, arrived);
+        })
+        .catch(() => {
+          // A message that cannot be read is skipped; the next one is handled as usual.
+        });
     };
     socket.onclose = (event) => {
       // A socket replaced by a newer one says nothing about the connection any more, and the timers are the new one's.
@@ -166,16 +158,47 @@ export class Live {
     };
   }
 
+  // One message, in its turn.
+  private handle(message: Record<string, unknown>, arrived: number): void {
+    if (typeof message.v === 'number' && message.v > PROTOCOL) {
+      this.handlers.outdated();
+      return;
+    }
+    if (message.type === 'pong') this.pong(message, arrived);
+    else if (message.type === 'hello' && typeof message.serverTime === 'number' && this.samples.length === 0) {
+      // A first rough difference until the pings come back.
+      this.offset = message.serverTime - arrived;
+    } else if (message.type === 'state' && message.guild === this.guild) {
+      // Only the state of the server shown counts: one for a server left behind can still be on its way.
+      this.subscribed = true;
+      this.resubscribe = 1000;
+      this.handlers.status('open');
+    } else if (message.type === 'error' && !this.subscribed && this.guild) {
+      if (message.code === 'unavailable') {
+        // Just started and not connected to Discord yet: asked again shortly, without a message each time.
+        const guild = this.guild;
+        window.clearTimeout(this.resubscribeTimer);
+        this.resubscribeTimer = window.setTimeout(() => {
+          if (this.guild === guild && !this.subscribed) this.send({ type: 'subscribe', guild });
+        }, this.resubscribe);
+        this.resubscribe = Math.min(10_000, this.resubscribe * 2);
+        return;
+      }
+      // Refused for good (the server cannot be opened): the connection itself works, the panel says why.
+      this.handlers.status('open');
+    }
+    this.handlers.message(message);
+  }
+
   private ping(): void {
     this.send({ type: 'ping', t: Date.now() });
   }
 
-  private pong(message: Record<string, unknown>): void {
+  private pong(message: Record<string, unknown>, arrived: number): void {
     if (typeof message.t !== 'number' || typeof message.serverTime !== 'number') return;
-    const now = Date.now();
-    const rtt = now - message.t;
+    const rtt = arrived - message.t;
     // The server read its clock about halfway through the round trip.
-    this.samples.push({ offset: message.serverTime - (message.t + now) / 2, rtt });
+    this.samples.push({ offset: message.serverTime - (message.t + arrived) / 2, rtt });
     this.samples = this.samples.slice(-8);
     const best = this.samples.reduce((a, b) => (b.rtt < a.rtt ? b : a));
     this.offset = best.offset;
@@ -184,4 +207,10 @@ export class Live {
   private send(message: Record<string, unknown>): void {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message));
   }
+}
+
+// A gzip message as text, unpacked by the browser itself.
+async function unpack(bytes: ArrayBuffer): Promise<string> {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(stream).text();
 }

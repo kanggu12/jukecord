@@ -58,6 +58,12 @@ export interface WebServer {
   close(): Promise<void>;
 }
 
+// What the live connection's address may say: the server to show at once, and whether the browser takes gzip.
+interface LiveQuery {
+  guild?: string;
+  gzip?: string;
+}
+
 // The HTTP status of each error code.
 const STATUS: Readonly<Record<string, number>> = {
   invalid: 400,
@@ -118,6 +124,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     presenter: deps.presenter,
     users: deps.store.users,
     log: log.child('events'),
+    // The queue's change counter, read without the queue: the hub keeps each server's queue message per version.
+    queueVersion: (guildId) => options.queue.version(guildId),
     stillValid: (caller) => auth.stillValid(caller),
   });
 
@@ -181,11 +189,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   await app.register(fastifyWebsocket, {
     options: {
       maxPayload: 4096,
-      // Messages over 1 KiB go compressed to a browser that offers it: a queue of a thousand tracks is about 330 KiB as
-      // JSON and 60 KiB compressed, sent to every listener whenever the queue changes. No context is carried from one
-      // message to the next; each connection keeps its zlib state (about 0.2 MiB) while it is open, and compressing
-      // such a queue takes about 2 ms per connection.
-      perMessageDeflate: { threshold: 1024, serverNoContextTakeover: true, clientNoContextTakeover: true },
+      // No compression per connection: it kept zlib's state for every open panel (about a quarter of a MiB each) and
+      // compressed a thousand-track queue again for each one, about 3 ms of a processor per panel per change, which
+      // 200 panels at three changes a second used up. A big message is compressed once instead and the same bytes go
+      // to every panel that can decompress them (see events.ts).
+      perMessageDeflate: false,
     },
   });
   // The panel's files when it is built; otherwise only sendFile (for the audio) is set up.
@@ -312,7 +320,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
 
   // Live updates. A browser's cookie is only accepted from the panel's own pages (another site could otherwise open
   // a connection with it).
-  app.get<{ Querystring: { guild?: string } }>(`${API_PREFIX}/events`, { websocket: true }, (socket, request) => {
+  app.get<{ Querystring: LiveQuery }>(`${API_PREFIX}/events`, { websocket: true }, (socket, request) => {
     // A blocked address is told to come back later (1013), which a panel takes as "reconnect after a wait".
     if (auth.limiter.blocked(request.ip)) {
       socket.close(1013, 'too many failed logins; wait ten minutes');
@@ -327,7 +335,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       socket.close(4403, 'connections come from the panel only');
       return;
     }
-    hub.attach(socket, caller, typeof request.query.guild === 'string' ? request.query.guild : undefined);
+    hub.attach(socket, caller, {
+      guild: typeof request.query.guild === 'string' ? request.query.guild : undefined,
+      // gzip=1: the panel can decompress (it has DecompressionStream), so big messages may come as gzip frames.
+      gzip: request.query.gzip === '1',
+    });
   });
 
   // The OpenAPI document of the API.
