@@ -218,7 +218,13 @@ export function listenBar(live: Live): HTMLElement {
     label(toggle, 'headphones', state.listening && !retry ? words.stopListening : words.listenHere, true);
     // What plays, with this browser's state under it.
     const message = {
-      off: state.status?.mode === 'browser-only' ? words.listenOffBrowser : words.listenOff,
+      // Browser-only, or the bot in no voice channel: there is no voice channel to speak of.
+      off:
+        state.status?.mode === 'browser-only'
+          ? words.listenOffBrowser
+          : state.voice?.current
+            ? words.listenOff
+            : words.listenOffNoVoice,
       waiting: words.waiting,
       catching: words.catchingUp,
       'in-sync': words.inSync,
@@ -237,7 +243,8 @@ export function listenBar(live: Live): HTMLElement {
     );
     fill(
       what,
-      player?.track ? h('b', null, player.track.title) : null,
+      // One line, cut short with an ellipsis on a narrow bar; the whole title on hover and for screen readers.
+      player?.track ? h('b', { title: player.track.title, 'data-clip': 'ok' }, player.track.title) : null,
       // The long "off" hint is left out on phones, where the bar has room for the title and the keys only.
       h(
         'span',
@@ -301,7 +308,7 @@ export function listenBar(live: Live): HTMLElement {
     describe();
     align();
   });
-  watch(['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue'], draw);
+  watch(['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice'], draw);
   // Drift is checked every two seconds while listening.
   window.setInterval(() => {
     if (state.listening) align();

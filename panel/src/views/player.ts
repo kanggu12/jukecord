@@ -5,6 +5,8 @@
  * Each card builds its elements once and redraws only the parts that change, when the state it watches changes.
  * The progress bar moves on a 4-per-second timer only while something plays; nothing moves while idle or paused.
  */
+
+import { sayFailure } from '../../../src/core/say.ts';
 import { api, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
@@ -203,11 +205,10 @@ export function nowCard(live: Live): HTMLElement {
         h('span', null, icon('users'), by),
       );
     } else if (!player) {
-      // No state yet (connecting): nothing is claimed about the player. The empty heading keeps its place on the card
-      // but is no heading to a screen reader until it says something.
-      refill(title, 'unknown');
+      // No state yet: nothing is claimed about the player, only that the panel is connecting.
+      refill(title, `unknown|${words.connectingLive}`, h('span', { class: 'muted' }, `${words.connectingLive}…`));
       refill(meta, 'unknown');
-      title.setAttribute('aria-hidden', 'true');
+      title.removeAttribute('aria-hidden');
     } else {
       // Nothing playing: with tracks waiting, the Play key starts them; with none, adding one plays it.
       const hint = (state.queue?.items.length ?? 0) > 0 ? words.idleQueued : words.idleHint;
@@ -220,7 +221,7 @@ export function nowCard(live: Live): HTMLElement {
       error,
       player?.error ?? '',
       player?.error ? icon('circle-alert') : null,
-      player?.error ? words.couldNotPlay(player.error) : null,
+      player?.error ? words.couldNotPlay(sayFailure(player.error, state.lang)) : null,
     );
     progress.hidden = !track;
     // The keys: play, pause or resume, skip, stop, repeat, remove.
@@ -246,7 +247,7 @@ export function nowCard(live: Live): HTMLElement {
     const repeatLabel = { off: words.repeatOff, track: words.repeatTrack, queue: words.repeatQueue }[mode2];
     repeat.title = repeatLabel;
     repeat.setAttribute('aria-label', repeatLabel);
-    repeat.disabled = !control;
+    repeat.disabled = !control || !player;
     bar.setAttribute('aria-disabled', String(!control || !track || status === 'loading'));
     bar.setAttribute('aria-label', words.seekLabel);
     tick();
@@ -533,7 +534,21 @@ export function queueCard(): HTMLElement {
     (card.querySelector('#queue-h .name') as HTMLElement).textContent = words.queue;
     const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
     // "13 tracks · 39:00 in all": the number with its unit, so it does not read as a time.
-    count.textContent = items.length > 0 ? `${words.tracks(items.length)} · ${words.total(clock(total))}` : '';
+    // While searching, how many of the tracks the search shows.
+    const searching = search.value.trim() !== '';
+    const matching = searching
+      ? items.filter((item) =>
+          [item.track.title, item.track.uploader ?? '', item.addedByName ?? ''].some((text) =>
+            text.toLowerCase().includes(search.value.trim().toLowerCase()),
+          ),
+        ).length
+      : items.length;
+    count.textContent =
+      items.length === 0
+        ? ''
+        : searching
+          ? words.tracksOf(matching, items.length)
+          : `${words.tracks(items.length)} · ${words.total(clock(total))}`;
     search.placeholder = words.searchQueue;
     search.setAttribute('aria-label', words.searchQueue);
     for (const [button, label] of [
@@ -554,7 +569,7 @@ export function queueCard(): HTMLElement {
     dedupe.disabled = !control || items.length < 2;
     clear.disabled = !control || items.length === 0;
     save.disabled = !control || (items.length === 0 && !state.player?.track);
-    load.disabled = !control;
+    load.disabled = !control || !state.queue;
     // The rows, filtered by the search; the scroll position survives the redraw.
     const query = search.value.trim().toLowerCase();
     const shown = query
@@ -834,7 +849,9 @@ export function addCard(): HTMLElement {
   const add = h('button', { class: 'key', type: 'submit' });
   const now = h('button', { class: 'key primary', type: 'button' });
   const form = h('form', { class: 'add' }, field, add, now);
-  const card = h('section', { class: 'card', 'aria-label': 'add' }, form);
+  // Why the keys are off for someone who may only look, in words a touch screen shows too (a title it does not).
+  const why = h('p', { class: 'look-only', hidden: true });
+  const card = h('section', { class: 'card', 'aria-label': 'add' }, form, why);
 
   // The key whose lookup is running: its words and its busy state stay while the card redraws for other reasons.
   let busy: HTMLButtonElement | null = null;
@@ -850,6 +867,8 @@ export function addCard(): HTMLElement {
     add.disabled = !control || busy !== null;
     now.disabled = !control || busy !== null;
     field.title = control ? '' : words.lookOnlyHint;
+    why.hidden = control || !state.guild;
+    why.textContent = words.lookOnlyHint;
     // Nothing playing and nothing waiting: the card glows to say where music comes from.
     card.classList.toggle(
       'invite',
@@ -912,7 +931,7 @@ export function voiceCard(): HTMLElement {
     top.classList.toggle('joined', Boolean(current) && !browserOnly);
     // Browser-only is said once, in the top bar; here the card explains it.
     pill.hidden = browserOnly;
-    fill(pill, h('span', { class: 'dot' }), current ? words.connected : words.notInVoice);
+    fill(pill, h('span', { class: 'dot' }), current ? words.inVoice : words.notInVoice);
     if (browserOnly) {
       fill(where, h('span', { class: 'muted' }, words.noBot));
       leave.hidden = true;
@@ -957,7 +976,7 @@ export function voiceCard(): HTMLElement {
               icon('volume-2'),
               h('span', { class: 'name' }, channel.name),
               h('span', { class: 'faint num' }, words.people(channel.people)),
-              here ? h('span', { class: 'badge tone-play' }, words.connected) : join,
+              here ? h('span', { class: 'badge tone-play' }, words.botHere) : join,
             );
           }),
         );

@@ -6,6 +6,7 @@
  * hover and focus target, every value is in the tooltip and in the table view, and text never takes the bar colour.
  */
 import { api, type LogRecord, type Stats, type Status } from '../api.ts';
+import { niceTop } from '../axis.ts';
 import { avatarUrl, clock, face, fill, h, icon } from '../dom.ts';
 import { logoMark } from '../logo.ts';
 import { state, t, watch } from '../state.ts';
@@ -24,24 +25,23 @@ function listened(ms: number): [string, string] {
   return hours > 0 ? [String(hours), rest] : [String(minutes), words.minutesShort];
 }
 
+// A log record's time, in this browser's time zone: "2026-11-12 14:03:27".
+function logTime(iso: string): string {
+  const at = new Date(iso);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
+}
+
 // "11-07" from "2026-11-07", in the order people of each language read dates.
 function shortDay(day: string): string {
   const [, month, date] = day.split('-');
   return state.lang === 'ko' ? `${Number(month)}.${Number(date)}` : `${month}-${date}`;
 }
 
-// Clean axis ticks: the top is the maximum rounded up to a tidy number.
-function niceTop(max: number): number {
-  if (max <= 4) return Math.max(1, max);
-  const step = 10 ** Math.floor(Math.log10(max));
-  for (const factor of [1, 2, 2.5, 5, 10]) if (factor * step >= max) return factor * step;
-  return 10 * step;
-}
-
 // A column chart with a y axis, a tooltip on each column and a table view.
 function columns(
   values: { label: string; tip: string; value: number }[],
-  axis: string[],
+  axis: { at: number; label: string }[],
   tableHead: [string, string],
 ): { plot: HTMLElement; table: HTMLElement } {
   const top = niceTop(Math.max(0, ...values.map((entry) => entry.value)));
@@ -78,25 +78,33 @@ function columns(
   const plot = h(
     'div',
     { class: 'plot' },
+    // The numbers stand on their lines (top, middle, bottom), as wide as the longest of them.
     h(
       'div',
-      { class: 'yaxis', 'aria-hidden': 'true' },
-      h('span', null, String(top)),
-      h('span', null, String(top / 2)),
-      h('span', null, '0'),
+      { class: 'yaxis', 'aria-hidden': 'true', style: `--digits:${String(top).length}` },
+      h('span', { class: 'tick', style: 'top:0' }, String(top)),
+      h('span', { class: 'tick', style: 'top:50%' }, String(top / 2)),
+      h('span', { class: 'tick', style: 'top:100%' }, '0'),
     ),
     h(
       'div',
       null,
       bars,
-      h('div', { class: 'axis', 'aria-hidden': 'true' }, ...axis.map((label) => h('span', null, label))),
+      // Each label under the middle of its own bar.
+      h(
+        'div',
+        { class: 'axis', 'aria-hidden': 'true' },
+        ...axis.map((tick) =>
+          h('span', { class: 'tick', style: `left:${((tick.at + 0.5) / values.length) * 100}%` }, tick.label),
+        ),
+      ),
     ),
     tip,
   );
   const table = h(
     'table',
     { class: 'chart-table' },
-    h('thead', null, h('tr', null, h('th', null, tableHead[0]), h('th', null, tableHead[1]))),
+    h('thead', null, h('tr', null, h('th', null, tableHead[0]), h('th', { class: 'n' }, tableHead[1]))),
     h(
       'tbody',
       null,
@@ -223,19 +231,30 @@ export function statsPage(): HTMLElement {
       tip: `${range(bucket, shortDay)} · ${clock(bucket.playedMs)}`,
       value: bucket.plays,
     }));
-    const middle = buckets[Math.floor(buckets.length / 2)]?.first ?? '';
-    const perDayTitle = span > 1 ? words.perWeek : words.perDay;
+    // Under the first, the middle and the last bar. A year of weeks crosses a new year, so its labels carry the year
+    // and the month ("2025-11"), which also read in order.
+    const middle = Math.floor(buckets.length / 2);
+    const tickOf = (index: number) => {
+      const day = buckets[index]?.first ?? '';
+      const [year, month] = day.split('-');
+      const label = span > 1 ? (state.lang === 'ko' ? `${year}.${Number(month)}` : `${year}-${month}`) : shortDay(day);
+      return { at: index, label };
+    };
     const perDay = columns(
       dayValues,
-      [shortDay(buckets[0]?.first ?? ''), shortDay(middle), shortDay(buckets.at(-1)?.first ?? '')],
-      [perDayTitle, words.playsUnit],
+      [tickOf(0), tickOf(middle), tickOf(buckets.length - 1)],
+      [span > 1 ? words.weekColumn : words.dayColumn, words.playsColumn],
     );
     const hourValues = stats.hours.map((value, hour) => ({
       label: `${hour}:00`,
       tip: `${hour}:00-${hour + 1}:00`,
       value,
     }));
-    const perHour = columns(hourValues, ['0', '6', '12', '18', '23'], [words.perHour, words.playsUnit]);
+    const perHour = columns(
+      hourValues,
+      [0, 6, 12, 18, 23].map((hour) => ({ at: hour, label: String(hour) })),
+      [words.hourColumn, words.playsColumn],
+    );
     // Ranked lists with a meter each, longest first; the count beside the name, in text colours.
     const topPlays = Math.max(1, ...stats.topTracks.map((entry) => entry.plays));
     const tracks = h(
@@ -293,7 +312,12 @@ export function statsPage(): HTMLElement {
     fill(
       content,
       tiles,
-      h('div', { class: 'charts' }, chartCard(perDayTitle, perDay), chartCard(words.perHour, perHour)),
+      h(
+        'div',
+        { class: 'charts' },
+        chartCard(span > 1 ? words.perWeek : words.perDay, perDay),
+        chartCard(words.perHour, perHour),
+      ),
       h(
         'div',
         { class: 'charts' },
@@ -374,18 +398,21 @@ export function logsPage(): HTMLElement {
   const row = (record: LogRecord) => {
     const tone = { debug: 'idle', info: 'load', warn: 'pause', error: 'bad' }[record.level];
     const words = t();
-    // The level in the panel's words; debug has none of its own.
-    const levelName = { debug: 'debug', info: words.levelInfo, warn: words.levelWarn, error: words.levelError }[
-      record.level
-    ];
+    // One record's level, in the singular and in the panel's words (the filter's keys use the plural).
+    const levelName = {
+      debug: words.recordDebug,
+      info: words.recordInfo,
+      warn: words.recordWarn,
+      error: words.recordError,
+    }[record.level];
     const fields = Object.entries(record.fields)
       .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
       .join(' ');
     return h(
       'div',
       { class: 'log' },
-      // Times in the panel's language, whatever the browser's.
-      h('span', { class: 'faint' }, new Date(record.time).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-GB')),
+      // The date as year-month-day in both languages (no day-month order to misread), and the time to the second.
+      h('span', { class: 'faint num' }, logTime(record.time)),
       h('span', null, h('span', { class: `badge tone-${tone}` }, levelName)),
       h('span', { class: 'muted' }, record.component),
       h('span', null, record.msg, fields ? h('span', { class: 'fields' }, ` ${fields}`) : null),

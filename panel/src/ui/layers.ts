@@ -6,9 +6,12 @@
  * Toasts never float over the cards: they take the free space in the bar, one at a time, so they cannot cut across
  * another box's edge. Sheets hang below the bar with the scrim under the bar too, so the bar stays readable.
  */
+
+import { sayError } from '../../../src/core/say.ts';
+import { ApiError } from '../api.ts';
 import { h, icon } from '../dom.ts';
 import type { IconName } from '../icons.ts';
-import { t } from '../state.ts';
+import { state, t } from '../state.ts';
 
 type Tone = 'play' | 'load' | 'pause' | 'bad';
 
@@ -33,9 +36,17 @@ export function toast(message: string, tone: Tone = 'load', name: IconName = 'ch
   toastTimer = window.setTimeout(() => box.replaceChildren(), lasts);
 }
 
-/** Shows an error from an action as a toast. */
+/** Shows an error from an action as a toast, in the panel's language. */
 export function problem(error: unknown): void {
-  toast(error instanceof Error ? error.message : String(error), 'bad', 'circle-alert');
+  // jukecord's refusals come in short English; the same table as the bot's turns them into the person's language.
+  // A request that never reached jukecord (the browser's own "Failed to fetch") says so in the panel's words.
+  const message =
+    error instanceof ApiError
+      ? sayError(error.message, state.lang)
+      : error instanceof TypeError
+        ? t().networkFailed
+        : sayError(error instanceof Error ? error.message : String(error), state.lang);
+  toast(message, 'bad', 'circle-alert');
 }
 
 // The open layers (the sheet and dialogs over it), newest last. Escape closes the newest only, and Tab stays inside it:

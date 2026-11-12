@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { REASONS } from '../../src/core/reasons.ts';
-import { sayError } from '../../src/discord/errors.ts';
+import { sayError, sayFailure, translate } from '../../src/core/say.ts';
+import { sayError as sayInDiscord } from '../../src/discord/errors.ts';
 
 // Every file under src, for the messages the actions can give.
 function sources(dir: string): string[] {
@@ -22,20 +23,9 @@ describe('sayError', () => {
         if (match[1]) messages.add(match[1]);
       }
     }
-    // The ones the bot never shows: browser-only and API-only refusals.
-    const notInDiscord = new Set([
-      'log in first',
-      'only the host can use jukecord here',
-      'there is no such server here',
-      'there is no such token of yours',
-      'days is 1 to 366',
-      'the time zone offset is -720 to 840 minutes',
-      'jukecord runs without a Discord bot here, so it cannot join voice',
-      'jukecord runs without a Discord bot here, so there are no roles',
-    ]);
     assert.ok(messages.size > 15, `only ${messages.size} messages were found; is the pattern still right?`);
+    // Every one of them: the panel shows the ones Discord never meets (browser-only and API-only refusals).
     for (const message of messages) {
-      if (notInDiscord.has(message)) continue;
       const korean = sayError(message, 'ko');
       assert.notEqual(korean, sayError(message, 'en'), `no Korean for "${message}"`);
     }
@@ -52,5 +42,24 @@ describe('sayError', () => {
     // English is the message as a sentence; an unknown message stays English in Korean too.
     assert.equal(sayError('nothing is playing', 'en'), 'Nothing is playing');
     assert.equal(sayError('something new', 'ko'), 'Something new');
+  });
+
+  it('gives a reason as it is for the middle of a sentence, and the bot the same words as the panel', () => {
+    // No capital: "Could not play: no such site".
+    assert.equal(translate('no such site', 'en'), 'no such site');
+    assert.equal(translate('no such site', 'ko'), '없는 사이트');
+    assert.equal(translate('something new', 'ko'), 'something new');
+    // The bot's door leads to the same table.
+    assert.equal(sayInDiscord, sayError);
+  });
+
+  it('translates the reason of a failed track and leaves its title alone', () => {
+    assert.equal(sayFailure('Neon Rain: the site answered 404', 'ko'), 'Neon Rain: 사이트가 404로 답함');
+    // A title with a colon of its own: only what follows the last one is the reason.
+    assert.equal(sayFailure('Part II: The Valley: no such site', 'ko'), 'Part II: The Valley: 없는 사이트');
+    assert.equal(sayFailure('Neon Rain: no such site', 'en'), 'Neon Rain: no such site');
+    // Every reason a player can give ends a failure this way.
+    for (const reason of Object.values(REASONS))
+      assert.notEqual(sayFailure(`A title: ${reason}`, 'ko'), `A title: ${reason}`, reason);
   });
 });

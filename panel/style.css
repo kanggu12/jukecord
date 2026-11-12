@@ -17,9 +17,9 @@
   color-scheme: dark;
   --bg: #0d0e12;
   --bg-top: #111318;
-  --pool-a: rgba(120, 130, 165, 0.1);
-  --pool-b: rgba(150, 120, 175, 0.07);
-  --pool-c: rgba(110, 140, 175, 0.06);
+  --pool-a: rgba(120, 130, 165, 0.13);
+  --pool-b: rgba(150, 120, 175, 0.09);
+  --pool-c: rgba(110, 140, 175, 0.08);
   --ambient: 0.32;
   --ambient-tone: saturate(1.5) brightness(0.6);
   --panel: rgba(30, 32, 39, 0.55);
@@ -66,8 +66,8 @@
   --pool-a: rgba(140, 150, 190, 0.14);
   --pool-b: rgba(190, 160, 205, 0.1);
   --pool-c: rgba(150, 180, 215, 0.1);
-  --ambient: 0.28;
-  --ambient-tone: saturate(1.3) brightness(1.1);
+  --ambient: 0.26;
+  --ambient-tone: saturate(1.9) brightness(1.3);
   --panel: rgba(255, 255, 255, 0.62);
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
   --panel-solid: rgba(255, 255, 255, 0.97);
@@ -108,8 +108,8 @@
     --pool-a: rgba(140, 150, 190, 0.14);
     --pool-b: rgba(190, 160, 205, 0.1);
     --pool-c: rgba(150, 180, 215, 0.1);
-    --ambient: 0.28;
-    --ambient-tone: saturate(1.3) brightness(1.1);
+    --ambient: 0.26;
+    --ambient-tone: saturate(1.9) brightness(1.3);
     --panel: rgba(255, 255, 255, 0.62);
     --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
     --panel-solid: rgba(255, 255, 255, 0.97);
@@ -613,10 +613,10 @@ img {
   container-type: inline-size;
   position: relative;
   isolation: isolate;
-  /* The glass: a sheen falling from the top edge over a tinted, blurred view of the field behind. */
+  /* The glass: a sheen falling from the top edge over a tinted view of the field behind. No backdrop blur here: the
+     only thing behind a card is the field, which is blurred already, and blurring it again under every card would
+     cost a phone its smooth scrolling for nothing seen. The bars and the layers, which content passes under, blur. */
   background: var(--sheen), var(--panel);
-  backdrop-filter: var(--glass);
-  -webkit-backdrop-filter: var(--glass);
   border: 1px solid var(--edge);
   border-radius: var(--r-card);
   box-shadow: var(--shadow), var(--rim);
@@ -734,7 +734,9 @@ img {
   transform: scale(0.97);
 }
 .key.primary {
-  background: linear-gradient(180deg, color-mix(in oklch, var(--key-hi) 100%, transparent), var(--key));
+  /* The gradient over the key's own colour: what reads the background colour (the audit's contrast, forced colours)
+     gets the colour the words stand on. */
+  background: linear-gradient(180deg, var(--key-hi), var(--key)) var(--key);
   border-color: transparent;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
@@ -869,9 +871,18 @@ img {
     inset 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 @media (pointer: coarse) {
-  /* Each choice gets the whole 44px. */
+  /* Each choice gets the whole 44px to the finger; its tile is drawn 2px inside (a clear border), so the tile in use
+     sits in the track instead of covering it. */
   .seg {
     padding: 0;
+    gap: 0;
+  }
+  .seg button {
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .seg button[aria-pressed="true"] {
+    box-shadow: var(--rim);
   }
 }
 .seg button {
@@ -896,30 +907,46 @@ img {
     0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-/* On/off switch. */
+/* On/off switch. The key itself is only the place to press (a finger's size on touch screens); its track and its
+   knob are drawn inside it, so the pill keeps its shape whatever size the key is. */
 .switch {
   position: relative;
   width: 34px;
   height: 20px;
-  border-radius: 10px;
+  padding: 0;
   border: 0;
-  background: var(--raised-2);
+  background: none;
   cursor: pointer;
   flex: none;
 }
+/* The track. Off: a grey of the text's own colour, which shows on glass and on a white sheet alike. */
+.switch::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 20px;
+  translate: 0 -50%;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--ink) 22%, transparent);
+  transition: background 160ms ease;
+}
+/* The knob. */
 .switch::after {
   content: "";
   position: absolute;
-  top: 2px;
+  top: 50%;
   left: 2px;
   width: 16px;
   height: 16px;
+  translate: 0 -50%;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: transform 160ms ease;
+  transition: transform 160ms var(--ease);
 }
-.switch[aria-checked="true"] {
+.switch[aria-checked="true"]::before {
   background: var(--play);
 }
 .switch[aria-checked="true"]::after {
@@ -982,8 +1009,21 @@ img {
   transform: scale(1.15);
   transition: opacity 0.8s ease;
 }
+/* Playing, the glow breathes slowly (only its size and strength change, which costs nothing to draw). */
 .card.playing .art::before {
   opacity: 0.7;
+  animation: halo 7s ease-in-out infinite;
+}
+@keyframes halo {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1.1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.22);
+  }
 }
 .card.paused .art::before {
   opacity: 0.35;
@@ -1026,8 +1066,12 @@ img {
   -webkit-mask-composite: xor;
   mask-composite: exclude;
 }
+/* Playing, the rainbow travels slowly round the rim (the big disc's; the bar's small one stays still). */
 .disc.playing::before {
   background: conic-gradient(var(--rainbow));
+}
+.disc.playing:not(.sm)::before {
+  animation: spin 9s linear infinite;
 }
 .disc.paused::before {
   background: var(--rest);
@@ -1181,11 +1225,13 @@ img {
     0 0 0 3px color-mix(in oklch, var(--ink) 10%, transparent),
     0 1px 4px rgba(0, 0, 0, 0.4);
 }
-/* Under the pointer the groove grows, to show it can be taken. */
-.track:not([aria-disabled="true"]):hover::before,
-.track:not([aria-disabled="true"]):hover .fill {
-  top: 5px;
-  height: 6px;
+/* Under a mouse pointer the groove grows, to show it can be taken (a finger has no hover, and its bar sits lower). */
+@media (hover: hover) and (pointer: fine) {
+  .track:not([aria-disabled="true"]):hover::before,
+  .track:not([aria-disabled="true"]):hover .fill {
+    top: 5px;
+    height: 6px;
+  }
 }
 .track[aria-disabled="true"] {
   cursor: default;
@@ -1446,6 +1492,13 @@ img {
   display: flex;
   gap: 8px;
   padding: 12px;
+}
+
+.look-only {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
 /* ---- voice ------------------------------------------------------------------------------------------------------ */
@@ -1903,14 +1956,21 @@ kbd {
   gap: 8px;
 }
 .yaxis {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  position: relative;
+  /* As wide as the top number (set by the panel's code), so the bars start at the same place in every chart. */
+  width: calc(var(--digits, 3) * 1ch + 2px);
   height: 160px;
   font-size: 12px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+/* Each number centred on its line. */
+.yaxis .tick {
+  position: absolute;
+  right: 0;
+  translate: 0 -50%;
+  line-height: 1;
 }
 .bars {
   display: flex;
@@ -1961,13 +2021,27 @@ kbd {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
+/* The labels under the bars: each one centred under its own bar (placed by the panel's code). */
 .axis {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 18px;
   margin-top: 6px;
   font-size: 12px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+}
+.axis .tick {
+  position: absolute;
+  top: 0;
+  translate: -50% 0;
+  white-space: nowrap;
+}
+/* The first and the last label stay inside the chart. */
+.axis .tick:first-child {
+  translate: 0 0;
+}
+.axis .tick:last-child {
+  translate: -100% 0;
 }
 .chart-table {
   width: 100%;
@@ -1980,7 +2054,7 @@ kbd {
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
-.chart-table td.n {
+.chart-table .n {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -2198,7 +2272,7 @@ kbd {
     left: 0;
     right: 0;
     padding: 6px 12px;
-    background: color-mix(in oklch, var(--bg) 62%, transparent);
+    background: color-mix(in oklch, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
     border-bottom: 1px solid var(--line);
@@ -2418,6 +2492,25 @@ kbd {
   }
 }
 
+/* ---- less transparency --------------------------------------------------------------------------------------- */
+/* People who ask their system for less transparency get solid surfaces: no light behind the cards, nothing seen
+   through the bars. */
+@media (prefers-reduced-transparency: reduce) {
+  .ambient {
+    display: none;
+  }
+  .card {
+    background: var(--panel-solid);
+  }
+  .bar,
+  .listen,
+  .toasts {
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* ---- motion -------------------------------------------------------------------------------------------------------- */
 /* People who ask their system for less motion get none, and the menu can turn it off too. */
 /* biome-ignore-start lint/complexity/noImportantStyles: turning motion off must win over every animation. */
@@ -2440,17 +2533,16 @@ kbd {
 /* ---- touch ------------------------------------------------------------------------------------------------------ */
 /* Last in the file, so they win over the rules above: every control at least 44 by 44 for a finger. */
 @media (pointer: coarse) {
-  /* The switch looks 28 high but takes 44: the colour stays in the middle (content box), the rest is margin to touch. */
+  /* The switch takes 44 high to the finger; its track stays a 28 high pill in the middle. */
   .switch {
     width: 46px;
+    height: 44px;
+  }
+  .switch::before {
     height: 28px;
-    box-sizing: content-box;
-    padding: 8px 0;
-    background-clip: content-box;
-    border-radius: 22px;
+    border-radius: 14px;
   }
   .switch::after {
-    top: 10px;
     width: 24px;
     height: 24px;
   }
@@ -2474,9 +2566,18 @@ kbd {
   .volume input {
     height: 44px;
   }
-  /* The logo is a link home: a finger's height too. */
+  /* The logo is a link home: a finger's size too, even where only the mark shows. */
   .brand {
     min-height: 44px;
+    min-width: 44px;
+    justify-content: center;
+  }
+  /* Where only the mark shows, the extra width reaches into the bar's padding and the gap beside it, so the mark
+     stays where it was and the bar's other parts keep their room. */
+  @media (max-width: 400px) {
+    .brand {
+      margin-inline: -9px;
+    }
   }
   .seg button {
     min-width: 44px;
