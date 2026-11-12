@@ -751,9 +751,10 @@ export function queueCard(): HTMLElement {
       h(
         'div',
         { class: 'text' },
+        // Two lines at most (style.css), the whole title its tooltip.
         h(
           'div',
-          { class: 'name' },
+          { class: 'name', title: item.track.title, 'data-clip': 'ok' },
           h('a', { href: item.track.url, target: '_blank', rel: 'noopener noreferrer' }, item.track.title),
         ),
         subLine(

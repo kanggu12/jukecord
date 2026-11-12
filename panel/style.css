@@ -1451,8 +1451,17 @@ img {
 .row .text {
   min-width: 0;
 }
+/* Every row's title: two lines at most, the whole title the row's tooltip (as a search's results have it). Beside the
+   heart and three keys the history's title has a narrow column, and in the side column under the voice card (short on
+   a laptop's window) a long one took five lines and left the list two whole rows; in the queue on a phone, a long one
+   took four and made its row twice the others. */
 .row .name {
   font-weight: 500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 .row .name a {
   text-decoration: none;
@@ -1537,18 +1546,8 @@ img {
 .history .row {
   grid-template-columns: 48px minmax(0, 1fr) auto;
 }
-/* History and liked rows: two lines of a title at most, the whole title the row's tooltip (as a search's results have
-   it). Beside the heart and three keys the title has a narrow column, and in the side column under the voice card
-   (short on a laptop's window) a long one took five lines and left the list two whole rows. */
-.history .name {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-}
 /* The title's ring drawn inside the link: the box that cuts the third line would cut a ring around it. */
-.history .name a:focus-visible {
+.row .name a:focus-visible {
   outline-offset: -2px;
 }
 /* A label in a line of words (Next, the bot's channel, Look only): its word on a pale tint of its meaning. */

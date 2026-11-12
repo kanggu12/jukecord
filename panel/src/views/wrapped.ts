@@ -164,9 +164,10 @@ export function wrappedPage(): HTMLElement {
               h(
                 'div',
                 { class: 'text' },
+                // Two lines at most (style.css), the whole title its tooltip.
                 h(
                   'div',
-                  { class: 'name' },
+                  { class: 'name', title: first.track.title, 'data-clip': 'ok' },
                   h('a', { href: first.track.url, target: '_blank', rel: 'noopener noreferrer' }, first.track.title),
                 ),
                 subLine(
@@ -220,9 +221,10 @@ export function wrappedPage(): HTMLElement {
           h(
             'div',
             { class: 'text' },
+            // Two lines at most (style.css), the whole title its tooltip.
             h(
               'div',
-              { class: 'name' },
+              { class: 'name', title: entry.track.title, 'data-clip': 'ok' },
               h('a', { href: entry.track.url, target: '_blank', rel: 'noopener noreferrer' }, entry.track.title),
             ),
             entry.track.uploader ? subLine(h('span', null, entry.track.uploader)) : null,
