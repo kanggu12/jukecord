@@ -1906,6 +1906,12 @@ img {
   flex: 0 1 auto;
   min-width: 0;
 }
+/* The heart centred on the title's first line (20 px at a line height of 1.3: 26 px) however tall a key is (32 px, or
+   44 px for fingers, which put it 9 px low): it reaches as far above that line as below, so the row keeps the title's
+   height. */
+.now .title-row .like-key {
+  margin-block: calc((26px - var(--control-sm)) / 2);
+}
 /* The history card's title: its two lists, as a row of two choices, each with its count. */
 .seg .seg-count {
   margin-left: 6px;
