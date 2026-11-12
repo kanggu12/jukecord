@@ -67,9 +67,18 @@ async function until(status) {
 
 const browser = await chromium.launch();
 
-// A page logged in as the host, in a theme, a language and a size.
-async function open({ width, height, theme, lang, login = true, motion = 'off', discord = false }) {
-  const touch = width <= 744;
+// A page logged in as the host, in a theme, a language and a size; a touch screen up to the narrowest tablet, unless
+// said otherwise (a tablet held sideways is wide and touched).
+async function open({
+  width,
+  height,
+  theme,
+  lang,
+  login = true,
+  motion = 'off',
+  discord = false,
+  touch = width <= 744,
+}) {
   const context = await browser.newContext({
     viewport: { width, height },
     deviceScaleFactor: 1,
@@ -134,14 +143,19 @@ async function measure(page, name, setting, errors) {
 }
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
-async function sweep(name, sizes, act, { discord = false } = {}) {
+async function sweep(name, sizes, act, { discord = false, touch } = {}) {
   if (ONLY && !ONLY.has(name)) return;
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
     for (const lang of ['ko', 'en']) {
       for (const [width, height] of sizes) {
         const setting = { theme, lang, width, height };
-        const { context, page, errors } = await open({ ...setting, login: !name.startsWith('login'), discord });
+        const { context, page, errors } = await open({
+          ...setting,
+          login: !name.startsWith('login'),
+          discord,
+          ...(touch === undefined ? {} : { touch }),
+        });
         try {
           if (act) await act(page);
           await measure(page, name, setting, errors);
@@ -250,6 +264,17 @@ await api('POST', '/guilds/local/player/resume');
 await until('playing');
 await sweep('playing', SIZES);
 await sweep('discord', SIZES, null, { discord: true });
+// A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows.
+await sweep(
+  'tablet',
+  [
+    [1024, 768],
+    [1180, 820],
+    [1366, 950],
+  ],
+  null,
+  { discord: true, touch: true },
+);
 
 // The README's pictures: the player with a Discord bot while a track plays, in each theme, 1600 wide (the queue's
 // tools keep their words) at 1.6 times the pixels (full colour, no quantising: a reduced palette turns the shadows
