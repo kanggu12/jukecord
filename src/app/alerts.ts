@@ -14,6 +14,7 @@ import type { Clock, TimerHandle } from '../core/clock.ts';
 import { BOT_CHECK, plainReason } from '../core/reasons.ts';
 import { translate } from '../core/say.ts';
 import type { Logger } from '../log.ts';
+import { isPlaylistAddress } from '../media/source.ts';
 import type { SettingsRepository } from '../store/store.ts';
 import { formatSize } from '../util/units.ts';
 
@@ -59,6 +60,17 @@ export interface AlertsOptions {
 
 // Below this much free space on the data's disk, it is said once (and again after it had room once more).
 const LOW_DISK = 1024 ** 3;
+
+// Whether a lookup of an address is a flat listing (words searched, a playlist page; see ytdlp.ts) rather than one
+// video's own page, where YouTube's check for bots happens: a listing works through a check that still holds.
+function flat(address: string): boolean {
+  if (address === 'search') return true;
+  try {
+    return isPlaylistAddress(new URL(address));
+  } catch {
+    return false;
+  }
+}
 
 // Whether an address is YouTube's (where the check for bots is), "search" being YouTube's search.
 function youtube(address: string): boolean {
@@ -114,7 +126,9 @@ export class Alerts implements FetchWatch {
   }
 
   worked(address: string): void {
-    if (!this.refused || !youtube(address)) return;
+    // Only a video's own page shows the check is over: a search's or a playlist's answer ended an episode that still
+    // held, and the next refusal was then held back for the hour.
+    if (!this.refused || !youtube(address) || flat(address)) return;
     this.refused = false;
     this.raise({
       kind: 'bot-check-over',

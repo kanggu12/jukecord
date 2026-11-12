@@ -86,4 +86,19 @@ describe('Alerts', () => {
       ['bot-check', 'bot-check-over'],
     );
   });
+
+  it('does not end a bot check on a search or a playlist, which never reach the page where YouTube checks', () => {
+    const { posted, alerts } = setup();
+    const check = "ERROR: [youtube] abc: Sign in to confirm you're not a bot";
+    alerts.failed('https://www.youtube.com/watch?v=abc', check);
+    // Words searched, a playlist listed: both flat (ytdlp.ts), and both work through a bot check.
+    alerts.worked('search');
+    alerts.worked('https://www.youtube.com/playlist?list=PL0123456789');
+    // The check still holds: the next fetch is refused, and nothing more is said (it was never over).
+    alerts.failed('https://www.youtube.com/watch?v=def', check);
+    assert.deepEqual(
+      posted.filter((entry) => entry.guildId === A).map((entry) => entry.alert.kind),
+      ['bot-check'],
+    );
+  });
 });
