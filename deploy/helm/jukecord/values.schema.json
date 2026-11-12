@@ -31,20 +31,7 @@
     "env": {
       "type": "object",
       "description": "JUKECORD_* settings passed as they are, as strings (quote numbers and IDs); the port, the listening address, the data directory and the secret files belong to the chart, and the token and the OAuth secret go in discord",
-      "propertyNames": {
-        "pattern": "^JUKECORD_[A-Z_]+$",
-        "not": {
-          "enum": [
-            "JUKECORD_HOST",
-            "JUKECORD_PORT",
-            "JUKECORD_DATA_DIR",
-            "JUKECORD_DISCORD_TOKEN",
-            "JUKECORD_DISCORD_CLIENT_SECRET",
-            "JUKECORD_DISCORD_TOKEN_FILE",
-            "JUKECORD_DISCORD_CLIENT_SECRET_FILE"
-          ]
-        }
-      },
+      "propertyNames": { "pattern": "^JUKECORD_[A-Z_]+$" },
       "additionalProperties": { "type": ["string", "boolean"] }
     },
     "extraEnv": {
@@ -57,22 +44,12 @@
         "properties": {
           "name": {
             "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
-            "not": {
-              "enum": [
-                "JUKECORD_HOST",
-                "JUKECORD_PORT",
-                "JUKECORD_DATA_DIR",
-                "JUKECORD_DISCORD_TOKEN",
-                "JUKECORD_DISCORD_CLIENT_SECRET",
-                "JUKECORD_DISCORD_TOKEN_FILE",
-                "JUKECORD_DISCORD_CLIENT_SECRET_FILE"
-              ]
-            }
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"
           },
           "value": { "type": "string" },
           "valueFrom": { "type": "object" }
-        }
+        },
+        "not": { "required": ["value", "valueFrom"] }
       }
     },
     "service": {
@@ -90,7 +67,11 @@
         "enabled": { "type": "boolean" },
         "className": { "type": "string" },
         "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
-        "host": { "type": "string" },
+        "host": {
+          "type": "string",
+          "description": "A host name, without a scheme or a path; a leading *. for a wildcard",
+          "pattern": "^(|(\\*\\.)?[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?)*)$"
+        },
         "tls": { "type": "array", "items": { "type": "object" } }
       }
     },
@@ -101,7 +82,11 @@
         "enabled": { "type": "boolean" },
         "existingClaim": { "type": "string" },
         "storageClass": { "type": "string" },
-        "size": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$" },
+        "size": {
+          "type": "string",
+          "description": "A Kubernetes quantity: 1Gi, 500Mi, 2G",
+          "pattern": "^([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(Ki|Mi|Gi|Ti|Pi|Ei|m|k|M|G|T|P|E|[eE][+-]?[0-9]+)?$"
+        },
         "accessModes": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
       }
     },
@@ -116,15 +101,42 @@
         "ingressFrom": {
           "type": "array",
           "description": "NetworkPolicy peers (podSelector, namespaceSelector, ipBlock) that may reach the panel's port; empty: anyone",
-          "items": { "type": "object" }
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "podSelector": { "type": "object" },
+              "namespaceSelector": { "type": "object" },
+              "ipBlock": { "type": "object" }
+            }
+          }
         },
-        "privateRanges": { "type": "array", "items": { "type": "string" } }
+        "privateRanges": {
+          "type": "array",
+          "description": "Address ranges with their prefix length, IPv4 or IPv6",
+          "items": {
+            "type": "string",
+            "pattern": "^([0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}|[0-9A-Fa-f:]*:[0-9A-Fa-f:]*/[0-9]{1,3})$"
+          }
+        }
       }
     },
     "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
-    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "podLabels": {
+      "type": "object",
+      "description": "Labels in Kubernetes' form: a name of up to 63 letters, digits, - _ and . (with an optional prefix/), a value the same or empty",
+      "propertyNames": {
+        "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+      },
+      "additionalProperties": { "type": "string", "pattern": "^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])?$" }
+    },
     "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
     "tolerations": { "type": "array" },
-    "affinity": { "type": "object" }
+    "affinity": { "type": "object" },
+    "global": {
+      "type": "object",
+      "description": "What a parent chart gives every chart it depends on; jukecord reads none of it"
+    }
   }
 }

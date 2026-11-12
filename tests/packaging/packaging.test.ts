@@ -378,18 +378,69 @@ describe('the Helm chart', () => {
     assert.throws(() =>
       execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', '--set', 'replica=2'], { stdio: 'pipe' }),
     );
-    // A secret in env, a name the chart sets in extraEnv, and a token beside an existing Secret are refused too.
+    // What cannot work is refused before anything is installed, each with a message that says what to change.
+    const refusal = (...values: string[]) => {
+      try {
+        execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', ...values], { stdio: 'pipe' });
+      } catch (error) {
+        return String((error as { stderr?: Buffer }).stderr ?? error);
+      }
+      return 'rendered';
+    };
+    assert.match(refusal('--set', 'env.JUKECORD_DISCORD_TOKEN=x'), /goes in discord\.token/);
+    assert.match(
+      refusal('--set', 'extraEnv[0].name=JUKECORD_DISCORD_TOKEN_FILE', '--set', 'extraEnv[0].value=/x'),
+      /set by the chart/,
+    );
+    assert.match(refusal('--set', 'discord.existingSecret=s', '--set', 'discord.token=x'), /would be ignored/);
+    // An OAuth secret without the application's ID would stop jukecord at start.
+    assert.match(refusal('--set', 'discord.clientSecret=s'), /without discord\.clientId/);
+    assert.match(
+      refusal(
+        '--set-string',
+        'env.JUKECORD_LOG_LEVEL=debug',
+        '--set',
+        'extraEnv[0].name=JUKECORD_LOG_LEVEL',
+        '--set',
+        'extraEnv[0].value=info',
+      ),
+      /in both env and extraEnv/,
+    );
+    // The schema: a value and a source for one variable, a peer naming nothing, a host with a scheme, a label with a
+    // space, a range without its length, a size Kubernetes would not take.
     for (const values of [
-      ['--set', 'env.JUKECORD_DISCORD_TOKEN=x'],
-      ['--set', 'extraEnv[0].name=JUKECORD_DISCORD_TOKEN_FILE', '--set', 'extraEnv[0].value=/x'],
-      ['--set', 'discord.existingSecret=s', '--set', 'discord.token=x'],
+      [
+        '--set',
+        'extraEnv[0].name=TZ',
+        '--set',
+        'extraEnv[0].value=x',
+        '--set',
+        'extraEnv[0].valueFrom.configMapKeyRef.name=c',
+      ],
+      ['--set', 'networkPolicy.ingressFrom[0].x=1'],
+      ['--set', 'ingress.host=https://music.example.org'],
+      ['--set', 'podLabels.team=two words'],
+      ['--set', 'networkPolicy.privateRanges[0]=10.0.0.0'],
+      ['--set', 'persistence.size=5K'],
     ]) {
-      assert.throws(
-        () => execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', ...values], { stdio: 'pipe' }),
-        Error,
-        values.join(' '),
-      );
+      assert.match(refusal(...values), /don't meet the specifications of the schema/, values.join(' '));
     }
+    // And what Kubernetes takes is taken: decimal and binary sizes, an IPv6 range, a wildcard host, the values a
+    // parent chart gives every chart it depends on.
+    for (const values of [
+      ['--set', 'persistence.size=1Pi'],
+      ['--set', 'persistence.size=500M'],
+      ['--set', 'networkPolicy.privateRanges[0]=fd00::/8'],
+      ['--set', 'ingress.enabled=true', '--set', 'ingress.host=*.example.org'],
+      ['--set', 'global.imageRegistry=registry.example.org'],
+    ]) {
+      assert.equal(refusal(...values), 'rendered', values.join(' '));
+    }
+    // An upgrade with --reuse-values from a chart before podLabels keeps the old values, which have none.
+    const old = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-old-values-')), 'values.yaml');
+    fs.writeFileSync(old, read('deploy/helm/jukecord/values.yaml').replace(/^podLabels: \{\}\n/m, ''));
+    assert.doesNotMatch(read(old), /^podLabels:/m);
+    assert.equal(refusal('-f', old, '--set', 'podLabels=null'), 'rendered');
     if (fs.existsSync('/usr/local/bin/kubeconform') || have('kubeconform')) {
       const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-chart-')), 'chart.yaml');
       fs.writeFileSync(file, rendered);
@@ -419,7 +470,9 @@ describe('workflows and scripts', () => {
 
   it('pins by commit the outside actions that run with a token that may write, and checks before it publishes', () => {
     for (const file of workflows) {
-      for (const match of read(file).matchAll(/uses: ((?:softprops\/action-gh-release|azure\/setup-helm)@\S+)/g)) {
+      for (const match of read(file).matchAll(
+        /uses: ((?:softprops\/action-gh-release|azure\/setup-helm|docker\/[\w-]+)@\S+)/g,
+      )) {
         assert.match(match[1] ?? '', /@[0-9a-f]{40}$/, `${file} uses ${match[1]} by a tag that can move`);
       }
     }

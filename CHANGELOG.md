@@ -14,6 +14,19 @@ All notable changes to jukecord are documented here. The format is based on
   instead of 150.
 - typebox 1.4.6.
 
+- The chart takes the `global` values a parent chart gives every chart it depends on (it refused them, so jukecord
+  could not be a dependency), and an upgrade with `--reuse-values` from 0.1.1 no longer stops on `podLabels`.
+- The chart says where a value belongs when it refuses one: the bot's token or the OAuth secret in `env` or
+  `extraEnv`, a name the chart sets itself, the same name in both, and an OAuth secret without the application's ID
+  (which rendered, and then stopped jukecord at start). Its schema refuses what Kubernetes would refuse at install
+  (a size like `5K`, a host with a scheme, a label with a space, a range without its length, a variable with both a
+  value and a source, a peer that names nothing) and takes what Kubernetes takes (`5k`, `1Pi`, IPv6 ranges). With
+  `JUKECORD_PUBLIC_URL` taken from elsewhere (`extraEnv` with `valueFrom`), the notes after an install say so instead
+  of an address the pod does not get.
+- The guides and the chart's values say how many tracks are fetched at once: up to the fetch limit ahead of time and
+  twice that for tracks somebody is waiting for.
+- The workflows pin the Docker actions by commit too, as the other outside actions are.
+
 ### Fixed
 
 - The watchdog ended jukecord when the whole process had been stopped for longer than half a minute and was let go

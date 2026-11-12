@@ -38,9 +38,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/* The pod's labels: podLabels from the values, under the chart's own, which win (the Service and the NetworkPolicy
-find the pod by them). */}}
+find the pod by them). podLabels may be missing altogether: an upgrade with --reuse-values from a chart before it
+keeps the old values, which have none. */}}
 {{- define "jukecord.podLabels" -}}
-{{- toYaml (merge (include "jukecord.labels" . | fromYaml) .Values.podLabels) -}}
+{{- toYaml (merge (include "jukecord.labels" . | fromYaml) (.Values.podLabels | default dict)) -}}
 {{- end -}}
 
 {{/* "repository:tag", the tag defaulting to the chart's appVersion. */}}
@@ -82,7 +83,7 @@ an ID it is not read at all (a file that is not there would stop jukecord at sta
 {{- define "jukecord.userSets" -}}
 {{- $root := index . 0 -}}
 {{- $name := index . 1 -}}
-{{- if hasKey $root.Values.env $name -}}true
+{{- if hasKey ($root.Values.env | default dict) $name -}}true
 {{- else -}}
 {{- range $root.Values.extraEnv -}}{{- if eq .name $name -}}true{{- end -}}{{- end -}}
 {{- end -}}
@@ -100,17 +101,45 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- else if and .Values.ingress.enabled .Values.ingress.host (not (hasPrefix "*" .Values.ingress.host)) -}}
 {{- $url = printf "%s://%s" (ternary "https" "http" (gt (len (default list .Values.ingress.tls)) 0)) .Values.ingress.host -}}
 {{- end -}}
-{{- if hasKey .Values.env "JUKECORD_PUBLIC_URL" -}}
+{{- if hasKey (.Values.env | default dict) "JUKECORD_PUBLIC_URL" -}}
 {{- $url = toString (index .Values.env "JUKECORD_PUBLIC_URL") -}}
 {{- end -}}
 {{- range .Values.extraEnv -}}
 {{- if and (eq .name "JUKECORD_PUBLIC_URL") .value -}}{{- $url = .value -}}{{- end -}}
 {{- end -}}
+{{- if include "jukecord.publicUrlElsewhere" . -}}{{- $url = "" -}}{{- end -}}
 {{- $url -}}
+{{- end -}}
+
+{{/* Whether the pod's public address comes from where the chart cannot read it (extraEnv's valueFrom). */}}
+{{- define "jukecord.publicUrlElsewhere" -}}
+{{- range .Values.extraEnv -}}{{- if and (eq .name "JUKECORD_PUBLIC_URL") .valueFrom -}}true{{- end -}}{{- end -}}
 {{- end -}}
 
 {{/* Values that cannot work together, refused with a message that says what to change. */}}
 {{- define "jukecord.validate" -}}
+{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" -}}
+{{- $names := list -}}
+{{- range $name, $_ := (.Values.env | default dict) -}}{{- $names = append $names (list "env" $name) -}}{{- end -}}
+{{- range (.Values.extraEnv | default list) -}}{{- $names = append $names (list "extraEnv" .name) -}}{{- end -}}
+{{- range $names -}}
+{{- $where := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- if has $name (list "JUKECORD_DISCORD_TOKEN" "JUKECORD_DISCORD_CLIENT_SECRET") -}}
+{{- fail (printf "%s: %s is not set here. The bot's token goes in discord.token and the OAuth secret in discord.clientSecret, or both in a Secret named by discord.existingSecret; the chart gives them to jukecord as files." $where $name) -}}
+{{- end -}}
+{{- if hasKey $chartSets $name -}}
+{{- fail (printf "%s: %s is set by the chart (from %s); leave it out." $where $name (index $chartSets $name)) -}}
+{{- end -}}
+{{- end -}}
+{{- range (.Values.extraEnv | default list) -}}
+{{- if hasKey ($.Values.env | default dict) .name -}}
+{{- fail (printf "%s is set in both env and extraEnv; set it in one of them." .name) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.discord.clientSecret (not (or .Values.discord.clientId (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID")))) -}}
+{{- fail "discord.clientSecret is set without discord.clientId. Logging in with Discord needs both: the application's ID (discord.clientId, quoted) and its OAuth2 secret; leave both empty for host logins only." -}}
+{{- end -}}
 {{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}
 {{- fail "discord.existingSecret is set together with discord.token or discord.clientSecret, which would be ignored. Put the token and the OAuth secret in the Secret named by existingSecret and leave those two empty, or leave existingSecret empty to have the chart make the Secret from them." -}}
 {{- end -}}

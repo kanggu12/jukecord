@@ -74,8 +74,8 @@ resources:
     cpu: 250m
     memory: 512Mi
   limits:
-    # Node sets its heap ceiling at about half of this; yt-dlp and ffmpeg use the rest, for up to six tracks fetched at
-    # once on a large node. Keep it at 768Mi or more (docs/KUBERNETES.md, "Memory and CPU").
+    # Node sets its heap ceiling at about half of this; yt-dlp and ffmpeg use the rest, a pair for each track being
+    # fetched (docs/KUBERNETES.md, "Memory and CPU", says how many at once). Keep it at 768Mi or more.
     memory: 1536Mi
 
 podSecurityContext:

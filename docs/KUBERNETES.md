@@ -113,12 +113,13 @@ by jukecord's group only, and jukecord reads them through `JUKECORD_DISCORD_TOKE
 
 The pod asks for 250m of CPU and 512Mi of memory, and may use up to 1536Mi. Node sets the ceiling of its heap at
 about half of the container's memory limit (816 MiB at 1536Mi, 408 MiB at 768Mi), and yt-dlp and ffmpeg run beside it
-within the same limit: about 70 MB each for every track being fetched. jukecord fetches ahead as many tracks at once as
-half the processors Node sees, between 2 and 6, so a large node fetches more at a time; a CPU limit
-(`resources.limits.cpu`) lowers how many processors Node sees, and with them that number.
+within the same limit: about 70 MB each for every track being fetched. The fetch limit is half the processors Node
+sees, between 2 and 6: jukecord fetches at most that many tracks ahead of time at once, and beside them at most twice
+that many tracks somebody is waiting for (in all, six on two processors and eighteen on twelve or more). A CPU limit
+(`resources.limits.cpu`) lowers how many processors Node sees, and with them those numbers.
 
 Keep the memory limit at 768Mi or more. Node lets its heap grow to about half the limit; the other half holds the
-rest of Node and the yt-dlp and ffmpeg of the tracks being fetched, at least two at once. Below 768Mi that half is too
+rest of Node and the yt-dlp and ffmpeg of the tracks being fetched, two or more at once. Below 768Mi that half is too
 small for both, so a busy moment takes the pod past its limit, and the kernel ends it (`OOMKilled`, with nothing in
 jukecord's log) before Node notices anything. Under 512Mi it gets worse: the heap ceiling stops shrinking with the
 limit (Node keeps about 260 MiB). To set the ceiling yourself, give `NODE_OPTIONS` with `--max-old-space-size=<MiB>`

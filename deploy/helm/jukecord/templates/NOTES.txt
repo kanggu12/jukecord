@@ -1,9 +1,15 @@
 jukecord {{ .Chart.AppVersion }} is installed as {{ include "jukecord.fullname" . }} in {{ .Release.Namespace }}.
 {{- /* The same address the pod is given (jukecord.publicUrl), so these notes and the bot's links agree. */}}
 {{- $url := include "jukecord.publicUrl" . }}
+{{- $elsewhere := include "jukecord.publicUrlElsewhere" . }}
+{{- if $elsewhere }}
+
+The panel: at the address JUKECORD_PUBLIC_URL gets from extraEnv.
+{{- else }}
 {{- with $url }}
 
 The panel: {{ . }}
+{{- end }}
 {{- end }}
 {{- if not .Values.ingress.enabled }}
 
@@ -25,12 +31,12 @@ The bot's token or the OAuth secret is in the values, so the release keeps a cop
 discord.existingSecret reads them from a Secret of yours instead:
   kubectl -n {{ .Release.Namespace }} create secret generic jukecord-discord --from-literal=token=... --from-literal=clientSecret=...
 {{- end }}
-{{- if and .Values.ingress.enabled (not .Values.ingress.tls) (not (hasPrefix "https://" $url)) }}
+{{- if and .Values.ingress.enabled (not .Values.ingress.tls) (not (hasPrefix "https://" $url)) (not $elsewhere) }}
 
 The Ingress has no TLS, so the panel is served over plain http. ingress.tls takes a certificate's Secret (from
 cert-manager, for example); when TLS ends in front of the Ingress controller, publicUrl takes the https:// address.
 {{- end }}
-{{- if and .Values.ingress.enabled (not $url) }}
+{{- if and .Values.ingress.enabled (not $url) (not $elsewhere) }}
 {{- if .Values.ingress.host }}
 
 The Ingress has a wildcard host, so it answers for many names, and jukecord has no single address of its own
