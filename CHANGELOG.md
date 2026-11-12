@@ -6,88 +6,143 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-12
+
 ### Changed
 
 - The image carries jukecord's source with the types already taken out: JavaScript, with every line and column where
   it is in the TypeScript, so a stack trace still points into the source. Node no longer loads its TypeScript parser
   in each process: the server rests at about 78 MiB instead of 96, and a `jukecord` command answers in about 100 ms
   instead of 150.
-- typebox 1.4.6.
-
-- The chart takes the `global` values a parent chart gives every chart it depends on (it refused them, so jukecord
-  could not be a dependency), and an upgrade with `--reuse-values` from 0.1.1 no longer stops on `podLabels`.
-- The chart says where a value belongs when it refuses one: the bot's token or the OAuth secret in `env` or
-  `extraEnv`, a name the chart sets itself, the same name in both, and an OAuth secret without the application's ID
-  (which rendered, and then stopped jukecord at start). Its schema refuses what Kubernetes would refuse at install
-  (a size like `5K`, a host with a scheme, a label with a space, a range without its length, a variable with both a
-  value and a source, a peer that names nothing) and takes what Kubernetes takes (`5k`, `1Pi`, IPv6 ranges). With
-  `JUKECORD_PUBLIC_URL` taken from elsewhere (`extraEnv` with `valueFrom`), the notes after an install say so instead
-  of an address the pod does not get, and with the Ingress on and `networkPolicy.ingressFrom` empty they say that any
-  pod of the cluster may reach the port whose `X-Forwarded-For` jukecord believes. docs/KUBERNETES.md says that a new
-  token in an existing Secret takes effect when the pod starts again.
-- The guides and the chart's values say how many tracks are fetched at once: up to the fetch limit ahead of time and
-  twice that for tracks somebody is waiting for.
-- The workflows pin the Docker actions by commit too, as the other outside actions are, and give the release's token
-  to helm through the environment instead of writing it into the step's script. The weekly FFmpeg check reads a line's
-  first release (9.0) as that line, and the chart's test runs when the scripts or what goes into the image change.
-- The image build stops when a relative `.ts` path is left in the source as JavaScript (a template string, a
-  module's address made with `new URL`), which the image could not load, and when a `.js` and a `.ts` of one name sit
-  side by side.
-- `/metrics` treats the standard `Forwarded` header as a request through a proxy, as it does `X-Forwarded-For`.
+- Reads are held to a rate of their own, thirty a second with sixty at once, per login and per address (a panel reads
+  a handful when it opens and gets the rest over its live connection), and connections to sixteen answers under way
+  each and 256 from one address, unless `JUKECORD_TRUST_PROXY` says they come through a proxy. The host is held to
+  none of the rates.
 - The image's build stages are named jukecord and jukecord-…, so `docker buildx prune --filter description~=jukecord`
-  (docs/INSTALL.md) finds the final stage's cache too (its copies of yt-dlp, FFmpeg and the packages, about 170 MB a
-  build), which it left before.
+  (docs/INSTALL.md) finds the final stage's cache too (about 170 MB a build), which it left before.
+- typebox 1.4.6.
 
 ### Fixed
 
-- `./jukecord restore` took a backup cut short (it has the right first bytes), swapped it in and left jukecord
-  restarting in a loop on "database disk image is malformed". The file is now read whole by the image's SQLite before
-  anything is stopped, and refused with what is wrong with it. `./jukecord backup` prints the backup's whole path,
-  which `restore` takes from any folder (it printed one relative to the checkout, and `restore` reads a relative one
-  from where it is typed). `./jukecord restart` after `./jukecord down` says at once that jukecord is not running,
-  instead of waiting a minute for nothing. A value in `.env` with a comment after it (`# …`) is read without the comment,
-  as Compose reads it.
-
+- The panel froze for a moment at every change of a long queue: with a thousand tracks queued, each change (every
+  track start is one) took about 220 ms of the page, and a second on a slower phone. Rows are measured first and
+  then glide, the ones out of sight do not, a row from far away fades in, and clearing a search no longer glides:
+  under 50 ms now, and 0.2 s on that phone.
+- On phones a message raised while the menu was open was hidden under it, and one raised over a dialog sat under its
+  shade. Messages show over the menu, inside the dialog that is open, and on wide windows in two lines with their
+  whole text.
+- On a touch screen a finger that started a scroll on the progress bar moved the track for everyone; a vertical swipe
+  now scrolls the page.
+- A tablet held sideways showed one row of the queue or none. Short windows get the one-column page (below 820 px of
+  height on touch, 720 with a mouse), and two columns always show three rows of the queue or more.
+- Why the live connection was turned away (jukecord full, or refused) was shown in English in the Korean panel and
+  went with the message; it is said in the panel's language and stays on the playing card while the panel waits.
+- In the system's high-contrast colours (forced colours) the progress bar, the motion switch, every selection and
+  the charts were invisible or looked alike; they are drawn in the system's colours.
+- Skip with a slow answer blanked the playing card until the answer came; it comes back after a second.
+- With nothing to play, the card that invites adding music repainted the page sixty times a second for as long as it
+  was open, and the listening bars seventy; both now move what the graphics card moves by itself (near nothing at
+  rest, twelve a second while listening), and the card rests lit after a few breaths. The look is the same.
+- A start-up that could not reach jukecord left a blank page; the waiting page shows and the panel tries again.
+- The playing card's keys left Remove alone on a second row at some two-column widths; they drop their words by the
+  width of their own row.
+- A removed row came back for a moment before it went; Enter pressed twice removed once and showed an error; the
+  focus was lost. The row stays gone, one press removes it, and the focus moves to the row that takes its place.
+- A long display name pushed the menu key off narrow screens; it is cut with an ellipsis, its whole text as a title.
+- Dragging a track's title or cover dragged its row; it carries the track's address.
+- On the dark theme faint text fell under 4.5:1 when a bright cover lit the glass behind it; it is lifted, and the
+  glass and the light stay.
+- At 200 % zoom the list of keyboard shortcuts could not be read to its end without a mouse: dialogs use the height
+  of short windows, and a list that still overflows is scrolled with the keyboard.
+- Keyboard focus: the playlists dialog opens on its first Load key; the focus stays through a rename, a delete, a new
+  or revoked token and a language change; the menu's choices are named for screen readers. Enter in the rename dialog
+  no longer opens a second one.
+- A server switch said "Reconnecting" and slid every row of the new queue in as if just added.
+- The listening bar's small disc started its turn again at every change, each volume step included.
+- Skips in quick succession cut the cover's light instead of fading it.
+- Alt+arrow at either end of the queue showed an error; it does nothing.
+- Statistics: the tooltip says "5 plays · 11-12 · 9 min" (it wrote the time listened like a time of day), the labels
+  stand under their bars, and Korean dates read 11/12 and 2026.05 (they read like decimals).
+- Touch targets of the page links on tablets, the token name field, the log's columns (they started at three places),
+  its filter and tools (they ran off the screen at 561-680 px), and Refresh on small phones.
+- With less transparency asked for, the menu, dialogs, messages and the login card are solid too.
+- The system's Back closes the open menu or dialog first, one at a time, instead of leaving the panel; the menu marks
+  the page in use.
+- The login page showed any text given in its address as an error; an unknown error says the login did not go
+  through. Its name row is left-aligned on touch screens as elsewhere.
+- On phones with a notch or rounded corners the bars and the page keep to the safe area.
+- Korean wording throughout the panel (재생 위치, 다음에 재생, 총, 현재 곡, 실행 중, 덮어씀, 만료된 로그인 링크, and the
+  refusals the panel and the bot share: 응답 코드, 스테이지 채널, "다시 시도하세요"), and an English refusal that begins
+  with jukecord's name keeps its small letter.
 - The watchdog ended jukecord when the whole process had been stopped for longer than half a minute and was let go
   again (`docker pause`, a laptop asleep), whenever its thread happened to look before the main one had moved its
   counter; every server then came back paused. A look that itself comes late now starts the count again.
-- What Discord said about a person in a server is reused for a minute and then dropped; it was kept until the next
-  start, one entry for every person who had opened the panel, in every server.
+- One client could hold every place under the cap of 4096 connections, health checks included, with ordinary
+  keep-alive connections or with answers it never read (the headers of a long audio answer, then nothing). Besides
+  the share per address, a connection on which nothing moves for two minutes is closed, as nginx does after one (a
+  browser that paused its audio asks again when it plays on), and one turned away at the cap closes the idle ones to
+  make room for the next, which the log says once a minute.
+- A client that sent many requests in one go without reading the answers (HTTP pipelining, which no browser does)
+  had every one answered and held in memory: a few connections filled the heap and stopped jukecord. And one member
+  sending a burst of the heavier reads (a year of statistics) held the event loop until the watchdog ended jukecord.
+  Both are refused cheaply now; the API's description (`/api/v1/openapi.json`, open to anyone) is made once.
 - On a small machine with other servers fetching long tracks, a server whose fetch had to wait for its place gave its
   tracks up as too slow before any of them had started, and stopped after three. The time limit of a fetch now counts
   from when it starts.
 - A track that failed on every pass of a looping queue was fetched again on every pass, for as long as the loop ran.
   It now gets one more pass, and leaves the loop when it fails again while other tracks play.
 - The reasons a track could not be got: an age-restricted video was taken for YouTube's bot check (and kept in a
-  looping queue), YouTube's bot check itself read as "it could not be downloaded", and a video for Premium members,
-  one locked by DRM, a page withheld for legal reasons (451) and a file too large were kept in a looping queue to be
-  fetched again. A premiere or a live stream still to come now says that it has not started yet.
-- One client could hold every place under the cap of 4096 connections, health checks included: with ordinary
-  keep-alive connections, or with answers it never read (the headers of a long audio answer, then nothing), which
-  were held for good. At most 256 connections now come from one address (unless `JUKECORD_TRUST_PROXY` says they come
-  through a proxy, which is then where to limit them), and a connection on which nothing moves for two minutes is
-  closed, as nginx does after one; a browser that paused its audio asks again when it plays on.
-- Reads were not limited, and the heavier ones (a year of statistics, 20 ms each) sent in a burst by one member held
-  the event loop until the watchdog ended jukecord. Reads are now held to thirty a second with sixty at once, per login
-  and per address; a panel reads a handful when it opens and gets the rest over its live connection.
+  looping queue), the bot check itself read as "it could not be downloaded", and a video for Premium members, one
+  locked by DRM, a page withheld for legal reasons (451) and a file too large were kept in a looping queue to be
+  fetched again. A premiere or a live stream still to come says that it has not started yet.
+- Tabs whose browser was gone without a goodbye (the network lost, a laptop shut) held their login's places until the
+  heartbeat found them, up to a minute, so the same browser coming back was told to close a tab or two. A connection
+  turned away at a cap has the ones holding that cap's places pinged, and those that do not answer within five
+  seconds are let go: the panel's next try gets in.
 - A member's changes that the actions refused (no DJ role) used up the rate of the whole address, so a DJ behind the
   same address was told to wait. A refused change gives its address's share back; the member's own rate still holds.
-- A connection turned away at the cap of 4096 now closes the idle ones (kept open between requests) to make room for
-  the next, and the log says so once a minute.
-- Tabs whose browser was gone without a goodbye (the network lost, a laptop shut) held their login's places until
-  the heartbeat found them, up to a minute, so the same browser coming back was told to close a tab or two. A
-  connection turned away at a cap now has the ones holding that cap's places pinged, and those that do not answer
-  within five seconds are let go: the panel's next try gets in.
-- A stop waited for any audio answer still under way, which lasts as long as a browser takes to read it, and so ran
-  into its ten seconds and ended without leaving voice or closing the database. What is still under way two seconds
-  into the stop is now cut.
-- A client that sent many requests in one go without reading the answers (HTTP pipelining, which no browser does)
-  had every one answered and held in memory: a few connections filled the heap and stopped jukecord. More than 16
-  answers under way on one connection now close it. The API's description (`/api/v1/openapi.json`, open to anyone)
-  is made once instead of for every request.
 - The live hub, the rate limits and the bot's "listening to" line timed their waits by the system clock: set back (by
   hand, or by NTP after a machine slept), it stopped queue changes reaching open panels, and a login waited out the
   difference on 429s. They time by a clock that only goes forward.
+- A listener who switched servers was missing from the listeners in the state it got, until the next listeners
+  message a second later.
+- A stop waited for any audio answer still under way, which lasts as long as a browser takes to read it, and so ran
+  into its ten seconds and ended without leaving voice or closing the database. What is still under way two seconds
+  into the stop is cut.
+- What Discord said about a person in a server is reused for a minute and then dropped; it was kept until the next
+  start, one entry for every person who had opened the panel, in every server.
+- `./jukecord restore` took a backup cut short (it has the right first bytes), swapped it in and left jukecord
+  restarting in a loop on "database disk image is malformed". The file is read whole by the image's SQLite before
+  anything is stopped, and refused with what is wrong with it. `./jukecord backup` prints the backup's whole path,
+  which `restore` takes from any folder; `./jukecord restart` after `./jukecord down` says at once that jukecord is
+  not running instead of waiting a minute; a value in `.env` with a comment after it is read as Compose reads it.
+- The chart refused the `global` values a parent chart gives every chart it depends on, so jukecord could not be a
+  dependency, and an upgrade with `--reuse-values` from 0.1.1 stopped on `podLabels`.
+- The chart says where a value belongs when it refuses one: the bot's token or the OAuth secret in `env` or
+  `extraEnv`, a name the chart sets itself, one name in both, and an OAuth secret without the application's ID (which
+  rendered, and then stopped jukecord at start). Its schema refuses what Kubernetes would refuse at install (a size
+  like `5K`, a host with a scheme, a label with a space, a range without its length, a variable with both a value and
+  a source, a peer that names nothing) and takes what Kubernetes takes (`5k`, `1Pi`, IPv6 ranges). The notes after
+  an install say when `JUKECORD_PUBLIC_URL` comes from `extraEnv`'s `valueFrom`, and that with the Ingress on and
+  `networkPolicy.ingressFrom` empty any pod of the cluster may reach the port whose `X-Forwarded-For` jukecord
+  believes.
+- The guides said how many tracks are fetched at once wrongly: up to the fetch limit ahead of time, and twice that for
+  tracks somebody is waiting for, beside them. docs/KUBERNETES.md says that a new token in an existing Secret takes
+  effect when the pod starts again; the FAQ and the troubleshooting guide, that Docker's restart policy (not the
+  systemd unit) starts a jukecord that ended itself.
+- The image build stops when a relative `.ts` path is left in the source as JavaScript (a template string, a module's
+  address made with `new URL`), which the image could not load, and when a `.js` and a `.ts` of one name sit side by
+  side. The weekly FFmpeg check reads a line's first release (9.0) as that line, and the chart's test runs when the
+  scripts or what goes into the image change.
+
+### Security
+
+- The workflows pin every outside action by commit, Docker's too, as the 0.2.0 notes said they did, and give the
+  release's token to helm through the environment instead of writing it into the step's script.
+- `/metrics` takes the standard `Forwarded` header as a sign of a proxy, as it does `X-Forwarded-For`.
+- yt-dlp and ffmpeg run without jukecord's settings in their environment, which keeps the token out of what they
+  print and pass on; the code now says that this is not a wall against a child program that turns hostile, as it runs
+  as jukecord's user.
 
 ## [0.2.0] - 2026-11-12
 
@@ -312,7 +367,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kanggu12/jukecord/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kanggu12/jukecord/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kanggu12/jukecord/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kanggu12/jukecord/releases/tag/v0.1.0

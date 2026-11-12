@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/jukecord/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/jukecord/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/jukecord/releases"><img alt="Release v0.2.0" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/jukecord/releases"><img alt="Release v0.2.1" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <img alt="Runs on amd64 and arm64" src="docs/assets/badges/platforms.svg">
 </p>
