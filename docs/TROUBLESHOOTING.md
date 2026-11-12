@@ -35,6 +35,17 @@ passing (a 5xx answer, a timeout) is tried once more by itself.
 Browsers play sound only after a click on the page; press **Listen here** again if the bar says the browser held the
 sound back. Safari versions without Ogg Opus get the MP3 copy automatically.
 
+## "Too many live connections"
+
+The panel says why jukecord turned its live connection away, and tries again by itself a little later.
+
+- "from this address": every browser seems to come from one address, which is what a reverse proxy looks like when
+  jukecord is not told about it. Set `JUKECORD_TRUST_PROXY` (`1` for one proxy in front) so each browser counts as
+  itself; twenty connections per address are allowed.
+- "for this login": one browser (or one API token) has ten live connections open already; close a few of its tabs.
+- "jukecord has as many live connections as it allows": `JUKECORD_LIVE_MAX` (1000 by default) are open. A machine
+  that can take more can be given a higher one.
+
 ## Logging in with Discord fails
 
 - `redirect_uri` errors: the address in **Redirects** must be exactly `<JUKECORD_PUBLIC_URL>/auth/callback` (or
