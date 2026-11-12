@@ -2361,12 +2361,36 @@ kbd {
   font-weight: 600;
   line-height: 16px;
 }
-/* A narrow row of keys shows their icons alone (the now-keys rule below): Skip keeps its count, and the room for it. */
-@container now-keys (max-width: 480px) {
+/* A vote under way makes Skip wider by its count, so the keys give up their words sooner than the now-keys rule below
+   has them do (the widest row of keys with words, Korean while paused by touch, takes 519 px with the count). Skip
+   keeps its count, and the room for it. */
+@container now-keys (max-width: 540px) {
+  .now .keys:has(.votes) .key:has(.label) .label {
+    display: none;
+  }
+  .now .keys:has(.votes) .key:has(.label) {
+    width: var(--control);
+    padding: 0;
+  }
   .now .keys .key[data-act="skip"]:has(.votes) {
     width: auto;
     padding: 0 10px;
   }
+}
+/* Narrower, the five keys with the count do not fit one row (a phone's card): the main key takes a row of its own and
+   the other four share the next, as on the narrowest cards. */
+@container now-keys (max-width: 400px) {
+  .now .keys:has(.votes) .key.primary {
+    flex: 1 1 100%;
+  }
+  .now .keys:has(.votes) .key:not(.primary) {
+    flex: 1 1 0;
+    width: auto;
+  }
+}
+/* The server's settings in the menu: one line each, apart. */
+.section.settings .line + .line {
+  margin-top: 12px;
 }
 
 /* ---- narrower windows ---------------------------------------------------------------------------------------- */

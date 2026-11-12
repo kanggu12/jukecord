@@ -219,8 +219,9 @@ const MADE_UP = {
     count: 3,
   },
 };
-// Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones.
-async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild } = {}) {
+// Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones;
+// `control: false`, a person without the server's DJ role; `votes`, how a vote to skip stands in the state.
+async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild, control, votes } = {}) {
   await page.route(/\/api\/v1\/(status|me|guilds)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -230,7 +231,12 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild }
         ? { ...body, discord: true, mode: 'discord', login: { discord: true } }
         : what === 'me'
           ? { ...body, ...MADE_UP.me, name, bot: MADE_UP.bot }
-          : body.map((entry) => ({ ...entry, name: guild, icon: null }));
+          : body.map((entry) => ({
+              ...entry,
+              name: guild,
+              icon: null,
+              ...(control === false ? { mayControl: false } : {}),
+            }));
     await route.fulfill({ response, json });
   });
   // The page's side of each socket, so a state can say something of its own to the page (madeUpSay below).
@@ -248,6 +254,7 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild }
         return;
       }
       if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners: MADE_UP.listeners });
+      if (data.type === 'state' && votes) data.votes = votes;
       if (data.type === 'voice') data.voice = MADE_UP.voice;
       if (data.type === 'listeners') data.listeners = MADE_UP.listeners;
       ws.send(JSON.stringify(data));
@@ -616,6 +623,26 @@ await sweep('long-queue', FEW);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 await sweep('empty', FEW);
+
+// ---- how people share the music, and the sound -------------------------------------------------------------------
+// A queue and a track playing again (the walk above left the queue empty and the player stopped).
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+// Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
+// count stays on the key when a narrow row shows icons alone).
+await sweep('vote-skip', SIZES, null, { discord: { control: false, votes: { on: true, votes: 1, needed: 2 } } });
+// The menu of someone who manages the server, with the server's settings under the DJ role.
+await sweep(
+  'menu-settings',
+  FEW,
+  async (page) => {
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .settings .switch');
+    await page.waitForTimeout(400);
+  },
+  { discord: true },
+);
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

@@ -191,7 +191,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     ),
   );
   const dj = h('div', { class: 'section', hidden: true });
-  const share = h('div', { class: 'section', hidden: true });
+  const share = h('div', { class: 'section settings', hidden: true });
   const tokens = h('div', { class: 'section' });
   const end = h('div', { class: 'section' });
   // Keyboard shortcuts mean nothing on a touch screen without a keyboard; style.css hides this item there.
@@ -309,8 +309,9 @@ async function drawShare(box: HTMLElement, guild: string): Promise<void> {
   fill(
     box,
     h('h3', null, words.serverSettings),
-    switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
+    // Votes first, under the DJ role they go with; staying in voice last.
     switchLine(words.voteSkip, words.voteSkipHint, settings.voteSkip, (on) => api['vote-skip'](guild, on)),
+    switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
   );
 }
 
