@@ -112,6 +112,7 @@ export const PlayerSchema = Type.Object(
         description: 'What the player did by itself ("Title: taken out of the looping queue"); kept until a change',
       }),
     ),
+    waiting: Type.Boolean({ description: 'Whether the loading track waits for its turn among the fetches' }),
   },
   { title: 'Player' },
 );

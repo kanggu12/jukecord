@@ -88,6 +88,8 @@ export interface PlayerSnapshot {
    * the actions' plain English like `error`; kept until a person changes the player.
    */
   readonly notice: string | null;
+  /** Whether the loading track's fetch waits for its turn among the fetches of every server (no progress yet). */
+  readonly waiting: boolean;
 }
 
 export interface PlayerOptions {
@@ -158,6 +160,8 @@ export class Player {
   private repeat: RepeatMode = 'off';
   // Download progress of the loading track, and the timer that sends it at most four times a second.
   private progress: number | null = null;
+  // Whether the loading track's fetch waits for its place among every server's fetches (see load).
+  private waiting = false;
   private progressTimer: TimerHandle | null = null;
 
   // Loading: the running fetch, its timeout, and how to start once it is done.
@@ -224,6 +228,7 @@ export class Player {
       progress: this.status === 'loading' ? this.progress : null,
       version: this.version,
       notice: this.notice,
+      waiting: this.status === 'loading' && this.waiting,
     };
   }
 
@@ -516,6 +521,7 @@ export class Player {
     this.media = null;
     this.offsetMs = startAtMs;
     this.progress = null;
+    this.waiting = false;
     const session = ++this.session;
     const controller = new AbortController();
     this.loadAbort = controller;
@@ -534,6 +540,7 @@ export class Player {
     // The time a fetch waits for its place among the fetches of every server (other servers fetching long tracks on a
     // small machine) is not its own: the limit counts from when it starts. Without that, a server whose turn had not
     // come failed three tracks in a row as too slow, and stopped, before any of them was fetched.
+    // People see that it waits for its turn ("Getting it ready" with no progress said nothing about why).
     const onWaiting = (waiting: boolean): void => {
       if (session !== this.session || this.status !== 'loading') return;
       if (!waiting) {
@@ -542,6 +549,9 @@ export class Player {
         this.options.clock.clearTimeout(this.loadTimer);
         this.loadTimer = null;
       }
+      if (this.waiting === waiting) return;
+      this.waiting = waiting;
+      this.emit();
     };
     this.emit();
     // Progress is shown while loading; a burst of reports is sent at most four times a second.

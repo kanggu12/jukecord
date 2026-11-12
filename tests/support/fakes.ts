@@ -85,6 +85,8 @@ export interface PendingPrepare {
   readonly onProgress: ((fraction: number) => void) | undefined;
   /** Whether somebody waits for the track ('now') or it is fetched ahead of time ('ahead'). */
   readonly priority: 'now' | 'ahead';
+  /** The caller's "waiting for its turn" callback, if any (true while the fetch waits for its place). */
+  readonly onWaiting: ((waiting: boolean) => void) | undefined;
   resolve(media: PreparedMedia): void;
   reject(error: Error): void;
 }
@@ -98,9 +100,10 @@ export class FakeMedia implements MediaPreparer {
     signal: AbortSignal,
     onProgress?: (fraction: number) => void,
     priority: 'now' | 'ahead' = 'now',
+    onWaiting?: (waiting: boolean) => void,
   ): Promise<PreparedMedia> {
     return new Promise<PreparedMedia>((resolve, reject) => {
-      this.calls.push({ track, signal, onProgress, priority, resolve, reject });
+      this.calls.push({ track, signal, onProgress, priority, onWaiting, resolve, reject });
       // Like the real preparer: an abort ends the fetch with an error.
       signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     });

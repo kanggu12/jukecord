@@ -31,6 +31,7 @@ const TEXT = {
   playingNow: { en: 'Playing now', ko: '지금 재생' },
   paused: { en: 'Paused', ko: '일시정지' },
   loading: { en: 'Getting it ready', ko: '준비 중' },
+  waiting: { en: 'Waiting for its turn', ko: '차례를 기다리는 중' },
   nothing: { en: 'Nothing is playing', ko: '재생 중인 곡 없음' },
   queue: { en: 'Queue', ko: '대기열' },
   empty: { en: 'The queue is empty', ko: '대기열이 비어 있음' },
@@ -139,7 +140,9 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       ? TEXT.playingNow[lang]
       : snapshot.status === 'paused'
         ? TEXT.paused[lang]
-        : TEXT.loading[lang];
+        : snapshot.waiting
+          ? TEXT.waiting[lang]
+          : TEXT.loading[lang];
   const colour =
     snapshot.status === 'playing' ? COLOUR.playing : snapshot.status === 'paused' ? COLOUR.paused : COLOUR.neutral;
   const embed = new EmbedBuilder()

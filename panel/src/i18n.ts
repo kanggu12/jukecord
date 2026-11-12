@@ -229,6 +229,8 @@ const EN = {
   startFailed: 'jukecord could not open the panel just now; trying again',
   failed: (message: string) => message,
   reload: 'jukecord was updated: reload the page',
+  // A track whose fetch waits for its place among every server's fetches.
+  waitingTurn: 'Waiting for its turn',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -451,6 +453,7 @@ const KO: Strings = {
   startFailed: 'jukecord가 지금 패널을 열지 못함: 다시 시도하는 중',
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
+  waitingTurn: '차례를 기다리는 중',
 };
 
 /** The languages. */

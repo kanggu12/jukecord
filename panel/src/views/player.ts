@@ -173,12 +173,15 @@ export function nowCard(live: Live): HTMLElement {
     pill.className = `pill tone-${tone}`;
     // Idle says itself in the title; a label saying it again would be noise.
     pill.hidden = status === 'idle';
+    // A fetch waiting for its turn among every server's fetches says so: "Getting ready" with no progress said nothing.
     const label =
-      status === 'loading' && player?.progress !== null && player?.progress !== undefined
-        ? `${words.loading} ${Math.round(player.progress * 100)}%`
-        : status === 'idle'
-          ? words.idle
-          : { playing: words.playing, paused: words.paused, loading: words.loading }[status];
+      status === 'loading' && player?.waiting
+        ? words.waitingTurn
+        : status === 'loading' && player?.progress !== null && player?.progress !== undefined
+          ? `${words.loading} ${Math.round(player.progress * 100)}%`
+          : status === 'idle'
+            ? words.idle
+            : { playing: words.playing, paused: words.paused, loading: words.loading }[status];
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The track. Everything below is redrawn only when what it shows changes (refill): the title link and the keys
     // must stay the same elements while snapshots arrive, or a click on them is lost.

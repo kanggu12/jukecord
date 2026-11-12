@@ -67,6 +67,7 @@ export class Presenter {
       progress: snapshot.progress,
       version: snapshot.version,
       notice: snapshot.notice,
+      waiting: snapshot.waiting,
     };
   }
 

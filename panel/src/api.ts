@@ -146,6 +146,8 @@ export interface Player {
   version: number;
   /** What the player did by itself ("Title: taken out of the looping queue"), kept until a person changes it. */
   notice: string | null;
+  /** Whether the loading track waits for its turn among the fetches of every server. */
+  waiting: boolean;
 }
 export interface AddResult {
   items: QueueItem[];

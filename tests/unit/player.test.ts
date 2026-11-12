@@ -483,3 +483,23 @@ describe('Player and the system clock', () => {
     assert.equal(context.player.snapshot().at, context.clock.now());
   });
 });
+
+describe('Player loading a track that waits for its turn', () => {
+  it("says the fetch waits for its turn among every server's fetches, and that it started", async () => {
+    const context = setup();
+    context.player.play();
+    const call = context.media.last();
+    assert.equal(context.player.snapshot().waiting, false);
+    // Other servers fetch long tracks on a small machine: this one waits for a place, with no progress to show.
+    call.onWaiting?.(true);
+    assert.equal(context.player.snapshot().status, 'loading');
+    assert.equal(context.player.snapshot().waiting, true);
+    assert.equal(context.snapshots.at(-1)?.waiting, true);
+    // Its turn came: it is fetched now, and the progress follows.
+    call.onWaiting?.(false);
+    assert.equal(context.player.snapshot().waiting, false);
+    context.media.finish(SONG);
+    await flush();
+    assert.equal(context.player.snapshot().waiting, false);
+  });
+});

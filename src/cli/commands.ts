@@ -65,6 +65,7 @@ interface PlayerJson {
   progress: number | null;
   error: string | null;
   notice: string | null;
+  waiting: boolean;
 }
 interface AddJson {
   items: ItemJson[];
@@ -122,7 +123,9 @@ function showPlayer(answer: unknown): string {
   const where = player.durationMs ? ` ${formatDuration(position)} / ${formatDuration(player.durationMs)}` : '';
   const state =
     player.status === 'loading'
-      ? `Getting ready${player.progress !== null ? ` (${Math.round(player.progress * 100)}%)` : ''}`
+      ? player.waiting
+        ? 'Waiting for its turn'
+        : `Getting ready${player.progress !== null ? ` (${Math.round(player.progress * 100)}%)` : ''}`
       : player.status === 'paused'
         ? 'Paused'
         : 'Playing';
