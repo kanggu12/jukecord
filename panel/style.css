@@ -2263,6 +2263,17 @@ kbd {
     padding: 0;
   }
 }
+/* On the narrowest cards (phones up to about 400 wide) the five keys do not fit one row, and the last one alone on
+   a second row read as "close". There the main key takes a row of its own and the other four share the next. */
+@container (max-width: 370px) {
+  .now .keys .key.primary {
+    flex: 1 1 100%;
+  }
+  .now .keys .key:not(.primary) {
+    flex: 1 1 0;
+    width: auto;
+  }
+}
 /* On a narrow window the bar has no room for a toast: it hangs under the bar as a strip of the bar's own glass, as
    wide as the window (the content passes under it as under the bar), and its words may take two lines. */
 @media (max-width: 900px) {
@@ -2313,6 +2324,11 @@ kbd {
     grid-template-columns: minmax(0, 1fr);
     justify-items: start;
     gap: 14px;
+  }
+  /* The disc stands at the left; the words, the bar and the keys take the card's whole width (left to fit their
+     content, they were as wide as the title, and the progress bar ended where the title did). */
+  .now .info {
+    justify-self: stretch;
   }
   .now .disc {
     --size: 112px;
