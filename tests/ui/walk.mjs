@@ -129,7 +129,15 @@ async function measure(page, name, setting, errors) {
   await page.evaluate(AUDIT);
   const result = await page.evaluate(() => window.__audit());
   const label = `${name} ${setting.theme} ${setting.lang} ${setting.width}`;
-  report.push({ state: name, ...setting, findings: result.findings, sizes: result.sizes, errors: [...errors] });
+  report.push({
+    state: name,
+    ...setting,
+    findings: result.findings,
+    sizes: result.sizes,
+    // How many different font sizes, control heights, corners, paddings and gaps the page shows, and which.
+    distinct: result.distinct,
+    errors: [...errors],
+  });
   if (SHOOT.has(setting.width) || (name === 'idle' && setting.width === 2560)) {
     await page.screenshot({ path: path.join(OUT, `${name}-${setting.theme}-${setting.lang}-${setting.width}.png`) });
     // The accessibility rules, on the same pages (each rule once per page, with where it failed first).
@@ -1351,3 +1359,23 @@ for (const entry of [...distinct.values()].slice(0, 80)) {
   process.stdout.write(`- [${entry.kind}] ${entry.where}: ${entry.detail} (x${entry.count}, first ${entry.first})\n`);
 }
 for (const entry of errors.slice(0, 10)) process.stdout.write(`! ${entry.at}: ${entry.error}\n`);
+// How many different values the pages show (a page at most, and on average), and which ones the whole walk saw: the
+// fewer, the more the panel reads as one system.
+const measured = report.filter((entry) => entry.distinct);
+if (measured.length > 0) {
+  process.stdout.write('\ndistinct values per page (at most / on average), and all the walk saw:\n');
+  for (const [kind, name] of [
+    ['fonts', 'font sizes'],
+    ['controls', 'control heights'],
+    ['radii', 'corner radii'],
+    ['paddings', 'paddings'],
+    ['gaps', 'gaps and margins'],
+  ]) {
+    const counts = measured.map((entry) => entry.distinct[kind].length);
+    const all = [...new Set(measured.flatMap((entry) => entry.distinct[kind]))].sort(
+      (a, b) => (Number.parseFloat(a) || 0) - (Number.parseFloat(b) || 0),
+    );
+    const mean = counts.reduce((sum, count) => sum + count, 0) / counts.length;
+    process.stdout.write(`  ${name}: ${Math.max(...counts)} / ${mean.toFixed(1)}; ${all.join(', ')}\n`);
+  }
+}
