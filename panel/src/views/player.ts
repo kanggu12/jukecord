@@ -1439,7 +1439,8 @@ export function addCard(): HTMLElement {
       };
     const pick = (where: Where, name: IconName, label: string) =>
       h('span', { class: 'pick', title: label, dataset: { pick: where } }, icon(name));
-    const sub = [result.uploader, result.durationMs === null ? null : clock(result.durationMs)].filter(Boolean);
+    // The length first, as the queue's rows have it: on a phone the line is cut, and the channel can lose its end.
+    const sub = [result.durationMs === null ? null : clock(result.durationMs), result.uploader].filter(Boolean);
     const element = h(
       'li',
       { class: 'result', role: 'option', id: `add-found-${index}`, 'aria-selected': 'false' },
