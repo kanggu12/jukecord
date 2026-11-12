@@ -69,6 +69,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // Changes faster than the rates allow (429), and work turned away while jukecord is behind (503).
   ['too many changes at once; try again in a moment', '한꺼번에 너무 많이 바꿈: 잠시 뒤 다시 시도하세요'],
   ['too many skips at once; try again in a moment', '한꺼번에 너무 많이 넘김: 잠시 뒤 다시 시도하세요'],
+  ['too many requests at once; try again in a moment', '한꺼번에 너무 많이 요청함: 잠시 뒤 다시 시도하세요'],
   ['jukecord is busy; try again in a moment', 'jukecord가 바쁨: 잠시 뒤 다시 시도하세요'],
   // Why a live connection ended, which the panel shows.
   ['jukecord is restarting', 'jukecord가 다시 시작하는 중'],

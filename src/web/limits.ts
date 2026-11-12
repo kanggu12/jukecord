@@ -27,6 +27,13 @@ export const CHANGES: Rate = { perSecond: 10, burst: 20 };
 /** Changes that start a fetch now (skip, play now, jump, drop): two a second, five at once. */
 export const FETCHES: Rate = { perSecond: 2, burst: 5 };
 
+/**
+ * Reads: thirty a second, sixty at once. A panel reads a handful when it opens and gets the rest over its live
+ * connection; a burst of the heavier reads (a year of statistics, a thousand-track queue) sent in one go would hold the
+ * event loop for as long as the work takes.
+ */
+export const READS: Rate = { perSecond: 30, burst: 60 };
+
 // One bucket: what it held at time `at`.
 interface Bucket {
   tokens: number;

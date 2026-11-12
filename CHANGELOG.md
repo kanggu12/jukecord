@@ -35,6 +35,9 @@ All notable changes to jukecord are documented here. The format is based on
   were held for good. At most 256 connections now come from one address (unless `JUKECORD_TRUST_PROXY` says they come
   through a proxy, which is then where to limit them), and a connection on which nothing moves for two minutes is
   closed, as nginx does after one; a browser that paused its audio asks again when it plays on.
+- Reads were not limited, and the heavier ones (a year of statistics, 20 ms each) sent in a burst by one member held
+  the event loop until the watchdog ended jukecord. Reads are now held to thirty a second with sixty at once, per login
+  and per address; a panel reads a handful when it opens and gets the rest over its live connection.
 - A stop waited for any audio answer still under way, which lasts as long as a browser takes to read it, and so ran
   into its ten seconds and ended without leaving voice or closing the database. What is still under way two seconds
   into the stop is now cut.

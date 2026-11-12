@@ -85,7 +85,7 @@ describe('Pressure', () => {
 });
 
 describe('the rates of changes and shedding when behind', () => {
-  it('holds a login to its rate with 429 and Retry-After, the host not at all, and reads not at all', async () => {
+  it('holds a login to its rate with 429 and Retry-After, the host not at all, and reads to their own', async () => {
     let now = 1_000_000;
     const server = await testServer({ rates: { now: () => now } });
     try {
@@ -102,7 +102,7 @@ describe('the rates of changes and shedding when behind', () => {
         error: { code: 'rate-limited', message: 'too many changes at once; try again in a moment' },
       });
       assert.equal(refused.headers['retry-after'], '1');
-      // Reading is not a change: the queue still answers.
+      // Reading is not a change (reads have a rate of their own): the queue still answers.
       const read = await server.web.app.inject({
         method: 'GET',
         url: api(`/guilds/${GUILD}/queue`),
@@ -115,6 +115,36 @@ describe('the rates of changes and shedding when behind', () => {
       assert.equal((await shuffle(asAlice)).statusCode, 200);
       // The host's own command line is not held to it.
       for (let i = 0; i < 50; i += 1) assert.equal((await shuffle(asHost)).statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('holds reads to a wider rate of their own, by login and by address, and the host not at all', async () => {
+    let now = 2_000_000;
+    const server = await testServer({ rates: { now: () => now } });
+    try {
+      server.directory.join(GUILD, ALICE);
+      const alice = sessionFor(server, ALICE);
+      const read = (headers: Record<string, string>, remoteAddress = '10.2.0.1') =>
+        server.web.app.inject({ method: 'GET', url: api(`/guilds/${GUILD}/stats?days=365`), headers, remoteAddress });
+      // Sixty at once pass (a panel reads a handful when it opens), the next is refused until one has come back.
+      for (let i = 0; i < 60; i += 1) assert.equal((await read({ cookie: alice.cookie })).statusCode, 200);
+      const refused = await read({ cookie: alice.cookie });
+      assert.equal(refused.statusCode, 429);
+      assert.deepEqual(refused.json(), {
+        error: { code: 'rate-limited', message: 'too many requests at once; try again in a moment' },
+      });
+      now += 34;
+      assert.equal((await read({ cookie: alice.cookie })).statusCode, 200);
+      // Without a login, the address alone counts: the public status, from an address that read nothing yet, passes.
+      const status = (remoteAddress: string) =>
+        server.web.app.inject({ method: 'GET', url: api('/status'), remoteAddress });
+      assert.equal((await status('10.2.0.9')).statusCode, 200);
+      // Alice's address is spent, whoever asks from it.
+      assert.equal((await status('10.2.0.1')).statusCode, 429);
+      // The host's own command line is held to none of it.
+      for (let i = 0; i < 100; i += 1) assert.equal((await read(asHost)).statusCode, 200);
     } finally {
       await server.close();
     }

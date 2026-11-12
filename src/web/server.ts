@@ -27,7 +27,7 @@ import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, ty
 import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
-import { Buckets, CHANGES, FETCHES, Pressure, type Rate } from './limits.ts';
+import { Buckets, CHANGES, FETCHES, Pressure, type Rate, READS } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
 
 export interface WebServerOptions {
@@ -53,7 +53,12 @@ export interface WebServerOptions {
   readonly ready: () => boolean;
   readonly discordReady: () => boolean;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
-  readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
+  readonly rates?: {
+    readonly changes?: Rate;
+    readonly fetches?: Rate;
+    readonly reads?: Rate;
+    readonly now?: () => number;
+  };
   /** Whether jukecord has fallen behind and sheds what can wait (tests set it; by default the event loop says). */
   readonly behind?: () => boolean;
   /**
@@ -105,6 +110,7 @@ const FETCHING: ReadonlySet<OperationName> = new Set(['skip', 'play-now', 'jump'
 const BUSY = 'jukecord is busy; try again in a moment';
 const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
+const TOO_MANY_READS = 'too many requests at once; try again in a moment';
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
 // do. A client that sends many in one go and reads nothing had each one answered, and each answer held in memory for a
@@ -227,6 +233,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const clock = options.rates?.now ?? Date.now;
   const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
   const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
+  const reads = new Buckets(options.rates?.reads ?? READS, { now: clock });
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
@@ -397,6 +404,14 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           if (wait > 0) return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
           changes.take(keys);
           if (fetching) fetches.take(keys);
+        }
+        // A read from anyone but the host is held to the wider rate of reads, by its login and its address (without a
+        // login, by its address alone).
+        if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
+          const keys = [...(caller ? [`login ${loginKey(caller)}`] : []), `address ${addressKey(request.ip)}`];
+          const wait = reads.wait(keys);
+          if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
+          reads.take(keys);
         }
         const params = (request.params ?? {}) as Record<string, unknown>;
         const context =
