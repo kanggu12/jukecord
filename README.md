@@ -117,8 +117,22 @@ people use most.
 - **Even loudness.** Each track is fetched once, its loudness evened out, and kept as Opus in a cache with a size
   limit. The next tracks are fetched while one plays.
 - **Statistics.** Plays per day and per hour, the most played tracks and who added most, over a week up to a year.
+- **A panel lit by the music.** Frosted glass over the colours of the cover that is playing, in light and dark, in
+  English and Korean, on a phone as on a desk. Everything works from the keyboard, and motion and transparency follow
+  the system's settings.
+- **Steady in a crowd.** A change is made into one message and compressed once for every panel that shows it. Changes
+  are held to a rate per login, a jukecord that falls behind answers "busy" instead of slowing for everyone, and one
+  that hangs ends itself and comes back paused where it was.
 - **Small and contained.** One process and one SQLite file. It fetches only from public addresses, keeps its files to
   its own user, and on Kubernetes runs as a read-only, non-root pod behind a NetworkPolicy.
+
+### Light on a small machine
+
+On two processor cores, with a year of use in it (a thousand tracks queued, 10,000 plays), jukecord rests at about
+100 MB of memory, answers every read the panel makes in about 20 ms or less, and has a four-minute track ready in
+about 3.5 s. A thousand panels open at once see each change of that queue within a tenth of a second, and cost the
+server 127 MiB and two thirds of one core while it changes three times a second
+([how it was measured](docs/TESTING.md#measurements)).
 
 <p align="center">
   <picture>

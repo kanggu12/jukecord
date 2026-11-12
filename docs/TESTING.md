@@ -6,6 +6,7 @@
 | integration      | `npm test` (with the unit tests)             | real ffmpeg with a fake yt-dlp: fetching, converting, seeking, retrying; live updates over a real WebSocket; the web server's own limits; the `jukecord` command against a real server                                                                                                                                         |
 | packaging        | `node --test "tests/packaging/**/*.test.ts"` | one version everywhere, the changelog, the API document, the Dockerfile (pins, file modes, labels, what the panel's stage copies), the Compose file's limits, the front door's help, the chart (lint, template, the values it refuses, kubeconform when installed), the workflows (pins, the release's checks) and the scripts |
 | the panel        | `tests/ui/run.sh <folder>`                   | every state at eight window sizes, both themes and both languages, measured; the browser playing along                                                                                                                                                                                                                         |
+| measurements     | `tests/perf/measure.sh [cores] [panels]`     | a server used every day for a year, on two processor cores: memory, the panel's reads, a track's encoding, a crowd of a thousand panels                                                                                                                                                                                        |
 | the chart        | `deploy/kind/check.sh <image>`               | the chart on a throwaway kind cluster                                                                                                                                                                                                                                                                                          |
 | everything quick | `npm run check`                              | lint, types, unit and integration tests                                                                                                                                                                                                                                                                                        |
 
@@ -28,6 +29,29 @@ other boxes, a sheet or dialog that something else covers, a page wider than the
 out of it, and touch targets under 44 pixels (keys, fields, the switch, the sliders and the seek bar, the logo). On the pages it photographs it also runs axe-core's accessibility
 rules (names, roles, landmarks, headings). It also presses **Listen here** and waits for the browser to be in time
 with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
+
+## Measurements
+
+`tests/perf/measure.sh` starts a throwaway jukecord with a server used every day for a year (a thousand different
+tracks, all of them queued, 10,000 plays and three playlists: `tests/perf/seed.ts`), under the limits `compose.yaml`
+sets (1 GiB of memory, read-only, no capabilities) and on two processor cores unless told otherwise. Nothing reaches
+the internet or Discord. On two cores of a desktop processor, jukecord 0.2.0 gave:
+
+| What                                                                 | Measured                                                                              |
+| :------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
+| Memory at rest, and after the reads below                            | 96 MiB, 108 MiB                                                                       |
+| The player, the playlists, the status, recently played (50)          | about 1 ms each (the median of 20)                                                    |
+| The queue, a thousand tracks (328 KiB)                               | 5 ms                                                                                  |
+| Statistics over 30 days, over a year                                 | 2 ms, 19 ms                                                                           |
+| The live state a panel gets for that queue                           | 329 KiB of JSON, sent as 42 KiB (gzip)                                                |
+| A four-minute track, its loudness evened out and encoded             | 3.5 s                                                                                 |
+| A thousand panels connected while the queue changes 3 times a second | all stay connected; a change reaches a panel in 29 ms (the median; the slowest 97 ms) |
+| The server during that crowd                                         | up to 65 % of one core, 127 MiB                                                       |
+
+The crowd is `tests/perf/crowd.ts` in a container of its own: each panel asks for gzip frames as a browser does, and
+a change is timed from the request that makes it to the frame that carries it. `tests/perf/measure.sh 2 0` leaves the
+crowd out; a first number sets the cores. Before 0.2.0, which sends each change once for every panel, two hundred
+panels at three changes a second used both cores up and the slowest were cut off.
 
 ## On arm64 without an arm64 machine
 

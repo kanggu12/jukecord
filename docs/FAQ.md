@@ -15,11 +15,12 @@ channels of your Discord servers, and your friends log in to the panel with Disc
 [Making the bot](../README.md#the-discord-bot) takes a few minutes.
 
 **How big a computer does it need?**
-At rest jukecord takes about 110 MB of memory and next to no processor time. Each track is fetched and its loudness
-evened out once, which keeps one processor core busy for a few seconds (about six for a four-minute track on a
+At rest jukecord takes about 100 MB of memory and next to no processor time. Each track is fetched and its loudness
+evened out once, which keeps one processor core busy for a few seconds (about four for a four-minute track on a
 desktop, longer on a Raspberry Pi); the next tracks are fetched while one plays. While a track plays, its file goes to
 Discord as it is, without encoding it again. The image is about 430 MB, and the cache keeps up to 2 GiB of tracks
-(`JUKECORD_CACHE_MAX`).
+(`JUKECORD_CACHE_MAX`). Compose gives the container 1 GiB of memory, which a thousand open panels do not use up
+([measurements](TESTING.md#measurements)).
 
 **Do I have to open a port on my router?**
 Not for Discord: the bot connects out to Discord, so the voice channel hears it wherever jukecord runs. Friends who
@@ -34,6 +35,17 @@ adds its tracks, and search words search YouTube. YouTube sometimes asks servers
 **Can one jukecord play in several Discord servers?**
 Yes. Each server has its own queue, player, history, playlists and DJ role, and sees only its own. Tracks fetched
 ahead of time take turns across the servers, and a track somebody is waiting for always starts at once.
+
+**How many people can use it at once?**
+As many as a group of friends has, and far more: a thousand panels open at once still see each change within a tenth
+of a second on two processor cores. The limits are there for accidents: at most a thousand open panels
+(`JUKECORD_LIVE_MAX`), ten for one login and twenty from one address; ten changes a second for one login, two for
+skipping. Past a limit jukecord says so and the panel tries again by itself.
+
+**What happens when it is overwhelmed, or stops?**
+A jukecord that falls behind answers "busy" to new audio and changes until it has caught up, so the voice channel and
+the open panels come first. One that hangs ends itself after 30 seconds, and Docker, Kubernetes or the systemd unit
+start it again; every server comes back paused where it was, and the panels reconnect by themselves.
 
 **Does the computer have to stay on?**
 Only while people listen. jukecord keeps each queue and the place in the track, and after a restart it comes back
