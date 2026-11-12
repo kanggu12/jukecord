@@ -138,6 +138,8 @@ export function nowCard(live: Live): HTMLElement {
 
   // Where a drag on the bar would seek to, shown in the tip while dragging.
   let dragging: number | null = null;
+  // Brings the card back after Skip if no answer has done it by then.
+  let skipTimer = 0;
   let drawnTrack: number | null | undefined;
   let drawnMode = '';
 
@@ -314,8 +316,13 @@ export function nowCard(live: Live): HTMLElement {
     void act(pause, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
   };
   skip.onclick = () => {
-    // The track slides out to the right while the next one is asked for.
-    if (moving()) body.classList.add('leaving');
+    // The track slides out to the right while the next one is asked for. The card does not wait for the answer to come
+    // back: a slow one (seconds, while jukecord is busy) would leave it empty all that time.
+    if (moving()) {
+      body.classList.add('leaving');
+      window.clearTimeout(skipTimer);
+      skipTimer = window.setTimeout(() => body.classList.remove('leaving'), 900);
+    }
     void act(skip, () => api.skip(guild())).finally(() => {
       // Nothing came to replace it (the end of the queue, a refusal): the card shows what it has again.
       window.setTimeout(() => body.classList.remove('leaving'), 400);
