@@ -196,6 +196,23 @@ describe('the image', () => {
     }
   });
 
+  it('names jukecord first in each step of the stages that only build, which the build-cache advice filters on', () => {
+    for (const stage of ['ytdlp', 'ffmpeg', 'deps', 'panel']) {
+      const start = dockerfile.indexOf(` AS ${stage}\n`);
+      // The stage's instructions, each with its continuation lines joined and its comment lines left out.
+      const instructions = dockerfile
+        .slice(start, dockerfile.indexOf('\nFROM ', start))
+        .split('\n')
+        .filter((line) => !/^\s*#/.test(line))
+        .join('\n')
+        .replace(/\\\n/g, ' ')
+        .split('\n');
+      for (const run of instructions.filter((line) => line.startsWith('RUN '))) {
+        assert.match(run, /^RUN (?:set -eu; +)?echo "jukecord: /, `${stage}: ${run.slice(0, 80)}`);
+      }
+    }
+  });
+
   it('sends only what the build needs', () => {
     const ignore = read('.dockerignore');
     for (const entry of ['**', '!src/**', '!panel/**', '!scripts/**', 'panel/dist'])

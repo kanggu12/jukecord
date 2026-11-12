@@ -14,10 +14,17 @@ git clone https://github.com/kanggu12/jukecord.git && cd jukecord
 ```
 
 The first `up` builds the image, compiling FFmpeg for audio (about a minute on a fast desktop, longer on a small
-machine), and makes `.env` from `.env.example`. The build leaves about 400 MB of build cache, which
-`docker builder prune` removes. The panel opens on this machine
-only; `./jukecord open` makes a login link and opens it. Put the bot's token in `.env` (the [README](../README.md#the-discord-bot)
-says how to make the bot) and run `./jukecord up` again.
+machine), and makes `.env` from `.env.example`. The panel opens on this machine only; `./jukecord open` makes a login
+link and opens it. Put the bot's token in `.env` (the [README](../README.md#the-discord-bot) says how to make the bot)
+and run `./jukecord up` again.
+
+The build leaves about 800 MB of build cache (FFmpeg's compilers and the panel's build tools), which makes the next
+`./jukecord update` quicker. To see it, and to remove it while leaving other projects' build cache alone:
+
+```bash
+docker buildx du --filter description~=jukecord
+docker buildx prune --filter description~=jukecord
+```
 
 The front door's other commands:
 

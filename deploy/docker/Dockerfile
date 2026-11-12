@@ -7,11 +7,15 @@
 # with Node (JUKECORD passes --js-runtimes node), so the image needs neither Python nor Deno.
 #
 #   docker build -f deploy/docker/Dockerfile -t jukecord .
+#
+# Each step of the stages that only build (yt-dlp, FFmpeg, the npm packages, the panel) starts by echoing a line that
+# begins with "jukecord:". Docker describes a step's build cache by its command, so that word is how
+# `docker buildx prune --filter description~=jukecord` finds this build's cache and leaves other projects' alone.
 
 # Node 26 is the current LTS (from 2026-10-28) and Debian 13 (trixie) the current stable release. Pinned by the
 # multi-platform index digest, so a rebuild gets the same base on both architectures until it is bumped on purpose.
 # Written out here and in the panel's stage, not through an ARG: Dependabot reads only FROM lines when it proposes a
-# newer digest (.github/dependabot.yml).
+# newer digest (.github/dependabot.yml). The release workflow reads this line (AS base) for the image's base labels.
 # Debian (glibc), not Alpine: musl's resolver has failed lookups in Kubernetes clusters, which the Helm chart targets.
 FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS base
 
@@ -21,7 +25,8 @@ FROM base AS ytdlp
 ARG TARGETARCH
 # Before the versions below: a build argument declared before a RUN is part of that RUN's cache key, so a newer
 # yt-dlp would fetch these again.
-RUN apt-get update \
+RUN echo "jukecord: the tools that fetch yt-dlp" \
+ && apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/*
 # Bump all three together; the sums are the release's SHA2-256SUMS lines for the two .zip assets. A weekly check
@@ -32,6 +37,7 @@ ARG YTDLP_SHA256_ARM64=74708e707e8fa8177c8347e58152337edf320149cd7b225defd453f7c
 # The one-folder build (a .zip) starts faster than the one-file build, which unpacks itself to /tmp on every run, and
 # jukecord runs yt-dlp for every lookup and every download.
 RUN set -eu; \
+    echo "jukecord: yt-dlp ${YTDLP_VERSION} for ${TARGETARCH}"; \
     case "$TARGETARCH" in \
       amd64) asset=yt-dlp_linux.zip; sum="$YTDLP_SHA256_AMD64" ;; \
       arm64) asset=yt-dlp_linux_aarch64.zip; sum="$YTDLP_SHA256_ARM64" ;; \
@@ -55,7 +61,8 @@ RUN set -eu; \
 # LGPL-3.0-or-later (version 3 for OpenSSL's licence).
 FROM base AS ffmpeg
 # Before the version below, so a newer FFmpeg reuses the compilers from the cache.
-RUN apt-get update \
+RUN echo "jukecord: the tools FFmpeg is built with" \
+ && apt-get update \
  && apt-get install -y --no-install-recommends build-essential ca-certificates curl nasm pkg-config xz-utils \
       libmp3lame-dev libopus-dev libssl-dev zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -64,6 +71,7 @@ RUN apt-get update \
 ARG FFMPEG_VERSION=7.1.5
 ARG FFMPEG_SHA256=de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f
 RUN set -eu; \
+    echo "jukecord: FFmpeg ${FFMPEG_VERSION}, for audio"; \
     curl -fsSL --retry 3 -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir /tmp/ffmpeg; \
@@ -95,7 +103,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 # Runtime packages only; install scripts off, since nothing jukecord uses needs one (native parts come prebuilt).
 # The folder is created even when there are no runtime packages, so the COPY below never fails on its absence.
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && mkdir -p node_modules
+RUN echo "jukecord: the npm packages it runs" \
+ && npm ci --omit=dev --ignore-scripts --no-audit --no-fund && mkdir -p node_modules
 
 # ---- the panel ------------------------------------------------------------------------------------------------------
 # Built once on the machine doing the build (it is plain JavaScript and CSS, the same for every architecture), with
@@ -104,14 +113,16 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && mkdir -p node_mod
 FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS panel
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund
+RUN echo "jukecord: the tools the panel is built with" \
+ && npm ci --ignore-scripts --no-audit --no-fund
 COPY scripts ./scripts
 COPY panel ./panel
 # The files outside panel/ that the panel's code imports: the refusals and failures in a person's language, which the
 # bot and the panel share, and the reasons they translate. Each lands where it is in the checkout, so the panel's
 # ../../../src/core imports resolve here as they do there (tests/packaging checks that every such import is copied).
 COPY src/core/say.ts src/core/reasons.ts ./src/core/
-RUN node scripts/build-panel.ts
+RUN echo "jukecord: the panel" \
+ && node scripts/build-panel.ts
 
 # ---- the image ------------------------------------------------------------------------------------------------------
 FROM base AS runtime
