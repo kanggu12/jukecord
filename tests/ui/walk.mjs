@@ -798,6 +798,25 @@ await sweep('listeners-guest', FEW, null, {
     },
   },
 });
+// What another app shared, on the page that adds it: for the host, and for a guest (who only listens).
+const SHARED = `/add?title=Paper%20Boats&text=${encodeURIComponent('Listen to this https://media.example/demo005')}`;
+await sweep('share', FEW, async (page) => {
+  await page.goto(`${BASE}${SHARED}`);
+  await page.waitForSelector('.share-card .share-input');
+});
+await sweep(
+  'share-guest',
+  FEW,
+  async (page) => {
+    await asGuest(page);
+    await page.goto(`${BASE}${SHARED}`);
+    await page.waitForSelector('.share-card .share-why');
+  },
+  { login: false },
+);
+await api('DELETE', '/guilds/local/queue');
+await api('POST', '/guilds/local/player/stop').catch(() => {});
+
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

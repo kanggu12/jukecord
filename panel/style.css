@@ -3146,6 +3146,24 @@ button.lyric:hover {
   }
 }
 
+/* ---- listening together: what another app shared ------------------------------------------------------------- */
+.share-card {
+  padding: var(--pad);
+  gap: 10px;
+  max-width: 720px;
+}
+.share-label {
+  margin: 0;
+}
+.share-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.share-why {
+  padding: 0;
+}
+
 /* ---- listening together: the light that moves with the music ------------------------------------------------- */
 /* While this browser listens, the glow behind the disc and the light behind the glass follow the music's low end
    (views/light.ts sets their opacity and scale, the two things a browser changes without drawing again). At rest these

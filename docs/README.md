@@ -35,6 +35,10 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   [who may do what](#who-may-do-what)).
 - **The sleep timer** (beside **Listen here** while this browser listens): this browser stops listening after 15, 30 or
   60 minutes, or when the track playing ends; the last seconds fade out. It is this browser's alone.
+- **As an app**: in a browser that offers it (Chrome or Edge's install button, Safari's **Add to Home Screen**), the
+  panel installs and opens in its own window, and opens when jukecord cannot be reached, saying so. On Android, an
+  installed panel is among the apps a video can be shared to: the shared address opens a page that adds it to the
+  queue on a press of **Add**, **Play next** or **Play now**.
 
 At the bottom, **Listen here** plays the music in this browser, in time with the voice channel; the volume is this
 browser's own. The page title shows what is playing, and the media keys and the lock screen of your computer or phone

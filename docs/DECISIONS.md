@@ -166,3 +166,12 @@ mozCaptureStream silences the element it copies) keep the glow's slow breathing.
 most about 35 times a second and only when the change shows, and nothing runs, the audio context suspended, while the
 tab is hidden, the music is paused or not heard here, or motion is off: at rest the panel does exactly what it did
 before.
+
+## The panel as an app
+
+A web app manifest with icons drawn from the mark, and a service worker that keeps only the panel's own files: never
+the API, the audio or the logins. It asks jukecord first for each file and uses its copy only when jukecord cannot be
+reached, so a new version shows at once as it did without a worker (the panel's "updated: reload" message stays the way
+to take it), and an installed panel opened while jukecord is away says so instead of showing the browser's error. The
+manifest's share target sends what another app shares to a page of the panel, which adds it on a press of a key: a
+page any site can send a browser to must not change the queue by itself.

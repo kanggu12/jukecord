@@ -134,6 +134,8 @@ people use most.
   login link. Both come with a QR code drawn by the panel.
 - **A light that moves with the music.** While a browser listens, the glow behind the disc and the light behind the
   glass follow the music's low end; it rests when the tab is hidden, the music pauses or motion is off.
+- **An app on a phone.** The panel installs to a home screen and opens like an app; on Android, sharing a video from
+  another app puts it on a page that adds it to the queue.
 - **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
   `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
   the end of the track.

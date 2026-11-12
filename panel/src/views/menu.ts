@@ -67,11 +67,19 @@ function currentPage(): string {
   return '/';
 }
 
+// The bars' colour of each theme (style.css's --bg), for the browser's own bar and an installed app's title bar.
+const THEME_COLOURS = { dark: '#0d0e12', light: '#eef0f4' } as const;
+
 /** Applies the theme and motion choices to the page. */
 export function applyLook(): void {
   const root = document.documentElement;
   if (state.theme === 'system') delete root.dataset.theme;
   else root.dataset.theme = state.theme;
+  // The browser's bar follows a theme chosen in the menu; with the system's, each of the two follows its own.
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    const own = meta.media.includes('light') ? THEME_COLOURS.light : THEME_COLOURS.dark;
+    meta.content = state.theme === 'system' ? own : THEME_COLOURS[state.theme];
+  }
   if (state.motion) delete root.dataset.motion;
   else root.dataset.motion = 'off';
   root.lang = state.lang;

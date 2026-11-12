@@ -18,14 +18,19 @@ import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
 import { act, addCard, historyCard, nowCard, queueCard, voiceCard } from './views/player.ts';
+import { addPage } from './views/shared.ts';
 
 const root = document.getElementById('app') as HTMLElement;
 
-type Route = 'player' | 'stats' | 'logs';
+type Route = 'player' | 'stats' | 'logs' | 'add';
 
 // The page a path shows; the log is the host's only.
 function routeOf(path: string): Route {
+  // A guest has the player alone (and the page of what another app shared, which says a guest only listens).
+  if (state.me?.kind === 'guest') return path.startsWith('/add') ? 'add' : 'player';
   if (path.startsWith('/stats')) return 'stats';
+  // What another app shared (the installed panel is a share target).
+  if (path.startsWith('/add')) return 'add';
   if (path.startsWith('/logs') && state.me?.kind === 'host') return 'logs';
   return 'player';
 }
@@ -227,7 +232,9 @@ function frame(): void {
     if (route === 'player') {
       fill(page);
     } else {
-      const built = collect(() => (route === 'stats' ? statsPage() : logsPage()));
+      const built = collect(() =>
+        route === 'stats' ? statsPage() : route === 'add' ? addPage(navigate, () => serversSheet(choose)) : logsPage(),
+      );
       leave = built.dispose;
       fill(page, built.value);
     }
@@ -562,3 +569,10 @@ function shortcuts(): void {
 }
 
 void boot();
+// Installable as an app: the service worker keeps the panel's own files for when jukecord cannot be reached (never the
+// API or the audio). Browsers allow one on https and on this machine only; elsewhere the panel works as before.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    // Not installed (a browser that refuses it): the panel works the same without it.
+  });
+}

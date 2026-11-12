@@ -281,6 +281,12 @@ const EN = {
   guestUntil: (date: string) => `Listening as a guest until ${date}`,
   guestOnly: 'A guest of a listening link can only listen',
   joining: 'Coming in with the listening link',
+  // What another app shared, on the page that adds it.
+  shareTitle: 'Add to the queue',
+  shareFound: 'Shared with jukecord',
+  shareServer: (name: string) => `The queue of ${name}`,
+  shareNothing: 'Nothing to add came with it',
+  shareOther: 'Another server',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -551,6 +557,11 @@ const KO: Strings = {
   guestUntil: (date: string) => `${date}까지 손님으로 듣는 중`,
   guestOnly: '듣기 링크로 들어온 손님은 듣기만 할 수 있음',
   joining: '듣기 링크로 들어가는 중',
+  shareTitle: '대기열에 넣기',
+  shareFound: 'jukecord로 공유한 것',
+  shareServer: (name: string) => `${name} 대기열`,
+  shareNothing: '넣을 것이 함께 오지 않음',
+  shareOther: '다른 서버',
 };
 
 /** The languages. */
