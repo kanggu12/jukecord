@@ -2,8 +2,9 @@
 # instead of being ignored.
 
 image:
-  # The release workflow points this at ghcr.io/<owner>/jukecord in the packaged chart.
-  repository: jukecord
+  # The released image, for amd64 and arm64. A copy in a registry of your own (docs/OFFLINE.md) or your own build goes
+  # here instead.
+  repository: ghcr.io/kanggu12/jukecord
   # Empty: the chart's appVersion.
   tag: ""
   pullPolicy: IfNotPresent

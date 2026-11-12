@@ -197,6 +197,11 @@ describe('the Helm chart', () => {
     assert.equal(schema.additionalProperties, false);
   });
 
+  it('installs the released image as it is, without the release rewriting the values', () => {
+    assert.match(read('deploy/helm/jukecord/values.yaml'), /^ {2}repository: ghcr\.io\/kanggu12\/jukecord$/m);
+    assert.doesNotMatch(read('.github/workflows/release.yml'), /sed -i[^\n]*values\.yaml/);
+  });
+
   it('lints, renders, refuses a misspelt value, and passes kubeconform', {
     skip: !have('helm') && 'helm is not installed',
   }, () => {

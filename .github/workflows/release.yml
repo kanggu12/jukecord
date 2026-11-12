@@ -160,8 +160,9 @@ jobs:
           version: v3.16.4
       - name: The Helm chart, pointing at this release's image
         run: |
-          sed -i "s#^  repository: jukecord\$#  repository: ghcr.io/${{ steps.v.outputs.owner }}/jukecord#" deploy/helm/jukecord/values.yaml
-          test "$(grep -c "repository: ghcr.io/" deploy/helm/jukecord/values.yaml)" = 1
+          # values.yaml names the image this workflow publishes, so the chart in the checkout installs as it is; a fork
+          # that releases under another owner changes it there, and this stops a chart that points elsewhere.
+          test "$(sed -n 's/^  repository: //p' deploy/helm/jukecord/values.yaml)" = "ghcr.io/${{ steps.v.outputs.owner }}/jukecord"
           helm lint deploy/helm/jukecord
           helm package deploy/helm/jukecord --version "${{ steps.v.outputs.version }}" \
             --app-version "${{ steps.v.outputs.version }}" --destination dist
