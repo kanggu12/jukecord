@@ -335,23 +335,29 @@ async function drawTokens(box: HTMLElement): Promise<void> {
             revoke,
           );
         })),
-    h('div', { class: 'line', style: 'margin-top:8px' }, h('label', { class: 'field' }, name)),
+    // A new token: its name, then what it may do and the key that makes it, the two lines apart (on a touch screen
+    // both are a finger's height, and the field touched the choices under it).
     h(
       'div',
-      { class: 'line' },
-      segmented(
-        [
-          ['read', words.scopeRead],
-          ['control', words.scopeControl],
-          ['admin', words.scopeAdmin],
-        ],
-        scope,
-        (value) => {
-          scope = value;
-        },
+      { class: 'token-new' },
+      h('div', { class: 'line' }, h('label', { class: 'field' }, name)),
+      h(
+        'div',
+        { class: 'line' },
+        segmented(
+          [
+            ['read', words.scopeRead],
+            ['control', words.scopeControl],
+            ['admin', words.scopeAdmin],
+          ],
+          scope,
+          (value) => {
+            scope = value;
+          },
+        ),
+        h('span', { class: 'grow' }),
+        make,
       ),
-      h('span', { class: 'grow' }),
-      make,
     ),
   );
 }

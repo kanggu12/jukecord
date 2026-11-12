@@ -2176,7 +2176,10 @@ kbd {
 }
 .log {
   display: grid;
-  grid-template-columns: 172px max-content 96px minmax(0, 1fr);
+  /* The time, the level, the component, the message. The level has a width of its own, as wide as its longest word
+     ("Warning"): each record is a grid of its own, and a column as wide as its own word started the component and
+     the message at three different places down the list. */
+  grid-template-columns: 172px 64px 96px minmax(0, 1fr);
   gap: 10px;
   padding: 5px var(--pad);
   border-bottom: 1px solid var(--line);
@@ -2188,8 +2191,15 @@ kbd {
   color: var(--ink-3);
 }
 .log-filter {
-  width: 240px;
+  /* Its placeholder whole, at the 16 px an input takes on a phone. */
+  width: 260px;
   flex: none;
+}
+/* The menu's new-token lines, a little apart: on a touch screen both are a finger's height. */
+.token-new {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
 }
 /* Older records come in above: the key for them sits on top of the list. */
 .card-head.log-older {
@@ -2462,7 +2472,7 @@ kbd {
   }
   /* A log record on a narrow window: time, level and component on one line, the message under them. */
   .log {
-    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-columns: auto 64px minmax(0, 1fr);
     gap: 2px 8px;
   }
   .log > :last-child {
@@ -2475,10 +2485,30 @@ kbd {
     padding: 0 10px;
   }
 }
+/* The log's tools on a window too narrow for them on one line (the levels, a filter of 260 px and Refresh): the
+   levels and Refresh on one line, the filter across the next. */
+@media (max-width: 680px) {
+  .page-head .page-tools {
+    flex-wrap: wrap;
+  }
+  .page-tools .log-filter {
+    order: 3;
+    flex: 1 1 100%;
+    width: auto;
+  }
+}
 @media (max-width: 400px) {
   /* The narrowest phones give the version's place to the server's name (/version and the status still say it). */
   .bar .version {
     display: none;
+  }
+  /* The log's Refresh shows its icon alone, so it stays on the line of the levels instead of taking one of its own. */
+  .page-tools .refresh-key .label {
+    display: none;
+  }
+  .page-tools .refresh-key {
+    width: var(--control);
+    padding: 0;
   }
 }
 @media (max-width: 560px) {
@@ -2505,15 +2535,6 @@ kbd {
   }
   .listen.idle > .key[data-act="listen"] .label {
     display: inline;
-  }
-  /* The log's tools: the levels and Refresh on one line, the filter across the next. */
-  .page-head .page-tools {
-    flex-wrap: wrap;
-  }
-  .page-tools .log-filter {
-    order: 3;
-    flex: 1 1 100%;
-    width: auto;
   }
   .tiles {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

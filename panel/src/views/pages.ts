@@ -368,7 +368,7 @@ export function logsPage(): HTMLElement {
   const title = h('h1');
   const levels = h('div', { class: 'seg', role: 'group' });
   const component = h('input', { type: 'search', autocomplete: 'off' });
-  const refresh = h('button', { class: 'key', type: 'button' });
+  const refresh = h('button', { class: 'key refresh-key', type: 'button' });
   const older = h('button', { class: 'key', type: 'button' });
   // A named region the keyboard can enter, so the records can be scrolled without a mouse.
   const list = h('div', { class: 'logs scroll', style: 'flex:1;min-height:0', role: 'region', tabindex: '0' });
@@ -472,7 +472,10 @@ export function logsPage(): HTMLElement {
     );
     component.placeholder = words.component;
     component.setAttribute('aria-label', words.component);
-    fill(refresh, icon('refresh-cw'), words.refresh);
+    // Its word in a label: the narrowest windows show the icon alone, and the key keeps its name for them.
+    fill(refresh, icon('refresh-cw'), h('span', { class: 'label' }, words.refresh));
+    refresh.title = words.refresh;
+    refresh.setAttribute('aria-label', words.refresh);
     fill(older, icon('history'), words.older);
   };
   // The filter follows the typing, a moment after the last key.
