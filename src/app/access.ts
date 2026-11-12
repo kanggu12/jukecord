@@ -56,6 +56,8 @@ export class Access {
   private readonly members = new Map<string, Remembered>();
   // Questions on their way to Discord, so ten panel requests at once ask once.
   private readonly asking = new Map<string, Promise<MemberInfo | null>>();
+  // When the answers too old to use were last dropped.
+  private sweptAt = 0;
 
   constructor(options: AccessOptions) {
     this.options = options;
@@ -133,6 +135,7 @@ export class Access {
       .member(guildId, userId)
       .then((member) => {
         this.members.set(key, { member, at: this.now() });
+        this.sweep();
         return member;
       })
       .catch((error: unknown) => {
@@ -145,5 +148,15 @@ export class Access {
       .finally(() => this.asking.delete(key));
     this.asking.set(key, question);
     return question;
+  }
+
+  // Drops the answers older than the TTL, at most once per TTL and only when a new answer comes in. An old answer is
+  // never used again (the next question asks Discord afresh), so without this the map kept a line for every person who
+  // ever opened the panel, in every server, until the next start.
+  private sweep(): void {
+    const now = this.now();
+    if (now - this.sweptAt < this.ttlMs) return;
+    this.sweptAt = now;
+    for (const [key, known] of this.members) if (now - known.at >= this.ttlMs) this.members.delete(key);
   }
 }

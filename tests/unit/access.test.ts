@@ -108,6 +108,31 @@ describe('Access', () => {
     assert.equal(directory.asked, 2);
   });
 
+  it('drops answers too old to use, so it remembers the people of the last minutes, not everyone ever seen', async () => {
+    const { directory, access, advance } = setup();
+    const remembered = () => (access as unknown as { members: Map<string, unknown> }).members.size;
+    // A thousand people open the panel once (none of them a member: the answer is remembered all the same).
+    for (let person = 0; person < 1000; person += 1) {
+      await code(() => access.context({ kind: 'user', userId: `7${String(person).padStart(17, '0')}` }, GUILD));
+    }
+    assert.equal(remembered(), 1000);
+    // Two minutes on, one more person comes: what was remembered about the thousand is of no use any more.
+    advance(120_000);
+    directory.join(GUILD, ALICE);
+    await access.context({ kind: 'user', userId: ALICE }, GUILD);
+    assert.equal(remembered(), 1);
+    // And an answer still young is kept when the old ones go.
+    advance(50_000);
+    directory.join(GUILD, BOB);
+    await access.context({ kind: 'user', userId: BOB }, GUILD);
+    advance(20_000);
+    await code(() => access.context({ kind: 'user', userId: '799999999999999999' }, GUILD));
+    assert.equal(remembered(), 2);
+    assert.equal(directory.asked, 1003);
+    await access.context({ kind: 'user', userId: BOB }, GUILD);
+    assert.equal(directory.asked, 1003);
+  });
+
   it('says Discord is not answering instead of locking people out', async () => {
     const { directory, access } = setup();
     directory.down = true;
