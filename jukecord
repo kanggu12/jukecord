@@ -3,18 +3,21 @@
 #
 #   ./jukecord up          start (builds the image the first time; makes .env from .env.example)
 #   ./jukecord open        a one-time login link for this browser (opens it when it can)
-#   ./jukecord status      is it running, which version, is Discord connected
+#   ./jukecord status      is it running, which version, is Discord connected (./jukecord version: the same)
 #   ./jukecord logs [-f]   jukecord's log (-f follows the console lines live)
 #   ./jukecord doctor      check every part jukecord needs, here and inside the container
 #   ./jukecord update      a newer image (pulled, or rebuilt from this checkout), then restart
+#   ./jukecord restart     stop and start again (a changed .env needs ./jukecord up instead)
 #   ./jukecord backup      a copy of the database, into ./backups
 #   ./jukecord restore F   put a backup back (the current database is kept beside it first)
 #   ./jukecord down        stop (the data stays in the volume)
 #   ./jukecord <command>   anything else goes to the jukecord command: np, add, skip, queue, token create ...
 #
-# Exit codes: those of the command run; 2 for a typing mistake here.
+# Exit codes: those of the command run; 1 when Docker or the settings are not usable; 2 for a typing mistake here.
 set -euo pipefail
 
+# Where the command was typed, for file names given relative to it (restore), before moving to the checkout.
+caller=$PWD
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$here"
 service=jukecord
@@ -31,12 +34,38 @@ compose() {
   docker compose "$@"
 }
 
+# Docker answering and Compose able to read compose.yaml with this .env, checked before anything else and with the
+# tools' own words when not: otherwise a stopped Docker reads as "not running", and a line in .env that Compose cannot
+# read ends a command with no message at all.
+preflight() {
+  local out
+  if ! command -v docker >/dev/null 2>&1; then
+    say "Docker is needed (https://docs.docker.com/get-docker/)"
+    exit 1
+  fi
+  # Its error alone (what it prints on stdout then is an empty line).
+  if ! out=$(docker info --format '{{.ServerVersion}}' 2>&1 >/dev/null); then
+    printf '%s\n' "$out" >&2
+    say "Docker is not answering; start it (or check DOCKER_HOST and the current docker context) and try again"
+    exit 1
+  fi
+  if ! out=$(compose config -q 2>&1); then
+    printf '%s\n' "$out" >&2
+    say "Compose cannot read compose.yaml with these settings; the line above says which (usually in .env)"
+    exit 1
+  fi
+}
+
 # This machine's time zone, so times the jukecord command prints and "today" in the statistics are local.
 timezone() {
+  local link
   if [ -n "${TZ:-}" ]; then printf '%s' "$TZ"
   elif command -v timedatectl >/dev/null 2>&1 && timedatectl show -p Timezone --value 2>/dev/null | grep -q .; then
     timedatectl show -p Timezone --value
   elif [ -f /etc/timezone ]; then cat /etc/timezone
+  # macOS (and Linux without the two above): /etc/localtime links to the zone's file, .../zoneinfo/Europe/Berlin.
+  elif link=$(readlink /etc/localtime 2>/dev/null) && [ "${link#*zoneinfo/}" != "$link" ]; then
+    printf '%s' "${link#*zoneinfo/}"
   else printf 'UTC'
   fi
 }
@@ -61,6 +90,16 @@ inside() {
 # A setting from .env as Compose reads it: the last line that sets it, without quotes around the value.
 setting() {
   sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\\1/"
+}
+
+# The image Compose runs: jukecord:local, built from this checkout, unless JUKECORD_IMAGE names a released one.
+image_name() {
+  compose config --images | head -n 1
+}
+
+# Whether that image is the one built from this checkout (jukecord:local), rather than one to pull.
+built_here() {
+  case "$1" in *jukecord:local) return 0 ;; *) return 1 ;; esac
 }
 
 # The address the panel is reached at from this machine: the public one when set, else where Compose really published
@@ -120,6 +159,11 @@ wait_ready() {
 }
 
 command=${1:-help}
+# Every command but help and doctor needs Docker and readable settings; doctor reports on both instead of stopping.
+case "$command" in
+  help | -h | --help | doctor) ;;
+  *) preflight ;;
+esac
 case "$command" in
   up)
     # Settings start from the example, readable by this user only (the bot's token goes in there).
@@ -127,6 +171,13 @@ case "$command" in
       cp .env.example .env
       chmod 600 .env
       say "made .env from .env.example; put the bot's token in it to use Discord (browser-only until then)"
+    fi
+    # The image of this checkout is built before the first start: Compose would otherwise try to pull jukecord:local
+    # from Docker Hub first and print the refusal, which reads like a failure.
+    image=$(image_name)
+    if built_here "$image" && ! docker image inspect "$image" >/dev/null 2>&1; then
+      say "building the image first (FFmpeg is compiled for audio: a few minutes, longer on a small machine)"
+      compose build
     fi
     compose up -d "${@:2}"
     wait_ready
@@ -166,17 +217,42 @@ case "$command" in
     fi
     ;;
   doctor)
-    printf 'docker: %s\n' "$(docker version --format '{{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}})' 2>/dev/null || echo 'not answering')"
-    printf 'compose: %s\n' "$(docker compose version --short 2>/dev/null || echo 'missing')"
-    printf 'settings: %s\n' "$( [ -f .env ] && echo ".env ($(stat -c %a .env 2>/dev/null || echo '?'))" || echo 'no .env (defaults)')"
-    if running; then inside doctor; else say "jukecord is not running, so only this machine was checked (./jukecord up)"; fi
+    # Each line says what was checked; a failure shows the tool's own words, and doctor ends with 1 when any failed.
+    failed=0
+    if ! command -v docker >/dev/null 2>&1; then
+      printf 'docker: missing (https://docs.docker.com/get-docker/)\n'
+      failed=1
+    elif out=$(docker info --format '{{.ServerVersion}} ({{.OSType}}/{{.Architecture}})' 2>/dev/null); then
+      printf 'docker: %s\n' "$out"
+    else
+      # Asked again for its error alone.
+      printf 'docker: not answering: %s\n' "$(docker info --format '{{.ServerVersion}}' 2>&1 >/dev/null | tr '\n' ' ')"
+      failed=1
+    fi
+    if command -v docker >/dev/null 2>&1 && out=$(docker compose version --short 2>&1); then
+      printf 'compose: %s\n' "$out"
+      # The settings as Compose reads them: a line it cannot read stops every other command.
+      if out=$(docker compose config -q 2>&1); then
+        printf 'settings: %s\n' "$([ -f .env ] && echo ".env ($(stat -c %a .env 2>/dev/null || stat -f %Lp .env 2>/dev/null || echo '?'))" || echo 'no .env (defaults)')"
+      else
+        printf 'settings: Compose cannot read them: %s\n' "$out"
+        failed=1
+      fi
+    else
+      printf 'compose: missing (https://docs.docker.com/compose/install/)\n'
+      failed=1
+    fi
+    if [ "$failed" = 0 ] && running; then
+      # The checks inside the container; their own failures count too.
+      inside doctor || failed=1
+    elif [ "$failed" = 0 ]; then
+      say "jukecord is not running, so only this machine was checked (./jukecord up)"
+      failed=1
+    fi
+    exit "$failed"
     ;;
   update)
-    image=$(compose config --images 2>/dev/null | head -n 1)
-    case "$image" in
-      *jukecord:local) compose build --pull ;;
-      *) compose pull ;;
-    esac
+    if built_here "$(image_name)"; then compose build --pull; else compose pull; fi
     compose up -d
     wait_ready
     inside status
@@ -190,8 +266,20 @@ case "$command" in
     ;;
   restore)
     file=${2:-}
-    if [ -z "$file" ] || [ ! -f "$file" ]; then
+    # A relative name is taken from where the command was typed, as any other program would.
+    case "$file" in '' | /*) ;; *) file="$caller/$file" ;; esac
+    if [ -z "$file" ]; then
       say "restore needs a backup file: ./jukecord restore backups/jukecord-<time>.db"
+      exit 2
+    fi
+    if [ ! -f "$file" ]; then
+      say "$file is not there; nothing was changed"
+      exit 2
+    fi
+    # Checked before anything is stopped: an SQLite database starts with these 15 bytes (tr drops any NUL byte, which
+    # the shell would warn about).
+    if [ "$(head -c 15 "$file" | LC_ALL=C tr -d '\000')" != "SQLite format 3" ]; then
+      say "$file is not a jukecord backup (not an SQLite database); nothing was changed"
       exit 2
     fi
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -202,8 +290,8 @@ case "$command" in
     compose stop "$service"
     # Done inside the volume as jukecord's own user, with the backup on stdin: a mounted file would keep this
     # machine's owner and mode (0600), which that user cannot read. Every step must work (set -e) or nothing changes.
-    # The file is checked to be a database before the current one is touched. The current one is folded into one file
-    # (what its write-ahead log still holds included) and kept beside the new one, so a wrong file can be undone.
+    # The file is checked again as it arrived, before the current one is touched. The current one is folded into one
+    # file (what its write-ahead log still holds included) and kept beside the new one, so a wrong file can be undone.
     # Single quotes on purpose: the script runs in the container, where its own variables expand.
     # shellcheck disable=SC2016
     swap='set -e
@@ -229,10 +317,11 @@ mv jukecord.db.restoring jukecord.db'
     inside status
     ;;
   help | -h | --help)
-    # This file by its full path: the directory changed above, so a relative $0 would point nowhere.
-    sed -n '2,15p' "$here/${BASH_SOURCE[0]##*/}" | sed 's/^# \{0,1\}//'
-    # The jukecord command's own list, when it is running to ask.
-    if running; then
+    # The comment block at the top of this file, by its full path: the directory changed above, so a relative $0
+    # would point nowhere.
+    awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$here/${BASH_SOURCE[0]##*/}"
+    # The jukecord command's own list, when it is running to ask (and without stopping here when Docker is missing).
+    if docker compose version >/dev/null 2>&1 && running; then
       printf '\n'
       inside --help
     fi

@@ -21,16 +21,17 @@ says how to make the bot) and run `./jukecord up` again.
 
 The front door's other commands:
 
-| Command                            | Does                                                                                              |
-| :--------------------------------- | :------------------------------------------------------------------------------------------------ |
-| `./jukecord status`                | whether it runs, the version, whether Discord is connected                                        |
-| `./jukecord logs` (`-f` to follow) | jukecord's log                                                                                    |
-| `./jukecord doctor`                | checks Docker, the settings, the database, ffmpeg, yt-dlp, the cache and Discord                  |
-| `./jukecord update`                | rebuilds the image from this checkout (after `git pull`), or pulls a released image, and restarts |
-| `./jukecord backup`                | a copy of the database in `./backups`                                                             |
-| `./jukecord restore <file>`        | puts a backup back; the current database is kept beside it                                        |
-| `./jukecord down`                  | stops it; the data stays in the `jukecord_jukecord-data` volume                                   |
-| `./jukecord <command>`             | the [jukecord command](README.md#the-jukecord-command): `np`, `add`, `token create` ...           |
+| Command                            | Does                                                                                                     |
+| :--------------------------------- | :------------------------------------------------------------------------------------------------------- |
+| `./jukecord status`                | whether it runs, the version, whether Discord is connected (`./jukecord version` says the same)          |
+| `./jukecord logs` (`-f` to follow) | jukecord's log                                                                                           |
+| `./jukecord doctor`                | checks Docker, the settings, the database, ffmpeg, yt-dlp, the cache and Discord; exits 1 when one fails |
+| `./jukecord update`                | rebuilds the image from this checkout (after `git pull`), or pulls a released image, and restarts        |
+| `./jukecord restart`               | stops it and starts it again (a changed `.env` needs `./jukecord up` instead)                            |
+| `./jukecord backup`                | a copy of the database in `./backups`                                                                    |
+| `./jukecord restore <file>`        | puts a backup back; the current database is kept beside it                                               |
+| `./jukecord down`                  | stops it; the data stays in the `jukecord_jukecord-data` volume                                          |
+| `./jukecord <command>`             | the [jukecord command](README.md#the-jukecord-command): `np`, `add`, `token create` ...                  |
 
 To use a released image instead of building one, set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.1.1` in `.env`.
 
@@ -115,5 +116,6 @@ the backup made before the update instead).
 
 `./jukecord backup` writes a consistent copy while jukecord runs. The media cache is not in it (tracks are fetched
 again when they are played). `./jukecord restore backups/jukecord-<time>.db` stops jukecord, puts the copy back and
-starts it again, also after `./jukecord down`. The database it replaces stays in the volume as
-`jukecord.db.before-restore-<time>`, and a file that is not a jukecord backup changes nothing.
+starts it again, also after `./jukecord down`; a relative name counts from the folder the command is typed in. The
+database it replaces stays in the volume as `jukecord.db.before-restore-<time>`, and a file that is not a jukecord
+backup is refused before anything is stopped.

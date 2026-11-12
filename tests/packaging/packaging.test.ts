@@ -173,7 +173,19 @@ describe('Compose and the front door', () => {
   it('has a front door that runs and explains itself', () => {
     assert.ok(fs.statSync('jukecord').mode & 0o100, './jukecord is not executable');
     const help = execFileSync('bash', ['jukecord', 'help'], { encoding: 'utf8' });
-    for (const command of ['up', 'open', 'status', 'logs', 'doctor', 'update', 'backup', 'restore', 'down']) {
+    for (const command of [
+      'up',
+      'open',
+      'status',
+      'version',
+      'logs',
+      'doctor',
+      'update',
+      'restart',
+      'backup',
+      'restore',
+      'down',
+    ]) {
       assert.match(help, new RegExp(`\\./jukecord ${command}\\b`));
     }
   });
