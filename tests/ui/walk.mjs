@@ -38,7 +38,8 @@ const FEW = [
 ];
 const SHOOT = new Set([412, 390, 1440]);
 // Only some states, for a quick look while working on one (ONLY=toast,menu tests/ui/run.sh <folder>): the other
-// states, the README's pictures and the playing-along check are skipped. A whole walk leaves it unset.
+// states, the README's pictures and the playing-along check are skipped; ONLY=readme takes the README's pictures
+// alone. A whole walk leaves it unset.
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
 const report = [];
 fs.mkdirSync(OUT, { recursive: true });
@@ -246,7 +247,7 @@ await sweep('discord', SIZES, null, { discord: true });
 // The README's pictures: the player with a Discord bot while a track plays, in each theme, 1600 wide (the queue's
 // tools keep their words) at 1.6 times the pixels (full colour, no quantising: a reduced palette turns the shadows
 // into steps).
-for (const theme of ONLY ? [] : ['light', 'dark']) {
+for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1000 },
     deviceScaleFactor: 1.6,
@@ -268,7 +269,7 @@ for (const theme of ONLY ? [] : ['light', 'dark']) {
 
 // And on a phone: the player listening along, the queue, and the statistics, each a picture of its own (the README's
 // figure puts them side by side).
-for (const theme of ONLY ? [] : ['light', 'dark']) {
+for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   const context = await browser.newContext({
     viewport: { width: 412, height: 915 },
     deviceScaleFactor: 2,

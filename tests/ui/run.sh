@@ -3,7 +3,7 @@
 # (tests/ui/walk.mjs), all in containers on a private network. Screenshots and report.json land in the folder given.
 #
 #   tests/ui/run.sh <output folder>
-#   ONLY=toast,menu tests/ui/run.sh <output folder>     only those states, for a quick look
+#   ONLY=toast,menu tests/ui/run.sh <output folder>     only those states, for a quick look (readme: its pictures)
 #
 # Needs the jukecord image (docker build -f deploy/docker/Dockerfile -t jukecord:dev .) and a built panel
 # (npm run build). The source is mounted over the image's, so a change needs no image rebuild.
