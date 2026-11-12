@@ -156,9 +156,11 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
 
 /**
  * The environment for a child program (yt-dlp, ffmpeg, and what yt-dlp starts in turn): the process's own, without
- * jukecord's settings. Those include the bot's token and the OAuth secret, which no child needs and which a child fed
- * with what a site sends could otherwise be made to read. Everything else (where programs are, the language, the time
- * zone, proxies, certificates) is passed on as it is, since yt-dlp and ffmpeg may need any of it.
+ * jukecord's settings. Those include the bot's token and the OAuth secret, which no child needs: kept out of their
+ * environment, they are not in what a child prints or writes when it fails, nor in what it passes on to the programs it
+ * starts. It is not a wall against a child that turns hostile: a child runs as jukecord's user, and that user can read
+ * jukecord's own environment (/proc/<pid>/environ) and its files. Everything else (where programs are, the language,
+ * the time zone, proxies, certificates) is passed on as it is, since yt-dlp and ffmpeg may need any of it.
  */
 export function childEnv(from: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
