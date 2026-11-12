@@ -27,7 +27,7 @@ statistics), the shortcuts on a short window (a page zoomed to 200 %), and the l
 The panel with a Discord bot is walked too: a made-up server, its voice channels and people listening in browsers are
 put between the page and the server, which runs browser-only. In it, someone without the DJ role sees a vote to skip
 under way at every width, and someone who manages the server opens the server's settings; the walk also takes turns
-from the queue's tools, opens the voice channel's sounds, and plays along with a sound on, changing it while it plays.
+from the queue's tools, opens the voice channel's sounds, and plays along as sounds are put on while it plays.
 The README's pictures come from the same walk.
 `tests/ui/audit.js` measures each page: text that is clipped (unless marked so, with its whole text as the title) or
 drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with translucent layers

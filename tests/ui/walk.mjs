@@ -663,8 +663,10 @@ await sweep(
   },
   { discord: true },
 );
-// Playing along with a preset on: the browser routes its audio through the preset's filters and still keeps in time.
+// Playing along as a sound comes and goes: the plain sound (no WebAudio at all), a sound put on while listening (the
+// press of Listen lets WebAudio run without another), and another: each time the audio still keeps in time.
 if (!ONLY || ONLY.has('listening-sound')) {
+  await api('PUT', '/guilds/local/voice/sound', { preset: 'off' });
   const { context, page, errors } = await open({ width: 1440, height: 900, theme: 'dark', lang: 'en', motion: 'on' });
   await page.click('[data-act="listen"]');
   let synced = false;
@@ -672,12 +674,12 @@ if (!ONLY || ONLY.has('listening-sound')) {
     await page.waitForTimeout(250);
     synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
   }
-  // A preset changed while listening (no press now: the press of Listen let WebAudio run): still in time.
-  await api('PUT', '/guilds/local/voice/sound', { preset: 'bass' });
-  await page.waitForTimeout(2500);
-  const still = await page.evaluate(() =>
-    document.querySelector('.listen .what span')?.textContent?.includes('In time'),
-  );
+  let still = true;
+  for (const preset of ['night', 'bass']) {
+    await api('PUT', '/guilds/local/voice/sound', { preset });
+    await page.waitForTimeout(2500);
+    still &&= await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+  }
   report.push({
     state: 'listening-sound',
     theme: 'dark',

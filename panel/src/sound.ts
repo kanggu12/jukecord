@@ -3,12 +3,13 @@
  * the same sound as the voice channel. The presets are core/sound.ts's table: the same shelves, peak and gain the voice
  * output asks ffmpeg for, which BiquadFilterNode computes with the same formulas.
  *
- * The audio element goes through WebAudio only once a preset is on (a page that never meets one plays it as it is),
- * and stays there after (an element can be handed to WebAudio once): with the preset off again, nothing is between
- * the element and the speakers but this browser's volume. That volume is then a gain at the end, after the preset, as
- * the voice channel's volume comes after its preset; each browser keeps its own. Browsers let WebAudio make sound only
- * after a press on the page, so the context is made (or woken) in the press of the Listen key, and the element is
- * handed over only while the context runs: a context the browser holds back would silence it.
+ * The audio element goes through WebAudio only once a preset is on: a page that never meets one makes no WebAudio at
+ * all (a running context keeps a phone's sound hardware awake) and plays the element as it is. Handed over, it stays
+ * (an element can be handed to WebAudio once): with the preset off again, nothing is between the element and the
+ * speakers but this browser's volume. That volume is then a gain at the end, after the preset, as the voice channel's
+ * volume comes after its preset; each browser keeps its own. Browsers let WebAudio make sound only after a press on
+ * the page, so the context is woken in the press of the Listen key too, and the element is handed over only while the
+ * context runs: a context the browser holds back would silence it (until then the sound stays as it is).
  */
 import { PRESET_STAGES, type SoundPreset, type SoundStage } from '../../src/core/sound.ts';
 
@@ -25,15 +26,26 @@ export class SoundGraph {
   private chain: AudioNode[] = [];
   private preset: SoundPreset = 'off';
   private volume = 1;
+  // Whether the Listen key was pressed on this page: before that the browser plays nothing here, and WebAudio made
+  // without a press would only wait for one.
+  private pressed = false;
 
   constructor(audio: HTMLAudioElement, changed: () => void = () => {}) {
     this.audio = audio;
     this.changed = changed;
   }
 
-  /** In the press of the Listen key: makes the context, or wakes it, while the browser allows it. */
+  /** In the press of the Listen key: makes the context, or wakes it, while the browser allows it, if a preset needs it. */
   unlock(): void {
-    // Browsers without WebAudio play the track as it is.
+    this.pressed = true;
+    // Nothing to put between the element and the speakers: no WebAudio.
+    if (this.preset === 'off' && !this.source) return;
+    this.start();
+  }
+
+  // Makes the context when there is none (browsers without WebAudio play the track as it is) and wakes it; the preset
+  // goes in once it runs.
+  private start(): void {
     if (typeof AudioContext === 'undefined') return;
     if (!this.context) {
       this.context = new AudioContext();
@@ -41,7 +53,8 @@ export class SoundGraph {
       // bar then asks for a press of Listen, which wakes it (see held).
       this.context.onstatechange = () => this.changed();
     }
-    this.wake();
+    if (this.context.state === 'running') this.apply();
+    else this.wake();
   }
 
   /** Wakes the context made earlier, where the browser allows it without a press (the page shown again, a media key). */
@@ -58,11 +71,13 @@ export class SoundGraph {
     return this.source !== null && this.context?.state !== 'running';
   }
 
-  /** The voice channel's preset, from the server: applied at once where the context runs, else at the next press. */
+  /** The voice channel's preset, from the server: applied at once where the browser lets WebAudio run, else at the
+   * next press of the Listen key. */
   setPreset(preset: SoundPreset): void {
     if (preset === this.preset) return;
     this.preset = preset;
-    this.apply();
+    // The plain sound on an element never handed over needs nothing; before a press of Listen, nothing plays here.
+    if (this.pressed && (preset !== 'off' || this.source)) this.start();
   }
 
   /** This browser's own volume, 0 to 1: the element's, or the gain at the end once the element is WebAudio's. */
@@ -73,7 +88,8 @@ export class SoundGraph {
   }
 
   // Puts the preset between the element and the speakers. Nothing to do for the plain sound on an element never
-  // handed over, or before the browser lets the context run.
+  // handed over, or before the browser lets the context run (never woken from here: a browser that keeps it held
+  // would otherwise be asked again and again).
   private apply(): void {
     const context = this.context;
     if (this.preset === 'off' && !this.source) return;
