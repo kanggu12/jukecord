@@ -223,6 +223,38 @@ describe('EventHub', () => {
     events.close();
   });
 
+  it('keeps sending queue changes and listeners when the system clock is set back', async () => {
+    const { events, handlers, queue } = hub({}, { queueEveryMs: 60, listenersEveryMs: 60 });
+    const browser = socket();
+    events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await settle(10);
+    const change = () => {
+      queue.version += 1;
+      handlers.get('queue')?.({ guildId: 'G' });
+    };
+    change();
+    await settle(10);
+    // The clock is set back an hour (by hand, or by NTP after a sleep): the next changes still arrive, in time.
+    const realNow = Date.now;
+    Date.now = () => realNow() - 3_600_000;
+    try {
+      for (let round = 0; round < 3; round += 1) {
+        change();
+        await settle(90);
+      }
+      browser.say({ type: 'listening', on: true });
+      await settle(90);
+    } finally {
+      Date.now = realNow;
+    }
+    assert.deepEqual(
+      browser.of('queue').map((message) => (message.queue as { version: number }).version),
+      [1, 2, 3, 4],
+    );
+    assert.ok(browser.of('listeners').length >= 1, 'no listeners message after the clock was set back');
+    events.close();
+  });
+
   it('makes a big message once, as gzip for the panels that take it and as text for the others', async () => {
     const { events, handlers, queue } = hub({}, { queueEveryMs: 0 });
     // A queue well over the 2 KiB below which messages stay text.

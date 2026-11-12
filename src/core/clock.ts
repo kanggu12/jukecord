@@ -17,6 +17,13 @@ export interface Clock {
   clearTimeout(handle: TimerHandle): void;
 }
 
+/**
+ * Milliseconds on a clock that only goes forward, from an arbitrary start: for how long ago something happened (a
+ * message held back, a rate limit, the time a step took), never for a date. The system clock can be set back or
+ * forward (by hand, or by NTP after a machine slept); a wait worked out from it would then last an hour, or not at all.
+ */
+export const steadyNow = (): number => performance.now();
+
 /** The real clock. Timers are unref'd: a pending end-of-track timer must not keep a stopping process alive. */
 export const systemClock: Clock = {
   now: () => Date.now(),

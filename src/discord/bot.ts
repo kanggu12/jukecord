@@ -30,6 +30,7 @@ import {
   type RoleInfo,
 } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
+import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
@@ -154,15 +155,16 @@ export class Bot implements Directory {
   // 15 s, the newest one winning.
   private activity: string | null = null;
   private activityTimer: NodeJS.Timeout | null = null;
-  private activitySentAt = 0;
+  // On the steady clock (core/clock.ts).
+  private activitySentAt = Number.NEGATIVE_INFINITY;
   private showActivity(title: string | null): void {
     // "Listening to" is the same line in every server; with more than one it would show one server's track to all.
     this.activity = this.client.guilds.cache.size === 1 ? title : null;
     if (this.activityTimer !== null) return;
-    const wait = Math.max(0, this.activitySentAt + 15_000 - Date.now());
+    const wait = Math.max(0, this.activitySentAt + 15_000 - steadyNow());
     this.activityTimer = setTimeout(() => {
       this.activityTimer = null;
-      this.activitySentAt = Date.now();
+      this.activitySentAt = steadyNow();
       const name = this.activity;
       this.client.user?.setActivity(name ? { name: name.slice(0, 120), type: ActivityType.Listening } : undefined);
     }, wait);

@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { steadyNow } from '../core/clock.ts';
 import { fetchLimitMs, type MediaPreparer, type PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
@@ -176,11 +177,11 @@ export class Media implements MediaPreparer {
       }
     };
     const promise = (async (): Promise<PreparedMedia> => {
-      let started = Date.now();
+      let started = steadyNow();
       try {
         // Its turn among the fetches of every server; the time it took counts from here.
         await ticket.granted;
-        started = Date.now();
+        started = steadyNow();
         // One retry after 2 s for a transient failure (see TRANSIENT); anything else fails at once.
         let loudness: number | null = null;
         for (let attempt = 1; ; attempt += 1) {
@@ -233,7 +234,7 @@ export class Media implements MediaPreparer {
         this.options.log.info('cached a track', {
           title: track.title,
           seconds: Math.round(durationMs / 1000),
-          took: `${((Date.now() - started) / 1000).toFixed(1)} s`,
+          took: `${((steadyNow() - started) / 1000).toFixed(1)} s`,
         });
         return { file: cache.opusPath(key), durationMs };
       } catch (error) {

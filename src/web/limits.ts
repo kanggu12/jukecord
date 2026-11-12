@@ -13,6 +13,7 @@
  * The health checks, logging in and what a panel reads to come back are never turned away.
  */
 import { monitorEventLoopDelay } from 'node:perf_hooks';
+import { steadyNow } from '../core/clock.ts';
 
 /** A steady rate (tokens a second) and the most that may be spent at once. */
 export interface Rate {
@@ -42,7 +43,8 @@ export class Buckets {
 
   constructor(rate: Rate, options: { now?: () => number; capacity?: number } = {}) {
     this.rate = rate;
-    this.now = options.now ?? Date.now;
+    // The steady clock: a system clock set back would otherwise leave every bucket empty for that long.
+    this.now = options.now ?? steadyNow;
     this.capacity = options.capacity ?? 10_000;
   }
 

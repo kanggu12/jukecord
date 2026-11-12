@@ -20,6 +20,7 @@ import type { WebSocket } from 'ws';
 import type { Access, Principal } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
+import { steadyNow } from '../core/clock.ts';
 import type { Logger } from '../log.ts';
 import type { UserRepository } from '../store/store.ts';
 import { addressKey, type Caller } from './auth.ts';
@@ -109,6 +110,7 @@ interface Room {
   readonly clients: Set<Client>;
   queue: QueueStart | null;
   queueTimer: NodeJS.Timeout | null;
+  // When the last queue and listener messages went, on the steady clock (core/clock.ts): never a date.
   queueSentAt: number;
   listeners: Listeners | null;
   listenersTimer: NodeJS.Timeout | null;
@@ -279,7 +281,7 @@ export class EventHub {
       // 1013: try again later. Said in the log too, at most once a minute with how many there were, and with a hint
       // for the usual cause of the per-address one.
       this.refused += 1;
-      if (Date.now() - this.refusedToldAt >= 60_000) {
+      if (steadyNow() - this.refusedToldAt >= 60_000) {
         this.options.log.info('refused live connections', {
           count: this.refused,
           last: refusal,
@@ -288,7 +290,7 @@ export class EventHub {
             : {}),
         });
         this.refused = 0;
-        this.refusedToldAt = Date.now();
+        this.refusedToldAt = steadyNow();
       }
       socket.close(1013, refusal);
       return false;
@@ -434,10 +436,10 @@ export class EventHub {
         clients: new Set(),
         queue: null,
         queueTimer: null,
-        queueSentAt: 0,
+        queueSentAt: Number.NEGATIVE_INFINITY,
         listeners: null,
         listenersTimer: null,
-        listenersSentAt: 0,
+        listenersSentAt: Number.NEGATIVE_INFINITY,
       };
       this.rooms.set(guildId, room);
     }
@@ -486,10 +488,10 @@ export class EventHub {
   // track put back and the next one taken out) are one message.
   private queueSoon(guildId: string, room: Room): void {
     if (room.queueTimer) return;
-    const wait = Math.max(0, room.queueSentAt + this.queueEveryMs - Date.now());
+    const wait = Math.max(0, room.queueSentAt + this.queueEveryMs - steadyNow());
     room.queueTimer = setTimeout(() => {
       room.queueTimer = null;
-      room.queueSentAt = Date.now();
+      room.queueSentAt = steadyNow();
       // The room may have closed meanwhile (its last connection left); then this is the old room, and nobody needs it.
       if (this.rooms.get(guildId) !== room) return;
       const start = this.queueStart(guildId, room);
@@ -530,10 +532,10 @@ export class EventHub {
     if (!room) return;
     room.listeners = null;
     if (room.listenersTimer) return;
-    const wait = Math.max(0, room.listenersSentAt + this.listenersEveryMs - Date.now());
+    const wait = Math.max(0, room.listenersSentAt + this.listenersEveryMs - steadyNow());
     room.listenersTimer = setTimeout(() => {
       room.listenersTimer = null;
-      room.listenersSentAt = Date.now();
+      room.listenersSentAt = steadyNow();
       if (this.rooms.get(guildId) !== room) return;
       const bytes = json({ type: 'listeners', guild: guildId, listeners: this.listenersOf(room) });
       this.broadcast(

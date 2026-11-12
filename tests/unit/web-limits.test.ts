@@ -32,6 +32,25 @@ describe('Buckets', () => {
     assert.ok(buckets.wait(['a']) > 0);
   });
 
+  it('is not thrown by the system clock being set back', () => {
+    // The system clock as jukecord would see it, which this test sets back; in place before the buckets are made, as
+    // the system's is.
+    const realNow = Date.now;
+    let back = 0;
+    Date.now = () => realNow() - back;
+    try {
+      const buckets = new Buckets({ perSecond: 10, burst: 2 });
+      buckets.take(['someone']);
+      back = 600_000;
+      // Ten minutes back, one token still in the bucket: no wait, and after it at most a tenth of a second.
+      assert.equal(buckets.wait(['someone']), 0);
+      buckets.take(['someone']);
+      assert.ok(buckets.wait(['someone']) <= 100, `${buckets.wait(['someone'])} ms to wait`);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it('keeps at most its capacity of keys, forgetting the least recently used', () => {
     const buckets = new Buckets({ perSecond: 1, burst: 1 }, { now: () => 0, capacity: 2 });
     buckets.take(['a']);
