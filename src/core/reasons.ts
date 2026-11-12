@@ -39,3 +39,21 @@ export function plainReason(message: string): string {
   if (/took longer|took too long|timed out|timeout/i.test(message)) return REASONS.tooLong;
   return REASONS.failed;
 }
+
+/**
+ * Whether a failure says something about the track itself that trying again will not change: removed, private,
+ * members-only, blocked, an address with nothing playable, a page that is gone (404, 410), an address refused as
+ * private. A failure of the network, the site's servers or a time limit is not: the same track may work in a minute.
+ */
+export function permanentFailure(message: string): boolean {
+  const reason = plainReason(message);
+  // The short reasons that describe the track; everything else describes the moment.
+  const forGood: readonly string[] = [
+    REASONS.unavailable,
+    REASONS.nothingToPlay,
+    REASONS.privateNetwork,
+    'the site answered 404',
+    'the site answered 410',
+  ];
+  return forGood.includes(reason);
+}

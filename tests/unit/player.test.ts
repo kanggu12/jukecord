@@ -275,6 +275,71 @@ describe('Player', () => {
     );
   });
 
+  it('puts back the tracks of a queue that ran out on failures, as three failures in a row do', async () => {
+    for (const queued of [1, 2]) {
+      const context = setup({ queued });
+      context.player.play();
+      for (let i = 0; i < queued; i += 1) {
+        context.media.last().reject(new Error('Temporary failure in name resolution'));
+        await flush();
+      }
+      // An outage with one or two tracks queued: they wait at the front, in order, instead of being thrown away.
+      assert.equal(context.player.snapshot().status, 'idle', `${queued} queued`);
+      assert.deepEqual(
+        context.queue.list(GUILD).map((item) => item.track.title),
+        context.tracks.map((track) => track.title),
+      );
+      // Added by the same person, and nothing more was fetched.
+      assert.ok(context.queue.list(GUILD).every((item) => item.addedBy === 'u1'));
+      assert.equal(context.media.calls.length, queued);
+    }
+  });
+
+  it('keeps a track that failed once in a looping queue, and drops one that is gone for good', async () => {
+    const context = setup({ queued: 3 });
+    context.player.setRepeat('queue');
+    context.player.play();
+    // Track 1 fails on a network blip: it goes back to the end of the loop, added by the same person.
+    context.media.last().reject(new Error('HTTP Error 503: Service Unavailable'));
+    await flush();
+    assert.equal(context.player.snapshot().track?.title, 'Track 2');
+    assert.deepEqual(
+      context.queue.list(GUILD).map((item) => [item.track.title, item.addedBy]),
+      [
+        ['Track 3', 'u1'],
+        ['Track 1', 'u1'],
+      ],
+    );
+    // Track 2 plays; Track 3 is gone from the site: it leaves the loop.
+    context.media.finish(SONG);
+    await flush();
+    await context.clock.advance(SONG);
+    context.media.last().reject(new Error('ERROR: [youtube] abc: Video unavailable'));
+    await flush();
+    assert.equal(context.player.snapshot().track?.title, 'Track 1');
+    assert.deepEqual(
+      context.queue.list(GUILD).map((item) => item.track.title),
+      ['Track 2'],
+    );
+  });
+
+  it('stops a looping queue after three failures in a row without putting a track back twice', async () => {
+    const context = setup({ queued: 2 });
+    context.player.setRepeat('queue');
+    context.player.play();
+    // An outage: Track 1, Track 2 and Track 1 again fail; each went back to the end of the loop when it failed.
+    for (let i = 0; i < 3; i += 1) {
+      context.media.last().reject(new Error('Temporary failure in name resolution'));
+      await flush();
+    }
+    assert.equal(context.player.snapshot().status, 'idle');
+    // The loop is whole: both tracks once each, in the loop's order.
+    assert.deepEqual(
+      context.queue.list(GUILD).map((item) => item.track.title),
+      ['Track 2', 'Track 1'],
+    );
+  });
+
   it('counts failures in a row only until someone acts', async () => {
     const context = setup({ queued: 8 });
     context.player.play();

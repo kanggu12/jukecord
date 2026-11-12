@@ -15,7 +15,7 @@ import type { HistoryRepository, PlayerStateRepository, RepeatMode } from '../st
 import type { Bus } from './bus.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { QueueService } from './queue.ts';
-import { plainReason } from './reasons.ts';
+import { permanentFailure, plainReason } from './reasons.ts';
 import type { Track } from './types.ts';
 
 /** What the player is doing. */
@@ -149,9 +149,10 @@ export class Player {
   private loadTimer: TimerHandle | null = null;
   private startAtMs = 0;
   private startPaused = false;
-  // The tracks in a row that could not be got ready (see FAILURES_BEFORE_STOP), with who added them, so a stop can
-  // put them back. A person's action (play, skip, stop ...) starts the count again.
-  private failedInRow: { track: Track; addedBy: string | null }[] = [];
+  // The tracks in a row that could not be got ready (see FAILURES_BEFORE_STOP), with who added them and whether a stop
+  // should put them back (one already back in a looping queue, or gone from it for good, is not put back twice). A
+  // person's action (play, skip, stop ...) starts the count again.
+  private failedInRow: { track: Track; addedBy: string | null; putBack: boolean }[] = [];
   // Restarts of outputs that ended early, counted per session (see outputEnded).
   private earlySession = -1;
   private earlyRestarts = 0;
@@ -550,15 +551,24 @@ export class Player {
     });
     // People see the title and a short reason (core/reasons.ts); the full text is in the line logged above.
     this.error = `${track.title}: ${plainReason(reason)}`;
-    this.failedInRow.push({ track, addedBy: this.current?.addedBy ?? null });
-    if (this.failedInRow.length >= FAILURES_BEFORE_STOP) {
+    const addedBy = this.current?.addedBy ?? null;
+    // A looping queue keeps a track that failed once (a network blip, a site's bad minute): it goes back to the end,
+    // as a finished one would. Only a failure that will not change (removed, private, not playable) takes it out of
+    // the loop for good. Either way a stop below has nothing more to put back for it.
+    const looping = this.repeat === 'queue';
+    if (looping && !permanentFailure(reason)) this.options.queue.add(this.guildId, [track.id], 'end', addedBy);
+    this.failedInRow.push({ track, addedBy, putBack: !looping });
+    // Three in a row, or a queue that ran out on failures (one or two tracks during an outage), stops the player
+    // instead of moving on: moving on would leave an empty queue and lose the tracks that failed.
+    const ranOut = this.options.queue.size(this.guildId) === 0;
+    if (this.failedInRow.length >= FAILURES_BEFORE_STOP || ranOut) {
       this.options.log.warn('stopped after tracks in a row could not be got ready', {
         guild: this.guildId,
         failures: this.failedInRow.length,
       });
       // The cause is the network or the site, not these tracks: they go back to the front of the queue, in their
       // order, for when it works again.
-      const failed = this.failedInRow;
+      const failed = this.failedInRow.filter((entry) => entry.putBack);
       this.failedInRow = [];
       for (const entry of [...failed].reverse())
         this.options.queue.add(this.guildId, [entry.track.id], 'next', entry.addedBy);
