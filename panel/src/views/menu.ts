@@ -65,9 +65,9 @@ export function applyLook(): void {
 }
 
 /** The menu. */
-export function menuSheet(navigate: (path: string) => void): void {
+export function menuSheet(navigate: (path: string) => void, onClose?: () => void): void {
   const words = t();
-  const { body, close } = sheet({ label: words.menu });
+  const { body, close } = sheet({ label: words.menu, ...(onClose ? { onClose } : {}) });
   const me = state.me;
   if (!me) return;
   // The host has no Discord name: one line, "Host" in the panel's language. A Discord login: the name, and how.

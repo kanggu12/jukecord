@@ -236,7 +236,11 @@ img {
   display: grid;
   grid-template-rows: var(--bar-h) 1fr var(--listen-h);
 }
+/* The bar holds its parts as they are, with no box round any of them (a box in the bar is a box in a box): the version
+   a word beside the name, the connection its lamp and its word, the pages their words with the one in use underlined
+   along the bar's foot, the account a bare key. Under the pointer a part takes a faint tint of the bar's glass. */
 .bar {
+  --bar-hover: color-mix(in oklch, var(--ink) 6%, transparent);
   position: sticky;
   top: 0;
   z-index: 30;
@@ -274,9 +278,6 @@ img {
   font-size: 12px;
   font-weight: 500;
   color: var(--ink-2);
-  padding: 1px 6px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
   font-variant-numeric: tabular-nums;
   line-height: 18px;
 }
@@ -300,8 +301,7 @@ img {
   max-width: 320px;
 }
 .server:hover:not(:disabled) {
-  background: var(--raised);
-  border-color: var(--line);
+  background: var(--bar-hover);
 }
 .server:disabled {
   cursor: default;
@@ -351,6 +351,18 @@ img {
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--tone, var(--ink-3)) 22%, transparent);
   flex: none;
 }
+/* In the bar the connection is a lamp and its word: no tint behind it, the lamp lit in its colour. */
+.bar > .pill {
+  background: none;
+  padding: 0 4px;
+  color: var(--ink-2);
+}
+.bar > .pill.tone-bad {
+  color: var(--tone);
+}
+.bar > .pill .dot {
+  box-shadow: 0 0 7px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 60%, transparent);
+}
 .tone-play {
   --tone: var(--play);
 }
@@ -378,6 +390,7 @@ img {
   flex: none;
 }
 .nav a {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -390,11 +403,21 @@ img {
 }
 .nav a:hover {
   color: var(--ink);
-  background: var(--raised);
+  background: var(--bar-hover);
 }
 .nav a[aria-current="page"] {
   color: var(--ink);
-  background: var(--raised-2);
+}
+/* The page in use: a line along the bar's foot under its word (half the bar's spare height below the key). */
+.nav a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc((var(--bar-h) - var(--control)) / -2);
+  height: 2px;
+  background: var(--ink);
+  pointer-events: none;
 }
 .account {
   display: flex;
@@ -402,14 +425,15 @@ img {
   gap: 8px;
   height: var(--control);
   padding: 0 8px 0 4px;
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--r);
-  background: var(--raised);
+  background: none;
   cursor: pointer;
   flex: none;
 }
-.account:hover {
-  background: var(--raised-2);
+.account:hover,
+.account[aria-expanded="true"] {
+  background: var(--bar-hover);
 }
 .avatar {
   width: 24px;

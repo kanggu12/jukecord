@@ -254,7 +254,13 @@ function frame(): void {
     account.setAttribute('aria-label', words.menu);
   };
   server.onclick = () => serversSheet(choose);
-  account.onclick = () => menuSheet(navigate);
+  // The key says whether its menu is open (screen readers, and the bar shows it held while it is).
+  account.setAttribute('aria-haspopup', 'dialog');
+  account.setAttribute('aria-expanded', 'false');
+  account.onclick = () => {
+    account.setAttribute('aria-expanded', 'true');
+    menuSheet(navigate, () => account.setAttribute('aria-expanded', 'false'));
+  };
   watch(['status', 'guild', 'live', 'lang', 'me', 'guilds'], drawBar);
   // The tab shows what plays; on its own watch, so player snapshots do not redraw the bar.
   watch(['player'], () => {
