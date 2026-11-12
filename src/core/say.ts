@@ -26,7 +26,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['join a voice channel first, or name one', '먼저 음성 채널에 들어가거나 채널을 고르세요'],
   ['that is not a voice channel', '음성 채널이 아님'],
   ['the bot does not play on stages', '스테이지 채널에서는 재생하지 않음'],
-  ['the position must be 0 or more', '위치는 0 이상'],
+  ['the position must be 0 or more', '자리 번호는 0 이상'],
   ['there is nothing to save: the queue is empty', '저장할 곡 없음: 대기열이 비어 있음'],
   [/^longer than the (\d+) minute limit$/, '$1분보다 긴 곡'],
   ['that role is not in this server', '이 서버에 없는 역할'],
@@ -39,13 +39,16 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['could not connect to the voice channel in time', '음성 채널에 제때 연결하지 못함'],
   [
     'jukecord is still connecting to Discord; try again in a moment',
-    'jukecord가 아직 디스코드에 연결 중: 잠시 뒤 다시',
+    'jukecord가 아직 디스코드에 연결 중: 잠시 뒤 다시 시도하세요',
   ],
-  ['jukecord is looking up other tracks right now; try again in a moment', '다른 곡을 찾는 중: 잠시 뒤 다시'],
+  [
+    'jukecord is looking up other tracks right now; try again in a moment',
+    '다른 곡을 찾는 중: 잠시 뒤 다시 시도하세요',
+  ],
   ['nothing to add', '넣을 것이 없음'],
   [/^item \d+ is not in the queue$/, '대기열에 없는 곡'],
   [/^position \d+ is outside the queue \(0-(\d+)\)$/, '대기열 밖의 자리(마지막 자리 번호는 $1)'],
-  [/^Discord did not answer: .*$/, '디스코드가 답하지 않음: 잠시 뒤 다시'],
+  [/^Discord did not answer: .*$/, '디스코드가 답하지 않음: 잠시 뒤 다시 시도하세요'],
   ['you are not a member of that server', '그 서버의 멤버가 아님'],
   // The ones only the panel and the API give (the bot never meets them).
   ['log in first', '먼저 로그인하세요'],
@@ -64,9 +67,32 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     '곡 안의 시간이 아님: "$1"(예: 83, 1:23, 1m23s)',
   ],
   // Changes faster than the rates allow (429), and work turned away while jukecord is behind (503).
-  ['too many changes at once; try again in a moment', '한꺼번에 너무 많이 바꿈: 잠시 뒤 다시'],
-  ['too many skips at once; try again in a moment', '한꺼번에 너무 많이 넘김: 잠시 뒤 다시'],
-  ['jukecord is busy; try again in a moment', 'jukecord가 바쁨: 잠시 뒤 다시'],
+  ['too many changes at once; try again in a moment', '한꺼번에 너무 많이 바꿈: 잠시 뒤 다시 시도하세요'],
+  ['too many skips at once; try again in a moment', '한꺼번에 너무 많이 넘김: 잠시 뒤 다시 시도하세요'],
+  ['jukecord is busy; try again in a moment', 'jukecord가 바쁨: 잠시 뒤 다시 시도하세요'],
+  // Why a live connection ended, which the panel shows.
+  ['jukecord is restarting', 'jukecord가 다시 시작하는 중'],
+  ['logged out', '로그아웃됨'],
+  ['the login has ended', '로그인이 끝남'],
+  ['no longer allowed in that server', '그 서버를 더는 열 수 없음'],
+  ['connections come from the panel only', '패널에서만 연결할 수 있음'],
+  // Refusals of the web server and the database that a panel can meet.
+  ["the change came without the panel's CSRF token; reload the panel", 'CSRF 토큰 없이 온 변경: 패널을 새로고침하세요'],
+  ["the logout came without the panel's CSRF token", 'CSRF 토큰 없이 온 로그아웃'],
+  ['that track is not playing or queued in this server', '이 서버에서 틀고 있거나 대기열에 있는 곡이 아님'],
+  ['the track is not prepared yet', '아직 준비되지 않은 곡'],
+  [
+    'jukecord is making other MP3 copies right now; try again in a moment',
+    '다른 MP3를 만드는 중: 잠시 뒤 다시 시도하세요',
+  ],
+  ['a token name is 1 to 100 characters', '토큰 이름은 1~100자'],
+  ['the new order does not hold exactly the items in the queue', '새 순서가 지금 대기열의 곡과 맞지 않음'],
+  ['this needs the host', '호스트만 할 수 있음'],
+  [/^this needs a (\w+) token$/, '$1 권한이 있는 토큰이 필요함'],
+  [/^repeat is one of (.+)$/, '반복은 $1 중 하나'],
+  [/^no such address: (.+)$/, '없는 주소: $1'],
+  [/^playlist (\d+) does not exist$/, '없는 플레이리스트(번호 $1)'],
+  [/^position (-?\d+) is before the start of the queue$/, '대기열 시작보다 앞선 자리(번호 $1)'],
   // Why a live connection was turned away (1013), which the panel shows.
   ['jukecord has as many live connections as it allows', 'jukecord의 실시간 연결이 가득 참'],
   [
@@ -77,9 +103,9 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'too many live connections from this address; close a tab or two',
     '이 주소의 실시간 연결이 너무 많음: 탭을 몇 개 닫으세요',
   ],
-  ['too many failed logins; wait ten minutes', '로그인 실패가 너무 많음: 10분 뒤 다시'],
+  ['too many failed logins; wait ten minutes', '로그인 실패가 너무 많음: 10분 뒤 다시 시도하세요'],
   // The reasons a track could not be got (core/reasons.ts).
-  [REASONS.botCheck, '지금은 YouTube가 이 서버를 막고 있음'],
+  [REASONS.botCheck, '지금은 YouTube가 이 jukecord를 막고 있음'],
   [REASONS.privateNetwork, '사설망 주소라 가져오지 않음'],
   [REASONS.unavailable, '볼 수 없는 영상'],
   [REASONS.notYet, '아직 시작하지 않음'],
@@ -117,6 +143,8 @@ export function sayFailure(message: string, lang: Lang): string {
 /** A message from the actions as the person reads it: a sentence in their language. */
 export function sayError(message: string, lang: Lang): string {
   const said = translate(message, lang);
+  // Korean has no capitals: a translation is shown as it is, and a word in Latin letters at its start keeps its case.
+  if (said !== message) return said;
   // English (or Korean without an entry): the message as a sentence, with its capital; jukecord's name has none.
   if (said.startsWith('jukecord')) return said;
   return said.charAt(0).toUpperCase() + said.slice(1);

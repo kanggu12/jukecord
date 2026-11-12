@@ -50,7 +50,10 @@ describe('sayError', () => {
     assert.equal(sayError('there is no playlist named "Road trip"', 'ko'), '"Road trip" 플레이리스트 없음');
     assert.equal(sayError('the site answered 404', 'ko'), '사이트 응답 코드 404');
     assert.equal(sayError('position 9 is outside the queue (0-3)', 'ko'), '대기열 밖의 자리(마지막 자리 번호는 3)');
-    assert.equal(sayError('Discord did not answer: timed out', 'ko'), '디스코드가 답하지 않음: 잠시 뒤 다시');
+    assert.equal(
+      sayError('Discord did not answer: timed out', 'ko'),
+      '디스코드가 답하지 않음: 잠시 뒤 다시 시도하세요',
+    );
     for (const reason of Object.values(REASONS))
       assert.notEqual(sayError(reason, 'ko'), sayError(reason, 'en'), reason);
     // A value goes where Korean needs no particle after it: "403으로" and "404로" cannot both follow one pattern.
@@ -61,6 +64,9 @@ describe('sayError', () => {
     // English is the message as a sentence; an unknown message stays English in Korean too.
     assert.equal(sayError('nothing is playing', 'en'), 'Nothing is playing');
     assert.equal(sayError('something new', 'ko'), 'Something new');
+    // The refusals with a value that a panel can meet.
+    assert.equal(sayError('this needs a control token', 'ko'), 'control 권한이 있는 토큰이 필요함');
+    assert.equal(sayError('no such address: GET /api/v1/nothing', 'ko'), '없는 주소: GET /api/v1/nothing');
     // jukecord's name keeps its small letter at the start of a sentence, as everywhere else.
     assert.equal(
       sayError('jukecord runs without a Discord bot here, so there are no roles', 'en'),
