@@ -201,4 +201,6 @@ one not prepared yet `409`.
 | `/readyz`  | `200` when jukecord can serve requests, with whether Discord is connected; `503` otherwise |
 | `/metrics` | Prometheus text: players by state, queued tracks, the cache, panel connections, answers    |
 
-These three need no login.
+These three need no login. `/metrics` answers only a scraper beside jukecord (the same machine, cluster or local
+network): a request that came through a reverse proxy (it carries `X-Forwarded-For`) or from a public address gets a
+404, so the version and the counts are not given to the internet.

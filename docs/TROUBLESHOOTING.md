@@ -47,6 +47,13 @@ sound back. Safari versions without Ogg Opus get the MP3 copy automatically.
 It prints every settings problem at once and exits with code 2. Another message to look for: "the database is at schema
 N, newer than this jukecord knows": a newer jukecord wrote it; run the newer version or restore a backup.
 
+## jukecord started again by itself
+
+`the main thread has not answered for 30 s; ending the process so that it is started again` in `./jukecord logs`
+means jukecord was stuck and ended itself, so that Docker (or Kubernetes, or the systemd unit) would start it again:
+Docker restarts a container that exits, not one that hangs. Every server comes back paused where it was. The lines
+before it say what it was doing; please put them in an issue.
+
 ## The port is taken
 
 Set another one: `JUKECORD_PORT=8796` in `.env`, then `./jukecord up`.
