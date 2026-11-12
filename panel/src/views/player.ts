@@ -521,7 +521,14 @@ export function queueCard(): HTMLElement {
     if (control) {
       // Only the grip starts a drag, so text in the row can still be selected and links clicked.
       grip.onpointerdown = () => element.setAttribute('draggable', 'true');
+      // A press of the grip that did not become a drag leaves the row as it was (a drag would have ended in dragend).
+      grip.onpointerup = () => {
+        if (!dragged) element.removeAttribute('draggable');
+      };
       element.ondragstart = (event) => {
+        // A title link or a cover dragged out of the row is that link's or picture's own drag (it carries its address);
+        // only the row itself, made draggable by its grip, is a move.
+        if (event.target !== element) return;
         dragged = item;
         element.classList.add('dragging');
         event.dataTransfer?.setData('text/plain', String(item.id));
