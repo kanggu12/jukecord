@@ -90,7 +90,8 @@ export JUKECORD_URL=https://music.example.com JUKECORD_TOKEN=jkc_...
 node src/cli/main.ts np
 ```
 
-`jukecord --help` lists every command, and `jukecord help <command>` (or `<command> --help`) shows one. A few:
+`jukecord --help` lists every command, and `jukecord help <command>` (or `<command> --help`) shows one; through the
+front door, `./jukecord help <command>` asks the running jukecord. A few:
 
 ```bash
 ./jukecord add never gonna give you up --next

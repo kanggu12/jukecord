@@ -173,7 +173,8 @@ the backup made before the update instead).
 
 ## Backups
 
-`./jukecord backup` writes a consistent copy while jukecord runs. The media cache is not in it (tracks are fetched
+`./jukecord backup` writes a consistent copy while jukecord runs, beside it (a worker thread writes the copy, so the
+music and the panel go on meanwhile, however big the database). The media cache is not in it (tracks are fetched
 again when they are played). `./jukecord restore backups/jukecord-<time>.db` stops jukecord, puts the copy back and
 starts it again, also after `./jukecord down`; a relative name counts from the folder the command is typed in. The
 database it replaces stays in the volume as `jukecord.db.before-restore-<time>`, and a file that is not a whole
