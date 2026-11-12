@@ -10,14 +10,12 @@
  */
 import { sayError } from '../../../src/core/say.ts';
 import { ApiError, api, type Lyrics } from '../api.ts';
+import { ONE_COLUMN } from '../columns.ts';
 import { clock, fill, h, icon } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { mayControl, positionNow, state, t, watch } from '../state.ts';
 import { problem, sheet } from '../ui/layers.ts';
 
-// The windows that show one column (style.css has the same rule for the player's layout): the lyrics are a sheet
-// there, as there is no column beside the player to show them in.
-const ONE_COLUMN = '(max-width: 900px), (max-height: 720px), (pointer: coarse) and (max-height: 820px)';
 // A line is lit this much before its time: the eye reaches it as the voice does.
 const LEAD_MS = 150;
 // After the person scrolls the lines themselves, they are not moved back to the line being sung for this long.
@@ -86,6 +84,7 @@ export function lyricsView(live: Live): HTMLElement {
   // The sheet the lyrics are in on a one-column window, and whether it is being closed to move them to the card.
   let closeSheet: (() => void) | null = null;
   let rehoming = false;
+  // The windows with one column: the lyrics are a sheet there, as there is no column beside the player to show them in.
   const oneColumn = window.matchMedia(ONE_COLUMN);
 
   // The lyrics of the track playing: kept ones at once, else asked for (the answer may be for a track that has

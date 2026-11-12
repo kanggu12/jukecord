@@ -891,6 +891,29 @@ async function openLyrics(page) {
   await page.waitForTimeout(400);
 }
 await sweep('lyrics', SIZES, openLyrics);
+// A wide window short of height, with a mouse: two columns (the shorter playing card), so the lyrics open in the right
+// column as on any window with two columns, not as a sheet over both (the lyrics' rule for one column once lacked the
+// layout's "up to 1100 px wide", and opened a sheet here).
+await sweep(
+  'lyrics-short-wide',
+  [
+    [1280, 700],
+    [1366, 657],
+  ],
+  async (page) => {
+    await openLyrics(page);
+    // Where they opened: a sheet, the card in the right column, or neither.
+    const where = await page.evaluate(() =>
+      document.querySelector('.sheet .lyrics')
+        ? 'a sheet'
+        : document.querySelector('.col.side.lyrics-open > .lyrics-card:not([hidden]) > .lyrics')
+          ? 'the right column'
+          : 'nowhere to be seen',
+    );
+    if (where !== 'the right column') throw new Error(`the lyrics opened in ${where} beside two columns`);
+  },
+  { touch: false },
+);
 await sweep('lyrics-plain', FEW, async (page) => {
   page.lyricsKind = 'plain';
   await openLyrics(page);

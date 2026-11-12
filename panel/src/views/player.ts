@@ -19,6 +19,7 @@ import {
   type SearchResult,
   type Track,
 } from '../api.ts';
+import { ONE_COLUMN } from '../columns.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
@@ -1524,11 +1525,6 @@ export function looksLikeAddress(text: string): boolean {
 
 // Where an add puts what it finds: the end of the queue, next, or playing now.
 type Where = 'end' | 'next' | 'now';
-
-// The windows that show one column (style.css has the same rule for the player's layout): the page scrolls there, and
-// the add card's list of results lengthens the page.
-const ONE_COLUMN =
-  '(max-width: 900px), (max-width: 1100px) and (max-height: 720px), (pointer: coarse) and (max-height: 820px)';
 
 /**
  * Adding: an address or search words, to the end of the queue, next, or to play now. Words show what YouTube found
