@@ -125,8 +125,9 @@ people use most.
   that hangs ends itself and comes back paused where it was.
 - **Small and contained.** One process and one SQLite file. It fetches only from public addresses, keeps its files to
   its own user, and on Kubernetes runs as a read-only, non-root pod behind a NetworkPolicy.
-- **Covers from jukecord.** Each track's picture is fetched once by jukecord, from public addresses only, and kept with
-  the track in its cache; the panel shows it from there, so browsers never ask the image hosts.
+- **Covers from jukecord.** Each track's picture, and a search result's, is fetched once by jukecord, from public
+  addresses only, and kept with the track in its cache; the panel shows it from there, so browsers never ask the image
+  hosts.
 - **Wrapped.** A server's year in music, or a month, or the last 12 months: plays and hours, the song of the year (the
   track played on the most days), the most played tracks and who added most, the busiest day and hour, the longest day
   and the first track. A page under the statistics that saves itself as a picture for a story or a post, and
@@ -134,8 +135,9 @@ people use most.
 - **Looks after itself.** A server nobody hears anywhere pauses after two minutes instead of fetching for nobody;
   after a restart the bot goes back to its voice channel when people are there (or where it was asked to stay); the
   newest now-playing card in Discord follows the music and the votes to skip. An alerts channel of the server's
-  choosing hears about trouble (YouTube refusing jukecord, a restart by its watchdog, a full disk, a track leaving a
-  looping queue, connections turned away), and a backup can be made every day at a time of the host's choosing.
+  choosing hears about trouble (YouTube refusing jukecord, a restart by its watchdog, a disk nearly full, a daily
+  backup that failed, a track leaving a looping queue, connections turned away), and a backup can be made every day at
+  a time of the host's choosing.
 - **Lyrics in time.** The words of the track playing, from [LRCLIB](https://lrclib.net), beside the player (a sheet on a
   phone) with the line being sung lit; whoever may change the music picks a line to play from there. Also `/lyrics`,
   `jukecord lyrics` and the API; `JUKECORD_LYRICS=off` turns them off.
@@ -146,17 +148,18 @@ people use most.
 - **A light that moves with the music.** While a browser listens, the glow behind the disc and the light behind the
   glass follow the music's low end; it rests when the tab is hidden, the music pauses or motion is off.
 - **An app on a phone.** The panel installs to a home screen and opens like an app; on Android, sharing a video from
-  another app puts it on a page that adds it to the queue.
+  another app opens a page to add it to the queue.
 - **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
   `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
   the end of the track.
 - **Fair in a crowd.** Where a server has a DJ role, Skip from anyone else is a vote: the track goes when half of the
-  people listening, in the voice channel and in browsers, have voted. People can take turns in the queue, each person
-  can be held to a number of tracks, and the bot can stay in voice all day.
+  people listening, in the voice channel and in their browsers, have voted (guests of a listening link do not vote).
+  People can take turns in the queue, each person can be held to a number of tracks, and the bot can stay in voice
+  all day.
 - **One sound for everyone.** A volume for the voice channel up to 200 % and sounds to choose (more bass, clearer
   voices, brighter, softer at night). Browsers listening along apply the same sound, so the voice channel and every
   browser hear the same.
-- **Search and pick.** Search words show what YouTube found beside the add field as you type (title, channel, length,
+- **Search and pick.** Search words show what YouTube found under the add field as you type (title, channel, length,
   cover), to play now, next or add; Discord suggests the same under `/play` and `/add`. A link pasted or dropped
   anywhere on the page is added.
 - **Autoplay.** When the queue runs out, a track from the server's own plays (the ones played and liked more, more
