@@ -446,3 +446,40 @@ describe('Player failures after a restart', () => {
     assert.equal(context.player.snapshot().status, 'paused');
   });
 });
+
+describe('Player and the system clock', () => {
+  it('keeps its place and its seeks when the system clock is set back an hour', async () => {
+    const context = setup();
+    await startPlaying(context);
+    await context.clock.advance(20_000);
+    // A seek, then the clock is set back (by hand, or by NTP after a machine slept), then another seek.
+    context.player.seek(30_000);
+    context.clock.jump(-3_600_000);
+    // The place is where the track is, not an hour before its start.
+    assert.equal(context.player.snapshot().positionMs, 30_000);
+    // The second seek waits for the cooldown it is inside of (400 ms), not for an hour.
+    assert.equal(context.player.seek(90_000), true);
+    await context.clock.advance(500);
+    assert.equal(context.player.snapshot().positionMs, 90_100);
+  });
+
+  it('does not run to the end of the track or cut it when the clock jumps forward', async () => {
+    const context = setup();
+    const output = new FakeOutput();
+    context.player.attach(output);
+    await startPlaying(context);
+    await context.clock.advance(20_000);
+    // A machine that wakes up, or a clock put right: an hour later at once.
+    context.clock.jump(3_600_000);
+    assert.equal(context.player.snapshot().positionMs, 20_000);
+    // Paused and played on: the track goes on from there, past the 5 s grace an output has to report its end.
+    context.player.pause();
+    context.player.resume();
+    await context.clock.advance(6500);
+    assert.equal(context.player.snapshot().track?.title, 'Track 1');
+    assert.equal(context.player.snapshot().status, 'playing');
+    assert.equal(context.player.snapshot().positionMs, 26_500);
+    // The time in the snapshot and in the history is the date, which did move.
+    assert.equal(context.player.snapshot().at, context.clock.now());
+  });
+});

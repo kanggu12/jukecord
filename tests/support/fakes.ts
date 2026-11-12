@@ -12,9 +12,15 @@ export async function flush(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-/** A clock that only moves when a test moves it; timers run in order as time passes them. */
+/**
+ * A clock that only moves when a test moves it; timers run in order as time passes them. Like the real ones, its timers
+ * and its steady time follow time passing, not the date: jump() sets the date alone, as a system clock set back or
+ * forward does.
+ */
 export class FakeClock implements Clock {
+  // The steady time (which timers follow), and how far the date is from it.
   private time: number;
+  private offset = 0;
   private sequence = 0;
   private readonly timers = new Map<number, { at: number; fn: () => void }>();
 
@@ -24,7 +30,16 @@ export class FakeClock implements Clock {
   }
 
   now(): number {
+    return this.time + this.offset;
+  }
+
+  steady(): number {
     return this.time;
+  }
+
+  /** Sets the date `ms` later (or earlier, when negative) at once, without any time passing for timers. */
+  jump(ms: number): void {
+    this.offset += ms;
   }
 
   setTimeout(fn: () => void, ms: number): TimerHandle {

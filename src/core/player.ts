@@ -144,7 +144,9 @@ export class Player {
   private status: PlayerStatus = 'idle';
   private current: Current | null = null;
   private media: PreparedMedia | null = null;
-  // The position at clock time `anchor`. While playing the position is offsetMs + (now - anchor); otherwise offsetMs.
+  // The position at steady time `anchor` (the clock's steady(), never the date: a system clock set back an hour made
+  // the place an hour before the start). While playing the position is offsetMs + (steady now - anchor); otherwise
+  // offsetMs.
   private offsetMs = 0;
   private anchor = 0;
   // Bumped on every start of the outputs and every change of track; see the module comment.
@@ -201,7 +203,7 @@ export class Player {
   /** Where the current track is now, in milliseconds. */
   position(): number {
     if (this.status !== 'playing') return this.offsetMs;
-    const elapsed = this.options.clock.now() - this.anchor;
+    const elapsed = this.options.clock.steady() - this.anchor;
     // Never past the end: between the end and the moment the next track starts, the bar stays full.
     const end = this.media?.durationMs ?? Number.POSITIVE_INFINITY;
     return Math.min(this.offsetMs + elapsed, end);
@@ -300,7 +302,7 @@ export class Player {
     if (this.status !== 'paused' || !this.media) return false;
     this.notice = null;
     this.status = 'playing';
-    this.anchor = this.options.clock.now();
+    this.anchor = this.options.clock.steady();
     // Outputs started with this session pick up where they paused; any other output starts at the position now.
     for (const [output, session] of this.outputs) {
       if (session === this.session) output.resume();
@@ -320,7 +322,8 @@ export class Player {
   seek(targetMs: number): boolean {
     if (this.status === 'idle') return false;
     this.notice = null;
-    const now = this.options.clock.now();
+    // On the steady clock: a seek after the system clock was set back an hour was otherwise held for that hour.
+    const now = this.options.clock.steady();
     const wait = this.lastSeekAt + this.seekCooldownMs - now;
     if (wait <= 0) {
       this.applySeek(targetMs);
@@ -451,7 +454,7 @@ export class Player {
       this.record();
       current.startedAt = this.options.clock.now();
       this.offsetMs = 0;
-      this.anchor = this.options.clock.now();
+      this.anchor = this.options.clock.steady();
       this.session += 1;
       for (const output of this.outputs.keys()) this.startOutput(output);
       this.scheduleEnd();
@@ -588,7 +591,7 @@ export class Player {
       return;
     }
     this.status = 'playing';
-    this.anchor = this.options.clock.now();
+    this.anchor = this.options.clock.steady();
     this.session += 1;
     for (const output of this.outputs.keys()) this.startOutput(output);
     this.scheduleEnd();
@@ -657,7 +660,7 @@ export class Player {
 
   // Runs a seek: restarts the sound at the new place while playing, or just moves the place otherwise.
   private applySeek(targetMs: number): void {
-    this.lastSeekAt = this.options.clock.now();
+    this.lastSeekAt = this.options.clock.steady();
     const duration = this.media?.durationMs ?? this.current?.track.durationMs ?? null;
     // Keep the target inside the track (see SEEK_END_MARGIN_MS).
     const max = duration === null ? Number.POSITIVE_INFINITY : Math.max(0, duration - SEEK_END_MARGIN_MS);
@@ -673,7 +676,7 @@ export class Player {
       for (const output of this.outputs.keys()) output.stop();
     } else if (this.status === 'playing' && this.media) {
       this.offsetMs = target;
-      this.anchor = this.options.clock.now();
+      this.anchor = this.options.clock.steady();
       this.session += 1;
       for (const output of this.outputs.keys()) this.startOutput(output);
       this.scheduleEnd();

@@ -150,7 +150,7 @@ export class Prefetcher {
       const next = this.wanted(guildId).find((track) => {
         const key = MediaCache.keyOf(track.source);
         const failedAt = plan.failed.get(key);
-        const failedLately = failedAt !== undefined && clock.now() - failedAt <= FAILED_RETRY_MS;
+        const failedLately = failedAt !== undefined && clock.steady() - failedAt <= FAILED_RETRY_MS;
         return !this.options.cache.has(key) && !done.has(key) && !failedLately;
       });
       if (!next) break;
@@ -162,7 +162,7 @@ export class Prefetcher {
         done.add(key);
       } catch (error) {
         if (abort.signal.aborted) return;
-        plan.failed.set(key, clock.now());
+        plan.failed.set(key, clock.steady());
         // The player will say what is wrong when it gets there; here it is only worth a debug line.
         this.options.log.debug('prefetch failed', { guild: guildId, track: next.url, error });
       } finally {
