@@ -3055,3 +3055,117 @@ button.lyric:hover {
     display: none;
   }
 }
+
+/* ---- listening together: inviting, guests ------------------------------------------------------------------- */
+/* The key beside the people listening, at the row's end; where the row has no room for it (a narrow column, many
+   faces), it takes a line of its own under them, at the right, rather than squeezing the words beside the faces. */
+.listeners:has(> .key[data-act="invite"]) {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.listeners:has(> .key[data-act="invite"]) > .grow {
+  flex: 1 0 auto;
+}
+.listeners > .num {
+  white-space: nowrap;
+}
+.listeners > .key[data-act="invite"] {
+  margin-left: auto;
+}
+/* The Invite dialog: which link (the host's choice), the form, the link made with its QR code, the links that work. */
+.invite-tabs {
+  margin-bottom: 12px;
+}
+.invite-hint {
+  margin: 0 0 10px;
+}
+.invite-form {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.invite-made {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-row);
+  background: var(--sunk);
+}
+.invite-link {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.invite-note {
+  margin: 0;
+  font-size: 12px;
+}
+.invite-url {
+  user-select: all;
+}
+.invite h3 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.invite-links {
+  padding: 0;
+}
+/* A QR code: dark on light whatever the theme (cameras read it so), on a white tile with rounded corners. */
+.qr-box {
+  flex: none;
+  width: 156px;
+  height: 156px;
+  padding: 6px;
+  border-radius: var(--r);
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.qr {
+  display: block;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+.qr-back {
+  fill: #fff;
+}
+.qr-marks {
+  fill: #111;
+}
+@media (forced-colors: active) {
+  /* A contrast theme repaints colours; the code keeps its own, or a camera may not read it. */
+  .qr-box,
+  .qr {
+    forced-color-adjust: none;
+  }
+}
+/* A guest's card: the people listening, a face and a name each, and the guest's link under them. */
+.guest-people {
+  list-style: none;
+  margin: 0;
+  padding: 10px var(--pad);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.guest-people li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.guest-until {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px var(--pad) 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+}

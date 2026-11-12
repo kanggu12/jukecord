@@ -176,13 +176,21 @@ export const ScopeSchema = Type.Union([Type.Literal('read'), Type.Literal('contr
 
 export const MeSchema = Type.Object(
   {
-    kind: Type.Union([Type.Literal('host'), Type.Literal('user')]),
+    kind: Type.Union([Type.Literal('host'), Type.Literal('user'), Type.Literal('friend'), Type.Literal('guest')], {
+      description: 'friend: let in by the host with a login link; guest: in with a listening link',
+    }),
     id: Nullable(Type.String()),
     name: Type.String(),
     avatar: Nullable(Type.String()),
     scope: ScopeSchema,
     csrf: Nullable(Type.String({ description: 'Send as the x-jukecord-csrf header with every change (panel only)' })),
     bot: Nullable(Type.Object({ id: Type.String(), name: Type.String(), avatar: Nullable(Type.String()) })),
+    guest: Nullable(
+      Type.Object(
+        { guildId: Type.String(), expiresAt: Type.Integer() },
+        { description: "A guest's server, and when its listening link stops working" },
+      ),
+    ),
   },
   { title: 'Me' },
 );
@@ -275,4 +283,26 @@ export const LyricsSchema = Type.Object(
     ),
   },
   { title: 'Lyrics' },
+);
+
+/** A listening link as it is listed: never its code, which is shown once, when it is made. */
+export const ListenLinkSchema = Type.Object(
+  {
+    id: Type.Integer(),
+    createdBy: Nullable(Type.String({ description: 'Discord user ID; null for the host' })),
+    createdByName: Nullable(Type.String()),
+    createdAt: Type.Integer(),
+    expiresAt: Type.Integer({ description: 'When it stops working, and its guests are out' }),
+    guests: Type.Integer({ description: 'The browsers in with it now' }),
+    maxGuests: Type.Integer({ description: 'The most browsers it lets in at once' }),
+  },
+  { title: 'ListenLink' },
+);
+
+export const ListenLinkCreatedSchema = Type.Object(
+  {
+    url: Type.String({ description: 'The link to give guests: shown in this answer only, stored only as a hash' }),
+    link: ListenLinkSchema,
+  },
+  { title: 'ListenLinkCreated' },
 );

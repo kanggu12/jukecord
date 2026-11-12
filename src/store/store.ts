@@ -1302,19 +1302,21 @@ export class ListenLinkRepository {
     this.now = now;
   }
 
+  /** Keeps a new link, working from now for `lastsMs`. */
   create(link: {
     hash: string;
     guildId: string;
     createdBy: string | null;
-    expiresAt: number;
+    lastsMs: number;
     maxGuests: number;
   }): ListenLinkRow {
+    const now = this.now();
     const row = this.store.db
       .prepare(
         `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
          VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
       )
-      .get(link.hash, link.guildId, link.createdBy, this.now(), link.expiresAt, link.maxGuests) as Row;
+      .get(link.hash, link.guildId, link.createdBy, now, now + link.lastsMs, link.maxGuests) as Row;
     const made = this.get(int(row, 'id'));
     if (!made) throw new StoreError('the listening link just written cannot be read back');
     return made;

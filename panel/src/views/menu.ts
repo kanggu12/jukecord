@@ -7,6 +7,7 @@ import { avatarUrl, face, fill, guildIconUrl, h, icon, keepingFocus } from '../d
 import { pickLang } from '../i18n.ts';
 import { keep, state, t, update } from '../state.ts';
 import { confirmDialog, problem, sheet, showDialog } from '../ui/layers.ts';
+import { inviteDialog, mayInvite, when } from './invite.ts';
 import { act, ago } from './player.ts';
 
 /** The servers this login can open, in a dialog; picking one switches the panel to it. */
@@ -89,21 +90,24 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   hooks?.opened();
   const me = state.me;
   if (!me) return;
-  // The host has no Discord name: one line, "Host" in the panel's language. A Discord login: the name, and how.
+  // The host has no Discord name: one line, "Host" in the panel's language; a friend and a guest the same, a guest with
+  // until when its link works. A Discord login: the name, and how.
   const host = me.kind === 'host';
+  const named = host ? words.host : me.kind === 'friend' ? words.friend : me.kind === 'guest' ? words.guest : me.name;
+  const how =
+    me.kind === 'user'
+      ? words.discordLogin
+      : me.kind === 'guest' && me.guest
+        ? words.guestUntil(when(me.guest.expiresAt))
+        : null;
   const who = h(
     'div',
     { class: 'section' },
     h(
       'div',
       { class: 'line' },
-      face(host ? words.host : me.name, avatarUrl(me.id, me.avatar)),
-      h(
-        'div',
-        { class: 'grow' },
-        h('b', null, host ? words.host : me.name),
-        host ? null : h('div', { class: 'faint' }, words.discordLogin),
-      ),
+      face(named, avatarUrl(me.id, me.avatar)),
+      h('div', { class: 'grow' }, h('b', null, named), how ? h('div', { class: 'faint' }, how) : null),
     ),
   );
   // The pages, for narrow windows where the bar has no room for them.
@@ -204,12 +208,28 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     close();
     shortcutsDialog();
   };
-  const out = h('button', { class: 'choice', type: 'button' }, icon('log-out'), words.logOut);
+  // A guest leaves (its place under the link is free again); anyone else logs out.
+  const guest = me.kind === 'guest';
+  const out = h('button', { class: 'choice', type: 'button' }, icon('log-out'), guest ? words.leave : words.logOut);
   out.onclick = async () => {
     await logOut();
     location.assign('/login');
   };
-  fill(end, shortcuts, out);
+  // Inviting someone to listen along, for whoever may make links (the key beside the listeners opens the same).
+  const invite = h(
+    'button',
+    { class: 'choice', type: 'button', 'data-act': 'menu-invite' },
+    icon('user-plus'),
+    words.invite,
+  );
+  invite.onclick = () => {
+    close();
+    inviteDialog();
+  };
+  // A guest's menu: the look and leaving; it has no pages to move between, no shortcuts to press.
+  pages.hidden = guest;
+  shortcuts.hidden = guest;
+  fill(end, mayInvite() ? invite : null, shortcuts, out);
   fill(body, who, pages, look, dj, tokens, end);
   // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
   // which runs in the same turn).

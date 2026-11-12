@@ -135,3 +135,23 @@ guess from finding another song's words. Requests go one at a time, a third of a
 them all for as long as it says; they leave through the same address guard as yt-dlp's (a CONNECT tunnel, TLS inside
 it to LRCLIB itself), so jukecord reaches only public addresses whoever asks. `JUKECORD_LYRICS=off` turns all of it
 off. The panel and the API are given the lines with their times; a person who may change the music can seek to one.
+
+## Listening links for guests
+
+Listening along without Discord was what a host link gave, with every right. A listening link gives the least that
+listening needs: one server, the player, the queue and the lyrics, the audio of what plays or is queued there, for 1, 7
+or 30 days. A guest is a login of its own kind, with its own table of sessions (in the sessions table a login without
+a user is the host's, so a guest there would have been one row's mistake from every right), and the server answers a
+guest's request for any other operation with a refusal before anything else looks at it: an allow-list, not a list of
+what is forbidden, so a new operation is closed to guests until it is opened. The code is 32 random bytes kept as a
+hash; it travels after a `#` in the link, which browsers never send to a server, so it never lands in a server's or a
+reverse proxy's log, and the panel's page sends it to jukecord in a request of its own (from the panel's own pages
+only). A link takes 25 browsers at most, a server keeps 50 links at most, and failed codes count against an address as
+failed logins do. Revoking deletes the link and its guests' sessions, and their live connections end at once.
+
+## Friends let in by the host
+
+In browser-only mode every friend needed the host's own link. A login link can now be made for a friend who may only
+look and listen, or also change the music: a session of kind `friend` with that scope, never Manage Server, never
+tokens, and held to the rates and the caps on live connections as anyone but the host is. It is the host's way in, so
+it reaches every server the host has, and what a friend adds counts as the host's.

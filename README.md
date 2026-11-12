@@ -128,6 +128,10 @@ people use most.
 - **Lyrics in time.** The words of the track playing, from [LRCLIB](https://lrclib.net), beside the player (a sheet on a
   phone) with the line being sung lit; whoever may change the music picks a line to play from there. Also `/lyrics`,
   `jukecord lyrics` and the API; `JUKECORD_LYRICS=off` turns them off.
+- **Listening links for guests.** A link for 1, 7 or 30 days lets anyone listen along to one server in a browser
+  without a Discord account: the player, the queue and **Listen here**, nothing to change. Its maker and Manage Server
+  revoke it, which ends its guests at once. The host can also let a friend in to view or control with a one-time
+  login link. Both come with a QR code drawn by the panel.
 - **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
   `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
   the end of the track.

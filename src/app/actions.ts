@@ -5,6 +5,7 @@
  * one of these actions, and shows the result. That is what keeps them in step: a feature exists when it is an action,
  * and a test checks that every action is reachable from all four (see ACTIONS and tests/unit/parity.test.ts).
  */
+import { createHash, randomBytes } from 'node:crypto';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
@@ -15,7 +16,7 @@ import { AddressError } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import { type LyricsAnswer, type LyricsSource, LyricsUnavailable } from '../media/lyrics.ts';
 import type { Resolver } from '../media/resolver.ts';
-import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
+import type { HistoryStats, ListenLinkRow, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 
@@ -56,6 +57,9 @@ export const ACTIONS = [
   'status',
   'lyrics',
   'stop-after',
+  'listen-links',
+  'listen-link-create',
+  'listen-link-revoke',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -188,7 +192,16 @@ export interface ActionsOptions {
   readonly trackMaxMs?: number;
   /** Where lyrics come from (LRCLIB, through the database); null when they are turned off (JUKECORD_LYRICS). */
   readonly lyrics?: LyricsSource | null;
+  /** Ends the live connections of a listening link's guests (the web server's), when the link is revoked. */
+  endGuests?: ((linkId: number) => void) | null;
 }
+
+/** How long a listening link may work: a day, a week, or thirty days. */
+export const LISTEN_DAYS = [1, 7, 30] as const;
+/** How many browsers one listening link lets in at once. */
+export const GUESTS_PER_LINK = 25;
+// How many listening links a server may have working at once: plenty for friends, and a bound on the table.
+const LINKS_PER_SERVER = 50;
 
 /** What an add did: the new queue items, and how many tracks were left out and why. */
 export interface AddResult {
@@ -218,6 +231,11 @@ export class Actions {
 
   constructor(options: ActionsOptions) {
     this.options = options;
+  }
+
+  /** Called by the web server once it is up, so a revoked listening link ends its guests' live connections. */
+  setEndGuests(end: (linkId: number) => void): void {
+    this.options.endGuests = end;
   }
 
   /** Called by the Discord side once it is up, so join and leave start working. */
@@ -585,6 +603,70 @@ export class Actions {
       throw new ActionError('conflict', 'nothing is playing');
     return player.snapshot();
   }
+
+  /**
+   * The server's listening links that still work: all of them for people who can manage the server, otherwise the
+   * ones this person made (for which they must still be allowed to change the music).
+   */
+  listenLinks(context: ActionContext): ListenLinkRow[] {
+    const links = this.options.store.listenLinks.list(context.guildId);
+    if (context.mayManage) return links;
+    this.control(context);
+    return links.filter((link) => link.createdBy === context.userId);
+  }
+
+  /**
+   * Makes a listening link to this server for 1, 7 or 30 days: anyone with it listens along without a Discord
+   * account, up to GUESTS_PER_LINK browsers at once, and changes nothing. Its code is shown this once: only its
+   * SHA-256 is kept.
+   */
+  listenLinkCreate(context: ActionContext, days: number): { code: string; link: ListenLinkRow } {
+    this.control(context);
+    if (!(LISTEN_DAYS as readonly number[]).includes(days))
+      throw new ActionError('invalid', 'a listening link lasts 1, 7 or 30 days');
+    const links = this.options.store.listenLinks;
+    // Expired links go first, so they do not count against the limit.
+    links.prune();
+    if (links.count(context.guildId) >= LINKS_PER_SERVER) {
+      throw new ActionError(
+        'conflict',
+        `this server has as many listening links as it allows (${LINKS_PER_SERVER}); revoke one first`,
+      );
+    }
+    // 32 random bytes, like every secret jukecord hands out; the link carries it after a "#", which never reaches a
+    // server's log or a proxy's.
+    const code = randomBytes(32).toString('base64url');
+    const link = links.create({
+      hash: createHash('sha256').update(code).digest('hex'),
+      guildId: context.guildId,
+      createdBy: context.userId,
+      lastsMs: days * 86_400_000,
+      maxGuests: GUESTS_PER_LINK,
+    });
+    this.options.log.info('made a listening link', { guild: context.guildId, link: link.id, days });
+    return { code, link };
+  }
+
+  /**
+   * Revokes a listening link of this server: its guests are out at once, their live connections ended. Its maker may
+   * (while they may change the music), and so may people who can manage the server.
+   */
+  listenLinkRevoke(context: ActionContext, id: number): void {
+    const link = this.options.store.listenLinks.get(id);
+    if (!link || link.guildId !== context.guildId)
+      throw new ActionError('not-found', 'there is no such listening link here');
+    const own = context.mayControl && link.createdBy === context.userId;
+    if (!context.mayManage && !own) {
+      throw new ActionError(
+        'forbidden',
+        'only its maker and people who can manage the server can revoke a listening link',
+      );
+    }
+    this.options.store.listenLinks.remove(id);
+    this.options.endGuests?.(id);
+    this.options.log.info('revoked a listening link', { guild: context.guildId, link: id });
+  }
+
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".
   private fromStore(error: unknown): unknown {
     if (!(error instanceof StoreError)) return error;

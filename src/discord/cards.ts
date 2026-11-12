@@ -9,6 +9,7 @@ import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import type { LyricsAnswer } from '../media/lyrics.ts';
+import type { ListenLinkRow } from '../store/store.ts';
 import { formatDuration } from '../util/time.ts';
 
 /** The two languages the bot answers in; anything else gets English. */
@@ -63,6 +64,15 @@ const TEXT = {
   instrumental: { en: 'Instrumental: no words', ko: '연주곡: 가사 없음' },
   lyricsFrom: { en: 'Lyrics from LRCLIB', ko: '가사 출처: LRCLIB' },
   stopsAfter: { en: 'Stops after this track', ko: '이 곡이 끝나면 멈춤' },
+  listenLink: { en: 'A link to listen along', ko: '같이 듣는 링크' },
+  listenLinkHint: {
+    en: 'Anyone with it listens along in a browser without a Discord account and changes nothing. It is shown once.',
+    ko: '이 링크가 있으면 디스코드 계정 없이 브라우저에서 같이 듣고, 아무것도 바꿀 수 없음. 이번 한 번만 보임.',
+  },
+  listenLinks: { en: 'Listening links', ko: '듣기 링크' },
+  noListenLinks: { en: 'No listening links', ko: '듣기 링크 없음' },
+  until: { en: 'until', ko: '만료' },
+  guests: { en: 'guests', ko: '손님' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -304,4 +314,33 @@ export function lyricsCard(lyrics: LyricsAnswer, title: string, page: number, la
   return embed
     .setDescription(pages[shown - 1]?.trim() || TEXT.noLyrics[lang])
     .setFooter({ text: `${TEXT.page[lang]} ${shown}/${count} · ${TEXT.lyricsFrom[lang]}` });
+}
+
+/** A listening link just made, with when it stops working and how many guests it takes. */
+export function listenLinkCard(url: string, link: ListenLinkRow, lang: Lang): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(COLOUR.added)
+    .setTitle(TEXT.listenLink[lang])
+    .setDescription(`${url}\n\n${TEXT.listenLinkHint[lang]}`)
+    .setFooter({
+      text: `#${link.id} · ${TEXT.guests[lang]} ${link.maxGuests}`,
+    })
+    .setTimestamp(link.expiresAt);
+}
+
+/** The listening links that still work: their numbers (for /share revoke), until when, their guests, who made them. */
+export function listenLinksCard(links: readonly ListenLinkRow[], lang: Lang): EmbedBuilder {
+  if (links.length === 0) return new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.noListenLinks[lang]);
+  return new EmbedBuilder()
+    .setColor(COLOUR.neutral)
+    .setTitle(TEXT.listenLinks[lang])
+    .setDescription(
+      links
+        .slice(0, 25)
+        .map(
+          (link) =>
+            `**${link.id}** · ${TEXT.until[lang]} <t:${Math.floor(link.expiresAt / 1000)}:R> · ${TEXT.guests[lang]} ${link.guests}/${link.maxGuests} · ${link.createdBy ? `<@${link.createdBy}>` : TEXT.nobody[lang]}`,
+        )
+        .join('\n'),
+    );
 }

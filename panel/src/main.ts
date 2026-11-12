@@ -5,12 +5,13 @@
  * Pages: / (the player), /stats, /logs (the host only) and /login. Moving between them keeps the player screen and
  * the listening bar alive, so the music in this browser does not stop when someone looks at the statistics.
  */
-import { ApiError, api, type Player, setCsrf, whenLoggedOut } from './api.ts';
+import { ApiError, api, joinListen, type Player, setCsrf, whenLoggedOut } from './api.ts';
 import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
 import { collect, keep, liveWhy, mayControl, positionNow, state, t, update, watch } from './state.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
+import { guestCard } from './views/guest.ts';
 import { listenBar } from './views/listen.ts';
 import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
@@ -28,10 +29,35 @@ function routeOf(path: string): Route {
   return 'player';
 }
 
-/** Goes to the login page (the login is gone or never was). */
+/** Goes to the login page (the login is gone or never was): a guest's, because its listening link has ended. */
 function toLogin(error?: string): void {
-  const next = location.pathname === '/login' ? '/' : location.pathname;
-  location.assign(`/login?${new URLSearchParams({ ...(error ? { error } : {}), next })}`);
+  const next = location.pathname === '/login' ? '/' : `${location.pathname}${location.search}`;
+  const why = error ?? (state.me?.kind === 'guest' ? 'listen-ended' : undefined);
+  location.assign(`/login?${new URLSearchParams({ ...(why ? { error: why } : {}), next })}`);
+}
+
+/**
+ * A listening link opened (/listen#<code>): the code after the "#" goes to jukecord from here (it never reaches a
+ * server otherwise, so no log or proxy sees it) and leaves the address at once. In: the panel opens as usual, as the
+ * guest (or as the login this browser has already). Not in: the login page says why.
+ */
+async function join(): Promise<boolean> {
+  const code = location.hash.slice(1);
+  history.replaceState(null, '', '/');
+  fill(root, waitingPage(state.status, t().joining));
+  try {
+    await joinListen(code);
+    return true;
+  } catch (error) {
+    const reason =
+      error instanceof ApiError && error.status === 429
+        ? 'too-many'
+        : error instanceof ApiError && error.status === 409
+          ? 'listen-full'
+          : 'listen-link';
+    location.assign(`/login?error=${reason}`);
+    return false;
+  }
 }
 
 async function boot(): Promise<void> {
@@ -45,6 +71,7 @@ async function boot(): Promise<void> {
     fill(root, loginPage(state.status, new URLSearchParams(location.search).get('error')));
     return;
   }
+  if (location.pathname === '/listen' && !(await join())) return;
   whenLoggedOut(() => toLogin());
   // Who is logged in. jukecord not answering, or answering with a failure (busy, an error of its own): the page says
   // so and asks again (1 s, doubling up to 10 s), as for the servers below, instead of staying blank.
@@ -171,13 +198,18 @@ function frame(): void {
     playerTitle.textContent = t().player;
   });
   playerTitle.textContent = t().player;
+  // A guest sees the player and the queue (and the lyrics beside them while open); everyone else the whole screen.
+  const guest = state.me?.kind === 'guest';
   const playerScreen = h(
     'main',
     { class: 'main' },
     playerTitle,
-    h('div', { class: 'col' }, nowCard(live), queueCard(), addCard()),
-    // The right column also holds the lyrics, in place of the cards above them while they are open.
-    h('div', { class: 'col side' }, voiceCard(), historyCard(), lyricsView(live)),
+    h('div', { class: 'col' }, nowCard(live), queueCard(), guest ? null : addCard()),
+    // The right column also holds the lyrics, in place of the cards above them while they are open; a guest's has the
+    // people listening and its link, as the voice channel and the history are not a guest's to see.
+    guest
+      ? h('div', { class: 'col side' }, guestCard(), lyricsView(live))
+      : h('div', { class: 'col side' }, voiceCard(), historyCard(), lyricsView(live)),
   );
   // The cards rise into place once, when the panel opens; coming back from another page they are simply there.
   window.setTimeout(() => playerScreen.classList.add('risen'), 1200);
@@ -240,32 +272,41 @@ function frame(): void {
       'hidden',
       state.guilds.length <= 1,
     );
-    // One label for the state of the connection, then whether this login may only look.
+    // One label for the state of the connection, then whether this login may only look (a guest says it is one).
+    const guestLogin = state.me?.kind === 'guest';
     const [tone, label] =
       state.live === 'refused'
         ? ['bad', words.refused]
         : state.live !== 'open'
           ? ['pause', everOpen ? words.reconnecting : words.connectingLive]
-          : state.status?.mode === 'browser-only'
-            ? ['idle', words.browserOnly]
-            : state.status && !state.status.discord
-              ? ['bad', words.discordDown]
-              : guild && !mayControl()
-                ? ['pause', words.lookOnly]
-                : ['play', words.connected];
+          : guestLogin
+            ? ['idle', words.guest]
+            : state.status?.mode === 'browser-only'
+              ? ['idle', words.browserOnly]
+              : state.status && !state.status.discord
+                ? ['bad', words.discordDown]
+                : guild && !mayControl()
+                  ? ['pause', words.lookOnly]
+                  : ['play', words.connected];
     pill.className = `pill tone-${tone}`;
     pill.title =
       state.live === 'refused'
         ? words.wrongAddress
         : state.live !== 'open' && state.liveWaiting !== null
           ? (liveWhy() ?? '')
-          : guild && !mayControl()
-            ? words.lookOnlyHint
-            : '';
+          : guestLogin && state.me?.guest
+            ? words.guestUntil(
+                new Date(state.me.guest.expiresAt).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-US'),
+              )
+            : guild && !mayControl()
+              ? words.lookOnlyHint
+              : '';
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them
     // must survive the status and guild updates.
     const host = state.me?.kind === 'host';
+    // A guest has the player alone: no pages to move between.
+    nav.hidden = guestLogin;
     refill(
       nav,
       `${route}|${state.lang}|${host}`,
@@ -285,8 +326,15 @@ function frame(): void {
       ),
     );
     const me = state.me;
-    // The host has no Discord name: "Host" in the panel's language.
-    const name = me?.kind === 'host' ? words.host : (me?.name ?? '');
+    // The host has no Discord name: "Host" in the panel's language; a friend and a guest neither.
+    const name =
+      me?.kind === 'host'
+        ? words.host
+        : me?.kind === 'friend'
+          ? words.friend
+          : me?.kind === 'guest'
+            ? words.guest
+            : (me?.name ?? '');
     if (me)
       refill(
         account,
@@ -445,6 +493,8 @@ function receive(message: Record<string, unknown>): void {
 // The recent plays, asked again after a track changes (a short wait lets the server write the entry first).
 let historyTimer = 0;
 async function refreshHistory(wait = 400): Promise<void> {
+  // A guest has no history to show (and may not ask for it).
+  if (state.me?.kind === 'guest') return;
   window.clearTimeout(historyTimer);
   historyTimer = window.setTimeout(async () => {
     const guild = state.guild?.id;

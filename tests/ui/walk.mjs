@@ -148,7 +148,7 @@ async function measure(page, name, setting, errors) {
 }
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
-async function sweep(name, sizes, act, { discord = false, touch, forced = false } = {}) {
+async function sweep(name, sizes, act, { discord = false, touch, forced = false, login } = {}) {
   if (ONLY && !ONLY.has(name)) return;
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
@@ -157,7 +157,8 @@ async function sweep(name, sizes, act, { discord = false, touch, forced = false 
         const setting = { theme, lang, width, height };
         const { context, page, errors } = await open({
           ...setting,
-          login: !name.startsWith('login'),
+          // Logged in as the host, but on the login page's states and where a state logs in its own way (a guest).
+          login: login ?? !name.startsWith('login'),
           discord,
           forced,
           ...(touch === undefined ? {} : { touch }),
@@ -222,7 +223,7 @@ const MADE_UP = {
   },
 };
 // Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones.
-async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild } = {}) {
+async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild, listeners = MADE_UP.listeners } = {}) {
   await page.route(/\/api\/v1\/(status|me|guilds)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -249,9 +250,9 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild }
         ws.send(message);
         return;
       }
-      if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners: MADE_UP.listeners });
+      if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners });
       if (data.type === 'voice') data.voice = MADE_UP.voice;
-      if (data.type === 'listeners') data.listeners = MADE_UP.listeners;
+      if (data.type === 'listeners') data.listeners = listeners;
       ws.send(JSON.stringify(data));
     });
     ws.onMessage((message) => server.send(message));
@@ -712,6 +713,90 @@ await sweep('sleep-idle', NARROW, async (page) => {
   await page.click('[data-act="sleep"]');
   await page.click('.dialog [data-sleep="30"]');
   await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
+});
+
+// Inviting: a listening link for guests with its QR code and the links that work, and the host's login link for a
+// friend. The key beside the listeners opens it.
+await api('POST', '/guilds/local/playlists/Quiet%20hours/load', { at: 'end' });
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+async function invite(page) {
+  await page.click('[data-act="invite"]');
+  await page.waitForSelector('.dialog .invite');
+}
+await sweep('invite', FEW, async (page) => {
+  await invite(page);
+  await page.click('.dialog [data-act="invite-make"]');
+  await page.waitForSelector('.dialog .qr');
+});
+await sweep('invite-friend', FEW, async (page) => {
+  await invite(page);
+  await page.click('.dialog .invite-tabs button:nth-child(2)');
+  await page.click('.dialog [data-act="invite-friend"]');
+  await page.waitForSelector('.dialog [data-pane="friend"] .qr');
+});
+// Listening links made by the host, for the guests' states below: each guest's page takes one of a link's 25 places, so
+// a new link every twenty pages (a server keeps at most fifty links).
+const links = { hash: '', used: 20 };
+async function guestLink() {
+  if (links.used >= 20) {
+    const made = await api('POST', '/guilds/local/listen-links', { days: 7 });
+    links.hash = new URL(made.url).hash;
+    links.used = 0;
+  }
+  links.used += 1;
+  return links.hash;
+}
+// A guest's panel: in with a listening link, the player and the queue, the lyrics, the menu.
+async function asGuest(page) {
+  await page.goto(`${BASE}/listen${await guestLink()}`);
+  await page.waitForSelector('.app .card');
+  await page.waitForSelector('.bar .pill.tone-idle');
+}
+await sweep('guest', SIZES, asGuest, { login: false });
+await sweep(
+  'guest-lyrics',
+  FEW,
+  async (page) => {
+    await asGuest(page);
+    await openLyrics(page);
+  },
+  { login: false },
+);
+await sweep(
+  'guest-menu',
+  FEW,
+  async (page) => {
+    await asGuest(page);
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .section');
+    await page.waitForTimeout(400);
+  },
+  { login: false },
+);
+// A friend the host let in to control, from a login link.
+await sweep(
+  'friend',
+  FEW,
+  async (page) => {
+    const link = await api('POST', '/login-links?scope=control');
+    await page.goto(link.url.replace(new URL(link.url).origin, BASE));
+    await page.waitForSelector('.app .card');
+  },
+  { login: false },
+);
+// Guests among the people listening, in the made-up Discord.
+await sweep('listeners-guest', FEW, null, {
+  discord: {
+    listeners: {
+      people: [
+        ...MADE_UP.listeners.people,
+        { id: null, name: 'Guest', avatar: null, guest: true },
+        { id: null, name: 'Friend', avatar: null, friend: true },
+      ],
+      count: 6,
+    },
+  },
 });
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

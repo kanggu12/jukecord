@@ -8,7 +8,7 @@
 import type { StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
-import type { Person, UserRepository } from '../store/store.ts';
+import type { ListenLinkRow, Person, UserRepository } from '../store/store.ts';
 
 /** A track as the API shows it. */
 export function track(value: Track) {
@@ -91,6 +91,20 @@ export class Presenter {
       updatedAt: value.updatedAt,
       size: value.size,
     };
+  }
+
+  /** Listening links with their makers' names. */
+  listenLinks(links: readonly ListenLinkRow[]) {
+    const people = this.users.many(links.flatMap((link) => (link.createdBy ? [link.createdBy] : [])));
+    return links.map((link) => ({
+      id: link.id,
+      createdBy: link.createdBy,
+      createdByName: this.nameOf(people, link.createdBy),
+      createdAt: link.createdAt,
+      expiresAt: link.expiresAt,
+      guests: link.guests,
+      maxGuests: link.maxGuests,
+    }));
   }
 
   stats(view: StatsView) {

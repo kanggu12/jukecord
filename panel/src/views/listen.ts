@@ -13,7 +13,7 @@ import { api, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
-import { act, disc } from './player.ts';
+import { act, disc, listenerName } from './player.ts';
 import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
@@ -55,6 +55,8 @@ export function listenBar(live: Live): HTMLElement {
   // The sleep timer: this browser stops listening when it runs out, as the Listen key would stop it (set below, once
   // that is made).
   let stopListening = () => {};
+  // And starting it, for a guest's media keys (set with it below).
+  let listenOn = () => {};
   const sleep = sleepKey({
     stop: () => stopListening(),
     fade: (level) => {
@@ -187,9 +189,13 @@ export function listenBar(live: Live): HTMLElement {
   const session = 'mediaSession' in navigator ? navigator.mediaSession : null;
   const guild = () => state.guild?.id ?? '';
   if (session) {
-    session.setActionHandler('play', () => void act(null, () => api.resume(guild())));
-    session.setActionHandler('pause', () => void act(null, () => api.pause(guild())));
-    session.setActionHandler('nexttrack', () => void act(null, () => api.skip(guild())));
+    // A guest changes nothing for the others: its keys start and stop listening here.
+    const guest = () => state.me?.kind === 'guest';
+    session.setActionHandler('play', () => (guest() ? listenOn() : void act(null, () => api.resume(guild()))));
+    session.setActionHandler('pause', () => (guest() ? stopListening() : void act(null, () => api.pause(guild()))));
+    session.setActionHandler('nexttrack', () => {
+      if (!guest()) void act(null, () => api.skip(guild()));
+    });
   }
   const describe = () => {
     const track = state.player?.track;
@@ -292,6 +298,8 @@ export function listenBar(live: Live): HTMLElement {
     skipKey.setAttribute('aria-label', words.skip);
     pauseKey.disabled = !player || !mayControl() || (!player.track && !queued);
     skipKey.disabled = !mayControl() || !player?.track;
+    // A guest has neither: it can never press them.
+    mini.hidden = state.me?.kind === 'guest';
     // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
     bar.classList.toggle('idle', !player?.track);
     // Who else listens: the faces built again only when the people change (their pictures would load again).
@@ -299,7 +307,7 @@ export function listenBar(live: Live): HTMLElement {
     refill(
       faces,
       JSON.stringify(people.map((person) => [person.id, person.name, person.avatar])),
-      ...people.map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')),
+      ...people.map((person) => face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm')),
     );
     count.textContent = state.listeners.count > 0 ? words.listeners(state.listeners.count) : '';
     slider.value = String(Math.round(state.volume * 100));
@@ -326,6 +334,9 @@ export function listenBar(live: Live): HTMLElement {
   };
   stopListening = () => {
     if (state.listening) listen(false);
+  };
+  listenOn = () => {
+    if (!state.listening) listen(true);
   };
   toggle.onclick = () => {
     // Blocked: this press is the asking the browser waited for.

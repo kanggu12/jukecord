@@ -124,6 +124,23 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'jukecord is looking up other lyrics right now; try again in a moment',
     '다른 곡의 가사를 찾는 중: 잠시 뒤 다시 시도하세요',
   ],
+  // Listening links and their guests (src/app/actions.ts, src/web/server.ts), and a friend's login.
+  ['a listening link lasts 1, 7 or 30 days', '듣기 링크 기간은 1일, 7일, 30일 중 하나'],
+  [
+    /^this server has as many listening links as it allows \((\d+)\); revoke one first$/,
+    '이 서버의 듣기 링크가 가득 참($1개): 하나를 먼저 폐기하세요',
+  ],
+  ['there is no such listening link here', '여기에 없는 듣기 링크'],
+  [
+    'only its maker and people who can manage the server can revoke a listening link',
+    '듣기 링크는 만든 사람과 서버 관리 권한이 있는 사람만 폐기할 수 있음',
+  ],
+  ['a guest of a listening link can only listen', '듣기 링크로 들어온 손님은 듣기만 할 수 있음'],
+  ['a listening link opens its own server only', '듣기 링크는 그 링크의 서버만 열 수 있음'],
+  ['this listening link has ended or does not exist', '끝났거나 없는 듣기 링크'],
+  ['this listening link has as many guests as it allows', '이 듣기 링크의 손님 자리가 가득 참'],
+  ['the listening link has ended', '듣기 링크가 끝남'],
+  ['this login cannot make tokens', '이 로그인으로는 토큰을 만들 수 없음'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

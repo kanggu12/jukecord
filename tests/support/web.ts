@@ -249,6 +249,13 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });
+  // As main.ts does: a revoked listening link ends its guests' live connections.
+  actions.setEndGuests((linkId) =>
+    web.hub.end(
+      (caller) => caller.principal.kind === 'guest' && caller.principal.linkId === linkId,
+      'the listening link has ended',
+    ),
+  );
   let url = '';
   if (options.listen) url = await web.listen();
   return {

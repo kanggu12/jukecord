@@ -30,6 +30,9 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   line to play from there. Words without timings show as they are, and a track LRCLIB does not know says so.
 - **⋯** (in the playing card's head): **Stop after this track** stops the player, for everyone, when the track ends;
   the queue stays. Pressed again, the player plays on after it.
+- **Invite** (beside the people listening in the voice card, in the ⋯ list and in the menu): a listening link for
+  guests and, for the host, a login link for a friend, each with a QR code and a copy key (see
+  [who may do what](#who-may-do-what)).
 - **The sleep timer** (beside **Listen here** while this browser listens): this browser stops listening after 15, 30 or
   60 minutes, or when the track playing ends; the last seconds fade out. It is this browser's alone.
 
@@ -48,6 +51,17 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 - When a server has a **DJ role**, only members with that role (and people who can manage the server) change the music;
   everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
   role deleted in Discord counts as none: everyone may change the music again until another is set.
+- **Guests** come in with a **listening link**: anyone with the link listens along to its one server in a browser,
+  without a Discord account, for 1, 7 or 30 days. A guest sees the player, the queue and the lyrics and has **Listen
+  here**; it changes nothing and sees no other server, statistics, history, settings or log. Up to 25 browsers come in
+  with one link. People who may change the music make links (`Invite` in the panel, `/share create`,
+  `jukecord share`); each person sees and revokes their own, and people who can manage the server all of the
+  server's. Revoking a link ends its guests' connections at once. The link is shown once: jukecord keeps only its hash,
+  and the code travels after a `#`, which never reaches a server's or a proxy's log.
+- **Friends** come in with a **login link** the host makes (`Invite` in the panel, or `jukecord link --scope read` or
+  `--scope control`): one browser, once, within ten minutes, as the host's friend in every server here, to look and
+  listen (view) or also to change the music (control), never to change settings or tokens. What a friend adds counts
+  as the host's.
 
 ## Slash commands
 
@@ -71,6 +85,7 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/version`                                   | the version                                                         |
 | `/lyrics`                                    | the lyrics of the track playing, to you alone, a page at a time     |
 | `/stop after-track:`                         | True: stop when this track ends; False: play on after it            |
+| `/share create, list, revoke`                | listening links for guests, to you alone                            |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
@@ -97,6 +112,7 @@ node src/cli/main.ts np
 ./jukecord token create phone --scope control
 ./jukecord lyrics --synced
 ./jukecord stop --after-track
+./jukecord share --days 30
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it

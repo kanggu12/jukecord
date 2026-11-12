@@ -37,6 +37,12 @@ operations marked "the host" below, which span every server: the log, login link
 nothing: every change must also carry the session's CSRF token, from `GET /api/v1/me`, in the `x-jukecord-csrf` header.
 Programs use tokens instead and need no CSRF header.
 
+**Guests and friends** log in to the panel too. A guest came in with a listening link (`POST /auth/listen` with the
+link's code, which the panel's `/listen#<code>` page sends): it reads the player, the queue, the lyrics, `me` and
+`guilds` of its link's server and nothing else, whatever an operation's access would allow, and is answered `403` for
+everything else. A friend logged in with a login link made with `scope` `read` or `control`: like a token of that
+scope, in every server, never with Manage Server, and held to the rates below.
+
 Twenty failed logins (a wrong token, a used login link) from one address within ten minutes block that address for ten
 minutes with `429`, for credentials that do not work: a token, a cookie or a login link that works still gets in from
 there. Logging in with Discord waits for the block to end, since only Discord's answer says whether it works.
@@ -153,6 +159,9 @@ playlist) so a program does not need to ask again.
 | `settings` The server's settings and its roles | `GET /api/v1/guilds/{guild}/settings` | read | `jukecord settings` | `/dj show` |
 | `dj-role` Set the role that may change the music (null: everyone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/dj-role` | admin | `jukecord dj` | `/dj set` |
 | `status` The version, the mode and whether Discord is connected | `GET /api/v1/status` | anyone | `jukecord status` | `/version` |
+| `listen-links` The server's listening links that still work: yours, or all of them with Manage Server | `GET /api/v1/guilds/{guild}/listen-links` | control | `jukecord shares` | `/share list` |
+| `listen-link-create` Make a link that lets guests without a Discord account listen along (1, 7 or 30 days); shown once | `POST /api/v1/guilds/{guild}/listen-links` | control | `jukecord share` | `/share create` |
+| `listen-link-revoke` Revoke a listening link: its guests are out at once (its maker, or Manage Server) | `DELETE /api/v1/guilds/{guild}/listen-links/{id}` | control | `jukecord unshare` | `/share revoke` |
 
 ### Your login
 
@@ -169,7 +178,7 @@ playlist) so a program does not need to ask again.
 | Operation | Request | Needs | CLI | Discord |
 | :-- | :-- | :-- | :-- | :-- |
 | `logs` The newest log records, oldest first | `GET /api/v1/logs` | the host | `jukecord logs` |  |
-| `login-link` Make a one-time link that logs a browser in as the host (valid for 10 minutes) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
+| `login-link` Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
 | `backup` Write a copy of the database to the backups folder of the data directory | `POST /api/v1/backups` | the host | `jukecord backup` |  |
 | `doctor` Check the parts jukecord needs and show the settings (secrets as set or not set) | `GET /api/v1/doctor` | the host | `jukecord doctor` |  |
 

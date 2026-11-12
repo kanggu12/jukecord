@@ -257,6 +257,13 @@ async function main(): Promise<number> {
         }),
     },
   });
+  // A revoked listening link ends its guests' live connections at once, whichever way it was revoked.
+  actions.setEndGuests((linkId) =>
+    web.hub.end(
+      (caller) => caller.principal.kind === 'guest' && caller.principal.linkId === linkId,
+      'the listening link has ended',
+    ),
+  );
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;

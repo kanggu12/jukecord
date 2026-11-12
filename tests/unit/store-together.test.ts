@@ -108,7 +108,7 @@ describe('ListenLinkRepository and GuestSessionRepository', () => {
       hash,
       guildId,
       createdBy,
-      expiresAt: Date.UTC(2026, 10, 11) + days * 86_400_000,
+      lastsMs: days * 86_400_000,
       maxGuests: 2,
     });
 
