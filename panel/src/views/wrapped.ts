@@ -532,6 +532,7 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
     server: { name: guild.name, icon: guildIconUrl(guild.id, guild.icon, 128) },
     big,
     sub,
+    title: words.wrappedTitle(time),
     range: words.wrappedRange(wrapped.period.from, wrapped.period.to),
     song: song
       ? {

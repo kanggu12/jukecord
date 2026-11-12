@@ -19,9 +19,11 @@ export interface PictureContent {
   /** The language they are in: English labels are set in spaced capitals, as the cards' heads are. */
   readonly lang: 'en' | 'ko';
   readonly server: { readonly name: string; readonly icon: string | null };
-  /** The time, big ("2026", "November", "12 months"), and the words beside or under it ("in music"). */
+  /** The time, big ("2026", "November", "12 months"), and the words under it ("in music"), for the story. */
   readonly big: string;
   readonly sub: string;
+  /** The same on one line, as the page's title says it ("2026 in music"), for the square. */
+  readonly title: string;
   /** The first and the last day, in words. */
   readonly range: string;
   readonly song: {
@@ -603,6 +605,7 @@ export async function drawPicture(content: PictureContent, shape: Shape): Promis
     content.server.name,
     content.big,
     content.sub,
+    content.title,
     content.range,
     content.song?.label,
     content.song?.title,
@@ -933,7 +936,7 @@ function square(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent
   const w = 1080 - m * 2;
   const gap = 24;
   server(ink, content, pictures.icon, m, 48, 60);
-  ink.fit(`${content.big} ${content.sub}`, m - 3, 194, { size: 84, weight: 800, colour: look.ink, spacing: -2 }, w, 48);
+  ink.fit(content.title, m - 3, 194, { size: 84, weight: 800, colour: look.ink, spacing: -2 }, w, 48);
   const song = content.song ? 316 : 0;
   const totals = 140;
   const low = listHeight(3, 0.8);
