@@ -3,20 +3,33 @@
 The Helm chart runs one pod (a bot token allows one Discord session, so there is never a second replica), a Service, a
 volume for the database and the cache, and optionally an Ingress. It is published as an OCI chart.
 
+The values go in a file of your own, `jukecord-values.yaml`, which every later `helm upgrade` is given again:
+
+```yaml
+discord:
+  existingSecret: jukecord-discord
+  clientId: "YOUR_APPLICATION_ID"
+publicUrl: https://music.example.com
+ingress:
+  enabled: true
+  host: music.example.com
+  # The certificate for the host: a TLS Secret of that name, made by cert-manager or with kubectl create secret tls.
+  tls:
+    - secretName: jukecord-tls
+      hosts: [music.example.com]
+```
+
 ```bash
 kubectl create namespace jukecord
 kubectl -n jukecord create secret generic jukecord-discord \
   --from-literal=token=YOUR_BOT_TOKEN --from-literal=clientSecret=YOUR_OAUTH_SECRET
-helm install jukecord oci://ghcr.io/kanggu12/charts/jukecord -n jukecord \
-  --set discord.existingSecret=jukecord-discord \
-  --set-string discord.clientId=YOUR_APPLICATION_ID \
-  --set ingress.enabled=true --set ingress.host=music.example.com \
-  --set publicUrl=https://music.example.com
+helm install jukecord oci://ghcr.io/kanggu12/charts/jukecord -n jukecord -f jukecord-values.yaml
 kubectl -n jukecord exec deploy/jukecord -- jukecord link
 ```
 
 The last line prints a one-time login link for the host. `kubectl -n jukecord exec deploy/jukecord -- jukecord doctor`
-checks every part jukecord needs.
+checks every part jukecord needs. Without TLS on the Ingress (or in front of its controller), logins cross the network
+unencrypted; the notes Helm prints after the install say so.
 
 ## Values
 
@@ -57,9 +70,13 @@ ingress:
       hosts: [music.example.com]
 ```
 
-With the Ingress on, jukecord believes one proxy's `X-Forwarded-For` (for the login limiter), unless `env` sets
-`JUKECORD_TRUST_PROXY` otherwise. A pod that reaches jukecord's port directly, not through the controller, could then
+With the Ingress on, jukecord believes one proxy's `X-Forwarded-For` (for the login limiter), unless `env` or
+`extraEnv` sets `JUKECORD_TRUST_PROXY` otherwise. A pod that reaches jukecord's port directly, not through the controller, could then
 put any address in that header; `networkPolicy.ingressFrom` (below) lets in the controller alone.
+
+The Ingress sends every path to jukecord, `/metrics` too, which answers without a login and tells anyone how many
+people listen. It is meant for a Prometheus inside the cluster, which reads it from the Service (port 8795), not for
+the internet: where your controller can leave a path out, leave `/metrics` out of what the Ingress publishes.
 
 ## The NetworkPolicy
 
@@ -106,6 +123,105 @@ small for both, so a busy moment takes the pod past its limit, and the kernel en
 jukecord's log) before Node notices anything. Under 512Mi it gets worse: the heap ceiling stops shrinking with the
 limit (Node keeps about 260 MiB). To set the ceiling yourself, give `NODE_OPTIONS` with `--max-old-space-size=<MiB>`
 in `extraEnv`, at no more than half the limit.
+
+## Upgrading
+
+```bash
+kubectl -n jukecord exec deploy/jukecord -- jukecord backup
+helm upgrade jukecord oci://ghcr.io/kanggu12/charts/jukecord -n jukecord -f jukecord-values.yaml
+```
+
+Take a backup first; it stays in the volume until [Backup and restore](#backup-and-restore) copies it out. Without
+`--version` Helm takes the newest chart, and with it the newest jukecord; `--version X.Y.Z` picks one. Give your
+values file again rather than `--reuse-values`, which also keeps the old chart's defaults, so what a newer chart adds
+or changes in them would not apply (Helm 3.14 and newer have `--reset-then-reuse-values` for that). The old pod stops
+before the new one starts, and on its first start the new jukecord moves the database to its schema by itself.
+
+`helm rollback` brings back the older chart and the older jukecord, but after an upgrade that moved the database to a
+newer schema, the older jukecord refuses to start on it ("the database is at schema N, newer than this jukecord
+knows"). To go back then, restore the backup taken before the upgrade (below), and roll back after that.
+
+## Uninstalling
+
+```bash
+helm uninstall jukecord -n jukecord
+```
+
+The data volume stays: the chart keeps its claim on purpose, so an uninstall by mistake does not take a server's
+history with it. Installing again under the same name in the same namespace takes it back. To remove the data as well:
+
+```bash
+kubectl -n jukecord delete pvc jukecord
+```
+
+A claim of your own, given as `persistence.existingClaim`, is never made or removed by the chart: the data lives as
+long as you keep that claim, whatever happens to the release, and another install can be pointed at it.
+
+## Backup and restore
+
+`jukecord backup` writes a consistent copy of the database into the volume while jukecord runs, and `kubectl cp` takes
+it out. The media cache is not in it (tracks are fetched again when they are played).
+
+```bash
+pod=$(kubectl -n jukecord get pod -l app.kubernetes.io/instance=jukecord,app.kubernetes.io/component=server \
+  -o jsonpath='{.items[0].metadata.name}')
+file=$(kubectl -n jukecord exec "$pod" -- jukecord backup --json | sed -n 's/.*"file": *"\([^"]*\)".*/\1/p')
+kubectl -n jukecord cp "$pod:$file" "./${file##*/}"
+```
+
+To put a copy back, stop jukecord, start a pod of the same image on the volume, swap the database there, and start
+jukecord again. The database it replaces stays in the volume as `jukecord.db.before-restore` (with its `-wal` and
+`-shm` files, when there are any). The claim is named after the release (`jukecord`), or is your `existingClaim`:
+
+```bash
+kubectl -n jukecord scale deploy/jukecord --replicas=0
+kubectl -n jukecord wait --for=delete pod -l app.kubernetes.io/instance=jukecord,app.kubernetes.io/component=server
+image=$(kubectl -n jukecord get deploy/jukecord -o jsonpath='{.spec.template.spec.containers[0].image}')
+kubectl -n jukecord apply -f - <<MANIFEST
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jukecord-restore
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: restore
+      image: $image
+      command: [sleep, "1800"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: [ALL] }
+      volumeMounts: [{ name: data, mountPath: /data }]
+  volumes:
+    - name: data
+      persistentVolumeClaim: { claimName: jukecord }
+MANIFEST
+kubectl -n jukecord wait --for=condition=Ready pod/jukecord-restore
+kubectl -n jukecord cp ./jukecord-TIME.db jukecord-restore:/data/jukecord.db.restoring
+kubectl -n jukecord exec jukecord-restore -- sh -c 'cd /data &&
+  for part in jukecord.db jukecord.db-wal jukecord.db-shm; do
+    if [ -f "$part" ]; then mv "$part" "$part.before-restore"; fi
+  done &&
+  mv jukecord.db.restoring jukecord.db'
+kubectl -n jukecord delete pod jukecord-restore
+kubectl -n jukecord scale deploy/jukecord --replicas=1
+```
+
+## Restarts, drains and upgrades
+
+jukecord runs as one pod, and the chart makes no PodDisruptionBudget: with one replica, a budget that kept the pod
+would hold up every node drain, and one that let it go would change nothing. A drain, an upgrade or a restart
+therefore stops the music for as long as the old pod takes to stop and the new one to start: seconds on the same node,
+longer when the volume has to move to another node. jukecord leaves the voice channels within 10 seconds of being told
+to stop, and on its next start every server's track is back where it was, paused, with the queue and the history:
+someone presses play. Drain the node it runs on at a quiet moment.
 
 ## k3s and Raspberry Pi clusters
 
