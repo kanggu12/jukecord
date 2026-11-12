@@ -134,15 +134,25 @@ export class Live {
       // When it arrived, for the clock: a pong waiting behind a big message must not count the wait as network time.
       const arrived = Date.now();
       const data = event.data as string | ArrayBuffer;
-      this.inbox = this.inbox
-        .then(async () => {
-          const text = typeof data === 'string' ? data : await unpack(data);
-          // A message of a socket replaced meanwhile says nothing about the new one.
-          if (this.socket === socket) this.handle(JSON.parse(text) as Record<string, unknown>, arrived);
-        })
-        .catch(() => {
+      this.inbox = this.inbox.then(async () => {
+        let message: Record<string, unknown>;
+        try {
+          message = JSON.parse(typeof data === 'string' ? data : await unpack(data)) as Record<string, unknown>;
+        } catch {
           // A message that cannot be read is skipped; the next one is handled as usual.
-        });
+          return;
+        }
+        // A message of a socket replaced meanwhile says nothing about the new one.
+        if (this.socket !== socket) return;
+        try {
+          this.handle(message, arrived);
+        } catch (error) {
+          // A mistake in handling one is still reported as an uncaught error, without stopping the ones after it.
+          window.setTimeout(() => {
+            throw error;
+          });
+        }
+      });
     };
     socket.onclose = (event) => {
       // A socket replaced by a newer one says nothing about the connection any more, and the timers are the new one's.
