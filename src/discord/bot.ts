@@ -42,6 +42,7 @@ import {
   historyCard,
   type Lang,
   langOf,
+  lyricsCard,
   note,
   nowCard,
   playlistsCard,
@@ -452,6 +453,13 @@ export class Bot implements Directory {
           await interaction.editReply({
             embeds: [note(lang, `jukecord ${status.version}`, `jukecord ${status.version}`)],
           });
+          return;
+        }
+        case 'lyrics': {
+          // The title of the track the lyrics are for: the action takes the track playing as it is called.
+          const title = actions.nowPlaying(context).track?.title ?? '';
+          const lyrics = await actions.lyrics(context);
+          await interaction.editReply({ embeds: [lyricsCard(lyrics, title, options.getInteger('page') ?? 1, lang)] });
           return;
         }
         default:

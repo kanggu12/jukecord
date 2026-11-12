@@ -12,6 +12,7 @@ import { logoMark } from './logo.ts';
 import { collect, keep, liveWhy, mayControl, positionNow, state, t, update, watch } from './state.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { listenBar } from './views/listen.ts';
+import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
 import { act, addCard, historyCard, nowCard, queueCard, voiceCard } from './views/player.ts';
@@ -175,7 +176,8 @@ function frame(): void {
     { class: 'main' },
     playerTitle,
     h('div', { class: 'col' }, nowCard(live), queueCard(), addCard()),
-    h('div', { class: 'col' }, voiceCard(), historyCard()),
+    // The right column also holds the lyrics, in place of the cards above them while they are open.
+    h('div', { class: 'col side' }, voiceCard(), historyCard(), lyricsView(live)),
   );
   // The cards rise into place once, when the panel opens; coming back from another page they are simply there.
   window.setTimeout(() => playerScreen.classList.add('risen'), 1200);

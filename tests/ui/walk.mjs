@@ -98,6 +98,8 @@ async function open({
     [lang, motion],
   );
   const page = await context.newPage();
+  // Lyrics come from the walk itself: its server would ask LRCLIB, and the walk reaches no site.
+  await madeUpLyrics(page);
   if (discord) await asDiscord(page, discord === true ? {} : discord);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -258,6 +260,41 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild }
 // A live message of the walk's own to a page in the made-up Discord.
 function madeUpSay(page, message) {
   for (const ws of page.madeUpSockets ?? []) ws.send(JSON.stringify({ v: 1, guild: 'local', ...message }));
+}
+
+// Made-up lyrics for the track playing, in the shape the server gives them: a line every four seconds of the seeded
+// three-minute tracks, so that one is being sung whenever a page looks. `page.lyricsKind` picks what the answer is
+// (timed lines unless a state says otherwise). Every word is made up.
+const LYRIC_LINES = [
+  'Fold the morning into paper',
+  'Set it down where the water bends',
+  '',
+  'Every boat a little letter',
+  'Every letter never ends',
+  '종이배에 아침을 접어 실어 보내',
+  '강물이 굽는 곳까지 천천히',
+  'Lanterns on the far side of the river, waiting for the last of the boats to come home again',
+];
+async function madeUpLyrics(page) {
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/lyrics$/, async (route) => {
+    const player = await api('GET', '/guilds/local/player');
+    const kind = page.lyricsKind ?? 'synced';
+    const lines = Array.from({ length: 45 }, (_, index) => ({
+      atMs: index * 4000,
+      text: LYRIC_LINES[index % LYRIC_LINES.length],
+    }));
+    const json =
+      kind === 'none'
+        ? { trackId: player.track?.id ?? 0, kind, lines: [], text: null, source: null }
+        : {
+            trackId: player.track?.id ?? 0,
+            kind,
+            lines: kind === 'synced' ? lines : [],
+            text: lines.map((line) => line.text).join('\n'),
+            source: { name: 'LRCLIB', url: 'https://lrclib.net' },
+          };
+    await route.fulfill({ status: 200, contentType: 'application/json', json });
+  });
 }
 
 // ---- the walk ---------------------------------------------------------------------------------------------------
@@ -617,6 +654,27 @@ await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 await sweep('empty', FEW);
 
+// ---- listening together -------------------------------------------------------------------------------------------
+// A few tracks playing again for the states below, which need one.
+await api('POST', '/guilds/local/playlists/Quiet%20hours/load', { at: 'end' });
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+// The lyrics while a track plays: beside the player on two columns, a sheet on one, the line being sung lit.
+async function openLyrics(page) {
+  await page.click('[data-act="lyrics"]');
+  await page.waitForSelector('.lyrics .lyric.lit, .lyrics .empty, .lyrics-plain');
+  await page.waitForTimeout(400);
+}
+await sweep('lyrics', SIZES, openLyrics);
+await sweep('lyrics-plain', FEW, async (page) => {
+  page.lyricsKind = 'plain';
+  await openLyrics(page);
+});
+await sweep('lyrics-none', FEW, async (page) => {
+  page.lyricsKind = 'none';
+  await openLyrics(page);
+});
+await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

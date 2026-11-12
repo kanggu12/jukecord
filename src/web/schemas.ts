@@ -155,6 +155,7 @@ export const StatusSchema = Type.Object(
     mode: Type.Union([Type.Literal('discord'), Type.Literal('browser-only')]),
     uptimeMs: Type.Integer(),
     login: Type.Object({ discord: Type.Boolean({ description: 'Whether logging in with Discord is set up' }) }),
+    lyrics: Type.Boolean({ description: 'Whether lyrics are looked up here (JUKECORD_LYRICS)' }),
   },
   { title: 'Status' },
 );
@@ -249,3 +250,28 @@ export const OkSchema = Type.Object({ ok: Type.Literal(true) }, { title: 'Ok' })
 
 /** How many things a change removed. */
 export const RemovedSchema = Type.Object({ removed: Type.Integer() }, { title: 'Removed' });
+
+/** The lyrics of the track playing. */
+export const LyricsSchema = Type.Object(
+  {
+    trackId: Type.Integer({ description: 'The track they are for (the one playing when asked)' }),
+    kind: Type.Union(
+      [Type.Literal('synced'), Type.Literal('plain'), Type.Literal('instrumental'), Type.Literal('none')],
+      {
+        description: 'synced: timed lines; plain: words without timings; instrumental: no words; none: none found',
+      },
+    ),
+    lines: Type.Array(
+      Type.Object({
+        atMs: Type.Integer({ description: 'When the line starts, in milliseconds from the start of the track' }),
+        text: Type.String({ description: 'Its words; empty for a pause' }),
+      }),
+      { description: 'The timed lines, for kind synced; empty otherwise' },
+    ),
+    text: Nullable(Type.String({ description: 'The words without timings' })),
+    source: Nullable(
+      Type.Object({ name: Type.String(), url: Type.String() }, { description: 'Where they come from (LRCLIB)' }),
+    ),
+  },
+  { title: 'Lyrics' },
+);

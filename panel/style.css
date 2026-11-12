@@ -2901,3 +2901,146 @@ kbd {
     display: none;
   }
 }
+
+/* ---- listening together: the lyrics ------------------------------------------------------------------------- */
+/* The keys in a card's head beside its title (the playing card's Lyrics): at the head's far end, with their words. */
+.card-head .head-keys {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The right column while the lyrics are open: the lyrics in place of the voice channel and the history. */
+.col.side.lyrics-open > :not(.lyrics-card) {
+  display: none;
+}
+.lyrics {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* The track's title beside the heading, cut short on a narrow card (its whole title is its tooltip). */
+.lyrics .card-head .lyrics-what {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.lyrics .card-head .tools {
+  margin-left: 0;
+}
+/* The lines scroll in their own box, whose content is laid out from it (the line kept in sight is measured so). */
+.lyrics-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 10px 8px;
+}
+/* Room after the last line, so it too can stand a third of the way down when it is sung. */
+.lyrics-body::after {
+  content: "";
+  display: block;
+  height: 40vh;
+}
+.lyrics-body > .empty {
+  /* The empty states sit in the box's upper part, not at its foot below the room above. */
+  padding-top: 40px;
+}
+.lyrics-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* A line: large and bold, as lyrics are read from across a room (large enough to count as large text, whose contrast
+   may be 3:1). The one being sung in the text's own colour, lit; the rest, before and after it, dimmer. Only the
+   colour changes, never the size, so nothing moves when the line does. */
+.lyric {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  text-align: left;
+  font: 700 19px / 1.35 var(--font);
+  letter-spacing: -0.01em;
+  color: color-mix(in oklch, var(--ink) 52%, transparent);
+  transition:
+    color 0.35s ease,
+    background 0.2s ease;
+}
+button.lyric {
+  cursor: pointer;
+}
+button.lyric:hover {
+  background: var(--hover-tint);
+  color: color-mix(in oklch, var(--ink) 75%, transparent);
+}
+.lyric.lit {
+  color: var(--ink);
+  text-shadow: 0 0 22px color-mix(in oklch, var(--ink) 28%, transparent);
+}
+/* A pause between lines, for the eye. */
+.lyric.pause {
+  letter-spacing: 0.3em;
+}
+.lyrics-note {
+  margin: 0 10px 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.lyrics-plain {
+  margin: 0;
+  padding: 4px 10px;
+  white-space: pre-line;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+/* The source, credited under the lines. */
+.lyrics-credit {
+  margin: 0;
+  padding: 8px var(--pad) 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.lyrics .lyrics-credit a {
+  color: var(--ink-2);
+}
+/* In a sheet (a one-column window): the lyrics fill it, the lines scrolling in their own box; the sheet's own close
+   key takes the head's far corner. */
+.sheet-body.lyrics-sheet {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.sheet-body.lyrics-sheet > .lyrics {
+  padding-right: 0;
+}
+.lyrics-sheet .card-head {
+  padding-right: 56px;
+}
+@media (forced-colors: active) {
+  /* The line being sung told by the system's highlight, as colour alone would vanish in a contrast theme. */
+  .lyric.lit {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+@media (pointer: coarse) {
+  /* A line is a finger's height to choose. */
+  button.lyric {
+    min-height: 44px;
+  }
+}

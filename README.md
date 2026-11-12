@@ -125,6 +125,9 @@ people use most.
   that hangs ends itself and comes back paused where it was.
 - **Small and contained.** One process and one SQLite file. It fetches only from public addresses, keeps its files to
   its own user, and on Kubernetes runs as a read-only, non-root pod behind a NetworkPolicy.
+- **Lyrics in time.** The words of the track playing, from [LRCLIB](https://lrclib.net), beside the player (a sheet on a
+  phone) with the line being sung lit; whoever may change the music picks a line to play from there. Also `/lyrics`,
+  `jukecord lyrics` and the API; `JUKECORD_LYRICS=off` turns them off.
 
 ### Light on a small machine
 
@@ -176,8 +179,9 @@ Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecor
 
 The queues, the history, the playlists, the settings and the logins are in one SQLite file in jukecord's data folder,
 and the fetched tracks beside it, up to `JUKECORD_CACHE_MAX`. Logins and tokens are kept only as hashes, and the logs
-mask tokens. jukecord itself talks to Discord and to the sites the tracks come from, and sends no telemetry; the panel
-shows the tracks' pictures from those sites and people's pictures from Discord. Docker Compose publishes the panel on
+mask tokens. jukecord itself talks to Discord, to the sites the tracks come from and, for lyrics, to LRCLIB (it sends
+the song's title, artist, album and length; `JUKECORD_LYRICS=off` stops it), and sends no telemetry; the panel shows the
+tracks' pictures from those sites and people's pictures from Discord. Docker Compose publishes the panel on
 this computer only, until you give it a [public address](docs/INSTALL.md#friends-on-other-machines).
 
 ## Guides

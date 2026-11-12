@@ -16,6 +16,7 @@ import {
   GuildSchema,
   HistoryEntrySchema,
   LogRecordSchema,
+  LyricsSchema,
   MeSchema,
   Nullable,
   OkSchema,
@@ -484,6 +485,17 @@ export const API = {
     tag: 'host',
     access: 'host',
     response: DoctorSchema,
+  }),
+
+  // Listening together.
+  lyrics: op({
+    method: 'GET',
+    path: '/guilds/{guild}/lyrics',
+    summary: 'The lyrics of the track playing, timed when they can be (from LRCLIB, kept once found)',
+    tag: 'player',
+    access: 'read',
+    params: InGuild,
+    response: LyricsSchema,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

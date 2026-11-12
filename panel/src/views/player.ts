@@ -13,6 +13,7 @@ import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
 import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/layers.ts';
+import { lyricsOpen, toggleLyrics, whenLyricsChange } from './lyrics.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
 export function disc(size: 'lg' | 'sm', track: Track | null, mode: 'playing' | 'paused' | 'idle'): HTMLElement {
@@ -131,6 +132,21 @@ export function nowCard(live: Live): HTMLElement {
   const keys = h('div', { class: 'keys' }, pause, skip, stop, repeat, drop);
   const info = h('div', { class: 'info' }, title, meta, error, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
+  // The keys in the card's head: the lyrics (they open beside the player, or as a sheet on a phone).
+  const lyricsKey = h(
+    'button',
+    {
+      class: 'key sm',
+      type: 'button',
+      'data-act': 'lyrics',
+      'aria-expanded': 'false',
+      'aria-controls': 'lyrics-view',
+    },
+    icon('mic-vocal'),
+    h('span', { class: 'label' }),
+  );
+  lyricsKey.onclick = () => toggleLyrics();
+  whenLyricsChange(() => lyricsKey.setAttribute('aria-expanded', String(lyricsOpen())));
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'now-h' },
@@ -149,6 +165,9 @@ export function nowCard(live: Live): HTMLElement {
     const player = state.player;
     const words = t();
     (card.querySelector('#now-h') as HTMLElement).textContent = words.nowPlaying;
+    // The Lyrics key says its name, and is there only where lyrics are looked up (JUKECORD_LYRICS).
+    (lyricsKey.querySelector('.label') as HTMLElement).textContent = words.lyrics;
+    lyricsKey.hidden = !state.status?.lyrics;
     const mode = discMode(player);
     card.classList.toggle('playing', mode === 'playing');
     card.classList.toggle('paused', mode === 'paused');
@@ -345,7 +364,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'status'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {

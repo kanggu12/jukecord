@@ -23,6 +23,8 @@ import { publicAddressesOnly } from './media/address.ts';
 import { MediaCache } from './media/cache.ts';
 import { startEgressGuard } from './media/egress.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
+import { LrclibClient, Lyrics } from './media/lyrics.ts';
+import { outbound } from './media/outbound.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
@@ -149,7 +151,22 @@ async function main(): Promise<number> {
     tracks: store.tracks,
     log: log.child('lookup'),
     ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
+    // What YouTube says a recording is, kept for finding its lyrics.
+    music: store.music,
   });
+  // Lyrics from LRCLIB, unless turned off: its requests go through the same address guard as yt-dlp's, and say what
+  // asks (LRCLIB wants a client's name, version and home).
+  const lyrics = config.lyrics
+    ? new Lyrics({
+        lyrics: store.lyrics,
+        music: store.music,
+        lookup: new LrclibClient({
+          get: outbound({ proxy: egress?.url ?? null }),
+          userAgent: `jukecord/${VERSION} (https://github.com/kanggu12/jukecord)`,
+        }),
+        log: log.child('lyrics'),
+      })
+    : null;
   const actions = new Actions({
     store,
     queue,
@@ -159,6 +176,7 @@ async function main(): Promise<number> {
     startedAt: Date.now(),
     queueMax: config.queueMax,
     trackMaxMs: config.media.trackMaxMs,
+    lyrics,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);

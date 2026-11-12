@@ -45,6 +45,7 @@ export const PANEL_ACTIONS = [
   'token-create',
   'token-revoke',
   'logs',
+  'lyrics',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -198,6 +199,8 @@ export interface Status {
   mode: 'discord' | 'browser-only';
   uptimeMs: number;
   login: { discord: boolean };
+  /** Whether lyrics are looked up here (JUKECORD_LYRICS). */
+  lyrics: boolean;
 }
 export interface Guild {
   id: string;
@@ -221,6 +224,14 @@ export interface Token {
   scope: 'read' | 'control' | 'admin';
   createdAt: number;
   usedAt: number | null;
+}
+/** The lyrics of the track playing: timed lines (kind synced) and the words without timings. */
+export interface Lyrics {
+  trackId: number;
+  kind: 'synced' | 'plain' | 'instrumental' | 'none';
+  lines: { atMs: number; text: string }[];
+  text: string | null;
+  source: { name: string; url: string } | null;
 }
 export interface LogRecord {
   time: string;
@@ -283,6 +294,7 @@ export const api = {
       if (value !== undefined && value !== '') params.set(key, String(value));
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
+  lyrics: (guild: string) => request<Lyrics>('GET', `${g(guild)}/lyrics`),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

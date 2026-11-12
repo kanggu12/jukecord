@@ -47,6 +47,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   settings: '/dj show',
   'dj-role': '/dj set',
   status: '/version',
+  lyrics: '/lyrics',
 };
 
 // One command: English name and description, Korean name and description.
@@ -318,6 +319,14 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
       ),
     command('version', 'The jukecord version', '버전', 'jukecord 버전'),
+    command('lyrics', 'The lyrics of the track playing', '가사', '지금 곡의 가사').addIntegerOption((option) =>
+      option
+        .setName('page')
+        .setDescription('Page')
+        .setNameLocalizations({ ko: '페이지' })
+        .setDescriptionLocalizations({ ko: '페이지' })
+        .setMinValue(1),
+    ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

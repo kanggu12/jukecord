@@ -34,8 +34,8 @@ export interface Command {
   readonly usage: string;
   readonly summary: string;
   request(words: Words, lookups: Lookups): Request | Promise<Request>;
-  /** The answer for people; --json prints the JSON as it came instead. */
-  show(answer: unknown): string;
+  /** The answer for people, as the options typed ask for it; --json prints the JSON as it came instead. */
+  show(answer: unknown, words: Words): string;
 }
 
 /** A mistake in what was typed; the CLI prints it with the command's usage and exits with 2. */
@@ -537,6 +537,29 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       );
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
+    },
+  },
+
+  lyrics: {
+    name: 'lyrics',
+    usage: '[--synced]',
+    summary: 'The lyrics of the track playing (--synced: with their times)',
+    request: () => ({}),
+    show: (answer, words) => {
+      const lyrics = answer as {
+        kind: string;
+        lines: { atMs: number; text: string }[];
+        text: string | null;
+        source: { name: string; url: string } | null;
+      };
+      if (lyrics.kind === 'none') return 'No lyrics found for this track';
+      if (lyrics.kind === 'instrumental') return `Instrumental (${lyrics.source?.name ?? 'LRCLIB'})`;
+      // With --synced, each line after its time ("[1:02] words"); a pause is its time alone.
+      const body =
+        words.flags.has('synced') && lyrics.lines.length > 0
+          ? lyrics.lines.map((line) => `[${formatDuration(line.atMs)}] ${line.text}`.trimEnd()).join('\n')
+          : (lyrics.text ?? '');
+      return `${body}\n\nLyrics from ${lyrics.source?.name ?? 'LRCLIB'} (${lyrics.source?.url ?? 'https://lrclib.net'})`;
     },
   },
 };

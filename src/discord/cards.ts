@@ -8,6 +8,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'disc
 import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
+import type { LyricsAnswer } from '../media/lyrics.ts';
 import { formatDuration } from '../util/time.ts';
 
 /** The two languages the bot answers in; anything else gets English. */
@@ -57,6 +58,10 @@ const TEXT = {
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
+  lyrics: { en: 'Lyrics', ko: '가사' },
+  noLyrics: { en: 'No lyrics found for this track', ko: '이 곡의 가사를 찾지 못함' },
+  instrumental: { en: 'Instrumental: no words', ko: '연주곡: 가사 없음' },
+  lyricsFrom: { en: 'Lyrics from LRCLIB', ko: '가사 출처: LRCLIB' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -264,4 +269,35 @@ export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
   if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
   return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
+}
+
+// How many characters of lyrics one page of the card holds: an embed takes 4096, and a page this long reads whole.
+const LYRICS_PAGE = 1800;
+
+/** One page of the lyrics of the track playing, the words only (no timings), with the source credited. */
+export function lyricsCard(lyrics: LyricsAnswer, title: string, page: number, lang: Lang): EmbedBuilder {
+  const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(`${TEXT.lyrics[lang]} · ${title}`.slice(0, 256));
+  if (lyrics.kind === 'none') return embed.setDescription(TEXT.noLyrics[lang]);
+  if (lyrics.kind === 'instrumental')
+    return embed.setDescription(TEXT.instrumental[lang]).setFooter({ text: TEXT.lyricsFrom[lang] });
+  // Pages of whole lines: each line goes on the page it starts on, unless that page is full.
+  const pages: string[] = [];
+  let current = '';
+  for (const line of (lyrics.text ?? '').split('\n')) {
+    // A line longer than a page (it happens with words written without line breaks) is cut into pieces of a page.
+    for (let at = 0; at < Math.max(1, line.length); at += LYRICS_PAGE) {
+      const piece = line.slice(at, at + LYRICS_PAGE);
+      if (current.length + piece.length + 1 > LYRICS_PAGE && current) {
+        pages.push(current);
+        current = '';
+      }
+      current = current ? `${current}\n${piece}` : piece;
+    }
+  }
+  if (current.trim()) pages.push(current);
+  const count = Math.max(1, pages.length);
+  const shown = Math.min(Math.max(1, page), count);
+  return embed
+    .setDescription(pages[shown - 1]?.trim() || TEXT.noLyrics[lang])
+    .setFooter({ text: `${TEXT.page[lang]} ${shown}/${count} · ${TEXT.lyricsFrom[lang]}` });
 }

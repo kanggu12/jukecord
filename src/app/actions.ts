@@ -13,6 +13,7 @@ import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts'
 import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
+import { type LyricsAnswer, type LyricsSource, LyricsUnavailable } from '../media/lyrics.ts';
 import type { Resolver } from '../media/resolver.ts';
 import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
@@ -53,6 +54,7 @@ export const ACTIONS = [
   'settings',
   'dj-role',
   'status',
+  'lyrics',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -162,6 +164,8 @@ export interface Status {
   /** Whether the Discord bot is connected (false in browser-only mode or while connecting). */
   readonly discord: boolean;
   readonly uptimeMs: number;
+  /** Whether lyrics are looked up here (JUKECORD_LYRICS). */
+  readonly lyrics: boolean;
 }
 
 export interface ActionsOptions {
@@ -181,6 +185,8 @@ export interface ActionsOptions {
   readonly queueMax?: number;
   /** The longest track that may be added, in milliseconds (default 3 hours). */
   readonly trackMaxMs?: number;
+  /** Where lyrics come from (LRCLIB, through the database); null when they are turned off (JUKECORD_LYRICS). */
+  readonly lyrics?: LyricsSource | null;
 }
 
 /** What an add did: the new queue items, and how many tracks were left out and why. */
@@ -544,9 +550,27 @@ export class Actions {
       version: VERSION,
       discord: this.options.discordReady?.() ?? false,
       uptimeMs: Date.now() - (this.options.startedAt ?? Date.now()),
+      lyrics: Boolean(this.options.lyrics),
     };
   }
 
+  /**
+   * The lyrics of the track playing now (anyone may look): kept from an earlier lookup, or asked of LRCLIB once. Only
+   * the track playing: nobody can make jukecord look up anything else.
+   */
+  async lyrics(context: ActionContext): Promise<LyricsAnswer> {
+    const source = this.options.lyrics;
+    if (!source) throw new ActionError('unavailable', 'lyrics are turned off here');
+    const track = this.options.players.get(context.guildId).snapshot().track;
+    if (!track) throw new ActionError('conflict', 'nothing is playing');
+    try {
+      return await source.forTrack(track);
+    } catch (error) {
+      // LRCLIB down, slow, asking to wait, or too many lookups waiting: a moment later may work.
+      if (error instanceof LyricsUnavailable) throw new ActionError('unavailable', error.message);
+      throw error;
+    }
+  }
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".
   private fromStore(error: unknown): unknown {
     if (!(error instanceof StoreError)) return error;

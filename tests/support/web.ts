@@ -20,6 +20,7 @@ import { QueueService } from '../../src/core/queue.ts';
 import type { NewTrack } from '../../src/core/types.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
+import type { LyricsSource } from '../../src/media/lyrics.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
@@ -145,6 +146,8 @@ export interface TestServerOptions {
     readonly maxConnections?: number;
     readonly maxConnectionsPerAddress?: number;
   };
+  /** Where lyrics come from (a stand-in for LRCLIB); without it, lyrics are off as with JUKECORD_LYRICS=off. */
+  readonly lyrics?: LyricsSource;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -187,7 +190,15 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return tracks.map((track) => store.tracks.upsert(track));
     },
   } as unknown as Resolver;
-  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now() });
+  const actions = new Actions({
+    store,
+    queue,
+    players,
+    resolver,
+    log,
+    startedAt: clock.now(),
+    lyrics: options.lyrics ?? null,
+  });
   const directory = new FakeDirectory();
   const voice = new FakeVoice();
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);

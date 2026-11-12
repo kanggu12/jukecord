@@ -229,6 +229,16 @@ const EN = {
   startFailed: 'jukecord could not open the panel just now; trying again',
   failed: (message: string) => message,
   reload: 'jukecord was updated: reload the page',
+  // Lyrics.
+  lyrics: 'Lyrics',
+  lyricsClose: 'Close the lyrics',
+  lyricsLooking: 'Looking for lyrics',
+  lyricsNone: 'No lyrics found for this track',
+  lyricsInstrumental: 'Instrumental: no words',
+  lyricsUntimed: 'Without timings',
+  lyricsFrom: 'Lyrics from',
+  lyricsRetry: 'Try again',
+  lyricsGoTo: (time: string) => `Play from ${time}`,
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -451,6 +461,15 @@ const KO: Strings = {
   startFailed: 'jukecord가 지금 패널을 열지 못함: 다시 시도하는 중',
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
+  lyrics: '가사',
+  lyricsClose: '가사 닫기',
+  lyricsLooking: '가사를 찾는 중',
+  lyricsNone: '이 곡의 가사를 찾지 못함',
+  lyricsInstrumental: '연주곡: 가사 없음',
+  lyricsUntimed: '시간 정보 없음',
+  lyricsFrom: '가사 출처',
+  lyricsRetry: '다시 시도',
+  lyricsGoTo: (time: string) => `${time}부터 재생`,
 };
 
 /** The languages. */

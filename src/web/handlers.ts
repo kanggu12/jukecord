@@ -11,6 +11,7 @@ import type { Static, TSchema } from 'typebox';
 import type { Access } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions, type Directory } from '../app/actions.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
@@ -159,6 +160,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       mode: deps.discordMode ? ('discord' as const) : ('browser-only' as const),
       uptimeMs: Math.max(0, Math.round(status.uptimeMs)),
       login: { discord: deps.auth.discordLogin },
+      lyrics: status.lyrics,
     };
   },
 
@@ -220,5 +222,17 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   doctor: async ({ deps }) => {
     const report = await deps.doctor();
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
+  },
+
+  lyrics: async ({ context, deps }) => {
+    const lyrics = await deps.actions.lyrics(context);
+    return {
+      trackId: lyrics.trackId,
+      kind: lyrics.kind,
+      lines: lyrics.lines.map((line) => ({ ...line })),
+      text: lyrics.text,
+      // Credited wherever they are shown; "none found" has nothing to credit.
+      source: lyrics.kind === 'none' ? null : { ...LYRICS_SOURCE },
+    };
   },
 };

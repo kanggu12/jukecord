@@ -268,7 +268,11 @@ export async function run(
       ...request,
       params: { ...(guild ? { guild } : {}), ...(request.params ?? {}) },
     });
-    print(words.flags.has('json') ? JSON.stringify(answer, null, 2) : command.show(answer));
+    print(
+      words.flags.has('json')
+        ? JSON.stringify(answer, null, 2)
+        : command.show(answer, { args: rest, flags: words.flags }),
+    );
     // The self-check fails the command when a check failed, so scripts and monitors can tell.
     if (operation === 'doctor') {
       const checks = (answer as { checks?: { status: string }[] }).checks ?? [];

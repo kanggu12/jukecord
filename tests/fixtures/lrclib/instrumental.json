@@ -1,0 +1,13 @@
+{
+  "id": 4815180,
+  "name": "Low Tide",
+  "trackName": "Low Tide",
+  "artistName": "Demo Orchestra",
+  "albumName": "Made-up Shores",
+  "duration": 240.0,
+  "instrumental": true,
+  "hasWordSync": false,
+  "plainLyrics": null,
+  "syncedLyrics": null,
+  "lyricsfile": "version: '1.0'\nmetadata:\n  title: Low Tide\n  artist: Demo Orchestra\n  instrumental: true\n"
+}

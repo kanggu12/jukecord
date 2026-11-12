@@ -81,8 +81,11 @@ fingers.
 ## Privacy
 
 **What leaves my computer?**
-jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. The panel shows the tracks'
-pictures from those sites and people's pictures from Discord.
+jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. For lyrics it asks
+[LRCLIB](https://lrclib.net), sending the song's title, artist, album and length, only for a track that is playing when
+someone opens its lyrics, once per track (`JUKECORD_LYRICS=off` turns it off). Every request jukecord makes, yt-dlp's and
+LRCLIB's, goes to public addresses only. The panel shows the tracks' pictures from those sites and people's pictures
+from Discord.
 [Your data](../README.md#your-data) says what it keeps, and where.
 
 **Can people see servers they are not in?**

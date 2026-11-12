@@ -121,3 +121,17 @@ the measure is the event loop's delay rather than the processor's use: a busy pr
 up, and the loop's delay is what the voice of every server and every panel feel. Work that can be asked for again in
 a moment (audio, changes) is then turned away at once with 503, which costs almost nothing, instead of being queued
 behind work nobody can see.
+
+## Lyrics from LRCLIB
+
+LRCLIB is free, needs no key, keeps timed lyrics (LRC) beside the plain ones, and asks only that a client says what it
+is and goes gently. The other sources either need an account and a key per installation, or answer with plain words
+only, or scrape pages. jukecord asks for the track playing only when someone opens its lyrics (never ahead, never for a
+track nobody plays), once per track: what LRCLIB found is kept in the database for good, and that it found nothing for
+a week, after which it is asked again (LRCLIB fills in songs it lacked). It sends the song's title, artist, album and
+length: what YouTube says the recording is when it says (yt-dlp's `track`, `artist` and `album`), else what the title
+and the channel give with the usual decorations taken off. LRCLIB matches the length within two seconds, which keeps a
+guess from finding another song's words. Requests go one at a time, a third of a second apart, and a 429 or 503 holds
+them all for as long as it says; they leave through the same address guard as yt-dlp's (a CONNECT tunnel, TLS inside
+it to LRCLIB itself), so jukecord reaches only public addresses whoever asks. `JUKECORD_LYRICS=off` turns all of it
+off. The panel and the API are given the lines with their times; a person who may change the music can seek to one.

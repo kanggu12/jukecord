@@ -89,6 +89,10 @@ export function trackFromEntry(entry: Record<string, unknown>): NewTrack | null 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   const source = canonicalSource(url);
   const seconds = number(entry.duration);
+  // What the recording is, when YouTube says (a song from its music catalogue): the song, its first artist (the
+  // `artist` field joins them all with commas) and the album.
+  const song = text(entry.track);
+  const artist = (Array.isArray(entry.artists) ? text(entry.artists[0]) : null) ?? text(entry.artist);
   return {
     source,
     // YouTube addresses are shown in their clean form; other sites keep the page address they gave.
@@ -97,6 +101,10 @@ export function trackFromEntry(entry: Record<string, unknown>): NewTrack | null 
     uploader: text(entry.uploader) ?? text(entry.channel) ?? text(entry.artist) ?? null,
     durationMs: seconds === null ? null : Math.round(seconds * 1000),
     thumbnail: text(entry.thumbnail) ?? lastThumbnail(entry.thumbnails),
+    // Only when both are said: a song without its artist finds no lyrics, and the title is read instead.
+    ...(song && artist
+      ? { music: { artist: artist.trim(), title: song.trim(), album: text(entry.album)?.trim() ?? null } }
+      : {}),
   };
 }
 

@@ -117,6 +117,13 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.nothingFound, '찾은 곡 없음'],
   [REASONS.failed, '받지 못함'],
   [/^the site answered (\d{3})$/, '사이트 응답 코드 $1'],
+  // Lyrics (src/media/lyrics.ts).
+  ['lyrics are turned off here', '여기서는 가사를 찾지 않음'],
+  ['LRCLIB did not answer; try again in a moment', 'LRCLIB가 답하지 않음: 잠시 뒤 다시 시도하세요'],
+  [
+    'jukecord is looking up other lyrics right now; try again in a moment',
+    '다른 곡의 가사를 찾는 중: 잠시 뒤 다시 시도하세요',
+  ],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

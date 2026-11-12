@@ -1,0 +1,54 @@
+[
+  {
+    "id": 4815170,
+    "name": "Paper Boats on the River",
+    "trackName": "Paper Boats on the River",
+    "artistName": "Example Band",
+    "albumName": ".",
+    "duration": 201.0,
+    "instrumental": false,
+    "hasWordSync": false,
+    "plainLyrics": "A longer version, sung slower",
+    "syncedLyrics": "[00:20.00] A longer version, sung slower",
+    "lyricsfile": "version: '1.0'\n"
+  },
+  {
+    "id": 4815171,
+    "name": "Paper Boats on the River",
+    "trackName": "Paper Boats on the River",
+    "artistName": "Example Band",
+    "albumName": "Made-up Rivers (Deluxe)",
+    "duration": 188.0,
+    "instrumental": false,
+    "hasWordSync": false,
+    "plainLyrics": "Fold the morning into paper",
+    "syncedLyrics": null,
+    "lyricsfile": "version: '1.0'\n"
+  },
+  {
+    "id": 4815172,
+    "name": "Paper Boats on the River (feat. Sample Sound)",
+    "trackName": "Paper Boats on the River (feat. Sample Sound)",
+    "artistName": "Example Band",
+    "albumName": "Made-up Rivers",
+    "duration": 186.0,
+    "instrumental": false,
+    "hasWordSync": false,
+    "plainLyrics": "Fold the morning into paper",
+    "syncedLyrics": "[00:12.40] Fold the morning into paper",
+    "lyricsfile": "version: '1.0'\n"
+  },
+  {
+    "id": 4815173,
+    "name": "Static Bloom",
+    "trackName": "Static Bloom",
+    "artistName": "Example Band",
+    "albumName": "Made-up Rivers",
+    "duration": 187.0,
+    "instrumental": false,
+    "hasWordSync": false,
+    "plainLyrics": "Another song of the same length",
+    "syncedLyrics": "[00:05.00] Another song of the same length",
+    "lyricsfile": "version: '1.0'\n"
+  }
+]
