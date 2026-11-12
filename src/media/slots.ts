@@ -20,6 +20,8 @@ export type Priority = 'now' | 'ahead';
 export interface Ticket {
   /** Settles when the fetch may start; rejects when the signal aborts before that. */
   readonly granted: Promise<void>;
+  /** Whether the fetch still waits for its place (it did not get one at once, and has not started since). */
+  readonly waiting: boolean;
   /** Somebody now waits for this fetch: it counts as "now", and starts at once if there is a place for one. */
   promote(): void;
   /** Nobody waits for this fetch any more (it is still wanted ahead of time): it no longer counts as "now". */
@@ -104,6 +106,9 @@ export class Slots {
     }
     return {
       granted,
+      get waiting() {
+        return state === 'waiting';
+      },
       promote: () => {
         if (entry.kind === 'now' || state === 'done') return;
         entry.kind = 'now';

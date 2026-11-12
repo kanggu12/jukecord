@@ -21,6 +21,9 @@ All notable changes to jukecord are documented here. The format is based on
   counter; every server then came back paused. A look that itself comes late now starts the count again.
 - What Discord said about a person in a server is reused for a minute and then dropped; it was kept until the next
   start, one entry for every person who had opened the panel, in every server.
+- On a small machine with other servers fetching long tracks, a server whose fetch had to wait for its place gave its
+  tracks up as too slow before any of them had started, and stopped after three. The time limit of a fetch now counts
+  from when it starts.
 - A track that failed on every pass of a looping queue was fetched again on every pass, for as long as the loop ran.
   It now gets one more pass, and leaves the loop when it fails again while other tracks play.
 - The reasons a track could not be got: an age-restricted video was taken for YouTube's bot check (and kept in a

@@ -46,6 +46,8 @@ interface Job {
   nowWaiters: number;
   /** Everyone who wants to hear about the download's progress. */
   readonly listeners: Set<(fraction: number) => void>;
+  /** Everyone waiting for the fetch who wants to hear when it starts, after a wait for its place. */
+  readonly starting: Set<(waiting: boolean) => void>;
   /** Its place among the fetches of every server. */
   readonly ticket: Ticket;
 }
@@ -103,6 +105,7 @@ export class Media implements MediaPreparer {
     signal: AbortSignal,
     onProgress?: (fraction: number) => void,
     priority: Priority = 'now',
+    onWaiting?: (waiting: boolean) => void,
   ): Promise<PreparedMedia> {
     const key = MediaCache.keyOf(track.source);
     const cached = this.options.cache.get(key);
@@ -120,6 +123,12 @@ export class Media implements MediaPreparer {
     shared.waiters += 1;
     if (priority === 'now') shared.nowWaiters += 1;
     if (onProgress) shared.listeners.add(onProgress);
+    // Still waiting for its place (a caller that joined it finds it waiting too): the caller hears so now, and hears
+    // again when it starts.
+    if (onWaiting && shared.ticket.waiting) {
+      shared.starting.add(onWaiting);
+      onWaiting(true);
+    }
     // A caller that needed it now is gone: with only callers ahead of time left, it no longer counts as needed now.
     const lessNow = (): void => {
       if (priority !== 'now') return;
@@ -141,6 +150,7 @@ export class Media implements MediaPreparer {
     } finally {
       signal.removeEventListener('abort', leave);
       if (onProgress) shared.listeners.delete(onProgress);
+      if (onWaiting) shared.starting.delete(onWaiting);
       // A caller that got its answer is no longer waiting either.
       if (!signal.aborted) {
         shared.waiters -= 1;
@@ -155,6 +165,7 @@ export class Media implements MediaPreparer {
     const cache = this.options.cache;
     const tmp = cache.tmpPath(key);
     const listeners = new Set<(fraction: number) => void>();
+    const starting = new Set<(waiting: boolean) => void>();
     const ticket = this.slots.request(priority, abort.signal);
     // The job exists before its work starts, so the work can tell whether the list still points at it when it ends.
     const job: Job = {
@@ -163,6 +174,7 @@ export class Media implements MediaPreparer {
       waiters: 0,
       nowWaiters: 0,
       listeners,
+      starting,
       ticket,
     };
     job.promise.catch(() => {});
@@ -182,6 +194,15 @@ export class Media implements MediaPreparer {
         // Its turn among the fetches of every server; the time it took counts from here.
         await ticket.granted;
         started = steadyNow();
+        // Those who were told it waits hear that it starts; one that throws must not break the fetch.
+        for (const fn of starting) {
+          try {
+            fn(false);
+          } catch {
+            // A display, as progress is.
+          }
+        }
+        starting.clear();
         // One retry after 2 s for a transient failure (see TRANSIENT); anything else fails at once.
         let loudness: number | null = null;
         for (let attempt = 1; ; attempt += 1) {

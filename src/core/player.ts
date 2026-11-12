@@ -33,13 +33,15 @@ export interface PreparedMedia {
 export interface MediaPreparer {
   /**
    * Must stop work and reject soon after `signal` aborts: a skipped track should not keep downloading. `priority` says
-   * whether somebody waits for the track ('now', the default) or it is fetched ahead of time ('ahead').
+   * whether somebody waits for the track ('now', the default) or it is fetched ahead of time ('ahead'). `onWaiting`
+   * hears true when the fetch has to wait for its place among the fetches of every server, and false when it starts.
    */
   prepare(
     track: Track,
     signal: AbortSignal,
     onProgress?: (fraction: number) => void,
     priority?: 'now' | 'ahead',
+    onWaiting?: (waiting: boolean) => void,
   ): Promise<PreparedMedia>;
 }
 
@@ -492,11 +494,27 @@ export class Player {
     // Give up on a fetch that takes too long: a stuck download must not block the queue. A long track takes longer to
     // download and encode, so it gets a tenth of its length on top (three hours: 18 more minutes).
     const limitMs = fetchLimitMs(this.options.fetchTimeoutMs, current.track.durationMs);
-    this.loadTimer = this.options.clock.setTimeout(() => {
-      this.loadTimer = null;
-      controller.abort();
-      this.failed(current.track, 'getting it took too long');
-    }, limitMs);
+    const giveUpLater = (): void => {
+      if (this.loadTimer !== null) this.options.clock.clearTimeout(this.loadTimer);
+      this.loadTimer = this.options.clock.setTimeout(() => {
+        this.loadTimer = null;
+        controller.abort();
+        this.failed(current.track, 'getting it took too long');
+      }, limitMs);
+    };
+    giveUpLater();
+    // The time a fetch waits for its place among the fetches of every server (other servers fetching long tracks on a
+    // small machine) is not its own: the limit counts from when it starts. Without that, a server whose turn had not
+    // come failed three tracks in a row as too slow, and stopped, before any of them was fetched.
+    const onWaiting = (waiting: boolean): void => {
+      if (session !== this.session || this.status !== 'loading') return;
+      if (!waiting) {
+        giveUpLater();
+      } else if (this.loadTimer !== null) {
+        this.options.clock.clearTimeout(this.loadTimer);
+        this.loadTimer = null;
+      }
+    };
     this.emit();
     // Progress is shown while loading; a burst of reports is sent at most four times a second.
     const onProgress = (fraction: number): void => {
@@ -508,7 +526,7 @@ export class Player {
         if (session === this.session && this.status === 'loading') this.emit();
       }, 250);
     };
-    this.options.media.prepare(current.track, controller.signal, onProgress).then(
+    this.options.media.prepare(current.track, controller.signal, onProgress, 'now', onWaiting).then(
       (media) => {
         // Skipped, stopped or timed out meanwhile: this result belongs to a load that no longer matters.
         if (session !== this.session || controller.signal.aborted) return;

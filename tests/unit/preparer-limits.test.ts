@@ -3,12 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { Bus } from '../../src/core/bus.ts';
 import { fetchLimitMs } from '../../src/core/player.ts';
+import { Players } from '../../src/core/players.ts';
+import { QueueService } from '../../src/core/queue.ts';
 import { createLogger } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import type { Ffmpeg } from '../../src/media/ffmpeg.ts';
 import { Media } from '../../src/media/preparer.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
+import { FakeClock, flush } from '../support/fakes.ts';
 import { addTracks, memoryStore } from '../support/store.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
@@ -90,6 +94,58 @@ describe('Media under a crowd', () => {
     assert.equal(seen.running, 1);
     previous?.abort();
     await Promise.all(loads);
+  });
+
+  it('does not count the wait for a place against a track somebody waits for', async () => {
+    const { store, media, seen } = setup();
+    const clock = new FakeClock();
+    const bus = new Bus();
+    const queue = new QueueService(store.queue, bus);
+    const players = new Players({
+      queue,
+      media,
+      history: store.history,
+      state: store.playerState,
+      bus,
+      clock,
+      log,
+      fetchTimeoutMs: 60_000,
+    });
+    // Four servers each fetching a long mix take every place for a fetch somebody waits for (two cores: four).
+    const [mix1, mix2, mix3, mix4, ...songs] = addTracks(store, 9);
+    for (const [index, mix] of [mix1, mix2, mix3, mix4].entries()) {
+      queue.add(`mix-server-${index}`, [mix?.id ?? 0], 'end', null);
+      players.get(`mix-server-${index}`).play();
+    }
+    await flush();
+    assert.equal(seen.running, 4);
+    // A fifth server's songs wait their turn: five minutes on, none has started, and none was given up on.
+    queue.add(
+      'fifth',
+      songs.map((song) => song.id),
+      'end',
+      null,
+    );
+    const fifth = players.get('fifth');
+    fifth.play();
+    await clock.advance(5 * 60_000);
+    assert.equal(seen.started, 4);
+    assert.equal(fifth.snapshot().status, 'loading');
+    assert.equal(fifth.snapshot().error, null);
+    assert.equal(fifth.snapshot().track?.title, 'Track 5');
+    // A mix server stops: its place goes to the fifth server, whose time limit counts from there.
+    players.get('mix-server-0').stop();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flush();
+    assert.equal(seen.started, 5);
+    await clock.advance(fetchLimitMs(60_000, songs[0]?.durationMs ?? null) - 1000);
+    assert.equal(fifth.snapshot().status, 'loading');
+    assert.equal(fifth.snapshot().error, null);
+    // And it is still given up on once that limit has passed since it started.
+    await clock.advance(2000);
+    assert.match(fifth.snapshot().error ?? '', /getting it took too long/);
+    for (const player of players.all()) player.stop();
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   it('gives an MP3 copy the time limit of the track, which grows with its length', async () => {
