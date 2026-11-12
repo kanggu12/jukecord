@@ -969,14 +969,16 @@ window.__audit = () => {
     const map = element.computedStyleMap();
     const style = getComputedStyle(element);
     const spaces = [];
+    // The room a screen's notch, corners or home bar take (its safe-area insets) is the device's, not the design's.
+    const device = (value) => Object.values(safe).some((inset) => inset > 0 && Math.abs(value - inset) < 0.05);
     for (const side of ['top', 'right', 'bottom', 'left']) {
       const padding = lengthOf(map, `padding-${side}`);
-      if (padding) {
+      if (padding && !device(padding)) {
         spaces.push(['padding', padding]);
         used.paddings.add(px(padding));
       }
       const margin = lengthOf(map, `margin-${side}`);
-      if (margin) {
+      if (margin && !device(Math.abs(margin))) {
         spaces.push(['margin', Math.abs(margin)]);
         used.gaps.add(px(Math.abs(margin)));
       }
@@ -992,8 +994,6 @@ window.__audit = () => {
       }
     for (const [what, value] of spaces) {
       if (SCALE.some((step) => Math.abs(value - step) < 0.05)) continue;
-      // The room a screen's notch, corners or home bar take (its safe-area insets) is the device's, not the design's.
-      if (Object.values(safe).some((inset) => inset > 0 && Math.abs(value - inset) < 0.05)) continue;
       const key = px(value);
       if (!offScale.has(key)) offScale.set(key, []);
       const places = offScale.get(key);
