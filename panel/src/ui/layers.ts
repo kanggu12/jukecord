@@ -299,7 +299,11 @@ export function askDialog(options: {
       if (value) finish(value);
     };
     input.onkeydown = (event) => {
-      if (event.key === 'Enter') submit();
+      if (event.key !== 'Enter') return;
+      // Taken here: the dialog closes on it and the focus goes back to the key that opened it, which the same press
+      // would otherwise press again (a second rename dialog over the first).
+      event.preventDefault();
+      submit();
     };
     return {
       title: options.title,
