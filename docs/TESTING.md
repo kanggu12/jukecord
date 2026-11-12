@@ -12,7 +12,9 @@
 
 The integration tests need ffmpeg with libopus; they are skipped (and say so) without it. Nothing in the tests talks
 to Discord, YouTube or any other site: yt-dlp is replaced by `tests/support/fake-yt-dlp.mjs`, Discord's API by fakes,
-and every example address is on example.com or media.example.
+and every example address is on example.com or media.example. What YouTube, Deezer, Spotify and Apple Music answer
+(a search, a mix, Deezer's track, album and playlist, a Spotify and an Apple Music track's page) was read once from
+the real services and is kept in `tests/fixtures` in its real shape, with every value made up.
 
 ## The panel
 
@@ -25,7 +27,10 @@ dialog open and in the bar of wide windows. It also walks a tablet held sideways
 and a home bar (safe-area insets, upright and sideways), a contrast theme (forced colours, the menu and the
 statistics), the shortcuts on a short window (a page zoomed to 200 %), and the longest names Discord allows in the bar.
 The panel with a Discord bot is walked too: a made-up server, its voice channels and people listening in browsers are
-put between the page and the server, which runs browser-only. The README's pictures come from the same walk.
+put between the page and the server, which runs browser-only. It also types words in the add field (the search's answer
+is the walk's own, made from the seeded tracks), holds a link from another window over the page, opens the liked list,
+autoplay's choices and a row autoplay queued (from the seeded plays: nothing is fetched), and a playlist's export and
+import. The README's pictures come from the same walk.
 `tests/ui/audit.js` measures each page: text that is clipped (unless marked so, with its whole text as the title) or
 drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with translucent layers
 composited), controls on one row that differ in height or centre, floating layers that cut across other boxes, a sheet,

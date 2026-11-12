@@ -71,6 +71,11 @@ and changes are answered with `503` (`busy`) and `Retry-After`, until it has cau
 the browsers it logged in with a link) is held to neither rate, and its changes go through while jukecord is behind;
 its audio waits like everyone's, as sending audio is the work that can wait.
 
+`search`, which starts yt-dlp, is held to a rate of its own as well: one a second with five at once, per login
+and per address, the host apart.
+
+Bodies are at most 64 KiB, but for `playlist-import`, which takes a file of up to 1 MiB.
+
 A request must arrive whole within 30 s, its headers within 15 s; a slower one is answered `408` and its connection
 closed. Sending an answer has no time limit while the reader takes it (audio to a slow line takes as long as it takes),
 but a connection on which nothing moves either way for two minutes is closed; a WebSocket is not (it is pinged every

@@ -82,7 +82,10 @@ fingers.
 
 **What leaves my computer?**
 jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. The panel shows the tracks'
-pictures from those sites and people's pictures from Discord.
+pictures from those sites and people's pictures from Discord. Searching sends YouTube the words typed; autoplay's
+"related" mode asks YouTube for the mix of the track playing (its "history" mode asks nobody). A Deezer, Spotify or
+Apple Music link is read from that service and its tracks searched on YouTube by artist and title;
+`JUKECORD_LINK_SERVICES` turns each of those services off.
 [Your data](../README.md#your-data) says what it keeps, and where.
 
 **Can people see servers they are not in?**
