@@ -6,7 +6,7 @@
  */
 import type { QueueRepository } from '../store/store.ts';
 import type { Bus } from './bus.ts';
-import { inTurns, type Playing, turnIndex } from './turns.ts';
+import { addInTurns, inTurns, type Playing } from './turns.ts';
 import type { QueueItem } from './types.ts';
 
 /** Where new tracks go: after the last one, right after the one playing, or at a position. */
@@ -147,13 +147,16 @@ export class QueueService {
     const before = this.repo.owners(guildId);
     // In at the end first (one insert), then the whole order written once with each new item in its turn.
     const items = this.repo.insert(guildId, trackIds, Number.MAX_SAFE_INTEGER, addedBy);
-    const order = before.map((item) => item.id);
-    const owners = before.map((item) => item.addedBy);
-    for (const item of items) {
-      const at = turnIndex(owners, playing, addedBy);
-      order.splice(at, 0, item.id);
-      owners.splice(at, 0, addedBy);
-    }
+    const order = addInTurns(
+      before.map((item) => item.addedBy),
+      playing,
+      addedBy,
+      items.length,
+    ).flatMap((index) => {
+      // An item already there by its index, a new one as -(its place among the new ones + 1).
+      const id = index >= 0 ? before[index]?.id : items[-index - 1]?.id;
+      return id === undefined ? [] : [id];
+    });
     this.repo.reorder(guildId, order);
     this.changed(guildId);
     const places = new Map(order.map((id, index) => [id, index]));

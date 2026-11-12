@@ -3,7 +3,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { inTurns, type Owner, type Playing, turnIndex } from '../../src/core/turns.ts';
+import { addInTurns, inTurns, type Owner, type Playing, turnIndex } from '../../src/core/turns.ts';
 
 // A queue written as its owners ("aab" is two of a's then b's), and a track of `owner` put where turns put it.
 function add(queue: string, owner: string, playing: Playing = null): string {
@@ -62,5 +62,57 @@ describe('taking turns', () => {
     // Each person's tracks keep their own order.
     const owners: Owner[] = ['a', 'a', 'b'];
     assert.deepEqual(inTurns(owners, null), [0, 2, 1]);
+  });
+});
+
+// The rule placed one track at a time, as it reads (the reference the quick functions must agree with).
+function oneByOne(owners: Owner[], playing: Playing, owner: Owner, count: number): number[] {
+  const order = owners.map((_, index) => index);
+  const placed = [...owners];
+  for (let track = 0; track < count; track += 1) {
+    const at = turnIndex(placed, playing, owner);
+    order.splice(at, 0, -(track + 1));
+    placed.splice(at, 0, owner);
+  }
+  return order;
+}
+
+// A queue of the same, put in turns one item at a time.
+function arrangedOneByOne(owners: Owner[], playing: Playing): number[] {
+  const order: number[] = [];
+  const placed: Owner[] = [];
+  owners.forEach((owner, index) => {
+    const at = turnIndex(placed, playing, owner);
+    order.splice(at, 0, index);
+    placed.splice(at, 0, owner);
+  });
+  return order;
+}
+
+describe('taking turns, quickly', () => {
+  it('places tracks as the rule placed one at a time does, on queues of every shape', () => {
+    // A fixed sequence of numbers, so a failure can be run again.
+    let seed = 7;
+    const next = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const people: Owner[] = ['a', 'b', 'c', 'd', null];
+    for (let round = 0; round < 300; round += 1) {
+      const owners = Array.from({ length: Math.floor(next() * 14) }, () => people[Math.floor(next() * 5)] ?? null);
+      const playing: Playing = next() < 0.3 ? null : { owner: people[Math.floor(next() * 5)] ?? null };
+      const owner = people[Math.floor(next() * 5)] ?? null;
+      const count = 1 + Math.floor(next() * 4);
+      assert.deepEqual(addInTurns(owners, playing, owner, count), oneByOne(owners, playing, owner, count));
+      assert.deepEqual(inTurns(owners, playing), arrangedOneByOne(owners, playing));
+    }
+  });
+
+  it('takes a hundred thousand tracks in turns in well under a second', () => {
+    const owners: Owner[] = Array.from({ length: 100_000 }, (_, index) => `p${index % 37}`);
+    const started = performance.now();
+    assert.equal(inTurns(owners, { owner: 'p3' }).length, 100_000);
+    assert.equal(addInTurns(owners, null, 'newcomer', 100_000).length, 200_000);
+    assert.ok(performance.now() - started < 1000, `${Math.round(performance.now() - started)} ms`);
   });
 });

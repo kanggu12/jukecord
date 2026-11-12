@@ -42,17 +42,69 @@ export function turnIndex(owners: readonly Owner[], playing: Playing, owner: Own
   return Math.max(lastOfRound, lastOwn) + 1;
 }
 
+// The round of each item: how many items of its person come before it, the track playing counted for its person.
+function roundsOf(owners: readonly Owner[], playing: Playing): number[] {
+  const seen = new Map<Owner, number>();
+  if (playing !== null) seen.set(playing.owner, 1);
+  return owners.map((owner) => {
+    const round = seen.get(owner) ?? 0;
+    seen.set(owner, round + 1);
+    return round;
+  });
+}
+
 /**
- * A queue put in turns, as the indexes of its items in their new order: each item placed in turn, in the order the
- * queue has them now, so each person's tracks keep their own order and the rounds go in the order people first come.
+ * Where `count` tracks of `owner` go, in turns, one after another (as turnIndex places each, in one pass instead of
+ * one per track: a playlist of a thousand into a queue of a thousand is two thousand steps, not a million). Returns
+ * the new queue's order: an item already there by its index, a new track `j` as `-(j + 1)`. The items already there
+ * keep their order.
+ */
+export function addInTurns(owners: readonly Owner[], playing: Playing, owner: Owner, count: number): number[] {
+  const rounds = roundsOf(owners, playing);
+  // The last item of each round (the track playing is round 0's first, before the queue: -1), and the person's last.
+  const lastOf = new Map<number, number>();
+  if (playing !== null) lastOf.set(0, -1);
+  let lastOwn = -1;
+  let mine = playing !== null && playing.owner === owner ? 1 : 0;
+  owners.forEach((other, index) => {
+    lastOf.set(rounds[index] ?? 0, index);
+    if (other === owner) {
+      lastOwn = index;
+      mine += 1;
+    }
+  });
+  // Each new track goes after an item already there (its anchor; the length for the end), never before the new track
+  // before it: so the anchors only grow, and tracks on the same anchor keep their order.
+  const after = new Map<number, number[]>();
+  let anchor = lastOwn;
+  for (let track = 0; track < count; track += 1) {
+    const last = lastOf.get(mine + track);
+    anchor = Math.max(anchor, last === undefined ? owners.length : last);
+    const onIt = after.get(anchor) ?? [];
+    onIt.push(-(track + 1));
+    after.set(anchor, onIt);
+  }
+  // The queue with each new track after its anchor (pushed one by one: a spread of a hundred thousand would be too
+  // many arguments for one call).
+  const order: number[] = [];
+  const place = (anchor: number) => {
+    for (const track of after.get(anchor) ?? []) order.push(track);
+  };
+  place(-1);
+  owners.forEach((_, index) => {
+    order.push(index);
+    place(index);
+  });
+  place(owners.length);
+  return order;
+}
+
+/**
+ * A queue put in turns, as the indexes of its items in their new order: each person's tracks in their own order, round
+ * after round, and in each round in the order the queue has them now (what placing each in turn, one by one, gives).
+ * A sort, so a long queue costs little: the order of the round, then of the place.
  */
 export function inTurns(owners: readonly Owner[], playing: Playing): number[] {
-  const order: number[] = [];
-  const placed: Owner[] = [];
-  owners.forEach((owner, index) => {
-    const at = turnIndex(placed, playing, owner);
-    order.splice(at, 0, index);
-    placed.splice(at, 0, owner);
-  });
-  return order;
+  const rounds = roundsOf(owners, playing);
+  return owners.map((_, index) => index).sort((a, b) => (rounds[a] ?? 0) - (rounds[b] ?? 0) || a - b);
 }
