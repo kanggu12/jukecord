@@ -74,10 +74,16 @@ export type ActionErrorCode = 'invalid' | 'not-found' | 'forbidden' | 'conflict'
 export class ActionError extends Error {
   override name = 'ActionError';
   readonly code: ActionErrorCode;
+  /**
+   * Whether the refusal came after work an ordinary refusal does not cost: a lookup on the site (yt-dlp, the
+   * network) that found nothing. The web server gives a refused change its address's share back unless it did.
+   */
+  readonly spent: boolean;
 
-  constructor(code: ActionErrorCode, message: string) {
+  constructor(code: ActionErrorCode, message: string, options: { spent?: boolean } = {}) {
     super(message);
     this.code = code;
+    this.spent = options.spent ?? false;
   }
 }
 
@@ -233,11 +239,14 @@ export class Actions {
       return await this.options.resolver.resolve(input, signal, context.userId, context.guildId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork);
+      // The address was asked of DNS (see Resolver): a lookup was spent on it.
+      if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork, { spent: true });
+      // No lookup ran: every place was taken.
       if (error instanceof BusyError) throw new ActionError('unavailable', message);
-      // Nothing typed: said as it is. Anything else: the short reason (the resolver logged the full text).
+      // Nothing typed: said as it is, nothing looked up. Anything else: the short reason (the resolver logged the full
+      // text), after a lookup that cost what any lookup costs.
       if (/nothing to add/.test(message)) throw new ActionError('invalid', message);
-      throw new ActionError('not-found', plainReason(message));
+      throw new ActionError('not-found', plainReason(message), { spent: true });
     }
   }
 

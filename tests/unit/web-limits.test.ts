@@ -120,11 +120,12 @@ describe('the rates of changes and shedding when behind', () => {
     }
   });
 
-  it('holds reads to a wider rate of their own, by login and by address, and the host not at all', async () => {
+  it('holds reads to a wider rate of their own, a person by themself, a request without a login by its address', async () => {
     let now = 2_000_000;
     const server = await testServer({ rates: { now: () => now } });
     try {
       server.directory.join(GUILD, ALICE);
+      server.directory.join(GUILD, BOB);
       const alice = sessionFor(server, ALICE);
       const read = (headers: Record<string, string>, remoteAddress = '10.2.0.1') =>
         server.web.app.inject({ method: 'GET', url: api(`/guilds/${GUILD}/stats?days=365`), headers, remoteAddress });
@@ -135,14 +136,22 @@ describe('the rates of changes and shedding when behind', () => {
       assert.deepEqual(refused.json(), {
         error: { code: 'rate-limited', message: 'too many requests at once; try again in a moment' },
       });
+      // A second login of the same person (another browser, a token) shares that person's share.
+      const again = sessionFor(server, ALICE);
+      assert.equal((await read({ cookie: again.cookie })).statusCode, 429);
       now += 34;
       assert.equal((await read({ cookie: alice.cookie })).statusCode, 200);
-      // Without a login, the address alone counts: the public status, from an address that read nothing yet, passes.
+      // Someone else behind the same address (a household, an office, Docker's bridge, a proxy not trusted) has a
+      // share of their own: fifteen panels opening at once behind one address were refused, and a refused /me shows
+      // the panel's start-failed page.
+      const bob = sessionFor(server, BOB);
+      for (let i = 0; i < 60; i += 1) assert.equal((await read({ cookie: bob.cookie })).statusCode, 200);
+      // Without a login, the address alone counts, apart from the people there.
       const status = (remoteAddress: string) =>
         server.web.app.inject({ method: 'GET', url: api('/status'), remoteAddress });
-      assert.equal((await status('10.2.0.9')).statusCode, 200);
-      // Alice's address is spent, whoever asks from it.
+      for (let i = 0; i < 60; i += 1) assert.equal((await status('10.2.0.1')).statusCode, 200);
       assert.equal((await status('10.2.0.1')).statusCode, 429);
+      assert.equal((await status('10.2.0.9')).statusCode, 200);
       // The host's own command line is held to none of it.
       for (let i = 0; i < 100; i += 1) assert.equal((await read(asHost)).statusCode, 200);
     } finally {
@@ -170,6 +179,31 @@ describe('the rates of changes and shedding when behind', () => {
       for (let i = 0; i < 20; i += 1) assert.equal((await shuffle(alice)).statusCode, 403);
       assert.equal((await shuffle(alice)).statusCode, 429);
       assert.equal((await shuffle(bob)).statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a refused change's share of the address when the refusal came after a lookup", async () => {
+    const server = await testServer({ rates: { now: () => 9_000 }, nothingFound: ['no such song'] });
+    try {
+      // Two people behind one address; Alice searches for something that is not there, again and again.
+      server.directory.join(GUILD, ALICE);
+      server.directory.join(GUILD, BOB);
+      const alice = sessionFor(server, ALICE);
+      const bob = sessionFor(server, BOB);
+      const add = (session: { cookie: string; csrf: string }, input: string) =>
+        server.web.app.inject({
+          method: 'POST',
+          url: api(`/guilds/${GUILD}/queue`),
+          headers: { cookie: session.cookie, [CSRF_HEADER]: session.csrf },
+          payload: { input },
+          remoteAddress: '10.4.0.1',
+        });
+      // Each one ran a search (yt-dlp, the network): a refusal that cost what a lookup costs counts against the
+      // address too, so a person with several logins or tokens behind it still meets the address's brake.
+      for (let i = 0; i < 20; i += 1) assert.equal((await add(alice, 'no such song')).statusCode, 404);
+      assert.equal((await add(bob, 'no such song')).statusCode, 429);
     } finally {
       await server.close();
     }

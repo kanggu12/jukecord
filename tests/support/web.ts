@@ -130,6 +130,8 @@ export interface TestServerOptions {
   readonly panelDir?: string | null;
   /** What the resolver finds for each input. */
   readonly found?: Record<string, NewTrack[]>;
+  /** Inputs the resolver looks up and finds nothing for ("nothing was found", as yt-dlp's search says). */
+  readonly nothingFound?: readonly string[];
   /** The caps on live connections (lower than the defaults to test them). */
   readonly live?: Partial<LiveLimits>;
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
@@ -177,6 +179,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   // The resolver looks inputs up in the table; anything else finds nothing.
   const resolver = {
     resolve: async (input: string) => {
+      // Looked up on the site, which found nothing: a lookup that cost what any lookup costs.
+      if (options.nothingFound?.includes(input)) throw new Error('nothing was found');
       const tracks = found[input];
       if (!tracks) throw new Error(`nothing to add for "${input}"`);
       return tracks.map((track) => store.tracks.upsert(track));

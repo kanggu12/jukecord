@@ -503,6 +503,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // fetch). Nothing is taken from any bucket unless every one has a token, so a refusal costs nothing.
         // A change the actions then refuse (no DJ role, an item gone) gives its address's token back: the others behind
         // that address (a household, an office) are not held back by one person's refusals; that person's login still is.
+        // A refusal after a lookup on the site (a search that found nothing) cost a lookup, and keeps it spent: a person
+        // with several logins or tokens behind one address otherwise had no brake from the address at all.
         let giveBack: (() => void) | null = null;
         if (spec.method !== 'GET' && caller && caller.principal.kind !== 'host') {
           if (behind()) return later(reply, 'busy', BUSY, 2000);
@@ -519,10 +521,14 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             if (fetching) fetches.give(address);
           };
         }
-        // A read from anyone but the host is held to the wider rate of reads, by its login and its address (without a
-        // login, by its address alone).
+        // A read from anyone but the host is held to the wider rate of reads: a logged-in one by the person behind it
+        // alone, whatever login or token they use; one without a login by its address. Many people share an address
+        // (a household, an office, Docker's bridge, a proxy not trusted): counted by it, fifteen panels opening at
+        // once behind one were refused, and a refused /me shows the panel's start-failed page.
         if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
-          const keys = [...(caller ? [`login ${loginKey(caller)}`] : []), `address ${addressKey(request.ip)}`];
+          const keys = caller
+            ? [caller.principal.kind === 'user' ? `person ${caller.principal.userId}` : `login ${loginKey(caller)}`]
+            : [`address ${addressKey(request.ip)}`];
           const wait = reads.wait(keys);
           if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
           reads.take(keys);
@@ -542,7 +548,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             deps,
           });
         } catch (error) {
-          if (error instanceof ActionError || error instanceof StoreError) giveBack?.();
+          if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) giveBack?.();
           throw error;
         }
       },
