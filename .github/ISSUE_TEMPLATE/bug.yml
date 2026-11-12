@@ -29,7 +29,7 @@ body:
     attributes:
       label: jukecord version
       description: Beside the logo in the panel, /version in Discord, or what ./jukecord status says.
-      placeholder: 0.1.1
+      placeholder: 0.2.0
   - type: input
     id: where
     attributes:

@@ -6,6 +6,133 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+### Changed
+
+- The panel is remade in glass, lit by the music. The cards are frosted glass over a field that takes its light from
+  the cover of the track playing, and a glow of the cover's colours breathes behind the turning disc; with nothing
+  playing the field rests near grey, and the login page is lit by the mark's rainbow. The rainbow travels round the
+  disc's rim and runs along the progress bar while a track plays, and rests white when it is paused. Rows are bare
+  until the pointer or the keyboard is on them, each with its cover and the record peeking out from behind it. Keys
+  are glass, the main key solid, inputs sunk in. Both themes.
+- The panel moves, softly: the cards rise into place when it opens, a new track fades in, Skip moves the old one out,
+  rows glide to their new places when the queue is shuffled or reordered, come in when added and go out when removed,
+  and the card to add music breathes when there is nothing to play. Motion off (in the menu, or asked by the system)
+  keeps all of it still, and the system's setting for less transparency turns the glass solid.
+- The top bar: the page in use is underlined along the bar's foot, the version is a plain word beside the name, and
+  the account key opens the menu and closes it again.
+- Refusals and failures read in the panel's language: the Korean panel showed the server's English ("no such site"),
+  and the English one showed it without a capital. The panel and the bot now share one table.
+- Statistics: each label stands under its own bar and each number on its line, the axis top stays close above the
+  tallest bar (52 gives 60, not 100), a year of weeks is labelled by year and month, and the tables' columns say what
+  they hold. The log: one record's level is in the singular and in the panel's language, and dates are year-month-day.
+- A crowd of panels costs little more than one: each live message is made once for every panel showing the server,
+  and a big one (a long queue) is compressed once, as gzip, and sent as the same bytes to every browser that can unpack
+  it, instead of being compressed again for each connection. The queue goes out at most four times a second with the
+  queue as it is, and who is listening at most once a second, naming the first twenty. On two cores a thousand panels
+  at three queue changes a second stay connected and see each change in under a tenth of a second, where two hundred
+  were cut off before; an idle panel takes about 15 KiB of memory instead of 0.36 MiB.
+- Changes are held to ten a second per login and per address, twenty at once; skip, play now, jump and drop to two a
+  second, five at once. Beyond that the answer is 429 `rate-limited` with Retry-After. The host is not held to them.
+- While jukecord has fallen behind (its event loop over 0.2 s late), audio and changes from anyone but the host are
+  answered at once with 503 `busy` and Retry-After, so the voice and the live updates catch up first. `/metrics` shows
+  the delay.
+- At most twice the fetch limit of tracks somebody waits for are fetched at once (four on two cores): a storm of skips
+  no longer runs a hundred yt-dlp and ffmpeg processes.
+- The chart's image is `ghcr.io/kanggu12/jukecord` in the checkout too, not only in the packaged chart. The pod asks
+  for 250m and 512Mi and may use 1536Mi (was 100m, 256Mi and 1Gi): Node's heap ceiling is about half the limit, and
+  yt-dlp and ffmpeg share the rest. The readiness probe waits 5 s and six misses, the startup probe 3 s; the image's
+  health check runs once a minute.
+- Upgrading the chart: `env` refuses the token, the OAuth secret and the names the chart sets; `discord.existingSecret`
+  together with `discord.token` or `discord.clientSecret` stops the install; an existing Secret must hold `token`, and
+  with a client ID set, `clientSecret` too. Give your values file again rather than `--reuse-values`.
+- Compose gives the container 1 GiB of memory without swap, at most 1024 processes and a 256 MiB `/tmp`, and needs
+  Compose 2.24 or newer.
+- The front door lists `restart` and `version`, builds the image before the first start instead of trying to pull
+  `jukecord:local`, takes a relative backup name from where it is typed, and `doctor` exits 1 when a check fails.
+- The release image says when and on which base it was built; its notes are the CHANGELOG section alone.
+
+### Added
+
+- `JUKECORD_LIVE_MAX`: the most open panels at once (1000 by default); also at most ten per login and twenty per
+  address (the host's own count in the total only). One more is told why (1013), and the panel says so in the bar and
+  tries again later than after a drop (15 s, doubling to a minute).
+- A watchdog: when jukecord's main thread has not answered for 30 seconds, the process ends itself with a line in the
+  log, and the restart policy starts it again with every server paused where it was. Docker restarts a container that
+  exits, not one that hangs.
+- The data folder keeps the newest seven backups.
+- The chart: a README (`helm show readme`), `extraEnv` for what `env` cannot hold (`NODE_OPTIONS`, `TZ`,
+  `HTTPS_PROXY`, a value from a ConfigMap), `podLabels`, and `networkPolicy.ingressFrom`, which lets only the peers
+  named reach the panel's port: behind an Ingress, its controller alone, so the `X-Forwarded-For` jukecord believes
+  cannot come from another pod. It has an icon, a maintainer and Artifact Hub's annotations.
+- A weekly check fails when a newer yt-dlp is out than the image carries, and prints the sums to bump to; the FFmpeg
+  check adds a notice when a newer line than 7.1 exists. Dependabot proposes newer actions, base-image digests and npm
+  packages once a week, one pull request per kind.
+- [Questions and answers](docs/FAQ.md): what it takes to run, how many people can use it at once, listening with
+  friends, what leaves your computer. The guides gain upgrading, uninstalling, backup and restore on Kubernetes,
+  memory and CPU, nginx beside Caddy, a second copy on one machine (`COMPOSE_PROJECT_NAME`), and checking a release
+  with `gh attestation verify`.
+- `tests/perf/measure.sh` measures a server used every day for a year (a thousand tracks queued, 10,000 plays) on two
+  processor cores: memory, each read the panel makes, a track's encoding, and a crowd of a thousand panels.
+  [Testing](docs/TESTING.md#measurements) has the figures.
+
+### Fixed
+
+- On phones a long title made the page wider than the screen, with the menu key and the cards cut off.
+- On phones and tablets the menu could not be closed by touch: it has a close key now, and the key that opens it closes
+  it.
+- Toasts on phones were cut off at the screen's edge and pushed the menu key off it: they hang under the bar there,
+  on up to two lines.
+- Escape closes only the newest layer (a rename dialog over the playlists, not both), Tab stays inside it, and the
+  player's shortcuts wait while a menu or a dialog is open (an arrow key in the menu seeked the music). Opening the
+  menu from the keyboard on a wide window left the focus on the page behind it.
+- Discord avatars never appeared: the picture was only attached once loaded, and never started loading.
+- The Add key looked ready again while its lookup was still running, when anything else changed meanwhile.
+- Badges ("View only", a log record's level) broke inside the word and spilled out of their pill; the log page was
+  wider than a phone.
+- Touch targets: the seek bar, the volume, the motion switch, the Discord login key and the logo are a finger's size;
+  on the narrowest phones the playing card's keys keep to two tidy rows.
+- The first connection says "Connecting", not "Reconnecting"; before it, the card says so instead of standing blank,
+  and people who may only look are told why the keys are off on touch screens too.
+- Light theme: the state colours and the paused disc's rim reach the contrast they need.
+- Removing 900 duplicates from a thousand-track queue took about a second, during which no server's music was fed;
+  it takes a few milliseconds.
+- With the queue on repeat, a track that failed once left the loop for good; it goes back to the end unless it is
+  gone for good (removed, private, nothing playable). An outage emptied a queue of one or two tracks; they are put
+  back, as three failures in a row put theirs back.
+- A server that removed the bot kept fetching and pinning its next tracks; a stopped player needs nothing ahead. The
+  next tracks were fetched ahead only once the current one had loaded.
+- MP3 copies of long tracks always failed (a fixed minute); they get the time fetching the track gets.
+- A DJ role deleted in Discord left only the server's managers able to change the music; it counts as none.
+- An address blocked for failed logins also refused the right token, cookie or login link; only failing ones are
+  refused now.
+- yt-dlp no longer waits on a site that stops in the middle of an answer: the proxy closes yt-dlp's side too.
+- The history pages in the order entries were written, so a clock set back cannot hide an entry.
+- The front door says why when Docker is not answering or Compose cannot read `.env` (with the line), instead of "not
+  running", a doctor that passed, or no message at all; `restore` refuses a file that is not a database before it
+  stops anything; the time zone is read on macOS too.
+- The notes after `helm install` give https for an Ingress with TLS, as the pod gets, and say when a secret is in the
+  values, when the Ingress has no TLS, and when it has no host. helm test's pod takes the image pull secrets, node
+  selector and tolerations jukecord's pod has.
+- The guides name the Compose volume as Docker does (`jukecord_jukecord-data`), the Kubernetes example has TLS, the
+  build cache (about 800 MB) can be removed alone, and they say what the systemd unit is for.
+
+### Security
+
+- yt-dlp, ffmpeg and the JavaScript runtime yt-dlp starts no longer inherit jukecord's settings, the bot's token and
+  the OAuth secret among them. The chart gives jukecord both as files (`JUKECORD_DISCORD_TOKEN_FILE`,
+  `JUKECORD_DISCORD_CLIENT_SECRET_FILE`), not as variables.
+- `/metrics` answers only a scraper beside jukecord: a request through the reverse proxy or from a public address gets
+  a 404 instead of the version and the counts.
+- A client that sends half a request no longer holds its connection for good: a request must arrive within 30 s
+  (its headers within 15 s), and at most 4096 connections are open at once. Answers (audio to a slow phone) and live
+  connections have no time limit.
+- The image keeps no npm and no setuid or setgid program, and jukecord's files are 644 and its folders 755 instead of
+  all 755.
+- The release's outside actions that hold a token with write access are pinned by commit; the chart test runs on pull
+  requests, and CI runs the image without capabilities.
+
 ## [0.1.1] - 2026-11-12
 
 ### Changed
@@ -102,6 +229,7 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kanggu12/jukecord/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kanggu12/jukecord/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kanggu12/jukecord/releases/tag/v0.1.0

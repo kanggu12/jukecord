@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/jukecord/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/jukecord/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/jukecord/releases"><img alt="Release v0.1.1" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/jukecord/releases"><img alt="Release v0.2.0" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <img alt="Runs on amd64 and arm64" src="docs/assets/badges/platforms.svg">
 </p>
@@ -27,8 +27,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/panel-dark.png">
-    <img alt="The jukecord panel for a made-up Discord server, Night Owls. The track playing turns on a disc above its progress bar and keys; the queue below lists each track's length and who added it, with the queue's tools above it. On the right, the bot is in the voice channel Lounge with four people, three people listen in their browsers, and the recently played tracks follow. The bar at the bottom offers to play the music in this browser too." src="docs/assets/panel-light.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/panel-dark.webp">
+    <img alt="The jukecord panel for a made-up Discord server, Night Owls: cards of frosted glass over a field lit by the colours of the cover that is playing. The track playing turns on a disc beside its progress bar and keys; the queue below lists each track with its cover, its length and who added it, with the queue's tools above it. On the right, the bot is in the voice channel Lounge with four people, three people listen in their browsers, and the recently played tracks follow. The bar at the bottom offers to play the music in this browser too." src="docs/assets/panel-light.webp" width="100%">
   </picture>
 </p>
 
@@ -136,8 +136,8 @@ server 127 MiB and two thirds of one core while it changes three times a second
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phones-dark.png">
-    <img alt="The panel on a phone, three screens. The player listening along, in time with the others, with the keys under the track and the bar at the bottom. The queue, where each track's keys wait behind its menu key. The statistics: plays, time listened, tracks and people, then plays per day." src="docs/assets/phones-light.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phones-dark.webp">
+    <img alt="The panel on a phone, three screens. The player listening along, in time with the others, with the keys under the track and the bar at the bottom. The queue, where each track's keys wait behind its menu key. The statistics: plays, time listened, tracks and people, then plays per day." src="docs/assets/phones-light.webp" width="100%">
   </picture>
 </p>
 
