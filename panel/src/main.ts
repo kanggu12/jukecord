@@ -9,7 +9,7 @@ import { ApiError, api, type Player, setCsrf, whenLoggedOut } from './api.ts';
 import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
-import { collect, keep, mayControl, positionNow, state, t, update, watch } from './state.ts';
+import { collect, keep, liveWhy, mayControl, positionNow, state, t, update, watch } from './state.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { listenBar } from './views/listen.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
@@ -96,11 +96,12 @@ function frame(): void {
     status: (status) => update({ live: status }),
     outdated: () => toast(t().reload, 'pause', 'refresh-cw'),
     message: (message) => receive(message),
-    // 1013, jukecord asks to be tried again later: why is said in the bar now, and stays in the bar's label (its
-    // title) until a connection is taken.
+    // 1013, jukecord asks to be tried again later: why is said now (in the person's language), and stays in the
+    // bar's label (its title) and on the playing card until a connection is taken.
     waiting: (reason) => {
       update({ liveWaiting: reason });
-      if (reason) toast(reason, 'bad', 'wifi-off');
+      const why = liveWhy();
+      if (why) toast(why, 'bad', 'wifi-off');
     },
     // 4401, the login is gone: to the login page. 4410, the server shown is closed to this login now: start again
     // with the servers it can open. 4403, this page's address is not the one jukecord expects: said on the page.
@@ -108,7 +109,8 @@ function frame(): void {
       if (code === 4401) toLogin();
       else if (code === 4410) location.reload();
       else {
-        // Said twice: once now, and for as long as it lasts in the bar's label (whose title gives the reason).
+        // Said now, and for as long as it lasts in the bar's label (whose title gives the reason) and on the playing
+        // card, whole.
         update({ live: 'refused' });
         problem(t().wrongAddress);
       }
@@ -248,8 +250,8 @@ function frame(): void {
     pill.title =
       state.live === 'refused'
         ? words.wrongAddress
-        : state.live !== 'open' && state.liveWaiting
-          ? state.liveWaiting
+        : state.live !== 'open' && state.liveWaiting !== null
+          ? (liveWhy() ?? '')
           : guild && !mayControl()
             ? words.lookOnlyHint
             : '';

@@ -30,8 +30,8 @@ export interface LiveHandlers {
   /** The server ended the connection for good: 4401 the login is gone, 4403 this page's address is refused, 4410 the
    * server shown may not be opened any more. */
   ended(code: number): void;
-  /** The server asked to be tried again later (1013), saying why (too many connections, too many failed logins);
-   * called once per run of such refusals, and with null once a connection is taken again. */
+  /** The server asked to be tried again later (1013), saying why (too many connections, too many failed logins; ''
+   * when it gave no reason); called once per run of such refusals, and with null once a connection is taken again. */
   waiting(reason: string | null): void;
 }
 
@@ -173,7 +173,8 @@ export class Live {
       // doubling up to a minute) so that refused panels do not knock again all together.
       const later = event.code === 1013;
       if (later) {
-        if (!this.told) this.handlers.waiting(event.reason || 'jukecord asked to try again later');
+        // The reason as jukecord gave it (the panel says it in the person's language), or '' for none.
+        if (!this.told) this.handlers.waiting(event.reason);
         this.told = true;
         this.retry = Math.max(this.retry, 15_000);
       }

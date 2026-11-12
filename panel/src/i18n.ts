@@ -220,6 +220,7 @@ const EN = {
   loginFailed: 'The login did not go through',
   connectingDiscord: 'jukecord has just started and is connecting to Discord',
   refused: 'No live updates',
+  liveLater: 'jukecord turned the live connection away for now',
   hiddenChannel: 'a channel you cannot see',
   wrongAddress:
     "This page's address is not the one jukecord was set up with (JUKECORD_PUBLIC_URL), so live updates are refused",
@@ -442,6 +443,7 @@ const KO: Strings = {
   loginFailed: '로그인되지 않음',
   connectingDiscord: 'jukecord가 막 켜져 디스코드에 연결하는 중',
   refused: '실시간 연결 없음',
+  liveLater: 'jukecord가 실시간 연결을 잠시 받지 않음',
   hiddenChannel: '볼 수 없는 채널',
   wrongAddress: '이 페이지 주소가 jukecord에 설정된 주소(JUKECORD_PUBLIC_URL)와 달라 실시간 연결이 거절됨',
   offline: 'jukecord가 응답하지 않음: 다시 연결 중',

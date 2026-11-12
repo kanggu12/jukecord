@@ -4,6 +4,7 @@
  * Views subscribe to the keys they draw. A change names its keys, so the queue redrawing does not redraw the disc,
  * and a snapshot that arrives twice does not repaint anything.
  */
+import { sayError } from '../../src/core/say.ts';
 import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Status, Voice } from './api.ts';
 import { type Lang, pickLang, type Words, words } from './i18n.ts';
 import type { LiveStatus } from './live.ts';
@@ -19,7 +20,8 @@ export interface State {
   listeners: Listeners;
   history: HistoryEntry[];
   live: LiveStatus;
-  /** Why jukecord asked the live connection to try again later (1013), while it waits; null otherwise. */
+  /** Why jukecord asked the live connection to try again later (1013), while it waits ('' when it gave no reason);
+   * null otherwise. */
   liveWaiting: string | null;
   lang: Lang;
   /** The menu's choices, kept in this browser. */
@@ -120,6 +122,16 @@ export function watch(keys: readonly Key[], fn: () => void): () => void {
   };
   collector?.push(stop);
   return stop;
+}
+
+/**
+ * Why there are no live updates, in the person's language, while there are none for a reason: this page's address is
+ * refused for good, or jukecord asked to be tried again later (its reason). Null while connected or just connecting.
+ */
+export function liveWhy(): string | null {
+  if (state.live === 'refused') return t().wrongAddress;
+  if (state.live === 'open' || state.liveWaiting === null) return null;
+  return state.liveWaiting ? sayError(state.liveWaiting, state.lang) : t().liveLater;
 }
 
 /** The words of the language in use. */

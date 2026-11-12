@@ -11,7 +11,7 @@ import { api, type HistoryEntry, type Player, type QueueItem, type Track } from 
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
-import { mayControl, positionNow, state, t, update, watch } from '../state.ts';
+import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/layers.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
@@ -114,6 +114,8 @@ export function nowCard(live: Live): HTMLElement {
   const title = h('h3', { class: 'title' });
   const meta = h('div', { class: 'meta' });
   const error = h('div', { class: 'error', role: 'status' });
+  // Why there are no live updates, while there are none for a reason: in whole, where a touch screen shows it too.
+  const liveNote = h('div', { class: 'live-note', role: 'status' });
   const fillBar = h('div', { class: 'fill' });
   const knob = h('div', { class: 'knob' });
   const tip = h('div', { class: 'tip', hidden: true });
@@ -127,7 +129,7 @@ export function nowCard(live: Live): HTMLElement {
   const drop = h('button', { class: 'key quiet bad', type: 'button', 'data-act': 'drop' });
   const repeat = h('button', { class: 'key square', type: 'button', 'data-act': 'repeat' });
   const keys = h('div', { class: 'keys' }, pause, skip, stop, repeat, drop);
-  const info = h('div', { class: 'info' }, title, meta, error, progress, keys);
+  const info = h('div', { class: 'info' }, title, meta, error, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
   const card = h(
     'section',
@@ -196,8 +198,10 @@ export function nowCard(live: Live): HTMLElement {
         h('span', null, icon('users'), by),
       );
     } else if (!player) {
-      // No state yet: nothing is claimed about the player, only that the panel is connecting.
-      refill(title, `unknown|${words.connectingLive}`, h('span', { class: 'muted' }, `${words.connectingLive}…`));
+      // No state yet: nothing is claimed about the player, only that the panel is connecting, or (refused for good)
+      // that there are no live updates; why is said under it.
+      const heading = state.live === 'refused' ? words.refused : `${words.connectingLive}…`;
+      refill(title, `unknown|${heading}`, h('span', { class: 'muted' }, heading));
       refill(meta, 'unknown');
       title.removeAttribute('aria-hidden');
     } else {
@@ -214,6 +218,11 @@ export function nowCard(live: Live): HTMLElement {
       player?.error ? icon('circle-alert') : null,
       player?.error ? words.couldNotPlay(sayFailure(player.error, state.lang)) : null,
     );
+    // Refused for good, or turned away for now (jukecord full): the reason, which the bar keeps in its title only.
+    const why = liveWhy();
+    liveNote.hidden = !why;
+    liveNote.classList.toggle('refused', state.live === 'refused');
+    refill(liveNote, why ?? '', why ? icon('wifi-off') : null, why ? h('span', null, why) : null);
     progress.hidden = !track;
     // The keys: play, pause or resume, skip, stop, repeat, remove.
     const control = mayControl();
@@ -336,7 +345,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {
