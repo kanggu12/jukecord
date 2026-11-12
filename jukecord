@@ -385,6 +385,18 @@ mv jukecord.db.restoring jukecord.db'
     inside status
     ;;
   help | -h | --help)
+    # Help with a command of the jukecord command's own (./jukecord help add): that command's help, from the command
+    # that runs it, when it is running to ask (the whole list was printed instead). The front door's own words, and
+    # anything while it is not running, get the list below.
+    case "${2:-}" in
+      '' | up | down | restart | open | status | logs | doctor | update | backup | restore | version | help) ;;
+      *)
+        if docker compose version >/dev/null 2>&1 && running; then
+          inside help "$2"
+          exit
+        fi
+        ;;
+    esac
     # The comment block at the top of this file, by its full path: the directory changed above, so a relative $0
     # would point nowhere.
     awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$here/${BASH_SOURCE[0]##*/}"
@@ -395,10 +407,11 @@ mv jukecord.db.restoring jukecord.db'
     fi
     ;;
   *)
-    # A word that is not one of the jukecord command's own (read from the checkout beside this file, so a command added
-    # there is known here too) is a typing mistake, said as one even while jukecord is not running. Options (--json
-    # ...) and a checkout without the source go to the command as they are.
-    if [ -f "$here/src/cli/commands.ts" ] && [ "${1#-}" = "$1" ] &&
+    # Running, the jukecord command inside judges every word itself (the image can be newer than this checkout, and
+    # know commands the checkout does not). Not running, a word that is not one of its commands in the checkout beside
+    # this file is a typing mistake, said as one rather than as "not running". Options (--json ...) and a checkout
+    # without the source go to the command as they are.
+    if ! running && [ -f "$here/src/cli/commands.ts" ] && [ "${1#-}" = "$1" ] &&
       ! sed -n "s/.*name: '\([a-z]*\).*/\1/p" "$here/src/cli/commands.ts" | grep -qx -- "$1"; then
       say "there is no command \"$1\" (./jukecord help)"
       exit 2

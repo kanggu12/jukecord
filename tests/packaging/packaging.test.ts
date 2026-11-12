@@ -313,6 +313,49 @@ describe('the front door with jukecord not running', () => {
   });
 });
 
+describe('the front door with jukecord running', () => {
+  it("leaves the words it does not know to the running jukecord's own command, its help for a command too", () => {
+    // A Docker whose jukecord runs: the command inside prints what it was asked (an image newer than this checkout
+    // knows commands the checkout does not).
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-docker-'));
+    try {
+      fs.writeFileSync(
+        path.join(bin, 'docker'),
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          '  info) echo 27.0.0 ;;',
+          '  compose)',
+          '    case "$2" in',
+          '      version) echo v2.30.0 ;;',
+          '      ps) echo 0123456789ab ;;',
+          // exec [-T|-it] -e TZ=... jukecord jukecord ARGS: what follows the service and the command.
+          '      exec) shift 7; echo "inside: $*" ;;',
+          '    esac ;;',
+          'esac',
+          'exit 0',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const front = (...words: string[]) =>
+        spawnSync('bash', ['jukecord', ...words], {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+        });
+      const newer = front('karaoke', 'on');
+      assert.equal(newer.status, 0, newer.stderr);
+      assert.equal(newer.stdout, 'inside: karaoke on\n');
+      // help with a command: that command's help, from the command that runs it (the whole list was printed).
+      const help = front('help', 'add');
+      assert.equal(help.status, 0, help.stderr);
+      assert.equal(help.stdout, 'inside: help add\n');
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
 // The front door's check of a backup before a restore, as bash hands it to node inside the container: the
 // `check='...'` assignment of ./jukecord, evaluated by bash itself (its quoting included).
 function restoreCheck(): string {
