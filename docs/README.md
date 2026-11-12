@@ -69,7 +69,8 @@ five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers. When no
 in no voice channel, no browser playing along) for two minutes (`JUKECORD_REST_AFTER`), its player pauses and says so,
 instead of fetching tracks and counting plays for nobody; playing on is a press of play. After a restart (an update,
 a crash) the bot goes back to the voice channel it was in when people are there, and says so in that channel's chat
-with the now-playing card, paused.
+with the now-playing card, paused. The newest now-playing card in a server (from `/np`, `/pause` and the like, or a
+press of its keys) is kept current as the music changes, from anywhere, at most once every five seconds.
 
 ## The jukecord command
 

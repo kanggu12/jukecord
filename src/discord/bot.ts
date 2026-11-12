@@ -30,7 +30,8 @@ import {
   type RoleInfo,
 } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
-import { steadyNow } from '../core/clock.ts';
+import { type Clock, steadyNow, systemClock } from '../core/clock.ts';
+import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
@@ -55,6 +56,7 @@ import { commandDefinitions } from './commands.ts';
 const COMMAND_NAMES: ReadonlySet<string> = new Set(commandDefinitions().map((definition) => definition.name));
 
 import { sayError } from './errors.ts';
+import { CardKeeper, type CardPayload, type KeptCard } from './keeper.ts';
 import { VoiceMemory } from './rejoin.ts';
 import { VoiceManager } from './voice.ts';
 
@@ -76,6 +78,8 @@ export interface BotOptions {
   readonly users: UserRepository;
   /** Where the voice channel each server's bot is in is kept, to come back to after a restart (none: it does not). */
   readonly voiceChannels?: VoiceChannelRepository;
+  /** The clock the cards kept current are edited by (tests pass a fake one). */
+  readonly clock?: Clock;
 }
 
 export class Bot implements Directory {
@@ -86,6 +90,8 @@ export class Bot implements Directory {
   private serversKnown = false;
   // The voice channels kept for a restart (see rejoin.ts), when there is somewhere to keep them.
   private readonly memory: VoiceMemory | null;
+  // The last now-playing card of each server, kept current as the player changes (see keeper.ts).
+  private readonly keeper: CardKeeper;
 
   constructor(options: BotOptions) {
     this.options = options;
@@ -102,6 +108,13 @@ export class Bot implements Directory {
       ? new VoiceMemory({ bus: options.bus, channels: options.voiceChannels, log: options.log })
       : null;
     this.memory?.start();
+    this.keeper = new CardKeeper({
+      clock: options.clock ?? systemClock,
+      render: (snapshot, lang) => nowCard(snapshot, lang, options.panelUrl),
+      log: options.log,
+    });
+    // Every change of a player draws its server's card again (soon, and only when it shows something else).
+    options.bus.on('player', (snapshot) => this.keeper.changed(snapshot));
   }
 
   self(): { id: string; name: string; avatar: string | null } | null {
@@ -261,6 +274,7 @@ export class Bot implements Directory {
   async stop(): Promise<void> {
     // Leaving every channel now is jukecord stopping: the channels stay kept for the restart.
     this.memory?.freeze();
+    this.keeper.stop();
     this.voice.leaveAll();
     await this.client.destroy();
   }
@@ -297,13 +311,15 @@ export class Bot implements Directory {
             lang,
             this.options.panelUrl,
           );
-          await channel.send({
+          const message = await channel.send({
             embeds: [
               note(lang, 'jukecord restarted and is back in this channel', 'jukecord가 다시 시작해 이 채널로 돌아옴'),
               ...card.embeds,
             ],
             components: card.components,
           });
+          // The card people in the channel use from now on, kept current (its first edit drops the note above).
+          this.keeper.keep(guildId, { lang, edit: (payload) => message.edit(payload as never) }, card);
         },
       })
       .catch((error: unknown) => this.options.log.warn('could not come back to voice after a restart', { error }));
@@ -377,21 +393,19 @@ export class Bot implements Directory {
           return;
         }
         case 'skip':
-          await interaction.editReply(nowCard(actions.skip(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.skip(context), lang);
           return;
         case 'drop':
-          await interaction.editReply(nowCard(actions.removeCurrent(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.removeCurrent(context), lang);
           return;
         case 'pause':
-          await interaction.editReply(nowCard(actions.pause(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.pause(context), lang);
           return;
         case 'resume':
-          await interaction.editReply(nowCard(actions.resume(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.resume(context), lang);
           return;
         case 'repeat':
-          await interaction.editReply(
-            nowCard(actions.repeat(context, options.getString('mode', true)), lang, this.options.panelUrl),
-          );
+          await this.replyCard(interaction, actions.repeat(context, options.getString('mode', true)), lang);
           return;
         case 'seek': {
           let at: number;
@@ -400,7 +414,7 @@ export class Bot implements Directory {
           } catch (error) {
             throw new ActionError('invalid', error instanceof Error ? error.message : String(error));
           }
-          await interaction.editReply(nowCard(actions.seek(context, at), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.seek(context, at), lang);
           return;
         }
         case 'stop':
@@ -410,7 +424,7 @@ export class Bot implements Directory {
           });
           return;
         case 'np':
-          await interaction.editReply(nowCard(actions.nowPlaying(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.nowPlaying(context), lang);
           return;
         case 'queue':
           await interaction.editReply({
@@ -441,7 +455,7 @@ export class Bot implements Directory {
         case 'jump': {
           const item = actions.queue(context).items[options.getInteger('position', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
-          await interaction.editReply(nowCard(actions.jump(context, item.id), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.jump(context, item.id), lang);
           return;
         }
         case 'shuffle':
@@ -596,20 +610,48 @@ export class Bot implements Directory {
           : action === 'resume'
             ? actions.resume(context)
             : actions.skip(context);
-      // The card itself is updated in place, so the channel does not fill with copies.
-      await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl));
+      // The card itself is updated in place, so the channel does not fill with copies; it is the card people use now,
+      // so it is the one kept current.
+      await this.updateCard(interaction, snapshot, cardLang);
     } catch (error) {
       // A card out of date (paused since, another track, nothing playing now): its key did nothing because the player
       // is that way already. The card is drawn again from what plays now; a refusal left it wrong, and told the person
       // "nothing is playing" about a paused track.
       if (error instanceof ActionError && error.code === 'conflict') {
-        await interaction
-          .update(nowCard(actions.nowPlaying(context), cardLang, this.options.panelUrl))
-          .catch((failure: unknown) => this.options.log.debug('could not draw a card again', { error: failure }));
+        await this.updateCard(interaction, actions.nowPlaying(context), cardLang).catch((failure: unknown) =>
+          this.options.log.debug('could not draw a card again', { error: failure }),
+        );
         return;
       }
       await this.fail(interaction, error);
     }
+  }
+
+  // Answers a command with the now-playing card, and keeps that card current from now on (see keeper.ts): the newest
+  // card in a server is the one people look at.
+  private async replyCard(
+    interaction: ChatInputCommandInteraction,
+    snapshot: PlayerSnapshot,
+    lang: Lang,
+  ): Promise<void> {
+    const payload = nowCard(snapshot, lang, this.options.panelUrl);
+    const message = await interaction.editReply(payload);
+    this.keeper.keep(
+      snapshot.guildId,
+      keptCard((next) => interaction.editReply(next as never), message, lang),
+      payload,
+    );
+  }
+
+  // Draws a card whose key was pressed again, and keeps it current from now on.
+  private async updateCard(interaction: ButtonInteraction, snapshot: PlayerSnapshot, lang: Lang): Promise<void> {
+    const payload = nowCard(snapshot, lang, this.options.panelUrl);
+    await interaction.update(payload);
+    this.keeper.keep(
+      snapshot.guildId,
+      keptCard((next) => interaction.editReply(next as never), interaction.message, lang),
+      payload,
+    );
   }
 
   // Playlist names as people type them.
@@ -657,4 +699,22 @@ export class Bot implements Directory {
 // time zone of the machine jukecord runs on (TZ), which is the community's more often than UTC is.
 function offsetOf(locale: string): number {
   return locale.toLowerCase().startsWith('ko') ? 540 : -new Date().getTimezoneOffset();
+}
+
+// A card answered to a command or a key, kept current. Discord lets an interaction's own answer be edited for fifteen
+// minutes, whatever the channel allows the bot; after that the bot edits it as a message of its own, which needs it
+// to see the channel (a card it cannot edit is let go, see keeper.ts).
+function keptCard(
+  answer: (payload: CardPayload) => Promise<unknown>,
+  message: { edit?: (payload: never) => Promise<unknown> } | null | undefined,
+  lang: Lang,
+): KeptCard {
+  const until = steadyNow() + 14 * 60_000;
+  return {
+    lang,
+    edit: (payload) => {
+      if (steadyNow() < until || !message?.edit) return answer(payload);
+      return message.edit(payload as never);
+    },
+  };
 }

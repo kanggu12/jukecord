@@ -116,3 +116,33 @@ describe('the bot answers commands', () => {
     }
   });
 });
+
+describe('the now-playing card in the channel', () => {
+  it('is drawn again as the player changes, wherever the change came from', async () => {
+    const made = fakeBot();
+    const tracks = addTracks(made.store, 2);
+    made.queue.add(
+      '100000000000000001',
+      tracks.map((track) => track.id),
+      'end',
+      null,
+    );
+    made.players.get('100000000000000001').play();
+    made.media.finish(180_000);
+    await flush();
+    const asked = interaction('command', 'np');
+    await handlers(made.bot).onCommand(asked.interaction);
+    assert.match(asked.shown.at(-1)?.text ?? '', /^Playing now \| /);
+    // Paused from the panel (or the API, the command line): the card in the channel says so, with Resume.
+    made.players.get('100000000000000001').pause();
+    await made.clock.advance(0);
+    assert.match(asked.shown.at(-1)?.text ?? '', /^Paused \| /);
+    assert.match(asked.shown.at(-1)?.text ?? '', /\[Resume jukecord:resume:en\]/);
+    // Skipped there too: once more, five seconds after the last edit, with the next track.
+    made.players.get('100000000000000001').resume();
+    made.players.get('100000000000000001').skip();
+    await made.clock.advance(5000);
+    assert.match(asked.shown.at(-1)?.text ?? '', /^Getting it ready \| \[Track 2\]/);
+    await made.bot.client.destroy();
+  });
+});

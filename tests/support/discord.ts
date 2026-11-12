@@ -56,6 +56,8 @@ export function fakeBot(options: { found?: Record<string, () => Track[]> } = {})
     discord: store.discord,
     voiceIdleMs: 0,
     users: store.users,
+    voiceChannels: store.voiceChannels,
+    clock,
   });
   actions.setVoice(bot.voice, () => true, bot);
   return { clock, store, bus, media, logs, queue, players, actions, bot };
