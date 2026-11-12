@@ -1769,8 +1769,9 @@ img {
   background: color-mix(in oklch, var(--load) 16%, transparent);
   border-color: color-mix(in oklch, var(--load) 40%, transparent);
 }
-/* A narrow card keeps its icon; the words stay in its title and for screen readers. */
-@container card (max-width: 560px) {
+/* A card narrower than its head's words (the queue's tools keep theirs to 980 px) keeps the key's icon and its tint;
+   the words stay in its title and for screen readers, and the head stays on one line. */
+@container card (max-width: 1100px) {
   .card-head .autoplay-key {
     width: var(--control);
     padding: 0;
