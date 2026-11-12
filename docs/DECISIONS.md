@@ -279,11 +279,11 @@ is one flat listing by yt-dlp (titles, channels, lengths and pictures in one req
 resolver's lookup slots and at a rate of its own; it is kept for half an hour by its words and shared while it runs, and
 one nobody waits for any more (the next key was typed) is stopped, so typing does not use up the slots. A result picked
 is added from what the search learned, with nothing fetched until it plays. The list is part of the add card rather
-than a layer over the page, as the panel's other parts are: over the field where the card stands at the foot of a
-window that does not scroll (the field stays where the eyes are), under it everywhere else. While it shows there, the
-queue keeps three rows in sight on a window taller than 880 px; on a shorter one it keeps its head and gives the
-results the room of its rows (a line saying nothing was found takes only what it needs). It is an ARIA combobox and
-listbox, so the keyboard and screen readers move through it from the field.
+than a layer over the page, as the panel's other parts are: under the field, in the card above the queue, and the
+field stays where the eyes are. In two columns, where the page does not scroll, the list shares its column with the
+queue: the queue keeps three rows in sight on a window taller than 880 px; on a shorter one it keeps its head and
+gives the results the room of its rows (a line saying nothing was found takes only what it needs). It is an ARIA
+combobox and listbox, so the keyboard and screen readers move through it from the field.
 
 ## Autoplay from the server's own plays
 

@@ -1113,8 +1113,9 @@ await api('PUT', '/guilds/local/voice/sound', { preset: 'off' });
 await api('PUT', '/guilds/local/voice/volume', { percent: 100 });
 
 // ---- discovery: search and pick, a link dropped on the page ------------------------------------------------------
-// Phones (upright, by touch), the tablet, a short laptop and a wide one: where the list opens under the field and
-// where it opens over it (the card at the foot of the left column).
+// Phones (upright, by touch), the tablet, a short laptop and a wide one: where the list lengthens a page that scrolls
+// (one column), and where it shares a column that does not scroll with the queue (two columns: the queue keeps three
+// rows on the wide one, and gives the room of its rows to the results on the short one).
 const DISCOVERY = [
   [360, 780],
   [390, 844],

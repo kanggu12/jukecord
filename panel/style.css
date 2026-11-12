@@ -1629,8 +1629,8 @@ img {
 
 /* ---- what a search found -------------------------------------------------------------------------------------- */
 /* Under the add field (over it where the card stands at the foot of a page that does not scroll), in the card itself:
-   a solid reading surface, so titles read the same over any light behind the glass. The form keeps its height; the
-   list gives way when the column is short, and scrolls. */
+   a solid reading surface, so titles read the same over any light behind the glass. The form keeps its height; in a
+   column that does not scroll (found-fit, two columns) the list shares the column with the queue (below). */
 .add-card > .add {
   flex: none;
 }
@@ -1653,19 +1653,22 @@ img {
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
 }
-/* Over the field, at the foot of a column that does not scroll: the card grows upwards and the field stays put. The
-   queue above keeps three rows in sight on a window taller than 880 px (below), and the list gives way to them. */
-.add-card.found-above {
-  min-height: 0;
-}
+/* Over the field, at the foot of a column that does not scroll: the card grows upwards and the field stays put. */
 .add-card.found-above .found {
   order: -1;
   margin: 12px 12px 0;
+}
+/* In a column that does not scroll, over the field or under it (the card above the queue): the queue keeps three rows
+   in sight on a window taller than 880 px (below), and the list gives way to them. */
+.add-card.found-fit {
+  min-height: 0;
+}
+.add-card.found-fit .found {
   /* It gives way inside its own box: whatever it cannot show scrolls, and nothing of it reaches over the form. */
   min-height: 0;
   overflow: hidden;
 }
-.add-card.found-above .found-list {
+.add-card.found-fit .found-list {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -1673,10 +1676,10 @@ img {
    list is sized as if it were empty (contain: size), so the least the card can be is its head and those three rows:
    measured with its rows, a long queue kept its whole height, and the column ran past the window (the page scrolled
    and the results had no room). It fills what the card has beyond that. */
-.col:has(> .add-card.found-above) > .card.fill {
+.col:has(> .add-card.found-fit) > .card.fill {
   min-height: auto;
 }
-.col:has(> .add-card.found-above) > .card.fill > .queue-list {
+.col:has(> .add-card.found-fit) > .card.fill > .queue-list {
   flex: 1 1 0;
   min-height: 190px;
   contain: size;
@@ -1684,23 +1687,25 @@ img {
 /* A column too short for both (a laptop's window under 880 px). Nothing found yet (or nothing at all): the line takes
    what it needs and the queue keeps the rest; giving up its rows for it left one line over an empty box. */
 @media (max-height: 880px) {
-  .col:has(> .add-card.found-above) > .card.fill > .queue-list {
+  .col:has(> .add-card.found-fit) > .card.fill > .queue-list {
     min-height: 0;
   }
-  /* Any result: the queue keeps its head with its count and gives the room of its rows to the results, which sit on
-     the field (beside them, what was left of the rows was one row or a sliver of one). */
-  .col:has(> .add-card.found-above .result) > .card.fill {
+  /* Any result: the queue keeps its head with its count and gives the room of its rows to the results, which sit
+     against the field (beside them, what was left of the rows was one row or a sliver of one). */
+  .col:has(> .add-card.found-fit .result) > .card.fill {
     flex: none;
     min-height: 0;
   }
-  .col:has(> .add-card.found-above .result) > .card.fill > .queue-list {
+  .col:has(> .add-card.found-fit .result) > .card.fill > .queue-list {
     display: none;
   }
-  .add-card.found-above:has(.result) {
+  .add-card.found-fit:has(.result) {
     flex: 1 1 auto;
+  }
+  .add-card.found-above:has(.result) {
     justify-content: flex-end;
   }
-  .add-card.found-above:has(.result) .found-list {
+  .add-card.found-fit:has(.result) .found-list {
     max-height: none;
   }
 }

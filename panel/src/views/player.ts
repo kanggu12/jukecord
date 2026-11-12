@@ -1525,6 +1525,11 @@ export function looksLikeAddress(text: string): boolean {
 // Where an add puts what it finds: the end of the queue, next, or playing now.
 type Where = 'end' | 'next' | 'now';
 
+// The windows that show one column (style.css has the same rule for the player's layout): the page scrolls there, and
+// the add card's list of results lengthens the page.
+const ONE_COLUMN =
+  '(max-width: 900px), (max-width: 1100px) and (max-height: 720px), (pointer: coarse) and (max-height: 820px)';
+
 /**
  * Adding: an address or search words, to the end of the queue, next, or to play now. Words show what YouTube found
  * under the field a moment after typing stops (a list to pick from, with the keyboard or the pointer); a link pasted
@@ -1648,19 +1653,23 @@ export function addCard(): HTMLElement {
 
   const close = () => {
     found.hidden = true;
-    card.classList.remove('found-above');
+    card.classList.remove('found-above', 'found-fit');
     input.setAttribute('aria-expanded', 'false');
     setActive(-1);
   };
 
   // Opens the list where it is seen without moving the field: over the field when the card stands at the foot of a
-  // page that does not scroll (the two columns, the add card under the queue), under it everywhere else.
+  // page that does not scroll (the two columns, the add card under the queue), under it everywhere else. In two
+  // columns, where the page does not scroll, the list shares its column with the queue (found-fit, in the style): it
+  // gives way to three of the queue's rows, or takes their room on a short window. Grown with it, the card above the
+  // queue pushed the queue down to its head and a sliver of a row.
   const open = () => {
     if (!found.hidden) return;
     const pageScrolls = document.documentElement.scrollHeight > window.innerHeight + 1;
     const listen = document.querySelector('.listen')?.getBoundingClientRect().top ?? window.innerHeight;
     const above = !pageScrolls && card.getBoundingClientRect().bottom > listen - 120;
     card.classList.toggle('found-above', above);
+    card.classList.toggle('found-fit', above || (!pageScrolls && !window.matchMedia(ONE_COLUMN).matches));
     found.hidden = false;
     input.setAttribute('aria-expanded', 'true');
   };
