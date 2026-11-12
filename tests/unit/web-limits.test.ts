@@ -6,7 +6,7 @@ import { MediaCache } from '../../src/media/cache.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { CSRF_HEADER } from '../../src/web/auth.ts';
 import { Buckets, Pressure } from '../../src/web/limits.ts';
-import { ALICE, asHost, exampleTrack, GUILD, sessionFor, testServer } from '../support/web.ts';
+import { ALICE, asHost, BOB, DJ_ROLE, exampleTrack, GUILD, sessionFor, testServer } from '../support/web.ts';
 
 const api = (path: string) => `${API_PREFIX}${path}`;
 
@@ -145,6 +145,31 @@ describe('the rates of changes and shedding when behind', () => {
       assert.equal((await status('10.2.0.1')).statusCode, 429);
       // The host's own command line is held to none of it.
       for (let i = 0; i < 100; i += 1) assert.equal((await read(asHost)).statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves a refused change's share of the address to the others there", async () => {
+    const server = await testServer({ rates: { now: () => 7_000 } });
+    try {
+      // Alice is not a DJ, Bob is; both are behind one address (a household, an office).
+      server.directory.join(GUILD, ALICE);
+      server.directory.join(GUILD, BOB, { roles: [DJ_ROLE] });
+      server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      const alice = sessionFor(server, ALICE);
+      const bob = sessionFor(server, BOB);
+      const shuffle = (session: { cookie: string; csrf: string }) =>
+        server.web.app.inject({
+          method: 'POST',
+          url: api(`/guilds/${GUILD}/queue/shuffle`),
+          headers: { cookie: session.cookie, [CSRF_HEADER]: session.csrf },
+          remoteAddress: '10.3.0.1',
+        });
+      // Alice's refusals use up her own share, not the address's: she is held to the rate, Bob is not.
+      for (let i = 0; i < 20; i += 1) assert.equal((await shuffle(alice)).statusCode, 403);
+      assert.equal((await shuffle(alice)).statusCode, 429);
+      assert.equal((await shuffle(bob)).statusCode, 200);
     } finally {
       await server.close();
     }

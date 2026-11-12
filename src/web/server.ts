@@ -14,6 +14,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { ActionError } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
+import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
 import type { Track } from '../core/types.ts';
@@ -190,6 +191,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // At most this many connections at once, of every kind (requests, audio, WebSockets): one more is closed as it
   // arrives. Live connections have their own, lower cap (see events.ts), so the rest always has room.
   app.server.maxConnections = timeouts.maxConnections ?? 4096;
+  // A connection turned away at that cap: the idle ones (kept open between requests) are closed, so the next one finds
+  // room, and the log says so at most once a minute.
+  let turnedAway = 0;
+  let turnedAwayToldAt = Number.NEGATIVE_INFINITY;
+  app.server.on('drop', () => {
+    app.server.closeIdleConnections();
+    turnedAway += 1;
+    if (steadyNow() - turnedAwayToldAt < 60_000) return;
+    log.warn('turned connections away at the cap, and closed the idle ones', {
+      count: turnedAway,
+      cap: app.server.maxConnections,
+    });
+    turnedAway = 0;
+    turnedAwayToldAt = steadyNow();
+  });
   // And at most this many from one address (an IPv6 address counts by its /56, as the other limits do): one client with
   // ordinary keep-alive connections could otherwise hold every place under the cap above, the health checks' too.
   // Behind a trusted proxy every connection comes from the proxy, so the proxy is where to limit them.
@@ -395,6 +411,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // A change from anyone but the host waits while jukecord is behind, and is held to the rates: one token from
         // its login's bucket and one from its address's (and from the tighter buckets for a change that starts a
         // fetch). Nothing is taken from any bucket unless every one has a token, so a refusal costs nothing.
+        // A change the actions then refuse (no DJ role, an item gone) gives its address's token back: the others behind
+        // that address (a household, an office) are not held back by one person's refusals; that person's login still is.
+        let giveBack: (() => void) | null = null;
         if (spec.method !== 'GET' && caller && caller.principal.kind !== 'host') {
           if (behind()) return later(reply, 'busy', BUSY, 2000);
           const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
@@ -404,6 +423,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           if (wait > 0) return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
           changes.take(keys);
           if (fetching) fetches.take(keys);
+          const address = keys.slice(1);
+          giveBack = () => {
+            changes.give(address);
+            if (fetching) fetches.give(address);
+          };
         }
         // A read from anyone but the host is held to the wider rate of reads, by its login and its address (without a
         // login, by its address alone).
@@ -414,16 +438,23 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           reads.take(keys);
         }
         const params = (request.params ?? {}) as Record<string, unknown>;
-        const context =
-          typeof params.guild === 'string' && caller ? await deps.access.context(caller.principal, params.guild) : null;
-        return handler({
-          params: params as never,
-          query: (request.query ?? {}) as never,
-          body: (request.body ?? {}) as never,
-          caller,
-          context: context as never,
-          deps,
-        });
+        try {
+          const context =
+            typeof params.guild === 'string' && caller
+              ? await deps.access.context(caller.principal, params.guild)
+              : null;
+          return await handler({
+            params: params as never,
+            query: (request.query ?? {}) as never,
+            body: (request.body ?? {}) as never,
+            caller,
+            context: context as never,
+            deps,
+          });
+        } catch (error) {
+          if (error instanceof ActionError || error instanceof StoreError) giveBack?.();
+          throw error;
+        }
       },
     });
   }

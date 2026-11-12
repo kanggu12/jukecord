@@ -82,6 +82,15 @@ export class Buckets {
     }
   }
 
+  /** Gives a token back to each key that has a bucket (one taken for a request that was then refused). */
+  give(keys: readonly string[]): void {
+    const now = this.now();
+    for (const key of keys) {
+      if (!this.buckets.has(key)) continue;
+      this.buckets.set(key, { tokens: Math.min(this.rate.burst, this.level(key) + 1), at: now });
+    }
+  }
+
   // What a key's bucket holds now: what it held, plus what came back since, up to the burst. A new key is full.
   private level(key: string): number {
     const bucket = this.buckets.get(key);

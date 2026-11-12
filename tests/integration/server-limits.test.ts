@@ -227,23 +227,30 @@ describe('the web server caps its connections', () => {
     }
   });
 
-  it('closes a connection beyond the cap as it arrives, and takes one again once there is room', async () => {
+  it('closes a connection beyond the cap as it arrives, and the idle ones to make room for the next', async () => {
     const server = await testServer({ listen: true, timeouts: { maxConnections: 2 } });
     const port = Number(new URL(server.url).port);
     const open: net.Socket[] = [];
     try {
-      // Two idle connections fill it.
+      // Two connections fill it, each kept open after its answer (keep-alive), as a client that asks once a minute does.
       for (let i = 0; i < 2; i += 1) {
         const socket = net.connect(port, '127.0.0.1');
         await new Promise((resolve) => socket.once('connect', resolve));
+        socket.on('error', () => {});
+        socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n');
+        await new Promise((resolve) => socket.once('data', resolve));
         open.push(socket);
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
+      const closedByServer = open.map((socket) => new Promise((resolve) => socket.once('close', resolve)));
       const third = await raw(port, (socket) => socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n'));
       assert.equal(third.first, '', 'the connection over the cap was answered');
-      // One of the two leaves: the next one is served.
-      open.pop()?.destroy();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Turning it away closed the two idle ones, which held the places between their requests: the next is served.
+      await Promise.all(closedByServer);
+      assert.match(
+        JSON.stringify(server.logs.records.filter((record) => record.msg.startsWith('turned connections away'))),
+        /"count":1/,
+      );
       const fourth = await raw(port, (socket) =>
         socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'),
       );
