@@ -30,10 +30,11 @@ All notable changes to jukecord are documented here. The format is based on
   looping queue), YouTube's bot check itself read as "it could not be downloaded", and a video for Premium members,
   one locked by DRM, a page withheld for legal reasons (451) and a file too large were kept in a looping queue to be
   fetched again. A premiere or a live stream still to come now says that it has not started yet.
-- A connection whose reader stopped taking the answer (the headers of a long audio answer read, then nothing) was
-  held for good, and enough of them would have taken every place under the cap of 4096 connections, health checks
-  included. A connection on which nothing moves for two minutes is now closed, as nginx does after one; a browser
-  that paused its audio asks again when it plays on.
+- One client could hold every place under the cap of 4096 connections, health checks included: with ordinary
+  keep-alive connections, or with answers it never read (the headers of a long audio answer, then nothing), which
+  were held for good. At most 256 connections now come from one address (unless `JUKECORD_TRUST_PROXY` says they come
+  through a proxy, which is then where to limit them), and a connection on which nothing moves for two minutes is
+  closed, as nginx does after one; a browser that paused its audio asks again when it plays on.
 - A client that sent many requests in one go without reading the answers (HTTP pipelining, which no browser does)
   had every one answered and held in memory: a few connections filled the heap and stopped jukecord. More than 16
   answers under way on one connection now close it. The API's description (`/api/v1/openapi.json`, open to anyone)

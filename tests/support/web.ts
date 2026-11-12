@@ -135,13 +135,15 @@ export interface TestServerOptions {
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
   readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
   readonly behind?: () => boolean;
-  /** Shorter request and idle timeouts and a lower connection cap (to test them). */
+  /** Shorter request and idle timeouts and lower connection caps (to test them). */
+  readonly trustProxy?: boolean;
   readonly timeouts?: {
     readonly requestMs?: number;
     readonly headersMs?: number;
     readonly checkEveryMs?: number;
     readonly idleMs?: number;
     readonly maxConnections?: number;
+    readonly maxConnectionsPerAddress?: number;
   };
 }
 
@@ -206,7 +208,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     host: '127.0.0.1',
     port: 0,
     publicUrl: 'http://localhost:8795',
-    trustProxy: false,
+    trustProxy: options.trustProxy ?? false,
     panelDir: options.panelDir ?? null,
     bus,
     players,

@@ -161,6 +161,38 @@ describe('the web server times requests, not answers', () => {
 });
 
 describe('the web server caps its connections', () => {
+  it('takes at most so many connections from one address, unless it is told they come through a proxy', async () => {
+    for (const trustProxy of [false, true]) {
+      const server = await testServer({ listen: true, trustProxy, timeouts: { maxConnectionsPerAddress: 2 } });
+      const port = Number(new URL(server.url).port);
+      const open: net.Socket[] = [];
+      try {
+        // Two idle connections from this address (127.0.0.1) are its share.
+        for (let i = 0; i < 2; i += 1) {
+          const socket = net.connect(port, '127.0.0.1');
+          await new Promise((resolve) => socket.once('connect', resolve));
+          open.push(socket);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const third = await raw(port, (socket) =>
+          socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'),
+        );
+        // Behind a trusted proxy every connection comes from the proxy: the cap per address would be the proxy's.
+        assert.equal(third.first, trustProxy ? 'HTTP/1.1 200 OK' : '', `trustProxy ${trustProxy}`);
+        // One of the two leaves: there is room for one more from this address again.
+        open.pop()?.destroy();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const fourth = await raw(port, (socket) =>
+          socket.write('GET /healthz HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'),
+        );
+        assert.equal(fourth.first, 'HTTP/1.1 200 OK');
+      } finally {
+        for (const socket of open) socket.destroy();
+        await server.close();
+      }
+    }
+  });
+
   it('closes a connection beyond the cap as it arrives, and takes one again once there is room', async () => {
     const server = await testServer({ listen: true, timeouts: { maxConnections: 2 } });
     const port = Number(new URL(server.url).port);

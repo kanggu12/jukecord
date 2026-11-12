@@ -66,6 +66,7 @@ export interface WebServerOptions {
     readonly checkEveryMs?: number;
     readonly idleMs?: number;
     readonly maxConnections?: number;
+    readonly maxConnectionsPerAddress?: number;
   };
 }
 
@@ -183,6 +184,29 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // At most this many connections at once, of every kind (requests, audio, WebSockets): one more is closed as it
   // arrives. Live connections have their own, lower cap (see events.ts), so the rest always has room.
   app.server.maxConnections = timeouts.maxConnections ?? 4096;
+  // And at most this many from one address (an IPv6 address counts by its /56, as the other limits do): one client with
+  // ordinary keep-alive connections could otherwise hold every place under the cap above, the health checks' too.
+  // Behind a trusted proxy every connection comes from the proxy, so the proxy is where to limit them.
+  const trusting = hops !== false && hops !== 0 && hops !== '';
+  if (!trusting) {
+    const perAddressMax = timeouts.maxConnectionsPerAddress ?? 256;
+    const fromAddress = new Map<string, number>();
+    // Before the HTTP server's own listener, so a connection over the cap gets no parser at all.
+    app.server.prependListener('connection', (socket: Socket) => {
+      const key = addressKey(socket.remoteAddress);
+      const count = (fromAddress.get(key) ?? 0) + 1;
+      if (count > perAddressMax) {
+        socket.destroy();
+        return;
+      }
+      fromAddress.set(key, count);
+      socket.once('close', () => {
+        const left = (fromAddress.get(key) ?? 1) - 1;
+        if (left > 0) fromAddress.set(key, left);
+        else fromAddress.delete(key);
+      });
+    });
+  }
   const hub = new EventHub({
     bus: options.bus,
     actions: deps.actions,
