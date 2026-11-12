@@ -183,8 +183,9 @@ Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecor
 The queues, the history, the playlists, the settings and the logins are in one SQLite file in jukecord's data folder,
 and the fetched tracks beside it, with their pictures, up to `JUKECORD_CACHE_MAX`. Logins and tokens are kept only as
 hashes, and the logs mask tokens. jukecord itself talks to Discord and to the sites the tracks come from, and sends no
-telemetry; the panel shows the tracks' pictures from jukecord and people's pictures from Discord. Docker Compose publishes the panel on
-this computer only, until you give it a [public address](docs/INSTALL.md#friends-on-other-machines).
+telemetry; the panel shows the tracks' pictures from jukecord and people's pictures from Discord. Docker Compose
+publishes the panel on this computer only, until you give it
+a [public address](docs/INSTALL.md#friends-on-other-machines).
 
 ## Guides
 
