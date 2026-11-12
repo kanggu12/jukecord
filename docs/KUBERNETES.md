@@ -165,7 +165,9 @@ long as you keep that claim, whatever happens to the release, and another instal
 ## Backup and restore
 
 `jukecord backup` writes a consistent copy of the database into the volume while jukecord runs, and `kubectl cp` takes
-it out. The media cache is not in it (tracks are fetched again when they are played).
+it out. The media cache is not in it (tracks are fetched again when they are played). `env: { JUKECORD_BACKUP_AT:
+"04:30" }` makes one every day at that time in the pod's time zone (`TZ` in `extraEnv`; UTC otherwise), the newest
+`JUKECORD_BACKUP_KEEP` (7) staying in the volume.
 
 ```bash
 pod=$(kubectl -n jukecord get pod -l app.kubernetes.io/instance=jukecord,app.kubernetes.io/component=server \

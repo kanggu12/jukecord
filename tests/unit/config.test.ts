@@ -124,4 +124,19 @@ describe('describeConfig', () => {
     assert.equal(loadConfig({ ...base, JUKECORD_REST_AFTER: 'off' }, '/').restAfterMs, 0);
     assert.throws(() => loadConfig({ ...base, JUKECORD_REST_AFTER: '5s' }, '/'), /JUKECORD_REST_AFTER: 5s is outside/);
   });
+
+  it('reads the time of day of a daily backup, off by default, and how many backups stay', () => {
+    const base = { JUKECORD_DATA_DIR: '/data' };
+    assert.deepEqual(loadConfig(base, '/').backups, { at: null, keep: 7 });
+    assert.deepEqual(loadConfig({ ...base, JUKECORD_BACKUP_AT: '4:30', JUKECORD_BACKUP_KEEP: '30' }, '/').backups, {
+      at: { hour: 4, minute: 30 },
+      keep: 30,
+    });
+    assert.equal(loadConfig({ ...base, JUKECORD_BACKUP_AT: 'off' }, '/').backups.at, null);
+    assert.throws(
+      () => loadConfig({ ...base, JUKECORD_BACKUP_AT: '25:00' }, '/'),
+      /JUKECORD_BACKUP_AT: "25:00" is not/,
+    );
+    assert.throws(() => loadConfig({ ...base, JUKECORD_BACKUP_KEEP: '0' }, '/'), /JUKECORD_BACKUP_KEEP: 0 is outside/);
+  });
 });

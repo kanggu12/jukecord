@@ -133,6 +133,8 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                             |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                                      |
 | `JUKECORD_REST_AFTER`                                                | `2m`               | how long a server nobody hears plays on before it pauses (`0`: it plays on)                    |
+| `JUKECORD_BACKUP_AT`                                                 | `off`              | a backup of the database every day at this time (`04:30`, in jukecord's time zone)             |
+| `JUKECORD_BACKUP_KEEP`                                               | `7`                | how many backups stay in the backups folder                                                    |
 
 jukecord checks every setting when it starts and lists every problem at once. `jukecord doctor` shows the settings in
 effect (secrets only as set or not set) and checks the parts jukecord needs.

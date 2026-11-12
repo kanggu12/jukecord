@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { Access } from './app/access.ts';
 import { Actions, type Directory } from './app/actions.ts';
 import { type AlertSink, Alerts, leftLoopAlert, restartedAlert, turnedAwayAlert } from './app/alerts.ts';
+import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { ConfigError, loadConfig } from './config.ts';
@@ -256,6 +257,7 @@ async function main(): Promise<number> {
       logDir: path.join(config.dataDir, 'logs'),
       logFiles: config.log.files,
       backupDir: path.join(config.dataDir, 'backups'),
+      backupKeep: config.backups.keep,
       discordMode: bot !== null,
       doctor: () =>
         runDoctor({
@@ -283,6 +285,20 @@ async function main(): Promise<number> {
   });
   rest.start();
 
+  // A backup every day at the host's time of day (JUKECORD_BACKUP_AT), when one is set.
+  const schedule = config.backups.at
+    ? new BackupSchedule({
+        store,
+        dir: path.join(config.dataDir, 'backups'),
+        keep: config.backups.keep,
+        at: config.backups.at,
+        clock: systemClock,
+        log: log.child('backups'),
+        alerts,
+      })
+    : null;
+  schedule?.start();
+
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;
@@ -299,6 +315,7 @@ async function main(): Promise<number> {
     // Leaving voice below is jukecord stopping, not nobody listening.
     rest.stop();
     alerts.stop();
+    schedule?.stop();
     players.checkpointAll();
     // The panels are told first (they reconnect to the next jukecord), then Discord, then the database.
     void web

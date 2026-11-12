@@ -64,6 +64,12 @@ export interface Config {
   };
   /** How long a playing server nobody hears anywhere plays on before it pauses (0: it never does; see app/rest.ts). */
   readonly restAfterMs: number;
+  readonly backups: {
+    /** The time of day of the daily backup, in the time zone jukecord runs in; null for none (app/backups.ts). */
+    readonly at: { readonly hour: number; readonly minute: number } | null;
+    /** How many backups stay in the backups folder. */
+    readonly keep: number;
+  };
   readonly log: {
     readonly level: LogLevel;
     /** The size at which the log file is rotated, in bytes. */
@@ -117,6 +123,8 @@ const KNOWN = new Set([
   'JUKECORD_TRUST_PROXY',
   'JUKECORD_ALLOW_PRIVATE_ADDRESSES',
   'JUKECORD_REST_AFTER',
+  'JUKECORD_BACKUP_AT',
+  'JUKECORD_BACKUP_KEEP',
   // Read by compose.yaml (the published address and the image), not by jukecord; known so they raise no warning
   // when .env passes them through.
   'JUKECORD_BIND',
@@ -320,6 +328,20 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     return ms;
   });
 
+  // A backup every day at a time of day ("04:30", in the time zone jukecord runs in), or none ("off", the default), and
+  // how many stay: each is a whole copy of the database.
+  const backups = {
+    at: read('JUKECORD_BACKUP_AT', null as { hour: number; minute: number } | null, (text) => {
+      if (text.toLowerCase() === 'off') return null;
+      const time = /^(\d{1,2}):(\d{2})$/.exec(text);
+      const hour = Number(time?.[1]);
+      const minute = Number(time?.[2]);
+      if (!time || hour > 23 || minute > 59) throw new Error(`"${text}" is not off or a time of day like 04:30`);
+      return { hour, minute };
+    }),
+    keep: read('JUKECORD_BACKUP_KEEP', 7, integer(1, 365)),
+  };
+
   // Log settings: rotation keeps the log from growing without end (every log has a size limit and a count).
   const log = {
     level: read('JUKECORD_LOG_LEVEL', 'info' as LogLevel, (text) => {
@@ -357,6 +379,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     liveMax,
     voice,
     restAfterMs,
+    backups,
     log,
     warnings,
   };
@@ -392,5 +415,11 @@ export function describeConfig(config: Config): Record<string, string> {
     'live connections limit': String(config.liveMax),
     'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
     'pause with nobody listening after': config.restAfterMs === 0 ? 'never' : `${config.restAfterMs} ms`,
+    'daily backup': config.backups.at ? `at ${timeOfDay(config.backups.at)}, keeping ${config.backups.keep}` : 'off',
   };
+}
+
+/** A time of day as people write it: "04:30". */
+export function timeOfDay(at: { readonly hour: number; readonly minute: number }): string {
+  return `${String(at.hour).padStart(2, '0')}:${String(at.minute).padStart(2, '0')}`;
 }

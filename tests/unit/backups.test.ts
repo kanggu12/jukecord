@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { pruneBackups } from '../../src/web/handlers.ts';
+import { pruneBackups } from '../../src/app/backups.ts';
 
 describe('backups in the data folder', () => {
   it('keeps the newest ones and leaves other files alone', () => {
