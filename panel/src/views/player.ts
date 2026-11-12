@@ -67,17 +67,6 @@ export function flash(element: HTMLElement, name: string): void {
   element.addEventListener('animationend', done);
 }
 
-/** Runs an action after a short leaving animation of the element it removes (at once with motion off). */
-export function leaving(element: HTMLElement, run: () => Promise<unknown>): void {
-  if (!moving()) {
-    void run();
-    return;
-  }
-  element.classList.add('leaving');
-  // Refused or failed, the element is still there (no redraw replaced it): it comes back.
-  window.setTimeout(() => void run().finally(() => element.classList.remove('leaving')), 200);
-}
-
 // The disc's mode from the player's status.
 function discMode(player: Player | null): 'playing' | 'paused' | 'idle' {
   if (player?.status === 'playing') return 'playing';
@@ -395,6 +384,49 @@ export function queueCard(): HTMLElement {
   // The search the rows were last drawn for: rows glide only from one unfiltered drawing to the next (the rows of a
   // search that ends are not where they were drawn, and would glide over each other).
   let drawnQuery = '';
+  // Removals asked for and not refused, by item, with when: a redraw that comes before the queue message taking them
+  // away (another change's, or one sent before the removal) draws them out of sight too, until the queue no longer
+  // has them, or for a few seconds at most.
+  const leavingIds = new Map<number, number>();
+  const LEAVE_MS = 3000;
+  // Removals asked for in a server left behind are not the next one's rows.
+  watch(['guild'], () => leavingIds.clear());
+
+  // Removes items: their rows go out to the right (at once with motion off), then `run` asks jukecord. Done, the rows
+  // stay out of sight until the queue's redraw takes them away: it comes a moment after the answer (jukecord sends
+  // queue changes at most four times a second), and until then they must not show again. Refused, the reason is said
+  // and the rows come back. Returns false when one of them is being removed already (Enter twice, a double click):
+  // the first press's request is under way, and a second would be refused.
+  const removeItems = (ids: number[], run: () => Promise<unknown>): boolean => {
+    if (ids.some((id) => leavingIds.has(id))) return false;
+    const asked = Date.now();
+    for (const id of ids) leavingIds.set(id, asked);
+    // The rows as drawn now (a redraw may come at any moment, so they are looked up again when needed).
+    const rowsOf = () =>
+      [...list.querySelectorAll<HTMLElement>('li.row')].filter((element) => ids.includes(Number(element.dataset.id)));
+    // Shown again: refused, or still in the queue after a few seconds (the message taking them away did not come).
+    const back = () => {
+      for (const id of ids) if (leavingIds.get(id) === asked) leavingIds.delete(id);
+      for (const element of rowsOf()) {
+        element.classList.remove('leaving', 'gone');
+        element.querySelector('[data-key="remove"]')?.removeAttribute('aria-disabled');
+      }
+    };
+    if (moving()) for (const element of rowsOf()) element.classList.add('leaving');
+    window.setTimeout(
+      () =>
+        void run().then(
+          () => window.setTimeout(back, LEAVE_MS),
+          (error: unknown) => {
+            problem(error);
+            back();
+          },
+        ),
+      // The animation's length first, so the request does not race it.
+      moving() ? 200 : 0,
+    );
+    return true;
+  };
 
   const row = (item: QueueItem, control: boolean): HTMLElement => {
     const words = t();
@@ -446,7 +478,13 @@ export function queueCard(): HTMLElement {
     );
     jump.onclick = () => void act(jump, () => api.jump(guild(), item.id));
     next.onclick = () => void act(next, () => api.move(guild(), item.id, 0));
-    remove.onclick = () => leaving(element, () => act(remove, () => api.remove(guild(), item.id)));
+    remove.onclick = () => {
+      // Pressed again while the first press is under way: nothing more to ask.
+      if (!removeItems([item.id], () => api.remove(guild(), item.id))) return;
+      // Done with, but not disabled: a disabled key drops the keyboard focus at once, and the focus must stay in the
+      // row until the redraw passes it on to the row that takes its place.
+      remove.setAttribute('aria-disabled', 'true');
+    };
     more.onclick = () => trackMenu(item.id);
     // The first row is next already: its Play next holds the column without being a key.
     if (item.position === 0) {
@@ -593,6 +631,11 @@ export function queueCard(): HTMLElement {
       for (const element of list.querySelectorAll<HTMLElement>('li.row'))
         before.set(element.dataset.id ?? '', element.getBoundingClientRect().top);
     }
+    // Forgotten: removals of items the queue no longer has (done), and of ones it still has after a few seconds (the
+    // queue message that would take them away did not come; they show again).
+    for (const [id, asked] of leavingIds) {
+      if (Date.now() - asked > LEAVE_MS || !items.some((item) => item.id === id)) leavingIds.delete(id);
+    }
     // After the redraw (a move with Alt+arrow, a track added by someone else) the same key of the same row gets the
     // keyboard focus back.
     keepingFocus(list, () => {
@@ -609,6 +652,12 @@ export function queueCard(): HTMLElement {
           const element = row(item, control);
           // Added since the last drawing (by anyone): it slides in. Not on the first drawing, nor in a search.
           if (drawnIds && !query && !drawnIds.has(item.id) && moving()) element.classList.add('enter');
+          // Its removal is under way (this drawing is for another change): it stays out of sight, as it left, and
+          // its key stays done with.
+          if (leavingIds.has(item.id) && moving()) {
+            element.classList.add('gone');
+            element.querySelector('[data-key="remove"]')?.setAttribute('aria-disabled', 'true');
+          }
           rows.append(element);
         }
         // The rest waits behind one key, which draws the next hundred.
@@ -719,8 +768,12 @@ export function queueCard(): HTMLElement {
       ok: words.clear,
       danger: true,
     });
-    // The rows sweep out to the right, then the queue is cleared.
-    if (ok) leaving(list, () => act(clear, () => api.clear(guild())));
+    // The rows sweep out to the right together, then the queue is cleared (refused, they come back with the reason).
+    // Rows on their way out already are left to their own removal.
+    if (ok) {
+      const ids = (state.queue?.items ?? []).map((item) => item.id).filter((id) => !leavingIds.has(id));
+      removeItems(ids, () => api.clear(guild()));
+    }
   };
   save.onclick = async () => {
     const words = t();

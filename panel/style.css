@@ -2531,9 +2531,11 @@ kbd {
     transform: translateX(12px);
   }
 }
-/* Cleared: the rows go together. */
-.list.leaving > .row {
-  animation: row-leave 0.22s ease forwards;
+/* A row whose removal is under way, drawn again for another change before the queue message that takes it away: it
+   stays as it left, out of sight (no animation: it is gone already). */
+.row.gone {
+  opacity: 0;
+  pointer-events: none;
 }
 /* Nothing playing and nothing waiting: the card to add music breathes, slowly, in the focus colour. */
 .card.invite {

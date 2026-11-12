@@ -50,16 +50,20 @@ export function fill(parent: Element, ...children: Child[]): void {
  * Runs `rebuild`, which replaces the rows of `list`, and gives the keyboard focus back to the same key of the same row:
  * the row is found by its data-id and the key by its data-key. A key that is no longer there (Play next on the row
  * that became first) or is hidden falls back to the row's link, never to a neighbouring key that does something else.
+ * A row that is gone (removed, played) passes the focus to the row that took its place, on its link, which names its
+ * track to a screen reader; the last row's goes to the row before it.
  */
 export function keepingFocus(list: HTMLElement, rebuild: () => void): void {
   const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const row = focused && list.contains(focused) ? focused.closest<HTMLElement>('[data-id]') : null;
   const id = row?.dataset.id;
   const key = focused?.dataset.key;
+  // Where the row stood among the rows, for when it is gone after the rebuild.
+  const place = row ? [...list.querySelectorAll('[data-id]')].indexOf(row) : -1;
   rebuild();
   if (!id) return;
-  const again = [...list.querySelectorAll<HTMLElement>('[data-id]')].find((element) => element.dataset.id === id);
-  if (!again) return;
+  const rows = [...list.querySelectorAll<HTMLElement>('[data-id]')];
+  const again = rows.find((element) => element.dataset.id === id);
   // A key that can take the focus: on the page (not display: none), not held invisible, not disabled.
   const shown = (element: HTMLElement | null) =>
     element &&
@@ -68,6 +72,14 @@ export function keepingFocus(list: HTMLElement, rebuild: () => void): void {
     !(element as HTMLButtonElement).disabled
       ? element
       : null;
+  if (!again) {
+    // The row now at its place, or the last one when it was last (rows on their way out, marked gone, passed over);
+    // none left, the focus has nowhere to go in the list.
+    const staying = rows.filter((element) => !element.classList.contains('gone'));
+    const instead = staying[Math.min(place, staying.length - 1)];
+    if (instead) shown(instead.querySelector<HTMLElement>('a'))?.focus({ preventScroll: true });
+    return;
+  }
   const same = key ? shown(again.querySelector<HTMLElement>(`[data-key="${key}"]`)) : null;
   (same ?? shown(again.querySelector<HTMLElement>('a')))?.focus({ preventScroll: true });
 }
