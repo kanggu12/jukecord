@@ -90,7 +90,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const result = await deps.actions.playNow(context, body.input);
     return { ...result, items: deps.presenter.items(result.items) };
   },
-  skip: ({ context, deps }) => deps.presenter.player(deps.actions.skip(context)),
+  skip: ({ context, deps }) => {
+    const { snapshot, votes } = deps.actions.skip(context);
+    return { ...deps.presenter.player(snapshot), votes };
+  },
   'remove-current': ({ context, deps }) => deps.presenter.player(deps.actions.removeCurrent(context)),
   pause: ({ context, deps }) => deps.presenter.player(deps.actions.pause(context)),
   resume: ({ context, deps }) => deps.presenter.player(deps.actions.resume(context)),
@@ -222,4 +225,5 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   },
 
   stay: ({ context, body, deps }) => settingsAnswer(deps.actions.stay(context, body.on)),
+  'vote-skip': ({ context, body, deps }) => settingsAnswer(deps.actions.voteSkip(context, body.on)),
 };

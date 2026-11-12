@@ -70,6 +70,14 @@ const TEXT = {
     en: { off: 'off', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
     ko: { off: '끔', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
   },
+  skipVotes: {
+    en: (votes: number, needed: number) => `Skip (${votes} of ${needed})`,
+    ko: (votes: number, needed: number) => `건너뛰기 (${votes}/${needed})`,
+  },
+  votesLine: {
+    en: (votes: number, needed: number) => `Votes to skip: ${votes} of ${needed}`,
+    ko: (votes: number, needed: number) => `건너뛰기 투표: ${needed}표 중 ${votes}표`,
+  },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -136,8 +144,16 @@ function bar(position: number, duration: number | null): string {
   return `\`${'━'.repeat(filled)}${'─'.repeat(cells - filled)}\` ${formatDuration(position)} / ${formatDuration(duration)}`;
 }
 
-/** The current track with a progress bar, and buttons to pause or skip. */
-export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string | null) {
+/**
+ * The current track with a progress bar, and buttons to pause or skip. With a vote to skip it under way, the Skip
+ * button and the line under the bar say how the vote stands.
+ */
+export function nowCard(
+  snapshot: PlayerSnapshot,
+  lang: Lang,
+  panelUrl: string | null,
+  votes: { readonly votes: number; readonly needed: number } | null = null,
+) {
   if (!snapshot.track) {
     return { embeds: [new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.nothing[lang])], components: [] };
   }
@@ -156,9 +172,12 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
-  // The repeat mode, when one is on, under the bar.
-  if (snapshot.repeat !== 'off')
-    embed.setFooter({ text: snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang] });
+  // The repeat mode, when one is on, and a vote to skip under way, under the bar.
+  const footer = [
+    snapshot.repeat === 'off' ? null : snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang],
+    votes ? TEXT.votesLine[lang](votes.votes, votes.needed) : null,
+  ].filter((part): part is string => part !== null);
+  if (footer.length > 0) embed.setFooter({ text: footer.join(' · ') });
   // The card's language travels in the buttons, so a press redraws the card in the language it was made in, not the
   // presser's (a card in the channel is everyone's).
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -166,7 +185,10 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       .setCustomId(`jukecord:${snapshot.status === 'paused' ? 'resume' : 'pause'}:${lang}`)
       .setLabel(snapshot.status === 'paused' ? TEXT.resume[lang] : TEXT.pause[lang])
       .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`jukecord:skip:${lang}`).setLabel(TEXT.skip[lang]).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`jukecord:skip:${lang}`)
+      .setLabel(votes ? TEXT.skipVotes[lang](votes.votes, votes.needed) : TEXT.skip[lang])
+      .setStyle(ButtonStyle.Secondary),
   );
   // The panel link only when there is an address people can reach.
   if (panelUrl)

@@ -10,6 +10,8 @@ import { after, before, describe, it } from 'node:test';
 import { EVENTS_VERSION } from '../../src/web/events.ts';
 import {
   ALICE,
+  BOB,
+  DJ_ROLE,
   exampleTrack,
   GUILD,
   HOST_TOKEN,
@@ -127,7 +129,16 @@ describe('live updates', () => {
     assert.equal(typeof hello.serverTime, 'number');
     socket.send({ type: 'subscribe', guild: GUILD });
     const state = await socket.next('state');
-    assert.deepEqual(Object.keys(state).sort(), ['guild', 'listeners', 'player', 'queue', 'type', 'v', 'voice']);
+    assert.deepEqual(Object.keys(state).sort(), [
+      'guild',
+      'listeners',
+      'player',
+      'queue',
+      'type',
+      'v',
+      'voice',
+      'votes',
+    ]);
     const added = socket.next('queue');
     const playerEvent = socket.next('player');
     await server.actions.add({ guildId: GUILD, userId: ALICE, mayControl: true, mayManage: false }, 'two');
@@ -358,6 +369,49 @@ describe('live connections are capped', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       await open(asFirst).next('hello');
       assert.equal(server.web.hub.counts().connections, 4);
+    } finally {
+      for (const socket of sockets) socket.close();
+      await server.close();
+    }
+  });
+});
+
+describe('votes to skip, live', () => {
+  it('counts a browser listening as a person who may vote, and tells every panel how the vote stands', async () => {
+    const server = await testServer({
+      listen: true,
+      found: { two: [exampleTrack('va'), exampleTrack('vb')] },
+    });
+    const sockets: Socket[] = [];
+    try {
+      const base = server.url.replace('http://', 'ws://');
+      // Alice has no DJ role in a server that has one; Bob is in the bot's voice channel.
+      server.directory.join(GUILD, ALICE);
+      server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      server.voice.inVoice.set(GUILD, [BOB]);
+      const host = { guildId: GUILD, userId: null, mayControl: true, mayManage: true };
+      await server.actions.add(host, 'two');
+      server.media.finish(180_000);
+      const watcher = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { authorization: `Bearer ${HOST_TOKEN}` });
+      sockets.push(watcher);
+      const state = await watcher.next('state');
+      assert.deepEqual(state.votes, { on: true, votes: 0, needed: 1 });
+      // Not listening yet: Alice may not vote.
+      const alice = { guildId: GUILD, userId: ALICE, mayControl: false, mayManage: false };
+      assert.throws(() => server.actions.skip(alice), /only people listening can vote to skip/);
+      // Her browser listens along: she counts among the people listening.
+      const { cookie } = sessionFor(server, ALICE);
+      const browser = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { cookie, origin: server.url });
+      sockets.push(browser);
+      await browser.next('state');
+      browser.send({ type: 'listening', on: true });
+      await watcher.next('listeners');
+      assert.deepEqual(server.web.hub.listeningPeople(GUILD), [ALICE]);
+      // Alice in a browser, Bob and a third person in voice: three people, two votes needed.
+      server.voice.inVoice.set(GUILD, [BOB, '300000000000000003']);
+      const told = watcher.next('votes');
+      assert.deepEqual(server.actions.skip(alice).votes, { votes: 1, needed: 2 });
+      assert.deepEqual((await told).votes, { on: true, votes: 1, needed: 2 });
     } finally {
       for (const socket of sockets) socket.close();
       await server.close();

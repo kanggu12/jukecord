@@ -213,6 +213,8 @@ export class VoiceManager implements VoiceControl {
   voiceStateChanged(guildId: string): void {
     let joined = this.joined.get(guildId);
     if (!joined) return;
+    // Who is in the bot's channel may have changed: an open vote to skip counts again (a moment later, see votes.ts).
+    this.bus?.emit('people', { guildId });
     // A moderator moved the bot to another channel: follow it, so the panel and the countdown use the right one. Moved
     // onto a stage, it would sit there silent: it leaves instead.
     const now = this.client.guilds.cache.get(guildId)?.members.me?.voice.channel;
@@ -246,6 +248,15 @@ export class VoiceManager implements VoiceControl {
   channel(guildId: string): { channelId: string; name: string } | null {
     const joined = this.joined.get(guildId);
     return joined ? { channelId: joined.channelId, name: joined.name } : null;
+  }
+
+  /** The people (not bots) in the bot's voice channel of a server, by their Discord IDs; none when it is in none. */
+  people(guildId: string): string[] {
+    const joined = this.joined.get(guildId);
+    if (!joined) return [];
+    const channel = this.client.guilds.cache.get(guildId)?.channels.cache.get(joined.channelId);
+    if (!channel?.isVoiceBased()) return [];
+    return [...channel.members.filter((member) => !member.user.bot).keys()];
   }
 
   channels(guildId: string, viewer: { userId: string | null; all: boolean }): VoiceChannelInfo[] {
@@ -401,6 +412,8 @@ export class VoiceManager implements VoiceControl {
     this.idle.disarm(guildId);
     this.players.get(guildId).detach(joined.output);
     this.bus?.emit('voice', { guildId, channel: null });
+    // Nobody listens in voice any more: an open vote to skip counts the browsers alone.
+    this.bus?.emit('people', { guildId });
     return joined;
   }
 }

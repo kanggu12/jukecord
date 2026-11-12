@@ -310,6 +310,7 @@ async function drawShare(box: HTMLElement, guild: string): Promise<void> {
     box,
     h('h3', null, words.serverSettings),
     switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
+    switchLine(words.voteSkip, words.voteSkipHint, settings.voteSkip, (on) => api['vote-skip'](guild, on)),
   );
 }
 

@@ -14,6 +14,7 @@ import {
   type RoleInfo,
   type VoiceControl,
 } from '../../src/app/actions.ts';
+import { SkipVotes } from '../../src/app/votes.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
@@ -101,6 +102,11 @@ export class FakeVoice implements VoiceControl {
   readonly stayed: string[] = [];
   stayChanged(guildId: string): void {
     this.stayed.push(guildId);
+  }
+  /** Who is in the bot's voice channel, by server (tests set it). */
+  readonly inVoice = new Map<string, string[]>();
+  people(guildId: string): string[] {
+    return this.inVoice.get(guildId) ?? [];
   }
 }
 
@@ -194,9 +200,19 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return tracks.map((track) => store.tracks.upsert(track));
     },
   } as unknown as Resolver;
-  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now() });
   const directory = new FakeDirectory();
   const voice = new FakeVoice();
+  // The votes to skip, counting the fake voice channel and the browsers of the real live updates (once they exist).
+  let browsers: (guildId: string) => readonly string[] = () => [];
+  const votes = new SkipVotes({
+    players,
+    bus,
+    clock,
+    log,
+    applies: (guildId) => actions.voteSkipApplies(guildId),
+    listening: (guildId) => new Set([...voice.people(guildId), ...browsers(guildId)]),
+  });
+  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now(), votes });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
   const auth = new Auth({
@@ -245,6 +261,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });
+  browsers = (guildId) => web.hub.listeningPeople(guildId);
   let url = '';
   if (options.listen) url = await web.listen();
   return {

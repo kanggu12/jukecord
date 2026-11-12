@@ -233,6 +233,12 @@ const EN = {
   serverSettings: 'Server settings',
   stay: 'Stay in voice',
   stayHint: 'The bot stays in its channel when everyone has left',
+  voteSkip: 'Vote to skip',
+  voteSkipHint: 'With a DJ role, Skip from anyone else is a vote: half of the people listening skip',
+  voteToSkip: 'Vote to skip',
+  votesCount: (votes: number, needed: number) => `${votes} of ${needed}`,
+  skipVotes: (votes: number, needed: number) => `Skip: ${votes} of ${needed} votes`,
+  votedToSkip: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -458,6 +464,12 @@ const KO: Strings = {
   serverSettings: '서버 설정',
   stay: '음성 채널에 머물기',
   stayHint: '모두 나가도 봇이 채널에 남음',
+  voteSkip: '건너뛰기 투표',
+  voteSkipHint: 'DJ 역할이 있으면 다른 사람의 건너뛰기는 투표: 듣는 사람 절반이 찬성하면 넘어감',
+  voteToSkip: '건너뛰기에 투표',
+  votesCount: (votes: number, needed: number) => `${votes}/${needed}표`,
+  skipVotes: (votes: number, needed: number) => `건너뛰기: ${needed}표 중 ${votes}표`,
+  votedToSkip: (votes: number, needed: number) => `건너뛰기에 투표함: ${needed}표 중 ${votes}표`,
 };
 
 /** The languages. */

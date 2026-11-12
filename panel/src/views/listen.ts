@@ -12,8 +12,8 @@
 import { api, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
-import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
-import { act, disc } from './player.ts';
+import { keep, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
+import { act, disc, skipOrVote } from './player.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
 const DRIFT_MS = 300;
@@ -175,7 +175,8 @@ export function listenBar(live: Live): HTMLElement {
   if (session) {
     session.setActionHandler('play', () => void act(null, () => api.resume(guild())));
     session.setActionHandler('pause', () => void act(null, () => api.pause(guild())));
-    session.setActionHandler('nexttrack', () => void act(null, () => api.skip(guild())));
+    // Skip, or a vote to skip where it is one (see skipOrVote).
+    session.setActionHandler('nexttrack', () => void skipOrVote(null));
   }
   const describe = () => {
     const track = state.player?.track;
@@ -274,10 +275,17 @@ export function listenBar(live: Live): HTMLElement {
     const queued = (state.queue?.items.length ?? 0) > 0;
     const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
     label(pauseKey, moving ? 'pause' : 'play', pauseWords, false);
-    skipKey.title = words.skip;
-    skipKey.setAttribute('aria-label', words.skip);
+    // Skip, or a vote to skip without the DJ role where Skip is one, named with the count of a vote under way.
+    const votes = state.votes;
+    skipKey.title =
+      votes.on && votes.votes > 0
+        ? words.skipVotes(votes.votes, votes.needed)
+        : votes.on && !mayControl()
+          ? words.voteToSkip
+          : words.skip;
+    skipKey.setAttribute('aria-label', skipKey.title);
     pauseKey.disabled = !player || !mayControl() || (!player.track && !queued);
-    skipKey.disabled = !mayControl() || !player?.track;
+    skipKey.disabled = !maySkip() || !player?.track;
     // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
     bar.classList.toggle('idle', !player?.track);
     // Who else listens: the faces built again only when the people change (their pictures would load again).
@@ -298,7 +306,7 @@ export function listenBar(live: Live): HTMLElement {
     // Paused or idle: play on (or start the queue). Playing or loading: pause.
     void act(pauseKey, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
   };
-  skipKey.onclick = () => void act(skipKey, () => api.skip(guild()));
+  skipKey.onclick = () => void skipOrVote(skipKey);
 
   toggle.onclick = () => {
     // Blocked: this press is the asking the browser waited for.
@@ -326,7 +334,10 @@ export function listenBar(live: Live): HTMLElement {
     describe();
     align();
   });
-  watch(['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice'], draw);
+  watch(
+    ['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice', 'votes'],
+    draw,
+  );
   // Drift is checked every two seconds while listening.
   window.setInterval(() => {
     if (state.listening) align();

@@ -6,7 +6,17 @@ import { after, before, describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { CSRF_HEADER } from '../../src/web/auth.ts';
-import { ALICE, asHost, BOB, exampleTrack, GUILD, sessionFor, type TestServer, testServer } from '../support/web.ts';
+import {
+  ALICE,
+  asHost,
+  BOB,
+  DJ_ROLE,
+  exampleTrack,
+  GUILD,
+  sessionFor,
+  type TestServer,
+  testServer,
+} from '../support/web.ts';
 
 const api = (path: string) => `${API_PREFIX}${path}`;
 
@@ -56,5 +66,49 @@ describe('the community settings over the API', () => {
       payload: { on: false },
     });
     assert.equal(off.json().stay, false);
+  });
+});
+
+describe('votes to skip over the API', () => {
+  let server: TestServer;
+
+  before(async () => {
+    server = await testServer({ found: { two: [exampleTrack('a'), exampleTrack('b')] } });
+    // A server with a DJ role: Alice and Bob are in the bot's voice channel without it, Bob manages the server.
+    server.directory.join(GUILD, ALICE);
+    server.directory.join(GUILD, BOB, { manage: true });
+    server.store.settings.setDjRole(GUILD, DJ_ROLE);
+    server.voice.inVoice.set(GUILD, [ALICE, BOB, '300000000000000003']);
+  });
+  after(() => server.close());
+
+  const inject = (options: InjectOptions) => server.web.app.inject(options);
+  const as = (userId: string) => {
+    const { cookie, csrf } = sessionFor(server, userId);
+    return { cookie, [CSRF_HEADER]: csrf };
+  };
+
+  it("answers a skip without the DJ role with the vote's count, and turns votes off for those who manage", async () => {
+    await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue`), headers: asHost, payload: { input: 'two' } });
+    server.media.finish(180_000);
+    const vote = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: as(ALICE) });
+    assert.equal(vote.statusCode, 200);
+    assert.deepEqual(vote.json().votes, { votes: 1, needed: 2 });
+    assert.equal(vote.json().track.title, 'Track a');
+    // The host skips at once; its answer says no vote.
+    const skipped = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: asHost });
+    assert.equal(skipped.json().votes, null);
+    assert.equal(skipped.json().track.title, 'Track b');
+    // Votes off: Skip needs the DJ role again.
+    const off = await inject({
+      method: 'PUT',
+      url: api(`/guilds/${GUILD}/settings/vote-skip`),
+      headers: as(BOB),
+      payload: { on: false },
+    });
+    assert.equal(off.json().voteSkip, false);
+    const refused = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: as(ALICE) });
+    assert.equal(refused.statusCode, 403);
+    assert.match(refused.json().error.message, /DJ role/);
   });
 });

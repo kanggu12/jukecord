@@ -19,11 +19,21 @@ export interface VoiceChanged {
   readonly channel: { readonly channelId: string; readonly name: string } | null;
 }
 
+/** Something changed about one server, said with its ID alone: whoever listens reads what it needs. */
+export interface GuildChanged {
+  readonly guildId: string;
+}
+
 /** Every event and its payload. */
 export interface BusEvents {
   queue: [QueueChanged];
   player: [PlayerSnapshot];
   voice: [VoiceChanged];
+  /** Who listens in a server changed: someone came or went in the bot's voice channel, or a browser started or
+   * stopped listening along. */
+  people: [GuildChanged];
+  /** The votes to skip a server's track changed, or whether Skip is a vote there (see app/votes.ts). */
+  votes: [GuildChanged];
 }
 
 /** Hears about a listener that threw: the event, the server it was about, and the error. */

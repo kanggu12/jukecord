@@ -98,7 +98,7 @@ playlist) so a program does not need to ask again.
 | :-- | :-- | :-- | :-- | :-- |
 | `now-playing` What is playing and where | `GET /api/v1/guilds/{guild}/player` | read | `jukecord np` | `/np` |
 | `play-now` Play now: what the input finds goes first and the current track is skipped | `POST /api/v1/guilds/{guild}/player/play` | control | `jukecord play` | `/play` |
-| `skip` Skip to the next track | `POST /api/v1/guilds/{guild}/player/skip` | control | `jukecord skip` | `/skip` |
+| `skip` Skip to the next track; without the DJ role where votes are on, a vote (the answer says how it stands) | `POST /api/v1/guilds/{guild}/player/skip` | control | `jukecord skip` | `/skip` |
 | `remove-current` Drop the current track without counting it as played | `POST /api/v1/guilds/{guild}/player/drop` | control | `jukecord drop` | `/drop` |
 | `pause` Pause | `POST /api/v1/guilds/{guild}/player/pause` | control | `jukecord pause` | `/pause` |
 | `resume` Play on: resume what is paused, or start the queue when nothing plays | `POST /api/v1/guilds/{guild}/player/resume` | control | `jukecord resume` | `/resume` |
@@ -152,6 +152,7 @@ playlist) so a program does not need to ask again.
 | `dj-role` Set the role that may change the music (null: everyone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/dj-role` | admin | `jukecord dj` | `/dj set` |
 | `status` The version, the mode and whether Discord is connected | `GET /api/v1/status` | anyone | `jukecord status` | `/version` |
 | `stay` Stay in voice when everyone has left (off: leave after the host's time alone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/stay` | admin | `jukecord stay` | `/stay` |
+| `vote-skip` Whether Skip from someone without the DJ role is a vote (on) or refused (off); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/vote-skip` | admin | `jukecord voteskip` | `/voteskip` |
 
 ### Your login
 

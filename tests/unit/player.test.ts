@@ -446,3 +446,30 @@ describe('Player failures after a restart', () => {
     assert.equal(context.player.snapshot().status, 'paused');
   });
 });
+
+describe('Player plays', () => {
+  it('counts a new play at a skip, the end, a stop and a repeat, and not at a seek or a pause', async () => {
+    const context = setup();
+    const { clock, player, media } = context;
+    await startPlaying(context);
+    const first = player.playNumber();
+    // A seek and a pause stay within the play (the votes to skip it stay).
+    player.seek(30_000);
+    player.pause();
+    player.resume();
+    assert.equal(player.playNumber(), first);
+    player.skip();
+    const second = player.playNumber();
+    assert.notEqual(second, first);
+    media.finish(SONG);
+    await flush();
+    // The same track again by repeat is a play of its own.
+    player.setRepeat('track');
+    await clock.advance(SONG);
+    assert.equal(player.snapshot().track?.title, 'Track 2');
+    assert.notEqual(player.playNumber(), second);
+    const third = player.playNumber();
+    player.stop();
+    assert.notEqual(player.playNumber(), third);
+  });
+});

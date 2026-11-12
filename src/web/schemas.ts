@@ -73,6 +73,20 @@ export const PlayerSchema = Type.Object(
   { title: 'Player' },
 );
 
+/** A skip's answer: the player after it, and how the vote stands when it was a vote the track did not go by. */
+export const SkipSchema = Type.Object(
+  {
+    ...PlayerSchema.properties,
+    votes: Nullable(
+      Type.Object(
+        { votes: Type.Integer(), needed: Type.Integer() },
+        { description: 'The votes to skip that count, and the votes it takes; null when the track went' },
+      ),
+    ),
+  },
+  { title: 'Skip' },
+);
+
 export const AddResultSchema = Type.Object(
   {
     items: Type.Array(QueueItemSchema),

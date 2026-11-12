@@ -48,6 +48,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   'dj-role': '/dj set',
   status: '/version',
   stay: '/stay',
+  'vote-skip': '/voteskip',
 };
 
 // One command: English name and description, Korean name and description.
@@ -340,6 +341,14 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       '모두 나가도 음성 채널에 남기, 또는 혼자 남으면 잠시 뒤 나가기',
     )
       // A server setting: shown to people who can manage the server, as /dj is; Discord also enforces it.
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption(modeOption),
+    command(
+      'voteskip',
+      'Whether Skip from someone without the DJ role is a vote (half of the listeners skip)',
+      '건너뛰기투표',
+      'DJ 역할이 없는 사람의 건너뛰기를 투표로 받기(듣는 사람 절반이 찬성하면 넘어감)',
+    )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .addStringOption(modeOption),
   ];

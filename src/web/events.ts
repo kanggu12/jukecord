@@ -126,6 +126,9 @@ interface Room {
   listeners: Listeners | null;
   listenersTimer: NodeJS.Timeout | null;
   listenersSentAt: number;
+  // The votes to skip, held back like the queue (a crowd voting together is one message a quarter second).
+  votesTimer: NodeJS.Timeout | null;
+  votesSentAt: number;
 }
 
 // What one connection is sent: bytes, as a binary frame (gzip) or a text frame (JSON).
@@ -259,13 +262,20 @@ export class EventHub {
         this.send(client, { type: 'voice', guild: guildId, voice: lists.get(key) });
       }
     };
+    // The votes to skip changed: the panels hear the new view soon, at most four times a second.
+    const onVotes = ({ guildId }: { guildId: string }) => {
+      const room = this.rooms.get(guildId);
+      if (room) this.votesSoon(guildId, room);
+    };
     bus.on('player', onPlayer);
     bus.on('queue', onQueue);
     bus.on('voice', onVoice);
+    bus.on('votes', onVotes);
     this.off.push(
       () => bus.off('player', onPlayer),
       () => bus.off('queue', onQueue),
       () => bus.off('voice', onVoice),
+      () => bus.off('votes', onVotes),
     );
     this.heartbeat = setInterval(() => this.beat(), HEARTBEAT_MS);
     this.heartbeat.unref();
@@ -384,6 +394,18 @@ export class EventHub {
     return room ? this.listenersOf(room) : { people: [], count: 0 };
   }
 
+  /**
+   * Who listens along in a server's browsers, by Discord ID ("host" for the host), each person once: for the votes to
+   * skip, which count people, not tabs.
+   */
+  listeningPeople(guildId: string): string[] {
+    const room = this.rooms.get(guildId);
+    if (!room) return [];
+    const people = new Set<string>();
+    for (const client of room.clients) if (client.listening) people.add(client.who.id ?? 'host');
+    return [...people];
+  }
+
   /** Open connections and, of those, how many are playing along (for /metrics). */
   counts(): { connections: number; listening: number } {
     let listening = 0;
@@ -469,7 +491,8 @@ export class EventHub {
     const ending = Buffer.from(
       `,"type":"state","player":${JSON.stringify(presenter.player(actions.nowPlaying(reader(guildId))))},` +
         `"voice":${JSON.stringify(actions.voiceChannels(viewer(client, guildId)))},` +
-        `"listeners":${JSON.stringify(this.listenersOf(room))}}`,
+        `"listeners":${JSON.stringify(this.listenersOf(room))},` +
+        `"votes":${JSON.stringify(actions.skipVotes(reader(guildId)))}}`,
     );
     this.write(
       client,
@@ -493,6 +516,8 @@ export class EventHub {
         listeners: null,
         listenersTimer: null,
         listenersSentAt: Number.NEGATIVE_INFINITY,
+        votesTimer: null,
+        votesSentAt: Number.NEGATIVE_INFINITY,
       };
       this.rooms.set(guildId, room);
     }
@@ -515,6 +540,8 @@ export class EventHub {
     if (room.listenersTimer) clearTimeout(room.listenersTimer);
     room.queueTimer = null;
     room.listenersTimer = null;
+    if (room.votesTimer) clearTimeout(room.votesTimer);
+    room.votesTimer = null;
   }
 
   // The start of every message with this server's queue, made again only when the queue has changed since.
@@ -581,6 +608,8 @@ export class EventHub {
 
   // Someone started or stopped listening in a server: its panels hear about it, at most once a second.
   private listenersChanged(guildId: string): void {
+    // Who listens changed, also when the last panel of the server has just gone: an open vote to skip counts again.
+    this.options.bus.emit('people', { guildId });
     const room = this.rooms.get(guildId);
     if (!room) return;
     room.listeners = null;
@@ -601,6 +630,29 @@ export class EventHub {
       );
     }, wait);
     room.listenersTimer.unref();
+  }
+
+  // Sends a server's votes to skip soon: at once if none went lately, otherwise when QUEUE_EVERY_MS has passed since
+  // the last, with the view as it is then. The view is made once for every panel of the server.
+  private votesSoon(guildId: string, room: Room): void {
+    if (room.votesTimer) return;
+    const wait = Math.max(0, room.votesSentAt + this.queueEveryMs - steadyNow());
+    room.votesTimer = setTimeout(() => {
+      room.votesTimer = null;
+      room.votesSentAt = steadyNow();
+      // The room may have closed meanwhile; then nobody needs it.
+      if (this.rooms.get(guildId) !== room) return;
+      const bytes = json({ type: 'votes', guild: guildId, votes: this.options.actions.skipVotes(reader(guildId)) });
+      this.broadcast(
+        room,
+        outgoing(
+          bytes.length,
+          () => bytes,
+          () => gzip(bytes),
+        ),
+      );
+    }, wait);
+    room.votesTimer.unref();
   }
 
   // Sends one message, made once, to every connection showing a server.

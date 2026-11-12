@@ -314,9 +314,12 @@ export class Bot implements Directory {
           await this.autoJoin(interaction, context, lang);
           return;
         }
-        case 'skip':
-          await interaction.editReply(nowCard(actions.skip(context), lang, this.options.panelUrl));
+        case 'skip': {
+          // Without the DJ role it may be a vote: the card then says how the vote stands.
+          const { snapshot } = actions.skip(context);
+          await interaction.editReply(nowCard(snapshot, lang, this.options.panelUrl, openVotes(actions, context)));
           return;
+        }
         case 'drop':
           await interaction.editReply(nowCard(actions.removeCurrent(context), lang, this.options.panelUrl));
           return;
@@ -348,7 +351,9 @@ export class Bot implements Directory {
           });
           return;
         case 'np':
-          await interaction.editReply(nowCard(actions.nowPlaying(context), lang, this.options.panelUrl));
+          await interaction.editReply(
+            nowCard(actions.nowPlaying(context), lang, this.options.panelUrl, openVotes(actions, context)),
+          );
           return;
         case 'queue':
           await interaction.editReply({
@@ -467,6 +472,17 @@ export class Bot implements Directory {
           });
           return;
         }
+        case 'voteskip': {
+          const settings = actions.voteSkip(context, options.getString('mode', true) === 'on');
+          await interaction.editReply({
+            embeds: [
+              settings.voteSkip
+                ? note(lang, 'Skip from someone without the DJ role is a vote', 'DJ 역할이 없으면 건너뛰기가 투표가 됨')
+                : note(lang, 'Skip needs the DJ role', '건너뛰기에 DJ 역할이 필요함'),
+            ],
+          });
+          return;
+        }
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
@@ -537,9 +553,9 @@ export class Bot implements Directory {
           ? actions.pause(context)
           : action === 'resume'
             ? actions.resume(context)
-            : actions.skip(context);
-      // The card itself is updated in place, so the channel does not fill with copies.
-      await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl));
+            : actions.skip(context).snapshot;
+      // The card itself is updated in place, so the channel does not fill with copies; its Skip says how a vote stands.
+      await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl, openVotes(actions, context)));
     } catch (error) {
       await this.fail(interaction, error);
     }
@@ -584,6 +600,12 @@ export class Bot implements Directory {
       // The interaction expired (15 min) or the channel is gone; nothing left to tell.
     }
   }
+}
+
+// How a vote to skip the current track stands, for a card's Skip button, while one is under way (null otherwise).
+function openVotes(actions: Actions, context: ActionContext): { votes: number; needed: number } | null {
+  const view = actions.skipVotes(context);
+  return view.on && view.votes > 0 ? { votes: view.votes, needed: view.needed } : null;
 }
 
 // Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets UTC,

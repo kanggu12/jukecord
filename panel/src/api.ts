@@ -49,6 +49,7 @@ export const PANEL_ACTIONS = [
   'logs',
   // How a server's people share the music, and how its voice channel sounds.
   'stay',
+  'vote-skip',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -149,6 +150,16 @@ export interface Player {
   progress: number | null;
   version: number;
 }
+/** A skip's answer: the player after it, and how the vote stands when it was a vote the track did not go by. */
+export interface SkipAnswer extends Player {
+  votes: { votes: number; needed: number } | null;
+}
+/** How the votes to skip the current track stand (sent live). */
+export interface Votes {
+  on: boolean;
+  votes: number;
+  needed: number;
+}
 export interface AddResult {
   items: QueueItem[];
   skippedTooLong: number;
@@ -247,7 +258,7 @@ export const api = {
   add: (guild: string, input: string, at: 'end' | 'next' = 'end') =>
     request<AddResult>('POST', `${g(guild)}/queue`, { input, at }),
   'play-now': (guild: string, input: string) => request<AddResult>('POST', `${g(guild)}/player/play`, { input }),
-  skip: (guild: string) => request<Player>('POST', `${g(guild)}/player/skip`),
+  skip: (guild: string) => request<SkipAnswer>('POST', `${g(guild)}/player/skip`),
   'remove-current': (guild: string) => request<Player>('POST', `${g(guild)}/player/drop`),
   pause: (guild: string) => request<Player>('POST', `${g(guild)}/player/pause`),
   resume: (guild: string) => request<Player>('POST', `${g(guild)}/player/resume`),
@@ -294,6 +305,7 @@ export const api = {
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
   stay: (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/stay`, { on }),
+  'vote-skip': (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/vote-skip`, { on }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

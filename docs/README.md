@@ -41,6 +41,11 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 - When a server has a **DJ role**, only members with that role (and people who can manage the server) change the music;
   everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
   role deleted in Discord counts as none: everyone may change the music again until another is set.
+- Where a server has a DJ role, **Skip** from anyone else is a vote. The track goes when half of the people listening
+  have voted (rounded up, at least one): the people in the bot's voice channel and the people listening along in a
+  browser, each once. Only they may vote, a vote counts while its person listens, and the votes end with the track.
+  The panel's Skip key and the Skip button of the bot's card say how the vote stands ("1 of 2"). A server can turn
+  votes off (the menu's **Vote to skip**, `/voteskip`, `jukecord voteskip off`); Skip then needs the role too.
 
 ## Slash commands
 
@@ -63,6 +68,7 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
 | `/version`                                   | the version                                                         |
 | `/stay`                                      | stay in voice when everyone has left, or not (needs Manage Server)  |
+| `/voteskip`                                  | Skip without the DJ role is a vote, or not (needs Manage Server)    |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after

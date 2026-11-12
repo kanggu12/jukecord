@@ -5,7 +5,7 @@
  * and a snapshot that arrives twice does not repaint anything.
  */
 import { sayError } from '../../src/core/say.ts';
-import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Status, Voice } from './api.ts';
+import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Status, Voice, Votes } from './api.ts';
 import { type Lang, pickLang, type Words, words } from './i18n.ts';
 import type { LiveStatus } from './live.ts';
 
@@ -31,6 +31,8 @@ export interface State {
   /** Whether this browser plays along, and how loud (0 to 1). */
   listening: boolean;
   volume: number;
+  /** How the votes to skip the current track stand in the server shown. */
+  votes: Votes;
 }
 
 type Key = keyof State;
@@ -54,6 +56,9 @@ export function keep(name: string, value: string): void {
   }
 }
 
+/** No vote to skip: votes off, or none cast (the state before the server's own arrives, and after a switch). */
+export const NO_VOTES: Votes = { on: false, votes: 0, needed: 0 };
+
 const langChoice = (stored('lang') ?? 'auto') as State['langChoice'];
 const volume = Number(stored('volume') ?? '0.6');
 
@@ -75,6 +80,7 @@ export const state: State = {
   motion: stored('motion') !== 'off',
   listening: false,
   volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6,
+  votes: NO_VOTES,
 };
 
 const listeners = new Set<Listener>();
@@ -142,6 +148,11 @@ export function t(): Words {
 /** Whether the person may change the music in the server shown. */
 export function mayControl(): boolean {
   return Boolean(state.guild?.mayControl) && state.me?.scope !== 'read';
+}
+
+/** Whether the person may press Skip: to skip, or (without the DJ role, where Skip is a vote) to vote. */
+export function maySkip(): boolean {
+  return mayControl() || (state.votes.on && state.me?.scope !== 'read');
 }
 
 /** The track's position now: the snapshot's place plus the time since, while playing (in the server's time). */

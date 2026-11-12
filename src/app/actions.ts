@@ -17,6 +17,7 @@ import type { Resolver } from '../media/resolver.ts';
 import type { CommunitySettings, HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
+import type { SkipVotes, VotesView } from './votes.ts';
 
 /**
  * Every action by name. The four ways in each declare which of these they offer; the parity test fails when one is
@@ -54,6 +55,7 @@ export const ACTIONS = [
   'dj-role',
   'status',
   'stay',
+  'vote-skip',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -184,6 +186,15 @@ export interface ActionsOptions {
   readonly queueMax?: number;
   /** The longest track that may be added, in milliseconds (default 3 hours). */
   readonly trackMaxMs?: number;
+  /** The votes to skip; without them (tests that do not care) Skip needs the DJ role, as it did before votes. */
+  readonly votes?: SkipVotes;
+}
+
+/** What a skip did: the player after it, and how the vote stands when it was a vote the track did not go by. */
+export interface SkipResult {
+  readonly snapshot: PlayerSnapshot;
+  /** Null when the track went: a skip by someone who may change the music, or the vote that made it go. */
+  readonly votes: { readonly votes: number; readonly needed: number } | null;
 }
 
 /** What an add did: the new queue items, and how many tracks were left out and why. */
@@ -296,11 +307,26 @@ export class Actions {
     return player.snapshot();
   }
 
-  skip(context: ActionContext): PlayerSnapshot {
-    this.control(context);
+  /**
+   * Moves to the next track. Where the server has a DJ role and votes on, Skip from someone without the role is a vote
+   * instead (see app/votes.ts): the track goes once half of the people listening have voted.
+   */
+  skip(context: ActionContext): SkipResult {
     const player = this.options.players.get(context.guildId);
+    const votes = this.options.votes;
+    // Someone without the DJ role where Skip is a vote: a vote, which skips the track once there are enough.
+    if (!context.mayControl && votes && context.userId !== null && this.voteSkipApplies(context.guildId)) {
+      if (player.snapshot().track === null) throw new ActionError('conflict', 'nothing is playing');
+      const result = votes.vote(context.guildId, context.userId);
+      return {
+        snapshot: player.snapshot(),
+        votes: result.skipped ? null : { votes: result.votes, needed: result.needed },
+      };
+    }
+    // Anyone else without the DJ role is refused, as for every other change of the music.
+    this.control(context);
     if (!player.skip()) throw new ActionError('conflict', 'nothing is playing');
-    return player.snapshot();
+    return { snapshot: player.snapshot(), votes: null };
   }
 
   /** Drops the current track without counting it as played. */
@@ -539,6 +565,8 @@ export class Actions {
         throw new ActionError('not-found', 'that role is not in this server');
     }
     this.options.store.settings.setDjRole(context.guildId, roleId);
+    // Whether Skip is a vote depends on the DJ role: votes under way end, and the panels hear the new state.
+    this.options.votes?.reset(context.guildId);
     return this.settings(context);
   }
 
@@ -572,6 +600,31 @@ export class Actions {
     this.options.store.settings.setCommunity(context.guildId, { stay: on });
     // The bot looks again at once: staying stops a countdown under way, and leaving starts one in an empty channel.
     this.options.voice?.stayChanged?.(context.guildId);
+    return this.settings(context);
+  }
+
+  /** Whether Skip from someone without the DJ role is a vote in a server: it has a DJ role, and votes are on. */
+  voteSkipApplies(guildId: string): boolean {
+    const roles = this.options.directory?.roles(guildId) ?? null;
+    // The DJ role that counts (a role deleted in Discord is none, see djRoleNow): without one, everyone may skip.
+    if (djRoleNow(this.options.store.settings.get(guildId).djRoleId, roles) === null) return false;
+    return this.options.store.settings.community(guildId).voteSkip;
+  }
+
+  /** How the votes to skip the current track stand (anyone may look; the panels get it live). */
+  skipVotes(context: ActionContext): VotesView {
+    return this.options.votes?.view(context.guildId) ?? { on: false, votes: 0, needed: 0 };
+  }
+
+  /**
+   * Whether Skip from someone without the DJ role is a vote (on, the default) or refused (off), where the server has a
+   * DJ role. Needs Manage Server.
+   */
+  voteSkip(context: ActionContext, on: boolean): SettingsView {
+    this.manage(context);
+    this.options.store.settings.setCommunity(context.guildId, { voteSkip: on });
+    // Votes under way end either way, and the panels hear whether Skip is a vote now.
+    this.options.votes?.reset(context.guildId);
     return this.settings(context);
   }
 }

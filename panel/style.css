@@ -2349,6 +2349,26 @@ kbd {
   background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
 }
 
+/* ---- votes, turns and the sound -------------------------------------------------------------------------------- */
+/* The count of a vote to skip under way, on the Skip key: small, in the key's own ink, beside its word or its icon. */
+.key .votes {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+/* A narrow row of keys shows their icons alone (the now-keys rule below): Skip keeps its count, and the room for it. */
+@container now-keys (max-width: 480px) {
+  .now .keys .key[data-act="skip"]:has(.votes) {
+    width: auto;
+    padding: 0 10px;
+  }
+}
+
 /* ---- narrower windows ---------------------------------------------------------------------------------------- */
 @media (max-width: 1100px) {
   :root {

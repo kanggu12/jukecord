@@ -11,7 +11,7 @@ import { api, type HistoryEntry, type Player, type QueueItem, type Track } from 
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
-import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
+import { liveWhy, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/layers.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
@@ -90,6 +90,17 @@ export async function act<T>(button: HTMLButtonElement | null, run: () => Promis
 // The server shown (the panel only draws cards once one is chosen).
 function guild(): string {
   return state.guild?.id ?? '';
+}
+
+/**
+ * Presses Skip: the track goes, or (without the DJ role, where Skip is a vote) the vote is cast and a toast says how it
+ * stands. Returns whether the track went, as far as this answer says (undefined when refused).
+ */
+export async function skipOrVote(button: HTMLButtonElement | null): Promise<boolean | undefined> {
+  const answer = await act(button, () => api.skip(guild()));
+  if (!answer) return undefined;
+  if (answer.votes) toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'pause', 'skip-forward');
+  return answer.votes === null;
 }
 
 // "added by Alice" / "added by the host".
@@ -232,9 +243,22 @@ export function nowCard(live: Live): HTMLElement {
     refill(pause, `${moving}|${pauseWords}`, icon(moving ? 'pause' : 'play'), pauseWords);
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
     pause.disabled = !player || !control || (!track && !queued);
-    refill(skip, words.skip, icon('skip-forward'), h('span', { class: 'label' }, words.skip));
-    skip.title = words.skip;
-    skip.disabled = !control || !track;
+    // Skip, or a vote to skip for someone without the DJ role where Skip is one. A vote under way puts its count on
+    // the key, beside the word, where it stays when a narrow row of keys shows their icons alone.
+    const votes = state.votes;
+    const counting = votes.on && votes.votes > 0 && Boolean(track);
+    const count = counting ? words.votesCount(votes.votes, votes.needed) : '';
+    refill(
+      skip,
+      `${words.skip}|${count}`,
+      icon('skip-forward'),
+      h('span', { class: 'label' }, words.skip),
+      counting ? h('span', { class: 'votes num', 'aria-hidden': 'true' }, count) : null,
+    );
+    const voting = !control && votes.on;
+    skip.title = counting ? words.skipVotes(votes.votes, votes.needed) : voting ? words.voteToSkip : words.skip;
+    skip.setAttribute('aria-label', skip.title);
+    skip.disabled = !maySkip() || !track;
     refill(stop, words.stop, icon('square'), h('span', { class: 'label' }, words.stop));
     stop.title = words.stop;
     stop.disabled = !control || !track;
@@ -326,13 +350,14 @@ export function nowCard(live: Live): HTMLElement {
   };
   skip.onclick = () => {
     // The track slides out to the right while the next one is asked for. The card does not wait for the answer to come
-    // back: a slow one (seconds, while jukecord is busy) would leave it empty all that time.
-    if (moving()) {
+    // back: a slow one (seconds, while jukecord is busy) would leave it empty all that time. A vote does not move it:
+    // the track stays until the votes are enough.
+    if (moving() && mayControl()) {
       body.classList.add('leaving');
       window.clearTimeout(skipTimer);
       skipTimer = window.setTimeout(() => body.classList.remove('leaving'), 900);
     }
-    void act(skip, () => api.skip(guild())).finally(() => {
+    void skipOrVote(skip).finally(() => {
       // Nothing came to replace it (the end of the queue, a refusal): the card shows what it has again.
       window.setTimeout(() => body.classList.remove('leaving'), 400);
     });
@@ -345,7 +370,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'votes'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {

@@ -201,7 +201,17 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     request: (words) => ({ body: { input: rest(words, 'what to play') } }),
     show: showAdded,
   },
-  skip: { name: 'skip', usage: '', summary: 'Skip to the next track', request: () => ({}), show: showPlayer },
+  skip: {
+    name: 'skip',
+    usage: '',
+    summary: 'Skip to the next track (a vote, without the DJ role where votes are on)',
+    request: () => ({}),
+    show: (answer) => {
+      // A vote the track did not go by: how it stands. Otherwise the next track.
+      const votes = (answer as { votes: { votes: number; needed: number } | null }).votes;
+      return votes ? `Voted to skip: ${votes.votes} of ${votes.needed}` : showPlayer(answer);
+    },
+  },
   'remove-current': {
     name: 'drop',
     usage: '',
@@ -581,6 +591,16 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       (answer as { stay: boolean }).stay
         ? 'Stays in voice when everyone has left'
         : 'Leaves voice after the time alone the host set',
+  },
+  'vote-skip': {
+    name: 'voteskip',
+    usage: '<on|off>',
+    summary: 'Whether Skip without the DJ role is a vote',
+    request: (words) => ({ body: { on: onOff(words.args[0]) } }),
+    show: (answer) =>
+      (answer as { voteSkip: boolean }).voteSkip
+        ? 'Skip from someone without the DJ role is a vote'
+        : 'Skip needs the DJ role',
   },
 };
 
