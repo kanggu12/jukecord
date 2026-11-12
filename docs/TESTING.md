@@ -25,7 +25,12 @@ dialog open and in the bar of wide windows. It also walks a tablet held sideways
 and a home bar (safe-area insets, upright and sideways), a contrast theme (forced colours, the menu and the
 statistics), the shortcuts on a short window (a page zoomed to 200 %), and the longest names Discord allows in the bar.
 The panel with a Discord bot is walked too: a made-up server, its voice channels and people listening in browsers are
-put between the page and the server, which runs browser-only. The README's pictures come from the same walk.
+put between the page and the server, which runs browser-only. The README's pictures come from the same walk. The
+seed's history is a year long (the server new a year ago, with a few plays in its first month), and its covers are
+PNG pictures in jukecord's cache, as jukecord keeps the ones it fetches: Wrapped is walked over the year, over that
+first month and over a year with no plays, with its times to choose from, its "Save as picture" dialog and a contrast
+theme, and the pictures themselves (both shapes, both themes and languages, the year and the first month) are saved
+into the folder as `picture-*.png`, to be looked at whole.
 `tests/ui/audit.js` measures each page: text that is clipped (unless marked so, with its whole text as the title) or
 drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with translucent layers
 composited), controls on one row that differ in height or centre, floating layers that cut across other boxes, a sheet,

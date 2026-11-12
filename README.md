@@ -125,6 +125,12 @@ people use most.
   that hangs ends itself and comes back paused where it was.
 - **Small and contained.** One process and one SQLite file. It fetches only from public addresses, keeps its files to
   its own user, and on Kubernetes runs as a read-only, non-root pod behind a NetworkPolicy.
+- **Covers from jukecord.** Each track's picture is fetched once by jukecord, from public addresses only, and kept with
+  the track in its cache; the panel shows it from there, so browsers never ask the image hosts.
+- **Wrapped.** A server's year in music, or a month, or the last 12 months: plays and hours, the song of the year (the
+  track played on the most days), the most played tracks and who added most, the busiest day and hour, the longest day
+  and the first track. A page under the statistics that saves itself as a picture for a story or a post, and
+  `/wrapped`, `jukecord wrapped` and the API.
 
 ### Light on a small machine
 
@@ -175,9 +181,9 @@ Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecor
 ## Your data
 
 The queues, the history, the playlists, the settings and the logins are in one SQLite file in jukecord's data folder,
-and the fetched tracks beside it, up to `JUKECORD_CACHE_MAX`. Logins and tokens are kept only as hashes, and the logs
-mask tokens. jukecord itself talks to Discord and to the sites the tracks come from, and sends no telemetry; the panel
-shows the tracks' pictures from those sites and people's pictures from Discord. Docker Compose publishes the panel on
+and the fetched tracks beside it, with their pictures, up to `JUKECORD_CACHE_MAX`. Logins and tokens are kept only as
+hashes, and the logs mask tokens. jukecord itself talks to Discord and to the sites the tracks come from, and sends no
+telemetry; the panel shows the tracks' pictures from jukecord and people's pictures from Discord. Docker Compose publishes the panel on
 this computer only, until you give it a [public address](docs/INSTALL.md#friends-on-other-machines).
 
 ## Guides

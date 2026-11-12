@@ -121,3 +121,23 @@ the measure is the event loop's delay rather than the processor's use: a busy pr
 up, and the loop's delay is what the voice of every server and every panel feel. Work that can be asked for again in
 a moment (audio, changes) is then turned away at once with 503, which costs almost nothing, instead of being queued
 behind work nobody can see.
+
+## Covers through jukecord
+
+A track's picture is fetched by jukecord, once, and the panel shows it from jukecord's own address. Before, every
+browser fetched each picture from the site it is on: every listener's address went to the image hosts, the content
+security policy had to allow pictures from anywhere, and a picture from another origin cannot be drawn into a canvas
+that is then read back, which Wrapped's "Save as picture" does. Fetching through jukecord costs one request per track,
+under the same rule as every other fetch (the name resolved by jukecord, public addresses only, the connection made to
+the address checked, a redirect checked again) and with limits of its own (2 MiB, ten seconds, a few at once, picture
+formats told by their own bytes, never SVG, which can carry script). The pictures live in the media cache beside the
+audio and count towards its limit, each by its own last use: the history and Wrapped show covers of tracks whose audio
+went long ago. Discord's cards keep the site's address: Discord fetches pictures itself, through its own proxy, and
+cannot reach jukecord.
+
+## The song of the year
+
+Wrapped's song of the year is the track played on the most days, then the most times. The most played track already
+leads the top five; a track played fifty times in one night would lead by plays, while the one that came back week
+after week is the one people mean. Wrapped is counted from the history, which keeps a server's newest 10,000 plays, so
+for a busier server a year may start later than its first day; the page, the card and the command say from when.

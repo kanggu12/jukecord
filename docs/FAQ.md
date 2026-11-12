@@ -81,8 +81,9 @@ fingers.
 ## Privacy
 
 **What leaves my computer?**
-jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. The panel shows the tracks'
-pictures from those sites and people's pictures from Discord.
+jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. It fetches each track's
+picture once from its site and keeps it with the track, and the panel shows it from jukecord; people's pictures come
+from Discord.
 [Your data](../README.md#your-data) says what it keeps, and where.
 
 **Can people see servers they are not in?**

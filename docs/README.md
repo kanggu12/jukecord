@@ -22,6 +22,11 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
 - **Recently played**: the history, with a key to add a track again.
 - **Statistics** (top bar): plays per day and per hour of the day, the most played tracks, who added most, and the
   time listened, over 7, 30 or 90 days or a year. Each chart has a table view.
+- **Wrapped** (a key on the statistics): the server's year in music, or a month, or the last 12 months. The song of
+  the year (the track played on the most days), the first track, the plays, hours, tracks and people, the most played
+  tracks and who added most, the busiest day of the week and hour of the day, the longest day and the days with music.
+  **Save as picture** draws it as a story (1080 by 1920) or a square (1080 by 1080) PNG in the panel's theme and
+  language; on a phone, **Share** hands it to the phone. The address names the time: `/stats/wrapped?period=2026-03`.
 - **Log** (the host only): jukecord's log, filtered by level and part.
 - **The menu** (your name, top right): theme, language, motion, the server's DJ role (for people who can manage the
   server), API tokens, keyboard shortcuts, logging out.
@@ -62,6 +67,7 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/stats`                                     | listening figures                                                   |
 | `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
 | `/version`                                   | the version                                                         |
+| `/wrapped`                                   | the server's year in music, or a month, or the last 12 months       |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
@@ -86,6 +92,7 @@ node src/cli/main.ts np
 ./jukecord jump 3
 ./jukecord stats --days 7
 ./jukecord token create phone --scope control
+./jukecord wrapped --month 2026-03
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it
