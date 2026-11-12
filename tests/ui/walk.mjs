@@ -433,6 +433,20 @@ await sweep('shortcuts', FEW, async (page) => {
   await page.keyboard.press('?');
   await page.waitForSelector('.dialog kbd');
 });
+// A short window (a laptop's page zoomed to 200 %, with a mouse): the shortcuts' list fits in the dialog, or the
+// keyboard can scroll it.
+await sweep(
+  'shortcuts-short',
+  [
+    [640, 400],
+    [640, 320],
+  ],
+  async (page) => {
+    await page.keyboard.press('?');
+    await page.waitForSelector('.dialog kbd');
+  },
+  { touch: false },
+);
 // Phones and the tablet, where width is short: a toast (Remove duplicates says how many went) under the bar.
 const NARROW = [
   [360, 780],

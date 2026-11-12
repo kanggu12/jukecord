@@ -192,10 +192,13 @@ function dialog<T>(
     const scrim = h('div', { class: 'scrim full' });
     let done = false;
     let off = () => {};
+    // Stops watching the content's length (set below when there is content).
+    let unwatch = () => {};
     const finish = (value: T) => {
       if (done) return;
       done = true;
       off();
+      unwatch();
       scrim.remove();
       box.remove();
       // A toast said in this dialog goes on where the next one is said (the bar, or the dialog below).
@@ -204,12 +207,17 @@ function dialog<T>(
       resolve(value);
     };
     const parts = build(finish);
+    const content = parts.content ? h('div', { class: 'dialog-content scroll' }, parts.content) : null;
+    // A long list scrolls in the dialog: the keyboard must reach it then.
+    if (content && parts.content instanceof Element) {
+      unwatch = reachableWhenLong(content, parts.content, parts.title);
+    }
     const box = h(
       'div',
       { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': parts.title },
       h('div', { class: 'dialog-head' }, h('h2', null, parts.title)),
       parts.text ? h('p', { class: 'dialog-text' }, parts.text) : null,
-      parts.content ? h('div', { class: 'dialog-content scroll' }, parts.content) : null,
+      content,
       // Toasts raised while this dialog is on top: its shade covers the bar where they are said otherwise.
       h('div', { class: 'dialog-notes' }),
       h('div', { class: 'dialog-keys' }, ...parts.keys),
@@ -220,6 +228,30 @@ function dialog<T>(
     // The input, else the first choice of a list, else the first key (Cancel, in a question).
     queueMicrotask(() => (box.querySelector('input, .choice, .key') as HTMLElement | null)?.focus());
   });
+}
+
+// A dialog's content longer than the dialog has room for scrolls inside it (a short window, a page zoomed in): it then
+// takes the keyboard's focus too, as a named region, so Tab reaches it and the arrows scroll it (a list of shortcuts
+// has nothing in it that the keyboard could stop on). Watched while the dialog is open: a list can fill in later.
+function reachableWhenLong(scroller: HTMLElement, inner: Element, name: string): () => void {
+  const check = () => {
+    const long = scroller.scrollHeight > scroller.clientHeight + 1;
+    if (long) {
+      scroller.tabIndex = 0;
+      scroller.setAttribute('role', 'region');
+      scroller.setAttribute('aria-label', name);
+    } else {
+      scroller.removeAttribute('tabindex');
+      scroller.removeAttribute('role');
+      scroller.removeAttribute('aria-label');
+    }
+  };
+  // The scroller's own size (the window's height) and what it holds (rows added later).
+  const watcher = new ResizeObserver(check);
+  watcher.observe(scroller);
+  watcher.observe(inner);
+  // The way to stop watching, when the dialog closes.
+  return () => watcher.disconnect();
 }
 
 /** Asks before something that cannot be undone. */

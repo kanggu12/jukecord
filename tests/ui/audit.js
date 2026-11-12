@@ -14,6 +14,8 @@
  *   the bar's toast, a dialog's shade over the bar);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
+ * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
+ *   that is (the shortcuts' list in a short dialog);
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
  *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track or a
  *   chart's bar in the canvas's own colour (a contrast theme paints every background in its canvas colour);
@@ -323,6 +325,17 @@ window.__audit = () => {
     const counts = [...rows.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1]);
     if (counts.length > 1 && counts.at(-1) === 1 && Math.max(...counts) > 1)
       add('lone-key', keys, `keys in rows of ${counts.join(' + ')}`);
+  }
+
+  // A box that scrolls must be within the keyboard's reach: itself, or something in it.
+  const focusable =
+    'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+  for (const element of document.querySelectorAll('body *')) {
+    const style = getComputedStyle(element);
+    if (!/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) continue;
+    if (element.scrollHeight <= element.clientHeight + 2 && element.scrollWidth <= element.clientWidth + 2) continue;
+    if (!shown(element) || element.matches(focusable) || element.querySelector(focusable)) continue;
+    add('unreachable', element, `${element.scrollHeight} high in ${element.clientHeight}, with nothing to stop on`);
   }
 
   // States told apart by a fill alone must still be told apart, and what a fill alone draws must not be the

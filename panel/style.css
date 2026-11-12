@@ -1923,6 +1923,14 @@ img {
     0 30px 80px -30px rgba(0, 0, 0, 0.8);
   animation: dialog-in 200ms ease-out;
 }
+/* A short window (a phone held sideways, a page zoomed in): the dialog takes nearly the whole height, from near the
+   top, so a list in it fits rather than scrolls in a box of a few lines. */
+@media (max-height: 600px) {
+  .dialog {
+    top: max(16px, var(--safe-top));
+    max-height: calc(100dvh - 32px);
+  }
+}
 @keyframes dialog-in {
   from {
     opacity: 0;
