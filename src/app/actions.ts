@@ -192,6 +192,17 @@ export interface AddResult {
   readonly skippedFull: number;
 }
 
+/**
+ * The DJ role that applies: the one chosen, unless it no longer exists in the server (deleted in Discord since), which
+ * counts as no DJ role at all. Otherwise nobody but the managers could change the music, and nothing in jukecord would
+ * say why. `roles` is the server's roles as Discord says now, or null when that is not known (no bot, or a server the
+ * bot does not see): then the role chosen stands.
+ */
+export function djRoleNow(chosen: string | null, roles: readonly RoleInfo[] | null): string | null {
+  if (chosen === null || roles === null) return chosen;
+  return roles.some((role) => role.id === chosen) ? chosen : null;
+}
+
 /** The repeat modes, for checking input from the panel, the API and the CLI. */
 export const REPEAT_MODES: readonly RepeatMode[] = ['off', 'track', 'queue'];
 
@@ -505,8 +516,10 @@ export class Actions {
 
   /** The server's settings and the roles to choose the DJ role from (anyone may look). */
   settings(context: ActionContext): SettingsView {
-    const roles = this.options.directory?.roles(context.guildId) ?? [];
-    return { djRoleId: this.options.store.settings.get(context.guildId).djRoleId, roles };
+    const roles = this.options.directory?.roles(context.guildId) ?? null;
+    // A deleted role is shown as none, which is how it counts (see djRoleNow).
+    const djRoleId = djRoleNow(this.options.store.settings.get(context.guildId).djRoleId, roles);
+    return { djRoleId, roles: roles ?? [] };
   }
 
   /** Sets (or clears, with null) the role that may change the music. Needs Manage Server. */

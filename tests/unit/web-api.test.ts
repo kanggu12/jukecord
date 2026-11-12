@@ -162,6 +162,12 @@ describe('the HTTP API', () => {
     const shuffle = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/shuffle`), headers });
     assert.equal(shuffle.statusCode, 403);
     assert.match(shuffle.json().error.message, /DJ role/);
+    // The role deleted in Discord since: it counts as none, for changes and in the settings shown.
+    server.store.settings.setDjRole(GUILD, '500000000000000099');
+    const again = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/shuffle`), headers });
+    assert.equal(again.statusCode, 200);
+    const shown = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers });
+    assert.equal(shown.json().djRoleId, null);
     await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/settings/dj-role`),

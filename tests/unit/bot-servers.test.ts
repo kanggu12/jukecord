@@ -80,6 +80,35 @@ describe('the bot and the servers it is in', () => {
     }
   });
 
+  it('counts a DJ role deleted in Discord as none for slash commands too', async () => {
+    const { store, bot } = setup();
+    try {
+      // Who may change the music, worked out for a command as the bot does (a member without Manage Server).
+      const context = (roles: string[]) =>
+        (bot as unknown as { context(interaction: unknown): { mayControl: boolean } | null }).context({
+          inGuild: () => true,
+          guildId: STAYS,
+          user: { id: '300000000000000001' },
+          member: { roles },
+          memberPermissions: { has: () => false },
+        });
+      // The server's roles as Discord says now; the role chosen earlier is no longer among them.
+      bot.knownRoles = () => [{ id: '500000000000000001', name: 'DJ', color: 0 }];
+      store.settings.setDjRole(STAYS, '500000000000000099');
+      assert.equal(context([])?.mayControl, true);
+      // A role that exists still decides.
+      store.settings.setDjRole(STAYS, '500000000000000001');
+      assert.equal(context([])?.mayControl, false);
+      assert.equal(context(['500000000000000001'])?.mayControl, true);
+      // A server whose roles are not known keeps the role chosen.
+      bot.knownRoles = () => null;
+      store.settings.setDjRole(STAYS, '500000000000000099');
+      assert.equal(context([])?.mayControl, false);
+    } finally {
+      await bot.client.destroy();
+    }
+  });
+
   it('makes no player for a server it never played in', async () => {
     const { players, bot } = setup();
     try {

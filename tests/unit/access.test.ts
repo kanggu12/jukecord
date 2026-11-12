@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Access, LOCAL_GUILD } from '../../src/app/access.ts';
-import { ActionError } from '../../src/app/actions.ts';
+import { ActionError, djRoleNow } from '../../src/app/actions.ts';
 import { memoryStore } from '../support/store.ts';
 import { ALICE, BOB, DJ_ROLE, FakeDirectory, GUILD, OTHER_GUILD } from '../support/web.ts';
 
@@ -25,6 +25,28 @@ const code = async (fn: () => Promise<unknown>) => {
     return error instanceof ActionError ? error.code : String(error);
   }
 };
+
+describe('Access and a DJ role deleted in Discord', () => {
+  it('counts the role as none: everyone may change the music again, and the settings show no role', async () => {
+    const { store, directory, access } = setup();
+    directory.join(GUILD, ALICE);
+    // A role that was chosen and has since been deleted in Discord (the server's roles no longer list it).
+    const gone = '500000000000000099';
+    store.settings.setDjRole(GUILD, gone);
+    assert.equal((await access.context({ kind: 'user', userId: ALICE }, GUILD)).mayControl, true);
+    assert.equal((await access.guilds({ kind: 'user', userId: ALICE }))[0]?.mayControl, true);
+    // A role that still exists still decides.
+    store.settings.setDjRole(GUILD, DJ_ROLE);
+    assert.equal((await access.context({ kind: 'user', userId: ALICE }, GUILD)).mayControl, false);
+  });
+
+  it('keeps the role chosen when the roles are not known (djRoleNow)', () => {
+    assert.equal(djRoleNow('500000000000000099', null), '500000000000000099');
+    assert.equal(djRoleNow('500000000000000099', []), null);
+    assert.equal(djRoleNow(DJ_ROLE, [{ id: DJ_ROLE, name: 'DJ', color: 0 }]), DJ_ROLE);
+    assert.equal(djRoleNow(null, []), null);
+  });
+});
 
 describe('Access', () => {
   it('lets the host do everything in every server the bot is in, and nothing in others', async () => {

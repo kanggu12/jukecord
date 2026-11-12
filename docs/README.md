@@ -39,7 +39,8 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 - The **host** (the machine jukecord runs on: its `jukecord` command and the login links it makes) may do everything.
 - Anyone who logs in with Discord can open the servers they share with the bot.
 - When a server has a **DJ role**, only members with that role (and people who can manage the server) change the music;
-  everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`.
+  everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
+  role deleted in Discord counts as none: everyone may change the music again until another is set.
 
 ## Slash commands
 

@@ -24,6 +24,7 @@ import {
   ActionError,
   type Actions,
   type Directory,
+  djRoleNow,
   type GuildInfo,
   type MemberInfo,
   type RoleInfo,
@@ -105,8 +106,13 @@ export class Bot implements Directory {
   }
 
   roles(guildId: string): RoleInfo[] {
+    return this.knownRoles(guildId) ?? [];
+  }
+
+  /** A server's roles as Discord says now, or null for a server the bot does not see (then nothing is known). */
+  knownRoles(guildId: string): RoleInfo[] | null {
     const guild = this.client.guilds.cache.get(guildId);
-    if (!guild) return [];
+    if (!guild) return null;
     return (
       [...guild.roles.cache.values()]
         // @everyone is the "no DJ role" case, and bot-managed roles belong to their bots; neither is a DJ role.
@@ -255,11 +261,14 @@ export class Bot implements Directory {
     }
   }
 
-  // Who is asking and whether they may change the music: everyone, unless the server set a DJ role. People who can
-  // manage the server always may.
+  // Who is asking and whether they may change the music: everyone, unless the server set a DJ role (one deleted in
+  // Discord since counts as none, see djRoleNow). People who can manage the server always may.
   private context(interaction: ChatInputCommandInteraction | ButtonInteraction): ActionContext | null {
     if (!interaction.inGuild()) return null;
-    const role = this.options.settings.get(interaction.guildId).djRoleId;
+    const role = djRoleNow(
+      this.options.settings.get(interaction.guildId).djRoleId,
+      this.knownRoles(interaction.guildId),
+    );
     const roles = interaction.member.roles;
     const hasRole = role === null || (Array.isArray(roles) ? roles.includes(role) : roles.cache.has(role));
     const manager = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
