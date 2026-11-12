@@ -239,6 +239,25 @@ describe('live updates end with the login', () => {
   });
 });
 
+describe('live connections from an address that failed to log in too often', () => {
+  it('turn away a credential that does not work with 1013, and let one that works in', async () => {
+    const server = await testServer({ listen: true });
+    try {
+      for (let i = 0; i < 20; i += 1) {
+        await fetch(`${server.url}/api/v1/me`, { headers: { authorization: 'Bearer jkc_wrong' } });
+      }
+      const base = `${server.url.replace('http://', 'ws://')}/api/v1/events`;
+      const wrong = new Socket(base, { authorization: 'Bearer jkc_wrong' });
+      assert.deepEqual(await wrong.closed, { code: 1013, reason: 'too many failed logins; wait ten minutes' });
+      const host = new Socket(base, { authorization: `Bearer ${HOST_TOKEN}` });
+      await host.next('hello');
+      host.close();
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 describe('live connections are capped', () => {
   it('in all, per login and per address, closing the one over a cap with 1013 and why; the host counts in all only', async () => {
     const server = await testServer({ listen: true, live: { total: 4, perLogin: 2, perAddress: 3 } });

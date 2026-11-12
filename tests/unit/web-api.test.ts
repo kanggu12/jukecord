@@ -209,22 +209,31 @@ describe('the HTTP API', () => {
     assert.match(String(stale.headers['set-cookie']), /Max-Age=0/);
   });
 
-  it('blocks an address after 20 failed logins', async () => {
-    for (let i = 0; i < 20; i += 1) {
-      await inject({
-        method: 'GET',
-        url: api('/me'),
-        headers: { authorization: 'Bearer jkc_wrong' },
-        remoteAddress: '10.0.0.7',
-      });
-    }
-    const blocked = await inject({ method: 'GET', url: api('/me'), headers: asHost, remoteAddress: '10.0.0.7' });
-    assert.equal(blocked.statusCode, 429);
+  it('blocks an address after 20 failed logins, for credentials that do not work only', async () => {
+    const from = (remoteAddress: string, headers: Record<string, string> = {}, url = api('/me')) =>
+      inject({ method: 'GET', url, headers, remoteAddress });
+    for (let i = 0; i < 20; i += 1) await from('10.0.0.7', { authorization: 'Bearer jkc_wrong' });
+    // Another wrong guess is refused for a while, as is a session cookie that does not work.
+    const refused = await from('10.0.0.7', { authorization: 'Bearer jkc_wrong-again' });
+    assert.equal(refused.statusCode, 429);
+    assert.equal(refused.json().error.code, 'too-many');
+    assert.equal((await from('10.0.0.7', { cookie: `${SESSION_COOKIE}=stale` })).statusCode, 429);
+    // A credential that works still gets in from that address: one stale browser does not lock out the household.
+    assert.equal((await from('10.0.0.7', asHost)).statusCode, 200);
+    const alice = sessionFor(server, ALICE);
+    assert.equal((await from('10.0.0.7', { cookie: alice.cookie })).statusCode, 200);
+    // No credential at all is not an attempt: the public status answers, the rest asks for a login.
+    assert.equal((await from('10.0.0.7', {}, api('/status'))).statusCode, 200);
+    assert.equal((await from('10.0.0.7')).statusCode, 401);
+    // A login link the host just made works from there too; a used one says the address is blocked.
+    const link = server.auth.createLink();
+    const used = await inject({ method: 'GET', url: `/auth/link/${link.code}`, remoteAddress: '10.0.0.7' });
+    assert.equal(used.headers.location, '/');
+    assert.match(String(used.headers['set-cookie']), new RegExp(`${SESSION_COOKIE}=`));
+    const again = await inject({ method: 'GET', url: `/auth/link/${link.code}`, remoteAddress: '10.0.0.7' });
+    assert.equal(again.headers.location, '/login?error=too-many');
     // Other addresses are not affected.
-    assert.equal(
-      (await inject({ method: 'GET', url: api('/me'), headers: asHost, remoteAddress: '10.0.0.8' })).statusCode,
-      200,
-    );
+    assert.equal((await from('10.0.0.8', { authorization: 'Bearer jkc_wrong' })).statusCode, 401);
   });
 
   it('serves the OpenAPI document with every operation and only references that resolve', async () => {

@@ -23,7 +23,7 @@ import { MediaCache } from '../media/cache.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
-import { type Caller, CSRF_HEADER } from './auth.ts';
+import { type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { openApiDocument } from './openapi.ts';
@@ -222,15 +222,20 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   });
 
   // Who is calling. A credential that does not work counts as a failed login for its address, and a dead session
-  // cookie is removed so the browser stops sending it.
-  const identify = (request: FastifyRequest, reply?: FastifyReply): Caller | null => {
+  // cookie is removed so the browser stops sending it. An address that failed too often is refused (`blocked`) only
+  // for such a credential: one that works still gets in, so a household behind one address is not locked out for ten
+  // minutes by a browser with a stale cookie or by someone guessing. Guessing gains nothing from that: every secret is
+  // 32 random bytes, and a wrong one is answered the same way as before.
+  const identify = (request: FastifyRequest, reply?: FastifyReply): { caller: Caller | null; blocked: boolean } => {
     const caller = auth.identify({ authorization: request.headers.authorization, cookie: request.headers.cookie });
-    if (!caller && (request.headers.authorization || request.headers.cookie?.includes('jukecord_session='))) {
-      auth.limiter.fail(request.ip);
-      if (reply && request.headers.cookie?.includes('jukecord_session='))
-        reply.header('set-cookie', auth.endSession(null));
-    }
-    return caller;
+    const session = request.headers.cookie?.includes(`${SESSION_COOKIE}=`) ?? false;
+    // A request without any credential is not a failed login (a public page, or a "log in first").
+    if (caller || (!request.headers.authorization && !session)) return { caller, blocked: false };
+    // Asked before this failure counts, as before: the attempt after the twentieth is the first one refused.
+    const blocked = auth.limiter.blocked(request.ip);
+    auth.limiter.fail(request.ip);
+    if (reply && session) reply.header('set-cookie', auth.endSession(null));
+    return { caller: null, blocked };
   };
 
   // The API, one route per operation.
@@ -247,9 +252,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         response: { 200: plain(spec.response) },
       },
       handler: async (request, reply) => {
-        if (auth.limiter.blocked(request.ip))
-          return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
-        const caller = identify(request, reply);
+        const { caller, blocked } = identify(request, reply);
+        if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
         const verdict = permission(spec.access, caller);
         if (verdict === 'unauthorized') return failure(reply, 'unauthorized', 'log in first');
         if (verdict === 'forbidden') {
@@ -288,10 +292,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   app.get<{ Params: { guild: string; track: string }; Querystring: { format?: string } }>(
     `${API_PREFIX}/guilds/:guild/tracks/:track/audio`,
     async (request, reply) => {
-      // An address that failed too often is refused here too, before its credential is tried again.
-      if (auth.limiter.blocked(request.ip))
-        return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
-      const caller = identify(request, reply);
+      // An address that failed too often is refused here too, for a credential that does not work.
+      const { caller, blocked } = identify(request, reply);
+      if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
       if (!caller) return failure(reply, 'unauthorized', 'log in first');
       const context = await deps.access.context(caller.principal, request.params.guild);
       const id = Number(request.params.track);
@@ -324,12 +327,13 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // Live updates. A browser's cookie is only accepted from the panel's own pages (another site could otherwise open
   // a connection with it).
   app.get<{ Querystring: LiveQuery }>(`${API_PREFIX}/events`, { websocket: true }, (socket, request) => {
-    // A blocked address is told to come back later (1013), which a panel takes as "reconnect after a wait".
-    if (auth.limiter.blocked(request.ip)) {
+    // A blocked address with a credential that does not work is told to come back later (1013), which a panel takes as
+    // "reconnect after a wait"; one that works gets in.
+    const { caller, blocked } = identify(request);
+    if (blocked) {
       socket.close(1013, 'too many failed logins; wait ten minutes');
       return;
     }
-    const caller = identify(request);
     if (!caller) {
       socket.close(4401, 'log in first');
       return;
@@ -362,6 +366,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       reply.header('set-cookie', auth.clearOAuthCookie());
       const { code, state, error } = request.query;
       if (error || !code || !state) return reply.redirect('/login?error=cancelled');
+      // Refused before Discord is asked: whether this login works is only known from Discord's answer, and a blocked
+      // address must not be able to make jukecord ask Discord over and over (Discord limits how often it may).
       if (auth.limiter.blocked(request.ip)) return reply.redirect('/login?error=too-many');
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
@@ -386,17 +392,19 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   );
   // A one-time login link from `jukecord open`: the browser becomes the host.
   app.get<{ Params: { code: string } }>('/auth/link/:code', async (request, reply) => {
-    if (auth.limiter.blocked(request.ip)) return reply.redirect('/login?error=too-many');
+    // A link that works logs in even from a blocked address (it was made by the host a moment ago); one that does not
+    // counts as a failure, and from a blocked address says so.
     if (!auth.useLink(request.params.code)) {
+      const blocked = auth.limiter.blocked(request.ip);
       auth.limiter.fail(request.ip);
-      return reply.redirect('/login?error=link');
+      return reply.redirect(blocked ? '/login?error=too-many' : '/login?error=link');
     }
     log.info('logged in with a login link');
     return reply.header('set-cookie', auth.startSession({ kind: 'host' })).redirect('/');
   });
   app.post('/auth/logout', async (request, reply) => {
-    if (auth.limiter.blocked(request.ip)) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
-    const caller = identify(request);
+    const { caller, blocked } = identify(request);
+    if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
     if (caller && !auth.csrfOk(caller, request.headers[CSRF_HEADER] as string | undefined)) {
       return failure(reply, 'forbidden', "the logout came without the panel's CSRF token");
     }

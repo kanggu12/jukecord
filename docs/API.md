@@ -37,8 +37,9 @@ operations marked "the host" below, which span every server: the log, login link
 nothing: every change must also carry the session's CSRF token, from `GET /api/v1/me`, in the `x-jukecord-csrf` header.
 Programs use tokens instead and need no CSRF header.
 
-Twenty failed logins (a wrong token, a used login link) from one address within ten minutes block that address for a
-while with `429`.
+Twenty failed logins (a wrong token, a used login link) from one address within ten minutes block that address for ten
+minutes with `429`, for credentials that do not work: a token, a cookie or a login link that works still gets in from
+there. Logging in with Discord waits for the block to end, since only Discord's answer says whether it works.
 
 ## Errors
 
