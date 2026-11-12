@@ -66,3 +66,43 @@ describe('DiscordRepository', () => {
     assert.equal(store.discord.commandsHash(GUILD), 'def');
   });
 });
+
+describe('the voice channel kept for a restart, and the alerts channel', () => {
+  it('brings a database of the last release (schema 3) up to date, with no channel kept and no alerts channel', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-migrate-'));
+    try {
+      const file = path.join(dir, 'jukecord.db');
+      // The schema as 0.2.1 left it, with a DJ role set: the settings row from before has no alerts channel.
+      const old = new DatabaseSync(file);
+      for (const migration of MIGRATIONS.filter((entry) => entry.version <= 3)) old.exec(migration.sql);
+      old.exec('PRAGMA user_version = 3');
+      old.prepare("INSERT INTO guild_settings (guild_id, dj_role_id, updated_at) VALUES (?, '5', 1)").run(GUILD);
+      old.close();
+      const store = Store.open(file);
+      assert.deepEqual(store.settings.get(GUILD), { djRoleId: '5', alertsChannelId: null });
+      assert.deepEqual(store.voiceChannels.all(), []);
+      store.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps one voice channel per server, replaced by the next and forgotten on request', () => {
+    const store = memoryStore();
+    store.voiceChannels.remember(GUILD, '400000000000000001');
+    store.voiceChannels.remember(GUILD, '400000000000000002');
+    store.voiceChannels.remember('100000000000000002', '400000000000000009');
+    assert.deepEqual(store.voiceChannels.all(), [
+      { guildId: GUILD, channelId: '400000000000000002' },
+      { guildId: '100000000000000002', channelId: '400000000000000009' },
+    ]);
+    store.voiceChannels.forget(GUILD);
+    assert.deepEqual(store.voiceChannels.all(), [{ guildId: '100000000000000002', channelId: '400000000000000009' }]);
+    // The alerts channel is a setting beside the DJ role, each changed alone.
+    store.settings.setDjRole(GUILD, '5');
+    store.settings.setAlertsChannel(GUILD, '600000000000000001');
+    assert.deepEqual(store.settings.get(GUILD), { djRoleId: '5', alertsChannelId: '600000000000000001' });
+    store.settings.setDjRole(GUILD, null);
+    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null, alertsChannelId: '600000000000000001' });
+  });
+});

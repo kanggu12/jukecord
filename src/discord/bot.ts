@@ -11,13 +11,16 @@ import {
   ActivityType,
   type AutocompleteInteraction,
   type ButtonInteraction,
+  ChannelType,
   type ChatInputCommandInteraction,
   Client,
   Events,
   GatewayIntentBits,
   type Guild,
   MessageFlags,
+  type NewsChannel,
   PermissionFlagsBits,
+  type TextChannel,
 } from 'discord.js';
 import {
   type ActionContext,
@@ -28,16 +31,20 @@ import {
   type GuildInfo,
   type MemberInfo,
   type RoleInfo,
+  type TextChannelInfo,
 } from '../app/actions.ts';
+import type { Alert, AlertSink } from '../app/alerts.ts';
 import type { Bus } from '../core/bus.ts';
-import { steadyNow } from '../core/clock.ts';
+import { type Clock, steadyNow, systemClock } from '../core/clock.ts';
+import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
-import type { DiscordRepository, SettingsRepository, UserRepository } from '../store/store.ts';
+import type { DiscordRepository, SettingsRepository, UserRepository, VoiceChannelRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
 import {
   addedCard,
+  alertsCard,
   djCard,
   historyCard,
   type Lang,
@@ -52,7 +59,13 @@ import {
   wrappedCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
+
+// The names of this version's commands, to tell one from an older registration that it no longer has.
+const COMMAND_NAMES: ReadonlySet<string> = new Set(commandDefinitions().map((definition) => definition.name));
+
 import { sayError } from './errors.ts';
+import { CardKeeper, type CardPayload, type KeptCard } from './keeper.ts';
+import { VoiceMemory } from './rejoin.ts';
 import { VoiceManager } from './voice.ts';
 
 export interface BotOptions {
@@ -71,14 +84,24 @@ export interface BotOptions {
   readonly voiceIdleMs: number;
   /** Where the people who use commands are remembered, so the panel can show who added what. */
   readonly users: UserRepository;
+  /** Where the voice channel each server's bot is in is kept, to come back to after a restart (none: it does not). */
+  readonly voiceChannels?: VoiceChannelRepository;
+  /** The clock the cards kept current are edited by (tests pass a fake one). */
+  readonly clock?: Clock;
 }
 
-export class Bot implements Directory {
+export class Bot implements Directory, AlertSink {
   readonly client: Client;
   readonly voice: VoiceManager;
   private readonly options: BotOptions;
   // Set by the first login: from then on the server list is known (a reconnect later keeps the list it had).
   private serversKnown = false;
+  // The voice channels kept for a restart (see rejoin.ts), when there is somewhere to keep them.
+  private readonly memory: VoiceMemory | null;
+  // The last now-playing card of each server, kept current as the player changes (see keeper.ts).
+  private readonly keeper: CardKeeper;
+  // Settled at the first login, for everyone who waits for Discord (see connected); made by the first to wait.
+  private loggedIn: Promise<void> | null = null;
 
   constructor(options: BotOptions) {
     this.options = options;
@@ -91,6 +114,19 @@ export class Bot implements Directory {
       idleMs: options.voiceIdleMs,
       bus: options.bus,
     });
+    this.memory = options.voiceChannels
+      ? new VoiceMemory({ bus: options.bus, channels: options.voiceChannels, log: options.log })
+      : null;
+    this.memory?.start();
+    this.keeper = new CardKeeper({
+      clock: options.clock ?? systemClock,
+      render: (snapshot, lang) => nowCard(snapshot, lang, options.panelUrl),
+      log: options.log,
+      // A server's player as it is now, without making one for a server that has none.
+      current: (guildId) => options.players.existing(guildId)?.snapshot() ?? null,
+    });
+    // Every change of a player draws its server's card again (soon, and only when it shows something else).
+    options.bus.on('player', (snapshot) => this.keeper.changed(snapshot));
   }
 
   self(): { id: string; name: string; avatar: string | null } | null {
@@ -183,7 +219,7 @@ export class Bot implements Directory {
     if (!interaction.guild.voiceStates.cache.get(interaction.user.id)?.channelId) {
       reason =
         lang === 'ko'
-          ? '봇이 음성 채널에 없음: 음성 채널에 들어가 /참가'
+          ? '봇이 음성 채널에 없음: 음성 채널에 들어간 뒤 /참가를 쓰세요'
           : 'The bot is not in a voice channel: join one and use /join';
     } else {
       try {
@@ -202,6 +238,56 @@ export class Bot implements Directory {
     return this.client.isReady();
   }
 
+  /** A server's text channels the bot may post in (and embed in), in Discord's order: where alerts can go. */
+  textChannels(guildId: string): TextChannelInfo[] {
+    const guild = this.client.guilds.cache.get(guildId);
+    const me = guild?.members.me;
+    if (!guild || !me) return [];
+    const rights = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks];
+    return (
+      [...guild.channels.cache.values()]
+        // Text and announcement channels: where people read what jukecord says.
+        .filter(
+          (channel): channel is TextChannel | NewsChannel =>
+            channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement,
+        )
+        .filter((channel) => channel.permissionsFor(me)?.has(rights))
+        .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+        .map((channel) => ({ id: channel.id, name: channel.name }))
+    );
+  }
+
+  /** Posts an alert in a server's alerts channel (see app/alerts.ts), waiting for Discord after a start. */
+  async post(guildId: string, channelId: string, alert: Alert): Promise<void> {
+    await this.connected(120_000);
+    const guild = this.client.guilds.cache.get(guildId);
+    const channel = guild?.channels.cache.get(channelId);
+    if (!guild || !channel?.isSendable()) throw new Error('the alerts channel is not there, or not one to post in');
+    // The server's own language: nobody asked, so there is no one person's to answer in.
+    const lang = langOf(guild.preferredLocale);
+    const text = lang === 'ko' ? alert.ko : alert.en;
+    // Trouble has the colour of a problem; the end of it does not.
+    await channel.send({ embeds: [alert.over ? note(lang, text, text) : problem(text)] });
+  }
+
+  // Resolves once the bot is connected to Discord, or rejects after `ms`. Everyone waiting shares one listener: an
+  // alert for every server at the start (a full disk) added one each, past the eleven Node warns about.
+  private connected(ms: number): Promise<void> {
+    if (this.client.isReady()) return Promise.resolve();
+    // The one wait for the first login, made by the first to wait.
+    this.loggedIn ??= new Promise((resolve) => this.client.once(Events.ClientReady, () => resolve()));
+    const loggedIn = this.loggedIn;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('the bot did not connect to Discord in time')), ms);
+      // Waiting for Discord never keeps jukecord running by itself.
+      timer.unref();
+      void loggedIn.then(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
   /** Logs in and starts answering. Resolves once logged in; registration of commands follows in the background. */
   async start(): Promise<void> {
     const log = this.options.log;
@@ -209,6 +295,8 @@ export class Bot implements Directory {
       this.serversKnown = true;
       log.info('logged in to Discord', { as: client.user.tag, servers: client.guilds.cache.size });
       for (const guild of client.guilds.cache.values()) void this.register(guild);
+      // Back to the voice channels the bot was in before the restart, where people are now.
+      void this.comeBackToVoice();
     });
     // A server that adds the bot later gets the commands at once.
     this.client.on(Events.GuildCreate, (guild) => void this.register(guild));
@@ -246,8 +334,59 @@ export class Bot implements Directory {
 
   /** Leaves voice everywhere and logs out. */
   async stop(): Promise<void> {
+    // Leaving every channel now is jukecord stopping: the channels stay kept for the restart.
+    this.memory?.freeze();
+    this.keeper.stop();
     this.voice.leaveAll();
     await this.client.destroy();
+  }
+
+  // Goes back, after a restart, to the voice channels the bot was in where people are now, and says so in each (see
+  // rejoin.ts): with the now-playing card, paused, so the people there can play on.
+  private async comeBackToVoice(): Promise<void> {
+    if (!this.memory) return;
+    const channelOf = (guildId: string, channelId: string) =>
+      this.client.guilds.cache.get(guildId)?.channels.cache.get(channelId);
+    await this.memory
+      .rejoin({
+        people: (guildId, channelId) => {
+          const channel = channelOf(guildId, channelId);
+          return channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
+        },
+        // In voice by the voice manager's own account (a connection it made since the start).
+        inVoice: (guildId) => this.voice.channel(guildId) !== null,
+        join: (guildId, channelId) => this.voice.join(guildId, channelId, null),
+        told: async (guildId, channelId) => {
+          const guild = this.client.guilds.cache.get(guildId);
+          const channel = channelOf(guildId, channelId);
+          const me = guild?.members.me;
+          // A voice channel's own chat, when the bot may post there; nothing otherwise.
+          if (!guild || !me || !channel?.isTextBased() || !channel.isVoiceBased()) return;
+          const rights = [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.EmbedLinks,
+          ];
+          if (!channel.permissionsFor(me)?.has(rights)) return;
+          // The server's own language: nobody asked, so there is no one person's to answer in.
+          const lang = langOf(guild.preferredLocale);
+          const card = nowCard(
+            this.options.actions.nowPlaying({ guildId, userId: null, mayControl: false, mayManage: false }),
+            lang,
+            this.options.panelUrl,
+          );
+          const message = await channel.send({
+            embeds: [
+              note(lang, 'jukecord restarted and is back in this channel', 'jukecord가 다시 시작해 이 채널로 돌아옴'),
+              ...card.embeds,
+            ],
+            components: card.components,
+          });
+          // The card people in the channel use from now on, kept current (its first edit drops the note above).
+          this.keeper.keep(guildId, { lang, edit: (payload) => message.edit(payload as never) }, card);
+        },
+      })
+      .catch((error: unknown) => this.options.log.warn('could not come back to voice after a restart', { error }));
   }
 
   // Puts this version's commands in a server (replacing whatever an older version registered).
@@ -293,12 +432,16 @@ export class Bot implements Directory {
     const options = interaction.options;
     try {
       // Lookups can take seconds; answer "thinking" first so Discord does not time the command out (3 s). Commands
-      // that only look something up answer the person alone, so the channel keeps the music, not the questions.
+      // that only look something up answer the person alone, so the channel keeps the music, not the questions: the
+      // history and the statistics too, and a command this version no longer has. The now-playing card (/np) is the
+      // channel's, with its keys for everyone.
       const sub = interaction.options.getSubcommand(false);
       const lookup =
-        ['version', 'queue'].includes(interaction.commandName) ||
+        ['version', 'queue', 'history', 'stats'].includes(interaction.commandName) ||
+        !COMMAND_NAMES.has(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
-        (interaction.commandName === 'playlist' && sub === 'list');
+        (interaction.commandName === 'playlist' && sub === 'list') ||
+        (interaction.commandName === 'alerts' && sub === 'show');
       await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
       switch (interaction.commandName) {
         case 'add': {
@@ -315,21 +458,19 @@ export class Bot implements Directory {
           return;
         }
         case 'skip':
-          await interaction.editReply(nowCard(actions.skip(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.skip(context), lang);
           return;
         case 'drop':
-          await interaction.editReply(nowCard(actions.removeCurrent(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.removeCurrent(context), lang);
           return;
         case 'pause':
-          await interaction.editReply(nowCard(actions.pause(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.pause(context), lang);
           return;
         case 'resume':
-          await interaction.editReply(nowCard(actions.resume(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.resume(context), lang);
           return;
         case 'repeat':
-          await interaction.editReply(
-            nowCard(actions.repeat(context, options.getString('mode', true)), lang, this.options.panelUrl),
-          );
+          await this.replyCard(interaction, actions.repeat(context, options.getString('mode', true)), lang);
           return;
         case 'seek': {
           let at: number;
@@ -338,7 +479,7 @@ export class Bot implements Directory {
           } catch (error) {
             throw new ActionError('invalid', error instanceof Error ? error.message : String(error));
           }
-          await interaction.editReply(nowCard(actions.seek(context, at), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.seek(context, at), lang);
           return;
         }
         case 'stop':
@@ -348,7 +489,7 @@ export class Bot implements Directory {
           });
           return;
         case 'np':
-          await interaction.editReply(nowCard(actions.nowPlaying(context), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.nowPlaying(context), lang);
           return;
         case 'queue':
           await interaction.editReply({
@@ -379,7 +520,7 @@ export class Bot implements Directory {
         case 'jump': {
           const item = actions.queue(context).items[options.getInteger('position', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
-          await interaction.editReply(nowCard(actions.jump(context, item.id), lang, this.options.panelUrl));
+          await this.replyCard(interaction, actions.jump(context, item.id), lang);
           return;
         }
         case 'shuffle':
@@ -395,7 +536,7 @@ export class Bot implements Directory {
                 : note(
                     lang,
                     removed === 1 ? 'Removed 1 duplicate' : `Removed ${removed} duplicates`,
-                    `중복 ${removed}곡 뺌`,
+                    `중복 ${removed}곡 제거함`,
                   ),
             ],
           });
@@ -471,10 +612,23 @@ export class Bot implements Directory {
           );
           return;
         }
+        case 'alerts': {
+          // Where jukecord tells this server about trouble: shown, chosen (a text channel), or nowhere.
+          const sub = options.getSubcommand();
+          const settings =
+            sub === 'show'
+              ? actions.settings(context)
+              : actions.alertsChannel(
+                  context,
+                  sub === 'set' ? (options.getChannel('channel', true)?.id ?? null) : null,
+                );
+          await interaction.editReply({ embeds: [alertsCard(settings, lang)] });
+          return;
+        }
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
-            embeds: [problem(lang === 'ko' ? '없어진 명령' : 'This command no longer exists')],
+            embeds: [problem(lang === 'ko' ? '더는 없는 명령' : 'This command no longer exists')],
           });
       }
     } catch (error) {
@@ -494,9 +648,16 @@ export class Bot implements Directory {
         await interaction.editReply({ embeds: [playlistsCard(actions.playlists(context), lang)] });
         return;
       case 'save': {
-        const saved = actions.playlistSave(context, options.getString('name', true));
+        const name = options.getString('name', true);
+        // Saving over a playlist of that name replaces it, which is said: "Saved" read as if nothing was lost.
+        const replaced = actions.playlists(context).some((playlist) => playlist.name === name.trim());
+        const saved = actions.playlistSave(context, name);
         await interaction.editReply({
-          embeds: [note(lang, `Saved "${saved.name}" (${saved.size})`, `"${saved.name}" 저장(${saved.size}곡)`)],
+          embeds: [
+            replaced
+              ? note(lang, `Replaced "${saved.name}" (${saved.size})`, `"${saved.name}" 덮어씀(${saved.size}곡)`)
+              : note(lang, `Saved "${saved.name}" (${saved.size})`, `"${saved.name}" 저장(${saved.size}곡)`),
+          ],
         });
         return;
       }
@@ -542,11 +703,48 @@ export class Bot implements Directory {
           : action === 'resume'
             ? actions.resume(context)
             : actions.skip(context);
-      // The card itself is updated in place, so the channel does not fill with copies.
-      await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl));
+      // The card itself is updated in place, so the channel does not fill with copies; it is the card people use now,
+      // so it is the one kept current.
+      await this.updateCard(interaction, snapshot, cardLang);
     } catch (error) {
+      // A card out of date (paused since, another track, nothing playing now): its key did nothing because the player
+      // is that way already. The card is drawn again from what plays now; a refusal left it wrong, and told the person
+      // "nothing is playing" about a paused track.
+      if (error instanceof ActionError && error.code === 'conflict') {
+        await this.updateCard(interaction, actions.nowPlaying(context), cardLang).catch((failure: unknown) =>
+          this.options.log.debug('could not draw a card again', { error: failure }),
+        );
+        return;
+      }
       await this.fail(interaction, error);
     }
+  }
+
+  // Answers a command with the now-playing card, and keeps that card current from now on (see keeper.ts): the newest
+  // card in a server is the one people look at.
+  private async replyCard(
+    interaction: ChatInputCommandInteraction,
+    snapshot: PlayerSnapshot,
+    lang: Lang,
+  ): Promise<void> {
+    const payload = nowCard(snapshot, lang, this.options.panelUrl);
+    const message = await interaction.editReply(payload);
+    this.keeper.keep(
+      snapshot.guildId,
+      keptCard((next) => interaction.editReply(next as never), message, lang),
+      payload,
+    );
+  }
+
+  // Draws a card whose key was pressed again, and keeps it current from now on.
+  private async updateCard(interaction: ButtonInteraction, snapshot: PlayerSnapshot, lang: Lang): Promise<void> {
+    const payload = nowCard(snapshot, lang, this.options.panelUrl);
+    await interaction.update(payload);
+    this.keeper.keep(
+      snapshot.guildId,
+      keptCard((next) => interaction.editReply(next as never), interaction.message, lang),
+      payload,
+    );
   }
 
   // Playlist names as people type them.
@@ -570,7 +768,7 @@ export class Bot implements Directory {
       error instanceof ActionError
         ? sayError(error.message, lang)
         : lang === 'ko'
-          ? '문제가 생김: 이유는 jukecord 로그에'
+          ? '문제가 생김: 자세한 내용은 jukecord 로그에 있음'
           : 'Something went wrong: the reason is in the log';
     if (!(error instanceof ActionError))
       this.options.log.warn('a command failed', {
@@ -590,8 +788,26 @@ export class Bot implements Directory {
   }
 }
 
-// Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets UTC,
-// which the card's day boundaries make visible only around midnight.
+// Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets the
+// time zone of the machine jukecord runs on (TZ), which is the community's more often than UTC is.
 function offsetOf(locale: string): number {
-  return locale.toLowerCase().startsWith('ko') ? 540 : 0;
+  return locale.toLowerCase().startsWith('ko') ? 540 : -new Date().getTimezoneOffset();
+}
+
+// A card answered to a command or a key, kept current. Discord lets an interaction's own answer be edited for fifteen
+// minutes, whatever the channel allows the bot; after that the bot edits it as a message of its own, which needs it
+// to see the channel (a card it cannot edit is let go, see keeper.ts).
+function keptCard(
+  answer: (payload: CardPayload) => Promise<unknown>,
+  message: { edit?: (payload: never) => Promise<unknown> } | null | undefined,
+  lang: Lang,
+): KeptCard {
+  const until = steadyNow() + 14 * 60_000;
+  return {
+    lang,
+    edit: (payload) => {
+      if (steadyNow() < until || !message?.edit) return answer(payload);
+      return message.edit(payload as never);
+    },
+  };
 }

@@ -54,6 +54,7 @@ export const ACTIONS = [
   'dj-role',
   'status',
   'wrapped',
+  'alerts-channel',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -75,10 +76,16 @@ export type ActionErrorCode = 'invalid' | 'not-found' | 'forbidden' | 'conflict'
 export class ActionError extends Error {
   override name = 'ActionError';
   readonly code: ActionErrorCode;
+  /**
+   * Whether the refusal came after work an ordinary refusal does not cost: a lookup on the site (yt-dlp, the
+   * network) that found nothing. The web server gives a refused change its address's share back unless it did.
+   */
+  readonly spent: boolean;
 
-  constructor(code: ActionErrorCode, message: string) {
+  constructor(code: ActionErrorCode, message: string, options: { spent?: boolean } = {}) {
     super(message);
     this.code = code;
+    this.spent = options.spent ?? false;
   }
 }
 
@@ -139,6 +146,14 @@ export interface Directory {
   roles(guildId: string): RoleInfo[];
   /** The member's roles and rights, or null when they are not in the server. */
   member(guildId: string, userId: string): Promise<MemberInfo | null>;
+  /** The server's text channels the bot may post in, in Discord's order (for the alerts channel). */
+  textChannels?(guildId: string): TextChannelInfo[];
+}
+
+/** A text channel, for choosing where jukecord tells a server about trouble. */
+export interface TextChannelInfo {
+  readonly id: string;
+  readonly name: string;
 }
 
 /** A server's jukecord settings as the panel and the commands show them. */
@@ -147,6 +162,10 @@ export interface SettingsView {
   readonly djRoleId: string | null;
   /** The server's roles to choose from (empty in browser-only mode). */
   readonly roles: readonly RoleInfo[];
+  /** The text channel where jukecord tells the server about trouble (app/alerts.ts), or null for nowhere. */
+  readonly alertsChannelId: string | null;
+  /** The text channels the bot may post in, to choose it from (empty in browser-only mode). */
+  readonly channels: readonly TextChannelInfo[];
 }
 
 /** Listening figures over a span of days, with every day present (days without plays count zero). */
@@ -264,11 +283,14 @@ export class Actions {
       return await this.options.resolver.resolve(input, signal, context.userId, context.guildId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork);
+      // The address was asked of DNS (see Resolver): a lookup was spent on it.
+      if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork, { spent: true });
+      // No lookup ran: every place was taken.
       if (error instanceof BusyError) throw new ActionError('unavailable', message);
-      // Nothing typed: said as it is. Anything else: the short reason (the resolver logged the full text).
+      // Nothing typed: said as it is, nothing looked up. Anything else: the short reason (the resolver logged the full
+      // text), after a lookup that cost what any lookup costs.
       if (/nothing to add/.test(message)) throw new ActionError('invalid', message);
-      throw new ActionError('not-found', plainReason(message));
+      throw new ActionError('not-found', plainReason(message), { spent: true });
     }
   }
 
@@ -342,8 +364,10 @@ export class Actions {
   pause(context: ActionContext): PlayerSnapshot {
     this.control(context);
     const player = this.options.players.get(context.guildId);
-    if (!player.pause()) throw new ActionError('conflict', 'nothing is playing');
-    return player.snapshot();
+    if (player.pause()) return player.snapshot();
+    // Nothing changed: either it is paused already (or will start paused), or there is nothing to pause.
+    const status = player.snapshot().status;
+    throw new ActionError('conflict', status === 'idle' ? 'nothing is playing' : 'it is already paused');
   }
 
   /**
@@ -354,9 +378,16 @@ export class Actions {
     this.control(context);
     const player = this.options.players.get(context.guildId);
     if (player.resume() || player.play()) return player.snapshot();
-    // Neither worked: either something is already playing, or there is nothing to start.
-    const idle = player.snapshot().status === 'idle';
-    throw new ActionError('conflict', idle ? 'the queue is empty' : 'it is already playing');
+    // Neither worked: there is nothing to start, a track is getting ready to play, or one is playing.
+    const status = player.snapshot().status;
+    throw new ActionError(
+      'conflict',
+      status === 'idle'
+        ? 'the queue is empty'
+        : status === 'loading'
+          ? 'the track is getting ready'
+          : 'it is already playing',
+    );
   }
 
   /** Moves to a place in the current track, in milliseconds from the start. */
@@ -613,9 +644,15 @@ export class Actions {
   /** The server's settings and the roles to choose the DJ role from (anyone may look). */
   settings(context: ActionContext): SettingsView {
     const roles = this.options.directory?.roles(context.guildId) ?? null;
+    const saved = this.options.store.settings.get(context.guildId);
     // A deleted role is shown as none, which is how it counts (see djRoleNow).
-    const djRoleId = djRoleNow(this.options.store.settings.get(context.guildId).djRoleId, roles);
-    return { djRoleId, roles: roles ?? [] };
+    const djRoleId = djRoleNow(saved.djRoleId, roles);
+    // The same for a channel gone, or one the bot may no longer post in: nothing can be said there.
+    const channels = this.options.directory?.textChannels?.(context.guildId) ?? [];
+    const alertsChannelId = channels.some((channel) => channel.id === saved.alertsChannelId)
+      ? saved.alertsChannelId
+      : null;
+    return { djRoleId, roles: roles ?? [], alertsChannelId, channels };
   }
 
   /** Sets (or clears, with null) the role that may change the music. Needs Manage Server. */
@@ -641,6 +678,26 @@ export class Actions {
       discord: this.options.discordReady?.() ?? false,
       uptimeMs: Date.now() - (this.options.startedAt ?? Date.now()),
     };
+  }
+
+  /**
+   * Sets (or clears, with null) the text channel where jukecord tells this server about trouble: YouTube refusing it,
+   * a restart by the watchdog, a disk nearly full, a track taken out of the looping queue, connections turned away,
+   * a scheduled backup that failed (app/alerts.ts). Needs Manage Server.
+   */
+  alertsChannel(context: ActionContext, channelId: string | null): SettingsView {
+    if (!context.mayManage)
+      throw new ActionError('forbidden', 'only people who can manage the server can choose the alerts channel');
+    if (channelId !== null) {
+      // Only a channel the bot may post in: one it cannot would say nothing, and nobody would know why.
+      const channels = this.options.directory?.textChannels?.(context.guildId);
+      if (!channels)
+        throw new ActionError('unavailable', 'jukecord runs without a Discord bot here, so there are no channels');
+      if (!channels.some((channel) => channel.id === channelId))
+        throw new ActionError('not-found', 'that is not a channel of this server the bot may post in');
+    }
+    this.options.store.settings.setAlertsChannel(context.guildId, channelId);
+    return this.settings(context);
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

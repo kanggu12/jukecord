@@ -74,12 +74,14 @@ export interface LiveLimits {
   readonly probeMs?: number;
 }
 
-/** The limits unless the settings say otherwise: a thousand in all, ten tabs per login, twenty per address. */
-export const DEFAULT_LIVE_LIMITS: LiveLimits = { total: 1000, perLogin: 10, perAddress: 20 };
+// How long a probed connection has to answer (see LiveLimits.probeMs). A pong comes back in a fraction of a second from
+// a browser that is there, but a phone in a tunnel, or a ping stuck behind a big message on a slow line, stalls for
+// several: five seconds closed a tab that stalled for six, and its reconnect was refused because the tab knocking had
+// taken its place. Fifteen is the least time the panel waits before it knocks again after a 1013.
+const PROBE_MS = 15_000;
 
-// How long a probed connection has to answer (see LiveLimits.probeMs): a pong comes back in a fraction of a second
-// from a browser that is there, even on a slow phone line.
-const PROBE_MS = 5000;
+/** The limits unless the settings say otherwise: a thousand in all, ten tabs per login, twenty per address. */
+export const DEFAULT_LIVE_LIMITS: LiveLimits = { total: 1000, perLogin: 10, perAddress: 20, probeMs: PROBE_MS };
 
 // One open connection.
 interface Client {
@@ -151,6 +153,8 @@ export interface EventHubOptions {
   /** The fewest milliseconds between queue messages and between listener messages of a server (tests shorten them). */
   readonly queueEveryMs?: number;
   readonly listenersEveryMs?: number;
+  /** Hears, when the log says so, that connections were refused at the cap of every live connection, and how many. */
+  readonly refused?: (count: number, limit: number) => void;
 }
 
 /** What a new connection asks for, where it comes from, and what its browser can take. */
@@ -302,6 +306,7 @@ export class EventHub {
             ? { hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY so each browser has its own address' }
             : {}),
         });
+        if (refusal.startsWith('jukecord has as many')) this.options.refused?.(this.refused, this.limits.total);
         this.refused = 0;
         this.refusedToldAt = steadyNow();
       }
@@ -579,11 +584,17 @@ export class EventHub {
     return room.listeners;
   }
 
-  // Someone started or stopped listening in a server: its panels hear about it, at most once a second.
+  // Someone started or stopped listening in a server: its panels hear about it, at most once a second, and the rest of
+  // jukecord at once (whether a server is heard anywhere, see app/rest.ts), the last listener leaving included.
   private listenersChanged(guildId: string): void {
     const room = this.rooms.get(guildId);
+    let count = 0;
+    for (const client of room?.clients ?? []) if (client.listening) count += 1;
+    // Worked out anew from now on, before the bus is told: those who hear it read the count back (app/rest.ts), and
+    // got the one from before the change (a server played to nobody until its next change).
+    if (room) room.listeners = null;
+    this.options.bus.emit('listeners', { guildId, count });
     if (!room) return;
-    room.listeners = null;
     if (room.listenersTimer) return;
     const wait = Math.max(0, room.listenersSentAt + this.listenersEveryMs - steadyNow());
     room.listenersTimer = setTimeout(() => {

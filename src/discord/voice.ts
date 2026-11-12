@@ -306,11 +306,17 @@ export class VoiceManager implements VoiceControl {
     // Missing permissions fail silently in Discord (the bot appears and says nothing); say it plainly instead.
     const me = guild.members.me;
     const allowed = me ? channel.permissionsFor(me) : null;
-    if (!allowed?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
+    if (!me || !allowed?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
       throw new ActionError('forbidden', `the bot may not connect or speak in ${channel.name}`);
     }
+    // In that channel already: nothing to do (before the limit, which would count the bot as one more).
     const current = this.joined.get(guildId);
     if (current?.channelId === target) return { channelId: target, name: channel.name };
+    // A channel at its member limit takes nobody more (the bot only with Move Members): said at once, where trying
+    // ended after twenty seconds in "could not connect in time".
+    if (this.isFull(channel, me.id, allowed)) {
+      throw new ActionError('conflict', `the voice channel ${channel.name} is full`);
+    }
     if (current) this.drop(guildId);
     const connection = joinVoiceChannel({
       channelId: target,
@@ -359,6 +365,24 @@ export class VoiceManager implements VoiceControl {
     // Joined a channel that is already empty (the person left meanwhile): the countdown starts now.
     this.voiceStateChanged(guildId);
     return { channelId: target, name: channel.name };
+  }
+
+  // Whether a channel is at its member limit for the bot: as many others in it as the limit allows, and the bot
+  // without Move Members, which Discord lets past the limit. The bot itself is not counted: discord.js's `full` does
+  // count it, and refused the channel the bot was in (a /join there, or coming back while Discord still listed the
+  // crashed session in it).
+  private isFull(
+    channel: {
+      readonly userLimit?: number;
+      readonly members: { filter(test: (member: { readonly id: string }) => boolean): { readonly size: number } };
+    },
+    botId: string,
+    allowed: Readonly<PermissionsBitField>,
+  ): boolean {
+    // No limit (0), or a bot Discord lets past it.
+    const limit = channel.userLimit ?? 0;
+    if (limit === 0 || allowed.has(PermissionFlagsBits.MoveMembers)) return false;
+    return channel.members.filter((member) => member.id !== botId).size >= limit;
   }
 
   leave(guildId: string): boolean {

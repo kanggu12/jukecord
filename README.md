@@ -131,6 +131,11 @@ people use most.
   track played on the most days), the most played tracks and who added most, the busiest day and hour, the longest day
   and the first track. A page under the statistics that saves itself as a picture for a story or a post, and
   `/wrapped`, `jukecord wrapped` and the API.
+- **Looks after itself.** A server nobody hears anywhere pauses after two minutes instead of fetching for nobody;
+  after a restart the bot goes back to its voice channel when people are there; the newest now-playing card in
+  Discord follows the music. An alerts channel of the server's choosing hears about trouble (YouTube refusing jukecord,
+  a restart by its watchdog, a full disk, a track leaving a looping queue, connections turned away), and a backup can
+  be made every day at a time of the host's choosing.
 
 ### Light on a small machine
 
@@ -165,14 +170,14 @@ used ([architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md)).
 
 ## Everyday use
 
-| To                   | With Docker Compose                                              |
-| :------------------- | :--------------------------------------------------------------- |
-| Open the panel       | `./jukecord open`                                                |
-| See how it runs      | `./jukecord status`, and `./jukecord doctor` to check every part |
-| Read the log         | `./jukecord logs`, or the **Log** page in the panel              |
-| Back up the database | `./jukecord backup`, into `./backups`                            |
-| Update               | `git pull && ./jukecord update`                                  |
-| Stop                 | `./jukecord down`; the data stays                                |
+| To                   | With Docker Compose                                               |
+| :------------------- | :---------------------------------------------------------------- |
+| Open the panel       | `./jukecord open`                                                 |
+| See how it runs      | `./jukecord status`, and `./jukecord doctor` to check every part  |
+| Read the log         | `./jukecord logs`, or the **Log** page in the panel               |
+| Back up the database | `./jukecord backup`, into `./backups`; `JUKECORD_BACKUP_AT` daily |
+| Update               | `git pull && ./jukecord update`                                   |
+| Stop                 | `./jukecord down`; the data stays                                 |
 
 Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecord add <address or words>`,
 `./jukecord token create <name>`. On Kubernetes the same command runs through `kubectl exec`

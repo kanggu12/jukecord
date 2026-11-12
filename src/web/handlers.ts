@@ -5,11 +5,10 @@
  * in src/web/api.ts and, for a server, by Access); what is allowed in a server is decided inside the action. That is
  * what makes the API do exactly what the panel, the slash commands and the CLI do.
  */
-import fs from 'node:fs';
-import path from 'node:path';
 import type { Static, TSchema } from 'typebox';
 import type { Access } from '../app/access.ts';
-import { type ActionContext, ActionError, type Actions, type Directory } from '../app/actions.ts';
+import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
+import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
 import type { DoctorReport } from '../app/doctor.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
@@ -33,6 +32,8 @@ export interface HandlerDeps {
   readonly doctor: () => Promise<DoctorReport>;
   /** Whether the Discord bot is set up at all (browser-only mode otherwise). */
   readonly discordMode: boolean;
+  /** How many backups stay in the folder (JUKECORD_BACKUP_KEEP; seven by default). */
+  readonly backupKeep?: number;
 }
 
 // The parts of a request, typed from the operation's schemas.
@@ -62,19 +63,9 @@ function who(caller: Caller | null): Caller {
   return caller;
 }
 
-// How many backups stay in the data folder: a week of daily ones. Each is a whole copy of the database, so without a
-// limit they would fill the volume (the front door copies each one out, and Kubernetes users keep theirs there).
-export const KEEP_BACKUPS = 7;
-
-/** Removes all but the newest `keep` backups (their names sort by time) from the folder. */
-export function pruneBackups(dir: string, keep: number): void {
-  const backups = fs
-    .readdirSync(dir)
-    .filter((name) => /^jukecord-.+\.db$/.test(name))
-    .sort();
-  for (const name of backups.slice(0, Math.max(0, backups.length - keep)))
-    fs.rmSync(path.join(dir, name), { force: true });
-}
+// Backups are made and pruned in app/backups.ts (the scheduled ones too). Each is a whole copy of the database, so
+// without a limit they would fill the volume (the front door copies each one out, and Kubernetes users keep theirs
+// there).
 
 const OK = { ok: true as const };
 
@@ -143,14 +134,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return deps.actions.voiceChannels(context);
   },
 
-  settings: ({ context, deps }) => {
-    const settings = deps.actions.settings(context);
-    return { djRoleId: settings.djRoleId, roles: [...settings.roles] };
-  },
-  'dj-role': ({ context, body, deps }) => {
-    const settings = deps.actions.djRole(context, body.roleId);
-    return { djRoleId: settings.djRoleId, roles: [...settings.roles] };
-  },
+  settings: ({ context, deps }) => settingsAnswer(deps.actions.settings(context)),
+  'dj-role': ({ context, body, deps }) => settingsAnswer(deps.actions.djRole(context, body.roleId)),
   status: ({ deps }) => {
     const status = deps.actions.status();
     return {
@@ -208,14 +193,11 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const link = deps.auth.createLink();
     return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt };
   },
-  backup: ({ deps }) => {
-    // One file per backup, named by the time, so backups sort and none replaces another.
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const file = path.join(deps.backupDir, `jukecord-${stamp}.db`);
-    deps.store.backup(file);
-    const bytes = fs.statSync(file).size;
-    pruneBackups(deps.backupDir, KEEP_BACKUPS);
-    return { file, bytes };
+  backup: async ({ deps }) => {
+    // Named by the time, so backups sort and none replaces another; the newest JUKECORD_BACKUP_KEEP stay. Written
+    // beside the main thread, which goes on answering meanwhile.
+    const made = await makeBackup(deps.store, deps.backupDir, deps.backupKeep ?? KEEP_BACKUPS);
+    return { file: made.file, bytes: made.bytes };
   },
   doctor: async ({ deps }) => {
     const report = await deps.doctor();
@@ -224,4 +206,15 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
 
   wrapped: ({ context, query, deps }) =>
     deps.presenter.wrapped(deps.actions.wrapped(context, query.period, query.tz ?? 0)),
+  'alerts-channel': ({ context, body, deps }) => settingsAnswer(deps.actions.alertsChannel(context, body.channelId)),
 };
+
+// A server's settings as the API sends them (the schema's arrays are mutable).
+function settingsAnswer(view: SettingsView) {
+  return {
+    djRoleId: view.djRoleId,
+    roles: [...view.roles],
+    alertsChannelId: view.alertsChannelId,
+    channels: [...view.channels],
+  };
+}

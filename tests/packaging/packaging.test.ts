@@ -4,10 +4,11 @@
  * validated with helm and kubeconform when they are installed (CI installs both).
  */
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { LIVE_ACTIONS, PANEL_ACTIONS } from '../../panel/src/api.ts';
 import { withTable } from '../../scripts/api-doc.ts';
@@ -258,6 +259,9 @@ describe('Compose and the front door', () => {
     assert.match(compose, /^ {4}memswap_limit: 1g$/m);
     assert.match(compose, /^ {4}pids_limit: \d+$/m);
     assert.match(compose, /^ {6}- \/tmp:size=\d+m$/m);
+    // The host's time zone, which the front door sets: the statistics' "today" and the backups' time of day.
+    assert.match(compose, /^ {6}TZ: "\$\{TZ:-UTC\}"$/m);
+    assert.match(read('jukecord'), /^export TZ$/m);
   });
 
   it('has a front door that runs and explains itself', () => {
@@ -277,6 +281,138 @@ describe('Compose and the front door', () => {
       'down',
     ]) {
       assert.match(help, new RegExp(`\\./jukecord ${command}\\b`));
+    }
+  });
+});
+
+describe('the front door with jukecord not running', () => {
+  it('says a mistyped command is not one, and a real one that jukecord is not running', () => {
+    // A Docker that answers but runs nothing (no container is up), so nothing here reaches a real Docker.
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-docker-'));
+    try {
+      fs.writeFileSync(
+        path.join(bin, 'docker'),
+        '#!/bin/sh\ncase "$1" in info) echo 27.0.0 ;; compose) [ "$2" = version ] && echo v2.30.0 ;; esac\nexit 0\n',
+        { mode: 0o755 },
+      );
+      const front = (word: string) =>
+        spawnSync('bash', ['jukecord', word], {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+        });
+      const mistyped = front('foo');
+      assert.equal(mistyped.status, 2);
+      assert.equal(mistyped.stderr, 'jukecord: there is no command "foo" (./jukecord help)\n');
+      // A command of the jukecord command's own (from the source beside the front door), with nothing running.
+      const real = front('np');
+      assert.equal(real.status, 1);
+      assert.equal(real.stderr, 'jukecord: jukecord is not running here (./jukecord up)\n');
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the front door with jukecord running', () => {
+  it("leaves the words it does not know to the running jukecord's own command, its help for a command too", () => {
+    // A Docker whose jukecord runs: the command inside prints what it was asked (an image newer than this checkout
+    // knows commands the checkout does not).
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-docker-'));
+    try {
+      fs.writeFileSync(
+        path.join(bin, 'docker'),
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          '  info) echo 27.0.0 ;;',
+          '  compose)',
+          '    case "$2" in',
+          '      version) echo v2.30.0 ;;',
+          '      ps) echo 0123456789ab ;;',
+          // exec [-T|-it] -e TZ=... jukecord jukecord ARGS: what follows the service and the command.
+          '      exec) shift 7; echo "inside: $*" ;;',
+          '    esac ;;',
+          'esac',
+          'exit 0',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const front = (...words: string[]) =>
+        spawnSync('bash', ['jukecord', ...words], {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+        });
+      const newer = front('karaoke', 'on');
+      assert.equal(newer.status, 0, newer.stderr);
+      assert.equal(newer.stdout, 'inside: karaoke on\n');
+      // help with a command: that command's help, from the command that runs it (the whole list was printed).
+      const help = front('help', 'add');
+      assert.equal(help.status, 0, help.stderr);
+      assert.equal(help.stdout, 'inside: help add\n');
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
+// The front door's check of a backup before a restore, as bash hands it to node inside the container: the
+// `check='...'` assignment of ./jukecord, evaluated by bash itself (its quoting included).
+function restoreCheck(): string {
+  const text = read('jukecord');
+  const start = text.indexOf("    check='");
+  const end = text.indexOf("}'\n", start) + 2;
+  assert.ok(start > 0 && end > start, 'the restore check is not in ./jukecord');
+  return execFileSync('bash', ['-c', `${text.slice(start, end)}\nprintf '%s' "$check"`], { encoding: 'utf8' });
+}
+
+describe('the front door checks a backup before a restore', () => {
+  // The check, run as the container runs it: an ES module, the backup on stdin, the data folder as the argument.
+  const check = (input: Buffer, folder: string) =>
+    spawnSync(
+      process.execPath,
+      ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', restoreCheck(), folder],
+      { input, encoding: 'utf8' },
+    );
+
+  it('runs the check in the image the way this test runs it', () => {
+    assert.match(read('jukecord'), /--input-type=module -e "\$check" \/data <"\$file"/);
+  });
+
+  it('reads a backup whole into the data folder (not the small /tmp), passes a whole one and leaves nothing', () => {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-restore-'));
+    try {
+      // A whole backup with jukecord's tables, made the way the backup command makes one (VACUUM INTO).
+      const live = new DatabaseSync(path.join(folder, 'live.db'));
+      live.exec('CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT)');
+      const insert = live.prepare('INSERT INTO tracks (title) VALUES (?)');
+      // In one transaction: one write to the disk instead of one per row.
+      live.exec('BEGIN');
+      for (let index = 0; index < 2000; index += 1) insert.run(`Track ${index} with a title long enough to fill pages`);
+      live.exec('COMMIT');
+      live.prepare('VACUUM INTO ?').run(path.join(folder, 'backup.db'));
+      live.close();
+      const backup = fs.readFileSync(path.join(folder, 'backup.db'));
+      fs.rmSync(path.join(folder, 'live.db'));
+      fs.rmSync(path.join(folder, 'backup.db'));
+      const target = path.join(folder, 'data');
+      fs.mkdirSync(target);
+      const whole = check(backup, target);
+      assert.equal(whole.status, 0, whole.stderr);
+      // The copy it read went into the data folder and is gone again.
+      assert.deepEqual(fs.readdirSync(target), []);
+      // A backup cut short (a copy that stopped half way) is refused, with SQLite's own words on the marked line.
+      const cut = check(backup.subarray(0, 20_000), target);
+      assert.equal(cut.status, 2);
+      assert.match(cut.stderr, /^restore-check: .*(malformed|not a database)/m);
+      assert.deepEqual(fs.readdirSync(target), []);
+      // A copy that cannot be written (no room, no folder) says why on a line of its own, not as a crash: a crash's
+      // last line is Node's version, which the front door showed as the reason before.
+      const nowhere = check(backup, path.join(folder, 'missing'));
+      assert.equal(nowhere.status, 2);
+      assert.match(nowhere.stderr, /^restore-copy: ENOENT/m);
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true });
     }
   });
 });

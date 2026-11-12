@@ -27,7 +27,7 @@ import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
 import type { Rate } from '../../src/web/limits.ts';
 import { Presenter } from '../../src/web/present.ts';
-import { createWebServer, type WebServer } from '../../src/web/server.ts';
+import { createWebServer, type WebServer, type WebServerOptions } from '../../src/web/server.ts';
 import { FakeClock, FakeMedia } from './fakes.ts';
 import { memoryStore } from './store.ts';
 
@@ -36,6 +36,8 @@ export const OTHER_GUILD = '100000000000000002';
 export const ALICE = '300000000000000001';
 export const BOB = '300000000000000002';
 export const DJ_ROLE = '500000000000000001';
+/** The one text channel the fake bot may post in. */
+export const ALERTS_CHANNEL = '600000000000000001';
 /** The host token of every test server. */
 export const HOST_TOKEN = 'jkc_test-host-token-0123456789abcdef';
 
@@ -67,6 +69,11 @@ export class FakeDirectory implements Directory {
 
   roles(guildId: string): RoleInfo[] {
     return guildId === GUILD ? [{ id: DJ_ROLE, name: 'DJ', color: 0x3d7be0 }] : [];
+  }
+
+  // The text channels the bot may post in: one in the first server.
+  textChannels(guildId: string) {
+    return guildId === GUILD ? [{ id: ALERTS_CHANNEL, name: 'jukecord-alerts' }] : [];
   }
 
   async member(guildId: string, userId: string): Promise<MemberInfo | null> {
@@ -136,6 +143,8 @@ export interface TestServerOptions {
   readonly found?: Record<string, NewTrack[]>;
   /** What the made-up image hosts answer for each picture's address (an Error: that picture cannot be had). */
   readonly pictures?: Record<string, Picture | Error>;
+  /** Inputs the resolver looks up and finds nothing for ("nothing was found", as yt-dlp's search says). */
+  readonly nothingFound?: readonly string[];
   /** The caps on live connections (lower than the defaults to test them). */
   readonly live?: Partial<LiveLimits>;
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
@@ -146,16 +155,11 @@ export interface TestServerOptions {
     readonly covers?: Rate;
   };
   readonly behind?: () => boolean;
-  /** Shorter request and idle timeouts and lower connection caps (to test them). */
   readonly trustProxy?: boolean;
-  readonly timeouts?: {
-    readonly requestMs?: number;
-    readonly headersMs?: number;
-    readonly checkEveryMs?: number;
-    readonly idleMs?: number;
-    readonly maxConnections?: number;
-    readonly maxConnectionsPerAddress?: number;
-  };
+  /** Shorter request and idle timeouts and lower connection caps (to test them): the server's own option, as it is. */
+  readonly timeouts?: WebServerOptions['timeouts'];
+  /** How the MP3 copy for browsers without Opus is made (by default there is never one). */
+  readonly mp3?: WebServerOptions['mp3'];
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -193,6 +197,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   // The resolver looks inputs up in the table; anything else finds nothing.
   const resolver = {
     resolve: async (input: string) => {
+      // Looked up on the site, which found nothing: a lookup that cost what any lookup costs.
+      if (options.nothingFound?.includes(input)) throw new Error('nothing was found');
       const tracks = found[input];
       if (!tracks) throw new Error(`nothing to add for "${input}"`);
       return tracks.map((track) => store.tracks.upsert(track));
@@ -238,7 +244,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     players,
     queue,
     cache,
-    mp3: async () => null,
+    mp3: options.mp3 ?? (async () => null),
     covers,
     log,
     ...(options.live ? { live: options.live } : {}),

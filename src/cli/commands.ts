@@ -6,6 +6,7 @@
  * exist. People type 1-based queue numbers, as /queue and the panel show them; the commands look the item up.
  */
 
+import { sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
 
@@ -64,6 +65,8 @@ interface PlayerJson {
   repeat: string;
   progress: number | null;
   error: string | null;
+  notice: string | null;
+  waiting: boolean;
 }
 interface AddJson {
   items: ItemJson[];
@@ -100,21 +103,34 @@ function trackLine(track: TrackJson, by: string | null): string {
   return parts.join(' · ');
 }
 
+// Listening time as people say it, in whole minutes with the hours made from them: "3 h 12 min", "45 min". The
+// minutes rounded after the hours were taken printed 59 min 59 s as "0 h 60 min".
+function hoursMinutes(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+}
+
 function showPlayer(answer: unknown): string {
   const player = answer as PlayerJson;
   const repeat = player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`;
-  if (!player.track) return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}`;
+  // What the player did by itself (a track taken out of the loop), on a line of its own.
+  const notice = player.notice ? `\n${sayNotice(player.notice, 'en')}` : '';
+  if (!player.track)
+    return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}${notice}`;
   // Where it is now: the snapshot's position plus the time since it was taken, while playing.
   const position =
     player.status === 'playing' ? player.positionMs + Math.max(0, Date.now() - player.at) : player.positionMs;
   const where = player.durationMs ? ` ${formatDuration(position)} / ${formatDuration(player.durationMs)}` : '';
   const state =
     player.status === 'loading'
-      ? `Getting ready${player.progress !== null ? ` (${Math.round(player.progress * 100)}%)` : ''}`
+      ? player.waiting
+        ? 'Waiting for its turn'
+        : `Getting ready${player.progress !== null ? ` (${Math.round(player.progress * 100)}%)` : ''}`
       : player.status === 'paused'
         ? 'Paused'
         : 'Playing';
-  return `${state}:${where}\n${trackLine(player.track, player.addedByName)}${repeat}`;
+  return `${state}:${where}\n${trackLine(player.track, player.addedByName)}${repeat}${notice}`;
 }
 
 function showAdded(answer: unknown): string {
@@ -143,14 +159,26 @@ function showVoice(answer: unknown): string {
 }
 
 function showSettings(answer: unknown): string {
-  const settings = answer as { djRoleId: string | null; roles: { id: string; name: string }[] };
+  const settings = answer as {
+    djRoleId: string | null;
+    roles: { id: string; name: string }[];
+    alertsChannelId: string | null;
+    channels: { id: string; name: string }[];
+  };
   const role = settings.roles.find((entry) => entry.id === settings.djRoleId);
   const lines = [
     settings.djRoleId === null
       ? 'DJ role: none (everyone may change the music)'
       : `DJ role: ${role?.name ?? settings.djRoleId}`,
   ];
+  // Where jukecord tells the server about trouble, and the channels to choose it from.
+  const alerts = settings.channels.find((entry) => entry.id === settings.alertsChannelId);
+  lines.push(
+    settings.alertsChannelId === null ? 'Alerts: none' : `Alerts: #${alerts?.name ?? settings.alertsChannelId}`,
+  );
   if (settings.roles.length > 0) lines.push('Roles:', ...settings.roles.map((entry) => `  ${entry.id}  ${entry.name}`));
+  if (settings.channels.length > 0)
+    lines.push('Channels:', ...settings.channels.map((entry) => `  ${entry.id}  #${entry.name}`));
   return lines.join('\n');
 }
 
@@ -391,10 +419,8 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
         topTracks: { track: TrackJson; plays: number }[];
         topPeople: { name: string | null; plays: number }[];
       };
-      const hours = Math.floor(stats.playedMs / 3_600_000);
-      const minutes = Math.round((stats.playedMs % 3_600_000) / 60_000);
       const lines = [
-        `The last ${stats.span} days: ${stats.plays} plays, ${hours} h ${minutes} min, ${stats.tracks} tracks`,
+        `The last ${stats.span} days: ${stats.plays} plays, ${hoursMinutes(stats.playedMs)}, ${stats.tracks} tracks`,
       ];
       if (stats.topTracks.length > 0) lines.push('Most played:');
       for (const entry of stats.topTracks.slice(0, 10)) lines.push(`  ${entry.plays}  ${entry.track.title}`);
@@ -502,7 +528,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       const status = answer as { version: string; mode: string; discord: boolean; uptimeMs: number };
       const discord =
         status.mode === 'browser-only' ? 'browser-only (no bot)' : status.discord ? 'connected' : 'not connected';
-      return `jukecord ${status.version}\nDiscord: ${discord}\nUp for ${formatDuration(status.uptimeMs)}`;
+      // Past a day, days and hours ("9 d 0 h"); a clock's hours ran to "216:00:00".
+      const day = 86_400_000;
+      const up =
+        status.uptimeMs >= day
+          ? `${Math.floor(status.uptimeMs / day)} d ${Math.floor((status.uptimeMs % day) / 3_600_000)} h`
+          : formatDuration(status.uptimeMs);
+      return `jukecord ${status.version}\nDiscord: ${discord}\nUp for ${up}`;
     },
   },
 
@@ -642,6 +674,18 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     // The time zone of this machine, so "this year" and the days are the ones here.
     request: (words) => ({ query: { ...wrappedPeriod(words), tz: -new Date().getTimezoneOffset() } }),
     show: showWrapped,
+  },
+
+  'alerts-channel': {
+    name: 'alerts',
+    usage: '<channel ID|none>',
+    summary: 'Where jukecord tells this server about trouble (none: nowhere)',
+    request: (words) => {
+      const channel = words.args[0];
+      if (!channel) throw new UsageError('say a channel ID (see jukecord settings) or none');
+      return { body: { channelId: channel === 'none' ? null : channel } };
+    },
+    show: showSettings,
   },
 };
 

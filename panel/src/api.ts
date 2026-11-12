@@ -46,6 +46,7 @@ export const PANEL_ACTIONS = [
   'token-revoke',
   'logs',
   'wrapped',
+  'alerts-channel',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -98,7 +99,15 @@ export async function request<T>(method: string, path: string, body?: unknown): 
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const text = await response.text();
-  const json = text ? (JSON.parse(text) as unknown) : null;
+  let json: unknown = null;
+  try {
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // Not jukecord's answer: a reverse proxy's or an Ingress's own page (an HTML 502 while jukecord restarts). Said
+    // in the panel's words with the status, where the parser's own error was shown before ("Unexpected token '<'").
+    if (response.status === 401) onLoggedOut();
+    throw new ApiError('no-answer', `jukecord did not answer (${response.status})`, response.status);
+  }
   if (!response.ok) {
     const error = (json as { error?: { code?: string; message?: string } } | null)?.error;
     if (response.status === 401) onLoggedOut();
@@ -145,6 +154,10 @@ export interface Player {
   repeat: 'off' | 'track' | 'queue';
   progress: number | null;
   version: number;
+  /** What the player did by itself ("Title: taken out of the looping queue"), kept until a person changes it. */
+  notice: string | null;
+  /** Whether the loading track waits for its turn among the fetches of every server. */
+  waiting: boolean;
 }
 export interface AddResult {
   items: QueueItem[];
@@ -210,6 +223,10 @@ export interface Wrapped {
 export interface Settings {
   djRoleId: string | null;
   roles: { id: string; name: string; color: number }[];
+  /** The text channel where jukecord tells this server about trouble, or null for nowhere. */
+  alertsChannelId: string | null;
+  /** The text channels the bot may post in, to choose it from. */
+  channels: { id: string; name: string }[];
 }
 export interface Status {
   version: string;
@@ -308,6 +325,8 @@ export const api = {
       'GET',
       `${g(guild)}/wrapped?${new URLSearchParams({ ...(period ? { period } : {}), tz: String(-new Date().getTimezoneOffset()) })}`,
     ),
+  'alerts-channel': (guild: string, channelId: string | null) =>
+    request<Settings>('PUT', `${g(guild)}/settings/alerts-channel`, { channelId }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

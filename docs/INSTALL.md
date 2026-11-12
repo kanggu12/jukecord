@@ -173,9 +173,19 @@ the backup made before the update instead).
 
 ## Backups
 
-`./jukecord backup` writes a consistent copy while jukecord runs. The media cache is not in it (tracks are fetched
+`./jukecord backup` writes a consistent copy while jukecord runs, beside it (a worker thread writes the copy, so the
+music and the panel go on meanwhile, however big the database). The media cache is not in it (tracks are fetched
 again when they are played). `./jukecord restore backups/jukecord-<time>.db` stops jukecord, puts the copy back and
 starts it again, also after `./jukecord down`; a relative name counts from the folder the command is typed in. The
 database it replaces stays in the volume as `jukecord.db.before-restore-<time>`, and a file that is not a whole
-jukecord backup (another file, or a backup cut short) is refused before anything is stopped. `./jukecord backup`
-prints the backup's whole path, which `restore` takes from anywhere.
+jukecord backup (another file, or a backup cut short) is refused before anything is stopped, whatever its size (it is
+read in the data volume, not in the container's small `/tmp`). `./jukecord backup` prints the backup's whole path,
+which `restore` takes from anywhere.
+
+jukecord can also make one every day by itself: `JUKECORD_BACKUP_AT=04:30` in `.env` (then `./jukecord up`) makes a
+backup at that time in this machine's time zone, or when jukecord starts after that time if the day has none yet, into
+the volume's `backups` folder, where the newest `JUKECORD_BACKUP_KEEP` (7) stay. `./jukecord doctor` says how old the
+newest backup is and how big the database is; a daily backup that failed is in the log and in the alerts channels.
+These stay in the volume: copy one out with `docker compose cp jukecord:/data/backups/<file> .`, or make a copy here
+with `./jukecord backup`. The container runs in this machine's time zone (`./jukecord` passes it on; `TZ` in `.env` sets
+another).

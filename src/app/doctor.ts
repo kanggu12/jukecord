@@ -8,13 +8,14 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { type Config, describeConfig } from '../config.ts';
+import { type Config, describeConfig, timeOfDay } from '../config.ts';
 import type { MediaCache } from '../media/cache.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
 import type { YtDlp } from '../media/ytdlp.ts';
 import type { Store } from '../store/store.ts';
 import { formatSize } from '../util/units.ts';
 import type { Directory } from './actions.ts';
+import { listBackups } from './backups.ts';
 
 export interface Check {
   readonly name: string;
@@ -105,11 +106,18 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   await check('database', () => {
     const row = options.store.db.prepare('PRAGMA quick_check').get() as { quick_check?: string } | undefined;
     const bytes = options.store.file === ':memory:' ? 0 : fs.statSync(options.store.file).size;
+    // What its write-ahead log holds that the file does not yet: on disk too, and folded in now and then.
+    let log = 0;
+    try {
+      if (options.store.file !== ':memory:') log = fs.statSync(`${options.store.file}-wal`).size;
+    } catch {
+      // No log file at the moment.
+    }
     const healthy = row?.quick_check === 'ok';
     return {
       status: healthy ? 'ok' : 'fail',
       detail: healthy
-        ? `schema ${options.store.schemaVersion()}, ${formatSize(bytes)}`
+        ? `schema ${options.store.schemaVersion()}, ${formatSize(bytes)}${log > 0 ? `, and ${formatSize(log)} in its write-ahead log` : ''}`
         : `SQLite found damage: ${row?.quick_check ?? 'no answer'} (restore a backup)`,
     };
   });
@@ -154,5 +162,30 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       : 'login links from the host only (Discord login needs JUKECORD_DISCORD_CLIENT_SECRET)',
   }));
 
+  await check('backups', () => {
+    const backups = listBackups(path.join(config.dataDir, 'backups'));
+    const schedule = config.backups.at
+      ? `daily at ${timeOfDay(config.backups.at)}, keeping ${config.backups.keep}`
+      : 'no daily backup (JUKECORD_BACKUP_AT)';
+    const newest = backups[0];
+    if (!newest) return { status: 'ok', detail: `none yet; ${schedule}` };
+    const age = Math.max(0, Date.now() - newest.at);
+    // A daily backup that has not run for two days did not run when it should have.
+    const late = config.backups.at !== null && age > 2 * 86_400_000;
+    return {
+      status: late ? 'warn' : 'ok',
+      detail: `the newest ${ago(age)} (${formatSize(newest.bytes)}), ${backups.length} kept; ${schedule}`,
+    };
+  });
+
   return { ok: checks.every((entry) => entry.status !== 'fail'), checks, settings: describeConfig(config) };
+}
+
+// How long ago, as people say it: "12 min ago", "3 h ago", "2 days ago".
+function ago(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} days ago`;
 }

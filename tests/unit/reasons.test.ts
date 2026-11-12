@@ -3,6 +3,29 @@ import { describe, it } from 'node:test';
 import { permanentFailure, plainReason, REASONS } from '../../src/core/reasons.ts';
 import { ytdlpFailure } from '../../src/media/ytdlp.ts';
 
+describe('plainReason when this machine reaches nothing', () => {
+  it('says jukecord cannot reach the internet, for a link and for a search, not "no such site" or "could not download"', () => {
+    for (const message of [
+      // yt-dlp through the address guard, which answers so when no name server answers.
+      'ERROR: [youtube] abc: Unable to download webpage: <urlopen error Tunnel connection failed: 502 jukecord cannot reach the internet>',
+      // yt-dlp on its own (private addresses allowed): Python's words.
+      'ERROR: Unable to download webpage: <urlopen error [Errno -3] Temporary failure in name resolution>',
+      'ERROR: Unable to download API page: <urlopen error [Errno 101] Network is unreachable>',
+      'ERROR: [youtube:search] Unable to download webpage: [Errno 111] Connection refused',
+      // Node's own.
+      'getaddrinfo EAI_AGAIN www.youtube.com',
+      'connect EHOSTUNREACH 142.250.196.110:443',
+    ]) {
+      assert.equal(plainReason(message), REASONS.offline, message);
+    }
+    // A name that does not exist is still no such site.
+    assert.equal(plainReason('Tunnel connection failed: 502 no such site'), REASONS.noSuchSite);
+    assert.equal(plainReason('getaddrinfo ENOTFOUND nowhere.example'), REASONS.noSuchSite);
+    // And it is a moment, not the track: a looping queue keeps it.
+    assert.equal(permanentFailure('[Errno 101] Network is unreachable'), false);
+  });
+});
+
 describe('permanentFailure', () => {
   it('tells a track that is gone for good from a moment of trouble', () => {
     // What the track is: trying again will not change it, so a looping queue lets it go.

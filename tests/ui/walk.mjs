@@ -36,7 +36,7 @@ const FEW = [
   [1024, 768],
   [1440, 900],
 ];
-const SHOOT = new Set([412, 390, 1440]);
+const SHOOT = new Set([412, 390, 1440, 1366]);
 // Only some states, for a quick look while working on one (ONLY=toast,menu tests/ui/run.sh <folder>): the other
 // states, the README's pictures and the playing-along check are skipped; ONLY=readme takes the README's pictures
 // alone. A whole walk leaves it unset.
@@ -102,7 +102,9 @@ async function open({
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
-    if (message.type() === 'error' && !message.text().includes('favicon')) errors.push(message.text());
+    // A state may say which errors it causes on purpose (a refused request's "Failed to load resource" line).
+    const expected = (page.expectedErrors ?? []).some((pattern) => pattern.test(message.text()));
+    if (message.type() === 'error' && !message.text().includes('favicon') && !expected) errors.push(message.text());
   });
   if (login) {
     const link = await api('POST', '/login-links');
@@ -218,10 +220,20 @@ const MADE_UP = {
     ],
     count: 3,
   },
+  // The server's roles and the text channels the bot may post in, for the menu of someone who manages the server.
+  roles: [
+    { id: '500000000000000001', name: 'DJ', color: 0x3d7be0 },
+    { id: '500000000000000002', name: 'Night shift', color: 0 },
+  ],
+  channels: [
+    { id: '600000000000000001', name: 'jukecord-alerts' },
+    { id: '600000000000000002', name: 'general' },
+  ],
 };
-// Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones.
-async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild } = {}) {
-  await page.route(/\/api\/v1\/(status|me|guilds)(\?.*)?$/, async (route) => {
+// Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones;
+// `view`, a person who may only look (no DJ role, no Manage Server).
+async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false } = {}) {
+  await page.route(/\/api\/v1\/(status|me|guilds|guilds\/[^/]+\/settings)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
     const what = new URL(route.request().url()).pathname.split('/').pop();
@@ -230,7 +242,14 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild }
         ? { ...body, discord: true, mode: 'discord', login: { discord: true } }
         : what === 'me'
           ? { ...body, ...MADE_UP.me, name, bot: MADE_UP.bot }
-          : body.map((entry) => ({ ...entry, name: guild, icon: null }));
+          : what === 'settings'
+            ? { ...body, roles: MADE_UP.roles, channels: MADE_UP.channels, alertsChannelId: MADE_UP.channels[0].id }
+            : body.map((entry) => ({
+                ...entry,
+                name: guild,
+                icon: null,
+                ...(view ? { mayControl: false, mayManage: false } : {}),
+              }));
     await route.fulfill({ response, json });
   });
   // The page's side of each socket, so a state can say something of its own to the page (madeUpSay below).
@@ -677,6 +696,139 @@ for (const theme of ONLY && !ONLY.has('pictures') ? [] : ['dark', 'light']) {
     }
   }
 }
+// ---- added in 0.3 ---------------------------------------------------------------------------------------------------
+// Something to play again for the states below.
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' }).catch(() => {});
+// What the player did by itself, under the title (paused with nobody listening), put in by standing between the page
+// and its connection.
+async function player(page, change) {
+  const inject = await intercept(page);
+  await page.reload();
+  await page.waitForSelector('.app .card');
+  await page.waitForTimeout(300);
+  const now = await api('GET', '/guilds/local/player');
+  const queue = await api('GET', '/guilds/local/queue');
+  const track = now.track ?? queue.items[0]?.track ?? null;
+  inject({ type: 'player', player: { ...now, track, ...change, version: now.version + 1000 } });
+  await page.waitForTimeout(200);
+}
+await sweep('notice', FEW, async (page) => {
+  await player(page, {
+    status: 'paused',
+    positionMs: 64_000,
+    durationMs: 214_000,
+    notice: 'paused with nobody listening',
+  });
+  await page.waitForSelector('.now .player-note:not([hidden])');
+});
+// A track whose fetch waits for its turn among every server's fetches.
+await sweep('waiting', FEW, async (page) => {
+  await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
+});
+// The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
+await sweep(
+  'menu-discord',
+  FEW,
+  async (page) => {
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .section .choice[aria-pressed="true"] >> nth=1');
+    await page.waitForTimeout(400);
+  },
+  { discord: true },
+);
+// An add that does not go through (an address on a private network, which jukecord does not fetch): the reason under
+// the field as well as in the bar.
+await sweep('add-failed', FEW, async (page) => {
+  // The refusal is an answer of 400, which the browser reports on its console: expected here.
+  page.expectedErrors = [/status of 400/];
+  await page.fill('#add-input', 'http://10.0.0.1/tune');
+  await page.click('.add [type="submit"]');
+  await page.waitForSelector('.add-failed:not([hidden])');
+});
+// Someone who may only look, in the made-up Discord: no grips, no keys on the rows, the saved playlists to look at.
+await sweep(
+  'view-only',
+  FEW,
+  async (page) => {
+    await tool(page, 'load');
+    await page.waitForSelector('.dialog .channel');
+  },
+  { discord: { view: true } },
+);
+// Wide windows short of height (a 1366 by 768 laptop with the browser's bars, a 1920 by 1080 screen at 150 %): two
+// columns, the playing card shorter, the add field and the queue's rows in sight.
+await sweep(
+  'short-wide',
+  [
+    [1366, 657],
+    [1280, 610],
+    [1920, 700],
+  ],
+  null,
+  { touch: false },
+);
+// Touch screens as wide but short (an iPad Air held sideways under Safari's bars, an Android tablet under Chrome's):
+// one column, as a phone, since their keys are taller.
+await sweep(
+  'short-tablet',
+  [
+    [1180, 750],
+    [1280, 700],
+  ],
+  null,
+  { touch: true },
+);
+// The keyboard: the page is told the player's states by standing between it and its connection, and a skip is answered
+// here, so the server's player and queue stay as they are. Returns how to tell the page a state.
+async function playingHere(page) {
+  const inject = await intercept(page);
+  await page.reload();
+  await page.waitForSelector('.app .card');
+  await page.waitForTimeout(300);
+  const now = await api('GET', '/guilds/local/player');
+  const queue = await api('GET', '/guilds/local/queue');
+  const track = queue.items[0]?.track ?? null;
+  let version = now.version + 1000;
+  // Each state a newer version than the last, as the server numbers them.
+  const tell = (change) => {
+    version += 1;
+    inject({ type: 'player', player: { ...now, ...change, version } });
+  };
+  tell({ status: 'playing', track, positionMs: 30_000, durationMs: 180_000 });
+  await page.waitForTimeout(200);
+  return { now, tell };
+}
+// A shortcut is the key as typed: B on a Dvorak keyboard, at N's place, skips nothing; N in Hangul input mode skips.
+await sweep('keys-typed', [[1440, 900]], async (page) => {
+  const { now } = await playingHere(page);
+  const skips = [];
+  await page.route('**/api/v1/guilds/*/player/skip', (route) => {
+    skips.push(route.request().url());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(now) });
+  });
+  // A key pressed with nothing focused, as a keyboard layout or an input mode reports it.
+  const press = (key, code) =>
+    page.evaluate(
+      ([key, code]) => document.body.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true })),
+      [key, code],
+    );
+  await press('b', 'KeyN');
+  await page.waitForTimeout(300);
+  if (skips.length !== 0) throw new Error("B, typed at N's place on a Dvorak keyboard, skipped the track");
+  await press('ㅜ', 'KeyN');
+  await page.waitForTimeout(300);
+  if (skips.length !== 1) throw new Error('N in Hangul input mode did not skip the track');
+});
+// A key turned off with the focus on it hands the focus on: Stop has it, and the player stops; the focus goes to the
+// main key (Play, the queue waiting), not to the page.
+await sweep('keys-focus', [[1440, 900]], async (page) => {
+  const { tell } = await playingHere(page);
+  await page.focus('.now [data-act="stop"]');
+  tell({ status: 'idle', track: null });
+  await page.waitForTimeout(300);
+  const focused = await page.evaluate(() => document.activeElement?.closest('[data-act]')?.dataset.act ?? 'the page');
+  if (focused !== 'pause') throw new Error(`Stop turned off left the focus on ${focused}`);
+});
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

@@ -7,7 +7,8 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import { after, before, describe, it } from 'node:test';
-import { EVENTS_VERSION } from '../../src/web/events.ts';
+import WebSocketClient from 'ws';
+import { DEFAULT_LIVE_LIMITS, EVENTS_VERSION } from '../../src/web/events.ts';
 import {
   ALICE,
   exampleTrack,
@@ -310,6 +311,43 @@ describe('live connections are capped', () => {
     } finally {
       for (const socket of sockets) socket.close();
       for (const socket of silent) socket.destroy();
+      await server.close();
+    }
+  });
+
+  it('keep a tab that stalls for a moment, and give a tab the time a phone on a slow line takes to answer', async () => {
+    // Fifteen seconds to answer a probe by default: a pong takes a fraction of a second from a browser that is there,
+    // but a phone in a tunnel, or a ping stuck behind a big message, can stall for several. Five closed a tab that
+    // stalled for six, and its reconnect was then refused because the tab knocking had taken its place.
+    assert.ok((DEFAULT_LIVE_LIMITS.probeMs ?? 0) >= 15_000, `${DEFAULT_LIVE_LIMITS.probeMs} ms`);
+    // The same at a smaller scale: a probe of 1.2 s, and a tab whose line stalls for 0.6 s of it.
+    const server = await testServer({ listen: true, live: { perLogin: 2, probeMs: 1200 } });
+    const clients: WebSocketClient[] = [];
+    try {
+      server.directory.join(GUILD, ALICE);
+      const alice = sessionFor(server, ALICE);
+      const base = `${server.url.replace('http://', 'ws://')}/api/v1/events?guild=${GUILD}`;
+      const tab = () =>
+        new Promise<WebSocketClient>((resolve) => {
+          const client = new WebSocketClient(base, { headers: { cookie: alice.cookie, origin: server.url } });
+          clients.push(client);
+          client.on('error', () => {});
+          client.once('open', () => resolve(client));
+        });
+      const phone = await tab();
+      await tab();
+      // The phone's line stalls: it reads nothing (pings included, which ws answers as it reads them).
+      (phone as unknown as { _socket: net.Socket })._socket.pause();
+      const knock = new Socket(base, { cookie: alice.cookie, origin: server.url });
+      assert.equal((await knock.closed).code, 1013);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      (phone as unknown as { _socket: net.Socket })._socket.resume();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // The probe is over: the phone answered in time and keeps its place; the login still has its two tabs.
+      assert.equal(phone.readyState, WebSocketClient.OPEN);
+      assert.equal(server.web.hub.counts().connections, 2);
+    } finally {
+      for (const client of clients) client.terminate();
       await server.close();
     }
   });

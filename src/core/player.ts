@@ -27,6 +27,11 @@ export interface PreparedMedia {
   readonly file: string;
   /** The length measured from the file; the site's figure can be missing or a little off. */
   readonly durationMs: number;
+  /**
+   * Whether it came from the cache, not from the site just now: a track from the cache says nothing about whether
+   * the site works (a looping queue counts only tracks really fetched, see Player.failed).
+   */
+  readonly fromCache?: boolean;
 }
 
 /** Gets a track ready (fetch, convert, measure). Implemented by the media module; faked in tests. */
@@ -78,6 +83,13 @@ export interface PlayerSnapshot {
   readonly progress: number | null;
   /** Grows by one with every snapshot, so clients can ignore one that arrives out of order. */
   readonly version: number;
+  /**
+   * What the player did by itself that people would not see otherwise ("Title: taken out of the looping queue"), in
+   * the actions' plain English like `error`; kept until a person changes the player.
+   */
+  readonly notice: string | null;
+  /** Whether the loading track's fetch waits for its turn among the fetches of every server (no progress yet). */
+  readonly waiting: boolean;
 }
 
 export interface PlayerOptions {
@@ -95,6 +107,8 @@ export interface PlayerOptions {
   readonly seekCooldownMs?: number;
   /** How long past the end the player waits for an output to report the end before moving on by itself. */
   readonly endGraceMs?: number;
+  /** Hears that a track was taken out of a looping queue, with the full text of its failure (for app/alerts.ts). */
+  readonly onLeftLoop?: (guildId: string, track: Track, reason: string) => void;
 }
 
 // A track counts as listened to (and goes into the history) once it has played this long; a skip right after the
@@ -134,16 +148,22 @@ export class Player {
   private status: PlayerStatus = 'idle';
   private current: Current | null = null;
   private media: PreparedMedia | null = null;
-  // The position at clock time `anchor`. While playing the position is offsetMs + (now - anchor); otherwise offsetMs.
+  // The position at steady time `anchor` (the clock's steady(), never the date: a system clock set back an hour made
+  // the place an hour before the start). While playing the position is offsetMs + (steady now - anchor); otherwise
+  // offsetMs.
   private offsetMs = 0;
   private anchor = 0;
   // Bumped on every start of the outputs and every change of track; see the module comment.
   private session = 0;
   private version = 0;
   private error: string | null = null;
+  // See PlayerSnapshot.notice: set by the player itself, cleared by any change a person makes.
+  private notice: string | null = null;
   private repeat: RepeatMode = 'off';
   // Download progress of the loading track, and the timer that sends it at most four times a second.
   private progress: number | null = null;
+  // Whether the loading track's fetch waits for its place among every server's fetches (see load).
+  private waiting = false;
   private progressTimer: TimerHandle | null = null;
 
   // Loading: the running fetch, its timeout, and how to start once it is done.
@@ -156,7 +176,8 @@ export class Player {
   // person's action (play, skip, stop ...) starts the count again.
   private failedInRow: { track: Track; addedBy: string | null; putBack: boolean }[] = [];
   // The tracks of a looping queue that failed on their last pass and went back for one more (see failed): by track
-  // id, how many tracks had got ready when it failed. Tracks got ready so far, counted for that.
+  // id, how many tracks had got ready when it failed. Tracks got ready so far, counted for that: only those really
+  // fetched from their site, not those found in the cache.
   private failedLastPass = new Map<number, number>();
   private readyCount = 0;
   // Restarts of outputs that ended early, counted per session (see outputEnded).
@@ -188,7 +209,7 @@ export class Player {
   /** Where the current track is now, in milliseconds. */
   position(): number {
     if (this.status !== 'playing') return this.offsetMs;
-    const elapsed = this.options.clock.now() - this.anchor;
+    const elapsed = this.options.clock.steady() - this.anchor;
     // Never past the end: between the end and the moment the next track starts, the bar stays full.
     const end = this.media?.durationMs ?? Number.POSITIVE_INFINITY;
     return Math.min(this.offsetMs + elapsed, end);
@@ -208,6 +229,8 @@ export class Player {
       repeat: this.repeat,
       progress: this.status === 'loading' ? this.progress : null,
       version: this.version,
+      notice: this.notice,
+      waiting: this.status === 'loading' && this.waiting,
     };
   }
 
@@ -220,6 +243,7 @@ export class Player {
     // Nothing queued: nothing starts, and no snapshot is sent for a change that did not happen.
     if (this.options.queue.size(this.guildId) === 0) return false;
     this.failedInRow = [];
+    this.notice = null;
     return this.advance(false);
   }
 
@@ -227,6 +251,7 @@ export class Player {
   skip(): boolean {
     if (this.status === 'idle') return false;
     this.failedInRow = [];
+    this.notice = null;
     // With the queue on repeat, a skipped track stays in the loop: it goes back to the end like a finished one.
     const current = this.current;
     if (this.repeat === 'queue' && current)
@@ -238,6 +263,7 @@ export class Player {
   removeCurrent(): boolean {
     if (this.status === 'idle') return false;
     this.failedInRow = [];
+    this.notice = null;
     return this.advance(false);
   }
 
@@ -245,6 +271,7 @@ export class Player {
   stop(): boolean {
     if (this.status === 'idle') return false;
     this.failedInRow = [];
+    this.notice = null;
     this.finishCurrent(true);
     this.goIdle();
     return true;
@@ -252,20 +279,15 @@ export class Player {
 
   /** Pauses. While loading, the track will start paused when it is ready. */
   pause(): boolean {
-    if (this.status === 'loading') {
-      if (this.startPaused) return false;
-      this.startPaused = true;
-      this.emit();
-      return true;
-    }
-    if (this.status !== 'playing') return false;
-    // Freeze the position first, then stop the clock-driven timer and the sound.
-    this.offsetMs = this.position();
-    this.status = 'paused';
-    this.cancelEndTimer();
-    for (const output of this.outputs.keys()) output.pause();
-    this.emit();
-    return true;
+    return this.pauseSaying(null);
+  }
+
+  /**
+   * Pauses because nobody hears it anywhere (see app/rest.ts), and says so in the notice; a person plays on. Only a
+   * player that plays or gets a track ready rests.
+   */
+  rest(): boolean {
+    return this.pauseSaying('paused with nobody listening');
   }
 
   /** Resumes after a pause (or cancels the "start paused" of a loading track). */
@@ -273,12 +295,14 @@ export class Player {
     if (this.status === 'loading') {
       if (!this.startPaused) return false;
       this.startPaused = false;
+      this.notice = null;
       this.emit();
       return true;
     }
     if (this.status !== 'paused' || !this.media) return false;
+    this.notice = null;
     this.status = 'playing';
-    this.anchor = this.options.clock.now();
+    this.anchor = this.options.clock.steady();
     // Outputs started with this session pick up where they paused; any other output starts at the position now.
     for (const [output, session] of this.outputs) {
       if (session === this.session) output.resume();
@@ -297,7 +321,9 @@ export class Player {
    */
   seek(targetMs: number): boolean {
     if (this.status === 'idle') return false;
-    const now = this.options.clock.now();
+    this.notice = null;
+    // On the steady clock: a seek after the system clock was set back an hour was otherwise held for that hour.
+    const now = this.options.clock.steady();
     const wait = this.lastSeekAt + this.seekCooldownMs - now;
     if (wait <= 0) {
       this.applySeek(targetMs);
@@ -378,6 +404,7 @@ export class Player {
   setRepeat(mode: RepeatMode): boolean {
     if (mode === this.repeat) return false;
     this.repeat = mode;
+    this.notice = null;
     // The failures of an earlier loop do not count against a later one.
     this.failedLastPass.clear();
     this.emit();
@@ -397,12 +424,34 @@ export class Player {
   restore(track: Track | null, addedBy: string | null, positionMs: number): void {
     if (!track) return;
     this.failedInRow = [];
+    this.notice = null;
     this.current = { track, addedBy, startedAt: null };
     this.load(positionMs, true);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Internals
+
+  // Pauses (a loading track starts paused when it is ready) with this notice: none for a person's pause, which clears
+  // what the player said before, or what the player says about pausing by itself.
+  private pauseSaying(notice: string | null): boolean {
+    if (this.status === 'loading') {
+      if (this.startPaused) return false;
+      this.startPaused = true;
+      this.notice = notice;
+      this.emit();
+      return true;
+    }
+    if (this.status !== 'playing') return false;
+    this.notice = notice;
+    // Freeze the position first, then stop the clock-driven timer and the sound.
+    this.offsetMs = this.position();
+    this.status = 'paused';
+    this.cancelEndTimer();
+    for (const output of this.outputs.keys()) output.pause();
+    this.emit();
+    return true;
+  }
 
   // Finishes the current track and starts the next one in the queue (held paused if `paused`), or goes idle when
   // there is none.
@@ -426,7 +475,7 @@ export class Player {
       this.record();
       current.startedAt = this.options.clock.now();
       this.offsetMs = 0;
-      this.anchor = this.options.clock.now();
+      this.anchor = this.options.clock.steady();
       this.session += 1;
       for (const output of this.outputs.keys()) this.startOutput(output);
       this.scheduleEnd();
@@ -488,6 +537,7 @@ export class Player {
     this.media = null;
     this.offsetMs = startAtMs;
     this.progress = null;
+    this.waiting = false;
     const session = ++this.session;
     const controller = new AbortController();
     this.loadAbort = controller;
@@ -506,6 +556,7 @@ export class Player {
     // The time a fetch waits for its place among the fetches of every server (other servers fetching long tracks on a
     // small machine) is not its own: the limit counts from when it starts. Without that, a server whose turn had not
     // come failed three tracks in a row as too slow, and stopped, before any of them was fetched.
+    // People see that it waits for its turn ("Getting it ready" with no progress said nothing about why).
     const onWaiting = (waiting: boolean): void => {
       if (session !== this.session || this.status !== 'loading') return;
       if (!waiting) {
@@ -514,6 +565,9 @@ export class Player {
         this.options.clock.clearTimeout(this.loadTimer);
         this.loadTimer = null;
       }
+      if (this.waiting === waiting) return;
+      this.waiting = waiting;
+      this.emit();
     };
     this.emit();
     // Progress is shown while loading; a burst of reports is sent at most four times a second.
@@ -539,6 +593,15 @@ export class Player {
     );
   }
 
+  /**
+   * A track of this server was fetched from its site ahead of its turn (the prefetcher): the site works, as when the
+   * player fetches one itself. The prefetched track reaches the player from the cache later, which shows nothing; not
+   * counted, a looping queue's track that failed on its own was fetched again on every pass, never taken out.
+   */
+  fetchedAhead(): void {
+    this.readyCount += 1;
+  }
+
   // The current track is ready: start it (or hold it paused) at the place asked for.
   private ready(media: PreparedMedia): void {
     this.cancelLoad();
@@ -546,7 +609,10 @@ export class Player {
     // A track got ready: the count of failures in a row starts again, and a failure of this one on an earlier pass of
     // a looping queue is forgotten.
     this.failedInRow = [];
-    this.readyCount += 1;
+    // Only a track fetched from its site just now shows that the site works; one from the cache shows nothing about
+    // it. Counted as proof, a cached track let a track that failed during a YouTube bot check, or an outage, leave the
+    // loop after two passes, as if the site worked and that track did not.
+    if (!media.fromCache) this.readyCount += 1;
     if (this.current) this.failedLastPass.delete(this.current.track.id);
     // A restored position past the end of the file (the file changed) starts from the top instead.
     this.offsetMs = this.startAtMs < media.durationMs ? this.startAtMs : 0;
@@ -560,7 +626,7 @@ export class Player {
       return;
     }
     this.status = 'playing';
-    this.anchor = this.options.clock.now();
+    this.anchor = this.options.clock.steady();
     this.session += 1;
     for (const output of this.outputs.keys()) this.startOutput(output);
     this.scheduleEnd();
@@ -599,6 +665,10 @@ export class Player {
           track: track.url,
           why: permanent ? 'it will not work' : 'it failed on two passes in a row',
         });
+        // Said to people too, and kept past the next track (which clears the failure itself): a track leaving a loop
+        // is otherwise seen by nobody. And to the server's alerts channel, when it has one.
+        this.notice = `${track.title}: taken out of the looping queue`;
+        this.options.onLeftLoop?.(this.guildId, track, reason);
       }
     }
     this.failedInRow.push({ track, addedBy, putBack: !looping });
@@ -626,7 +696,7 @@ export class Player {
 
   // Runs a seek: restarts the sound at the new place while playing, or just moves the place otherwise.
   private applySeek(targetMs: number): void {
-    this.lastSeekAt = this.options.clock.now();
+    this.lastSeekAt = this.options.clock.steady();
     const duration = this.media?.durationMs ?? this.current?.track.durationMs ?? null;
     // Keep the target inside the track (see SEEK_END_MARGIN_MS).
     const max = duration === null ? Number.POSITIVE_INFINITY : Math.max(0, duration - SEEK_END_MARGIN_MS);
@@ -642,7 +712,7 @@ export class Player {
       for (const output of this.outputs.keys()) output.stop();
     } else if (this.status === 'playing' && this.media) {
       this.offsetMs = target;
-      this.anchor = this.options.clock.now();
+      this.anchor = this.options.clock.steady();
       this.session += 1;
       for (const output of this.outputs.keys()) this.startOutput(output);
       this.scheduleEnd();

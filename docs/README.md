@@ -47,31 +47,43 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
   everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
   role deleted in Discord counts as none: everyone may change the music again until another is set.
 
+- A server can choose an **alerts channel**, where jukecord says when something goes wrong: YouTube refusing it (its
+  check for bots) and when that is over, jukecord restarting itself, its data's disk with less than 1 GiB free, a track
+  taken out of the server's looping queue, connections turned away at one of its caps, and a scheduled backup that
+  failed. Each kind at most once an hour; the same lines go to jukecord's log. People who can manage the server choose
+  it in the panel's menu, with `/alerts set`, or with `jukecord alerts <channel ID>`.
+
 ## Slash commands
 
-| Command                                      | Does                                                                |
-| :------------------------------------------- | :------------------------------------------------------------------ |
-| `/play`                                      | play now (an address or search words); the current track is skipped |
-| `/add`                                       | add to the queue (at the end, or next)                              |
-| `/skip` `/pause` `/resume` `/stop`           | the player (`/resume` also starts the queue after a stop)           |
-| `/seek`                                      | go to a place: `83`, `1:23` or `1m23s`                              |
-| `/repeat`                                    | repeat off, this track, or the queue                                |
-| `/np`                                        | what is playing, with pause and skip buttons                        |
-| `/queue`                                     | the queue, ten to a page                                            |
-| `/jump` `/remove` `/move`                    | a queued track by its number: play it now, remove it, move it       |
-| `/shuffle` `/dedupe` `/clear`                | the whole queue                                                     |
-| `/history`                                   | recently played                                                     |
-| `/playlist save, load, list, rename, delete` | saved playlists                                                     |
-| `/join` `/leave`                             | the voice channel (yours, or the one you name)                      |
-| `/listen`                                    | the panel's link, to listen in a browser                            |
-| `/stats`                                     | listening figures                                                   |
-| `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
-| `/version`                                   | the version                                                         |
-| `/wrapped`                                   | the server's year in music, or a month, or the last 12 months       |
+| Command                                      | Does                                                                 |
+| :------------------------------------------- | :------------------------------------------------------------------- |
+| `/play`                                      | play now (an address or search words); the current track is skipped  |
+| `/add`                                       | add to the queue (at the end, or next)                               |
+| `/skip` `/pause` `/resume` `/stop`           | the player (`/resume` also starts the queue after a stop)            |
+| `/seek`                                      | go to a place: `83`, `1:23` or `1m23s`                               |
+| `/repeat`                                    | repeat off, this track, or the queue                                 |
+| `/np`                                        | what is playing, with pause and skip buttons                         |
+| `/queue`                                     | the queue, ten to a page                                             |
+| `/jump` `/remove` `/move`                    | a queued track by its number: play it now, remove it, move it        |
+| `/shuffle` `/dedupe` `/clear`                | the whole queue                                                      |
+| `/history`                                   | recently played                                                      |
+| `/playlist save, load, list, rename, delete` | saved playlists                                                      |
+| `/join` `/leave`                             | the voice channel (yours, or the one you name)                       |
+| `/listen`                                    | the panel's link, to listen in a browser                             |
+| `/stats`                                     | listening figures                                                    |
+| `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                    |
+| `/version`                                   | the version                                                          |
+| `/alerts show, set, clear`                   | where jukecord tells this server about trouble (needs Manage Server) |
+| `/wrapped`                                   | the server's year in music, or a month, or the last 12 months        |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
-five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers.
+five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers. When nobody hears a server anywhere (the bot
+in no voice channel, no browser playing along) for two minutes (`JUKECORD_REST_AFTER`), its player pauses and says so,
+instead of fetching tracks and counting plays for nobody; playing on is a press of play. After a restart (an update,
+a crash) the bot goes back to the voice channel it was in when people are there, and says so in that channel's chat
+with the now-playing card, paused. The newest now-playing card in a server (from `/np`, `/pause` and the like, or a
+press of its keys) is kept current as the music changes, from anywhere, at most once every five seconds.
 
 ## The jukecord command
 
@@ -84,7 +96,8 @@ export JUKECORD_URL=https://music.example.com JUKECORD_TOKEN=jkc_...
 node src/cli/main.ts np
 ```
 
-`jukecord --help` lists every command. A few:
+`jukecord --help` lists every command, and `jukecord help <command>` (or `<command> --help`) shows one; through the
+front door, `./jukecord help <command>` asks the running jukecord. A few:
 
 ```bash
 ./jukecord add never gonna give you up --next
@@ -96,7 +109,8 @@ node src/cli/main.ts np
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it
-is, for scripts. Exit codes: 0 done, 1 refused (the message says why), 2 a typing mistake, 3 jukecord did not answer.
+is, for scripts, and a failure as `{"error":{"code","message"}}` on stderr. Exit codes: 0 done, 1 refused (the message
+says why), 2 a typing mistake, 3 jukecord did not answer, 4 jukecord said to try again later (a rate, a busy moment).
 
 ## Settings
 
@@ -126,6 +140,9 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                                     |
 | `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                             |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                                      |
+| `JUKECORD_REST_AFTER`                                                | `2m`               | how long a server nobody hears plays on before it pauses (`0`: it plays on)                    |
+| `JUKECORD_BACKUP_AT`                                                 | `off`              | a backup of the database every day at this time (`04:30`, in jukecord's time zone)             |
+| `JUKECORD_BACKUP_KEEP`                                               | `7`                | how many backups stay in the backups folder                                                    |
 
 jukecord checks every setting when it starts and lists every problem at once. `jukecord doctor` shows the settings in
 effect (secrets only as set or not set) and checks the parts jukecord needs.

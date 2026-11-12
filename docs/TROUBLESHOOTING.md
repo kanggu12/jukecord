@@ -53,6 +53,20 @@ The panel says why jukecord turned its live connection away, and tries again by 
 - "jukecord has as many live connections as it allows": `JUKECORD_LIVE_MAX` (1000 by default) are open. A machine
   that can take more can be given a higher one.
 
+## "jukecord cannot reach the internet"
+
+Adding or playing a track says so when the machine jukecord runs on reaches no site: no name server answers, there is
+no route out, or a proxy refuses the connection. `./jukecord doctor` checks yt-dlp's release on GitHub, which fails the
+same way; once the network is back, adding works again (a track that failed in a looping queue stays in it).
+
+## "Turned connections away from one address at its cap"
+
+jukecord takes at most 256 connections from one address. The address in the log line is where they came from: a
+reverse proxy on the same machine, or Docker's bridge (`172.17.0.1`, how a client of the host looks inside the
+container), carries every browser on one address. With `JUKECORD_TRUST_PROXY` set, each browser counts by its own
+address for the rates and the live connections, and the proxy's address may have 3840 (all but a sixteenth of the
+4096 jukecord takes: the rest stay for health checks and other clients).
+
 ## Logging in with Discord fails
 
 - `redirect_uri` errors: the address in **Redirects** must be exactly `<JUKECORD_PUBLIC_URL>/auth/callback` (or
@@ -67,10 +81,11 @@ N, newer than this jukecord knows": a newer jukecord wrote it; run the newer ver
 
 ## jukecord started again by itself
 
-`the main thread has not answered for 30 s; ending the process so that it is started again` in `./jukecord logs`
-means jukecord was stuck and ended itself, so that Docker's restart policy (or Kubernetes) would start it again:
-Docker restarts a container that exits, not one that hangs. Every server comes back paused where it was. The lines
-before it say what it was doing; please put them in an issue.
+`the main thread has not answered for 30 s; ending the process so that it is started again` in `./jukecord logs -f`
+(the console), and `the watchdog ended the last run` in `./jukecord logs` once it is back, mean jukecord was stuck and
+ended itself, so that Docker's restart policy (or Kubernetes) would start it again: Docker restarts a container that
+exits, not one that hangs. Every server comes back paused where it was, and a server with an alerts channel is told.
+The lines before it say what it was doing; please put them in an issue.
 
 ## The port is taken
 

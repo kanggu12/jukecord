@@ -5,6 +5,8 @@
  * song instant. Everything else goes through yt-dlp, a few lookups at a time: each one is a process of its own with a
  * Node child for YouTube, and twenty at once would use more memory than a small server has.
  */
+
+import type { FetchWatch } from '../app/alerts.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { TrackRepository } from '../store/store.ts';
@@ -25,6 +27,8 @@ export interface ResolverOptions {
   readonly perPerson?: number;
   /** How many of those one server may have running (default 3), so one busy server leaves room for the others. */
   readonly perServer?: number;
+  /** Hears how each lookup on a site went (for YouTube's check for bots, see app/alerts.ts). */
+  readonly watch?: FetchWatch;
 }
 
 export class Resolver {
@@ -75,12 +79,20 @@ export class Resolver {
       // than the guard yt-dlp would meet.
       if (input.kind === 'url') await this.options.checkAddress?.(input.url);
       found = await this.options.ytdlp.lookup(input, signal);
+      // The site answered (words are searched on YouTube).
+      this.options.watch?.worked(input.kind === 'search' ? 'search' : input.url.href);
     } catch (error) {
       // The full text for the log; people get a short reason from the actions (core/reasons.ts).
       this.options.log.info('a lookup failed', {
         input: input.kind === 'search' ? `search: ${input.query}` : input.url.href,
         reason: error instanceof Error ? error.message : String(error),
       });
+      // A lookup stopped by the person asking is no answer from the site.
+      if (!signal?.aborted)
+        this.options.watch?.failed(
+          input.kind === 'search' ? 'search' : input.url.href,
+          error instanceof Error ? error.message : String(error),
+        );
       throw error;
     } finally {
       this.active -= 1;

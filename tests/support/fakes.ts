@@ -12,9 +12,15 @@ export async function flush(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-/** A clock that only moves when a test moves it; timers run in order as time passes them. */
+/**
+ * A clock that only moves when a test moves it; timers run in order as time passes them. Like the real ones, its timers
+ * and its steady time follow time passing, not the date: jump() sets the date alone, as a system clock set back or
+ * forward does.
+ */
 export class FakeClock implements Clock {
+  // The steady time (which timers follow), and how far the date is from it.
   private time: number;
+  private offset = 0;
   private sequence = 0;
   private readonly timers = new Map<number, { at: number; fn: () => void }>();
 
@@ -24,7 +30,16 @@ export class FakeClock implements Clock {
   }
 
   now(): number {
+    return this.time + this.offset;
+  }
+
+  steady(): number {
     return this.time;
+  }
+
+  /** Sets the date `ms` later (or earlier, when negative) at once, without any time passing for timers. */
+  jump(ms: number): void {
+    this.offset += ms;
   }
 
   setTimeout(fn: () => void, ms: number): TimerHandle {
@@ -70,6 +85,8 @@ export interface PendingPrepare {
   readonly onProgress: ((fraction: number) => void) | undefined;
   /** Whether somebody waits for the track ('now') or it is fetched ahead of time ('ahead'). */
   readonly priority: 'now' | 'ahead';
+  /** The caller's "waiting for its turn" callback, if any (true while the fetch waits for its place). */
+  readonly onWaiting: ((waiting: boolean) => void) | undefined;
   resolve(media: PreparedMedia): void;
   reject(error: Error): void;
 }
@@ -83,9 +100,10 @@ export class FakeMedia implements MediaPreparer {
     signal: AbortSignal,
     onProgress?: (fraction: number) => void,
     priority: 'now' | 'ahead' = 'now',
+    onWaiting?: (waiting: boolean) => void,
   ): Promise<PreparedMedia> {
     return new Promise<PreparedMedia>((resolve, reject) => {
-      this.calls.push({ track, signal, onProgress, priority, resolve, reject });
+      this.calls.push({ track, signal, onProgress, priority, onWaiting, resolve, reject });
       // Like the real preparer: an abort ends the fetch with an error.
       signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     });
@@ -98,10 +116,10 @@ export class FakeMedia implements MediaPreparer {
     return call;
   }
 
-  /** Finishes the newest fetch with a file of the given length. */
-  finish(durationMs: number): void {
+  /** Finishes the newest fetch with a file of the given length; `fromCache` as for a track found in the cache. */
+  finish(durationMs: number, fromCache = false): void {
     const call = this.last();
-    call.resolve({ file: `/cache/${call.track.id}.opus`, durationMs });
+    call.resolve({ file: `/cache/${call.track.id}.opus`, durationMs, fromCache });
   }
 }
 

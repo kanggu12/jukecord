@@ -44,8 +44,10 @@ describe("a server's tracks in its history and playlists", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-index-'));
     try {
       const file = path.join(dir, 'jukecord.db');
-      // A database as the migrations before the index left it, with a play in it.
-      const before = MIGRATIONS.filter((migration) => !migration.sql.includes('history_by_guild_track'));
+      // A database as the migrations before the index left it, with a play in it (by its place in the list, not its
+      // number: later migrations come after it).
+      const at = MIGRATIONS.findIndex((migration) => migration.sql.includes('history_by_guild_track'));
+      const before = MIGRATIONS.slice(0, at);
       const old = new DatabaseSync(file);
       for (const migration of before) old.exec(migration.sql);
       old.exec(`PRAGMA user_version = ${before.at(-1)?.version ?? 0}`);

@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 import type { HistoryEntry, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import { MIGRATIONS } from './schema.ts';
 
@@ -84,6 +85,7 @@ export class Store {
   readonly users: UserRepository;
   readonly sessions: SessionRepository;
   readonly tokens: TokenRepository;
+  readonly voiceChannels: VoiceChannelRepository;
   // How deep the current transaction is nested; inner ones become savepoints.
   private depth = 0;
 
@@ -100,6 +102,7 @@ export class Store {
     this.users = new UserRepository(this, now);
     this.sessions = new SessionRepository(this, now);
     this.tokens = new TokenRepository(this, now);
+    this.voiceChannels = new VoiceChannelRepository(this, now);
   }
 
   /**
@@ -221,9 +224,61 @@ export class Store {
     this.db.prepare('VACUUM INTO ?').run(target);
   }
 
+  /**
+   * backup(), written by a worker thread with a connection of its own: a copy of a large database takes seconds, and
+   * made here it held the main thread all that time (the voices' audio stood still, the panel waited, and past thirty
+   * seconds the watchdog ended jukecord). The copy is the same consistent snapshot: the database is in WAL mode, where
+   * a reader and this connection's writes do not wait for each other. An in-memory database (the tests') has no file
+   * for another connection to open, and is copied here.
+   */
+  async backupAside(target: string): Promise<void> {
+    if (this.file === ':memory:') return this.backup(target);
+    if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    // Written under another name, and named a backup once whole: jukecord stopped in the middle (the worker ends with
+    // it) leaves a ".partial" file, which no list takes for a backup (app/backups.ts clears it away later).
+    const partial = `${target}.partial`;
+    await vacuumInto(this.file, partial);
+    fs.renameSync(partial, target);
+  }
+
   close(): void {
     if (this.db.isOpen) this.db.close();
   }
+}
+
+// The worker's own code (plain JavaScript, run as it is): a read-only connection to the database file, VACUUM INTO
+// the target, and the outcome posted back. Waits up to five seconds for a lock, as the main connection does.
+const VACUUM_WORKER = `
+const { workerData, parentPort } = require('node:worker_threads');
+const { DatabaseSync } = require('node:sqlite');
+let db = null;
+try {
+  db = new DatabaseSync(workerData.source, { readOnly: true, timeout: 5000 });
+  db.prepare('VACUUM INTO ?').run(workerData.target);
+  parentPort.postMessage({ ok: true });
+} catch (error) {
+  parentPort.postMessage({ ok: false, message: String((error && error.message) || error) });
+} finally {
+  if (db) db.close();
+}
+`;
+
+// Copies the database file `source` into `target` in a worker thread; rejects with the worker's reason.
+function vacuumInto(source: string, target: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(VACUUM_WORKER, { eval: true, workerData: { source, target } });
+    // The worker's answer: done, or why not.
+    worker.once('message', (answer: { ok: boolean; message?: string }) => {
+      if (answer.ok) resolve();
+      else reject(new StoreError(`could not write the backup: ${answer.message ?? 'no reason given'}`));
+    });
+    // A worker that could not start, or ended without an answer (out of memory).
+    worker.once('error', (error) => reject(error));
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new StoreError(`the backup's worker ended with code ${code}`));
+    });
+  });
 }
 
 /** Tracks: one row per distinct source, updated when a later lookup knows more about it. */
@@ -1040,6 +1095,8 @@ function savedStateFrom(row: Row): SavedPlayerState {
 export interface GuildSettings {
   /** The role allowed to change the queue; null means every member of the server may. */
   readonly djRoleId: string | null;
+  /** The text channel where jukecord tells the server about trouble; null for nowhere. */
+  readonly alertsChannelId: string | null;
 }
 
 export class SettingsRepository {
@@ -1053,10 +1110,32 @@ export class SettingsRepository {
 
   /** A server's settings; a server never configured gets the defaults. */
   get(guildId: string): GuildSettings {
-    const row = this.store.db.prepare('SELECT dj_role_id FROM guild_settings WHERE guild_id = ?').get(guildId) as
-      | Row
-      | undefined;
-    return { djRoleId: row ? textOrNull(row, 'dj_role_id') : null };
+    const row = this.store.db
+      .prepare('SELECT dj_role_id, alerts_channel_id FROM guild_settings WHERE guild_id = ?')
+      .get(guildId) as Row | undefined;
+    return {
+      djRoleId: row ? textOrNull(row, 'dj_role_id') : null,
+      alertsChannelId: row ? textOrNull(row, 'alerts_channel_id') : null,
+    };
+  }
+
+  /** Sets or clears (null) the text channel where jukecord tells the server about trouble. */
+  setAlertsChannel(guildId: string, channelId: string | null): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO guild_settings (guild_id, alerts_channel_id, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (guild_id) DO UPDATE SET alerts_channel_id = excluded.alerts_channel_id,
+           updated_at = excluded.updated_at`,
+      )
+      .run(guildId, channelId, this.now());
+  }
+
+  /** The servers that chose an alerts channel, with it. */
+  withAlerts(): { readonly guildId: string; readonly channelId: string }[] {
+    const rows = this.store.db
+      .prepare('SELECT guild_id, alerts_channel_id FROM guild_settings WHERE alerts_channel_id IS NOT NULL')
+      .all() as Row[];
+    return rows.map((row) => ({ guildId: text(row, 'guild_id'), channelId: text(row, 'alerts_channel_id') }));
   }
 
   /** Sets or clears (null) the role that may change the queue. */
@@ -1322,4 +1401,60 @@ function tokenFrom(row: Row): TokenRow {
     createdAt: int(row, 'created_at'),
     usedAt: intOrNull(row, 'used_at'),
   };
+}
+
+/**
+ * The voice channel the bot is in, per server, kept for a restart: jukecord goes back to it when people are there
+ * (see discord/rejoin.ts). One per server; leaving forgets it.
+ */
+export class VoiceChannelRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** Keeps the channel the bot is in now (replacing the one before). */
+  remember(guildId: string, channelId: string): void {
+    this.store.db
+      .prepare(
+        `INSERT INTO voice_channels (guild_id, channel_id, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id, updated_at = excluded.updated_at`,
+      )
+      .run(guildId, channelId, this.now());
+  }
+
+  /** Forgets a server's channel (the bot left it). */
+  forget(guildId: string): void {
+    this.store.db.prepare('DELETE FROM voice_channels WHERE guild_id = ?').run(guildId);
+  }
+
+  /** The channel kept for a server, or null when there is none. */
+  get(guildId: string): string | null {
+    const row = this.store.db.prepare('SELECT channel_id FROM voice_channels WHERE guild_id = ?').get(guildId) as
+      | Row
+      | undefined;
+    return row ? text(row, 'channel_id') : null;
+  }
+
+  /** Notes that the bot said in a server's channel that it came back, now. */
+  told(guildId: string): void {
+    this.store.db.prepare('UPDATE voice_channels SET told_at = ? WHERE guild_id = ?').run(this.now(), guildId);
+  }
+
+  /** When the bot last said in a server's channel that it came back (ms since 1970), or null for never. */
+  toldAt(guildId: string): number | null {
+    const row = this.store.db.prepare('SELECT told_at FROM voice_channels WHERE guild_id = ?').get(guildId) as
+      | { told_at: number | bigint | null }
+      | undefined;
+    return row?.told_at == null ? null : Number(row.told_at);
+  }
+
+  /** Every channel kept, in the order they were first kept. */
+  all(): { readonly guildId: string; readonly channelId: string }[] {
+    const rows = this.store.db.prepare('SELECT guild_id, channel_id FROM voice_channels ORDER BY rowid').all() as Row[];
+    return rows.map((row) => ({ guildId: text(row, 'guild_id'), channelId: text(row, 'channel_id') }));
+  }
 }

@@ -164,3 +164,39 @@ describe('Media under a crowd', () => {
     assert.equal(seen.mp3Limits[0], 60_000 + 1_080_000);
   });
 });
+
+describe('Media making MP3 copies', () => {
+  it('does not make a copy that just failed again for every request, and says why in the log', async () => {
+    const store = memoryStore();
+    const cache = new MediaCache({ dir, maxBytes: 1024 ** 3, log });
+    cache.init();
+    const records: { msg: string }[] = [];
+    let tries = 0;
+    // An ffmpeg whose MP3 encoder fails (a broken file, an encoder missing), at once.
+    const ffmpeg = {
+      toMp3: async () => {
+        tries += 1;
+        throw new Error('ffmpeg failed: Unknown encoder');
+      },
+    } as unknown as Ffmpeg;
+    const media = new Media({
+      cache,
+      ytdlp: {} as YtDlp,
+      ffmpeg,
+      tracks: store.tracks,
+      log: createLogger({ level: 'debug', sinks: [{ write: (record) => records.push(record) }] }),
+      timeoutMs: 60_000,
+    });
+    const [track] = addTracks(store, 1);
+    assert.ok(track);
+    const key = MediaCache.keyOf(track.source);
+    const tmp = cache.tmpPath(key);
+    fs.writeFileSync(tmp, Buffer.alloc(100, 1));
+    cache.commit(key, tmp, { source: track.source, durationMs: 180_000, loudness: null });
+    await assert.rejects(media.mp3(track, new AbortController().signal), /Unknown encoder/);
+    // A browser asks again every couple of seconds: it hears the same failure, and no new ffmpeg starts for it.
+    await assert.rejects(media.mp3(track, new AbortController().signal), /Unknown encoder/);
+    assert.equal(tries, 1);
+    assert.ok(records.some((record) => record.msg === 'could not make an MP3 copy'));
+  });
+});

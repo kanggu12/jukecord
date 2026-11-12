@@ -14,12 +14,20 @@ function hub(
     refuse?: () => Error | null;
     queueEveryMs?: number;
     listenersEveryMs?: number;
+    // Called as the hub tells the bus something, while it does (as a listener of the real bus is).
+    onEmit?: (name: string) => void;
   } = {},
 ) {
   const handlers = new Map<string, (payload: { guildId: string }) => void>();
+  // What the hub tells the bus itself (who listens in a server), in order.
+  const emitted: { name: string; payload: unknown }[] = [];
   const bus = {
     on: (name: string, fn: (payload: { guildId: string }) => void) => handlers.set(name, fn),
     off: () => {},
+    emit: (name: string, payload: unknown) => {
+      emitted.push({ name, payload });
+      extra.onEmit?.(name);
+    },
   };
   const access = {
     context: async (_principal: unknown, guildId: string) => {
@@ -59,7 +67,7 @@ function hub(
     ...(extra.queueEveryMs !== undefined ? { queueEveryMs: extra.queueEveryMs } : {}),
     ...(extra.listenersEveryMs !== undefined ? { listenersEveryMs: extra.listenersEveryMs } : {}),
   } as unknown as ConstructorParameters<typeof EventHub>[0]);
-  return { events, handlers, queue };
+  return { events, handlers, queue, emitted };
 }
 
 // A socket that keeps what the hub writes (gzip frames unpacked, as the panel does) and lets a test send it messages.
@@ -99,6 +107,8 @@ function socket() {
     fake,
     terminated: () => terminated,
     say: (message: Record<string, unknown>) => listeners.get('message')?.(JSON.stringify(message)),
+    // The browser goes (its connection closes).
+    gone: () => listeners.get('close')?.(undefined),
     // What the hub sent of one type, in order.
     of: (type: string) => sent.filter((message) => message.type === type),
   };
@@ -376,6 +386,38 @@ describe('EventHub', () => {
     assert.deepEqual({ named: told.at(-1)?.people.length, count: told.at(-1)?.count }, { named: 20, count: 30 });
     assert.deepEqual(events.listeners('G').count, 30);
     events.close();
+  });
+
+  it('tells the rest of jukecord at once how many browsers of a server play along, the last one leaving too', async () => {
+    const { events, emitted } = hub();
+    const browser = socket();
+    events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await settle(10);
+    browser.say({ type: 'listening', on: true });
+    await settle(1);
+    assert.deepEqual(emitted.at(-1), { name: 'listeners', payload: { guildId: 'G', count: 1 } });
+    // Its tab closes: nobody shows the server any more, and that it has no listener left is said too.
+    browser.gone();
+    assert.deepEqual(emitted.at(-1), { name: 'listeners', payload: { guildId: 'G', count: 0 } });
+    events.close();
+  });
+
+  it('counts a listener gone by the time the rest of jukecord hears of it, the server still shown', async () => {
+    // What the rest of jukecord reads back as it is told (app/rest.ts asks the hub for the count).
+    const read: number[] = [];
+    const made = hub({}, { onEmit: (name) => name === 'listeners' && read.push(made.events.listeners('G').count) });
+    const watcher = socket();
+    const browser = socket();
+    made.events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    made.events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await settle(10);
+    browser.say({ type: 'listening', on: true });
+    await settle(1);
+    // "Listen here" off, the tab still open (as the host's): nobody listens, and that is what is read back.
+    browser.say({ type: 'listening', on: false });
+    await settle(1);
+    assert.deepEqual(read, [1, 0]);
+    made.events.close();
   });
 
   it('cuts off a panel with 8 MiB waiting for it, and only that one', async () => {

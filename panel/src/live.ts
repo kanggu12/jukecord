@@ -9,7 +9,8 @@
  *
  * It reconnects by itself (about 1 s, then doubling up to about 10 s, each wait spread at random) and subscribes again
  * after each reconnect, so a laptop waking up or jukecord restarting needs nothing from the person. When jukecord asks
- * to be tried again later (1013: it has as many connections as it allows), it says why and waits longer. A jukecord
+ * to be tried again later (1013: it has as many connections as it allows), it says why and waits longer (15 to 30 s
+ * at first, past the fifteen seconds jukecord gives silent tabs to answer before it frees their places). A jukecord
  * that has just started may not know its Discord servers yet and answers "unavailable"; the subscription is then asked
  * again the same way, and the connection counts as open only once the server's state has arrived. The server's clock is
  * the one that counts: the difference to this browser's clock is measured with pings and the fastest round trip of the
@@ -179,8 +180,11 @@ export class Live {
         this.retry = Math.max(this.retry, 15_000);
       }
       // Each panel waits a different share of the delay (half to one and a half times it): after a restart of jukecord
-      // a crowd of panels comes back spread over the seconds, not all in the same instant.
-      this.retryTimer = window.setTimeout(() => this.connect(), this.retry * (0.5 + Math.random()));
+      // a crowd of panels comes back spread over the seconds, not all in the same instant. Turned away, one to two
+      // times it: jukecord frees the places of tabs that went away by asking them whether they are there and closing
+      // the ones silent after fifteen seconds (src/web/events.ts), and a knock before that found no room again.
+      const share = later ? 1 + Math.random() : 0.5 + Math.random();
+      this.retryTimer = window.setTimeout(() => this.connect(), this.retry * share);
       this.retry = Math.min(later ? 60_000 : 10_000, this.retry * 2);
     };
   }

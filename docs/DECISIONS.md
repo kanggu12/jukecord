@@ -141,3 +141,34 @@ Wrapped's song of the year is the track played on the most days, then the most t
 leads the top five; a track played fifty times in one night would lead by plays, while the one that came back week
 after week is the one people mean. Wrapped is counted from the history, which keeps a server's newest 10,000 plays, so
 for a busier server a year may start later than its first day; the page, the card and the command say from when.
+
+## Reads per person, changes per login and address
+
+Many people often share one address (a household, an office, Docker's bridge, a proxy not told about): counted by it,
+fifteen panels opening at once there had a third of their reads refused. So a logged-in read counts against the
+person behind it alone, all their logins and tokens together, and a read without a login against its address.
+Changes keep both, the login's and the address's: they cost more, and a refusal after a lookup (a search that found
+nothing) keeps its share of the address spent, so several tokens behind one address do not take the address's brake
+away.
+
+## Resting pauses, and only people play on
+
+A server nobody hears anywhere (the bot out of voice, no browser playing along) went on fetching tracks and counting
+plays for nobody. After two minutes of that its player pauses with a notice saying why. It does not play on by itself
+when someone comes back (the bot joining voice, a browser pressing Listen here): sound starting by itself surprises
+people, the reason a restart comes back paused too, and pressing play is one step. A bot that stays in voice sounds in
+the channel, which counts as heard.
+
+## Coming back to voice where people are
+
+After a restart the bot goes back to the voice channel it was in only when people are in it at that moment. Going
+back later, when someone happens to enter the channel hours after a reboot, would be the bot turning up by surprise;
+so a kept channel with nobody in it is forgotten.
+
+## Alerts once an hour, in a channel the server chooses
+
+Trouble used to be in the log alone, which the people of a Discord server do not read. Each server chooses a channel
+(or none, the default), and jukecord says there what happened, with the figures and nothing more: each kind at most
+once an hour per server, and a state that lasts (YouTube's check for bots) once as it starts and once as it ends, so a
+bad day is a few lines, not one per failed fetch. A webhook was the other choice; a channel the bot posts in needs no
+secret to keep, and the bot is there already.

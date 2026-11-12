@@ -31,6 +31,7 @@ import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
+import { type FieldSchema, misfit } from './schemas.ts';
 
 export interface WebServerOptions {
   readonly host: string;
@@ -55,6 +56,11 @@ export interface WebServerOptions {
   readonly live?: Partial<LiveLimits>;
   /** Whether jukecord can serve requests (for /readyz). */
   readonly ready: () => boolean;
+  /**
+   * Hears, at most once a minute per cap, that connections were turned away at one: every connection's, one
+   * address's, or the live connections' (for app/alerts.ts).
+   */
+  readonly turnedAway?: (cap: TurnedAway) => void;
   readonly discordReady: () => boolean;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
   readonly rates?: {
@@ -78,7 +84,19 @@ export interface WebServerOptions {
     readonly idleMs?: number;
     readonly maxConnections?: number;
     readonly maxConnectionsPerAddress?: number;
+    /** The same from one address when proxies are trusted: a reverse proxy carries many browsers (default 2048). */
+    readonly maxConnectionsPerProxy?: number;
+    /** How long an audio request waits for an MP3 copy being made before it is told to ask again (default 5 s). */
+    readonly mp3WaitMs?: number;
   };
+}
+
+/** Connections turned away at a cap since the log last said so: which cap, how many, the cap, and the address. */
+export interface TurnedAway {
+  readonly cap: 'connections' | 'address' | 'live';
+  readonly count: number;
+  readonly limit: number;
+  readonly address?: string;
 }
 
 export interface WebServer {
@@ -117,12 +135,70 @@ const BUSY = 'jukecord is busy; try again in a moment';
 const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 const TOO_MANY_READS = 'too many requests at once; try again in a moment';
+// What an audio request is told while the MP3 copy it asked for is still being made.
+const MAKING_MP3 = 'jukecord is making the MP3 copy of this track; try again in a moment';
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
-// do. A client that sends many in one go and reads nothing had each one answered, and each answer held in memory for a
-// reader that never came: a few connections of small requests filled the heap. More than this many answers under way
-// on one connection closes it.
+// do; undici with pipelining and benchmark tools do. A client that sends many in one go and reads nothing had each one
+// answered, and each answer held in memory for a reader that never came: a few connections of small requests filled
+// the heap. So at most this many answers are made at a time on one connection; the requests after them wait their turn
+// without being made, up to PIPELINED_HELD more, and the ones past that are refused at once (a small 429 each, after
+// which Node stops reading the connection until its answers are taken). Closing the connection instead lost every
+// answer, the first sixteen too, without a word in the log.
 const PIPELINED_MAX = 16;
+const PIPELINED_HELD = 112;
+
+// Waits for `promise` at most `ms`: its value when it settled in time, `undefined` when the time ran out first (the
+// promise goes on; whoever made it keeps it). A rejection in time is passed on.
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  // The wait itself: a timer that ends in `undefined`, and that must not keep a stopping process alive.
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    // Settled first: the timer has nothing left to do.
+    clearTimeout(timer);
+  }
+}
+
+// A request that does not fit its operation's schema, as Fastify reports it: where (the query, the path, the body) and
+// the validator's findings, the first of which is the one that counts.
+interface Unfit {
+  readonly validationContext?: string;
+  readonly validation?: readonly {
+    readonly keyword: string;
+    readonly instancePath: string;
+    readonly params: Record<string, unknown>;
+    readonly message?: string;
+  }[];
+  readonly message: string;
+}
+
+// What such a request is told: the field and what it may be ("level is debug, info, warn or error", "limit is 1 to
+// 200"), read from the operation's own schema. The validator's words named its path, once for every choice.
+function unfit(error: Unfit, request: FastifyRequest): string {
+  const first = error.validation?.[0];
+  if (!first) return error.message;
+  if (first.keyword === 'required') return `${String(first.params.missingProperty)} is missing`;
+  const where = error.validationContext === 'querystring' ? 'querystring' : (error.validationContext ?? 'body');
+  const name = first.instancePath.split('/').find(Boolean) ?? '';
+  const schema = (
+    request.routeOptions.schema as Record<string, { properties?: Record<string, FieldSchema> }> | undefined
+  )?.[where];
+  const field = schema?.properties?.[name];
+  const part = (where === 'querystring' ? request.query : where === 'params' ? request.params : request.body) as
+    | Record<string, unknown>
+    | undefined;
+  const problem = misfit(field, part?.[name]);
+  if (problem) return `${name} ${problem}`;
+  // A pattern (an ID): what the field's description says it is.
+  if (field?.description) return `${name} is ${field.description.charAt(0).toLowerCase()}${field.description.slice(1)}`;
+  return `${name} ${first.message ?? 'is not right'}`;
+}
 
 // The answer for an error, in the one shape every API error has.
 function failure(reply: FastifyReply, code: string, message: string): FastifyReply {
@@ -208,32 +284,58 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       count: turnedAway,
       cap: app.server.maxConnections,
     });
+    options.turnedAway?.({ cap: 'connections', count: turnedAway, limit: app.server.maxConnections });
     turnedAway = 0;
     turnedAwayToldAt = steadyNow();
   });
   // And at most this many from one address (an IPv6 address counts by its /56, as the other limits do): one client with
   // ordinary keep-alive connections could otherwise hold every place under the cap above, the health checks' too.
-  // Behind a trusted proxy every connection comes from the proxy, so the proxy is where to limit them.
+  // Behind a trusted proxy every connection comes from the proxy, which carries every browser: it may take all but a
+  // sixteenth of the places (3,840 of 4,096), and the rest stay for the others (the platform's health checks, a direct
+  // client, a second proxy). Half of them, as first tried, halved what a deployment behind an ingress could take.
+  // Without the trust a proxy on the same machine, or Docker's own (inside a container a client of the host comes from
+  // the bridge's gateway), puts every browser on one address's share; the log says so, with the setting that changes
+  // it.
   const trusting = hops !== false && hops !== 0 && hops !== '';
-  if (!trusting) {
-    const perAddressMax = timeouts.maxConnectionsPerAddress ?? 256;
-    const fromAddress = new Map<string, number>();
-    // Before the HTTP server's own listener, so a connection over the cap gets no parser at all.
-    app.server.prependListener('connection', (socket: Socket) => {
-      const key = addressKey(socket.remoteAddress);
-      const count = (fromAddress.get(key) ?? 0) + 1;
-      if (count > perAddressMax) {
-        socket.destroy();
-        return;
+  const perAddressMax = trusting
+    ? (timeouts.maxConnectionsPerProxy ?? app.server.maxConnections - Math.floor(app.server.maxConnections / 16))
+    : (timeouts.maxConnectionsPerAddress ?? 256);
+  const fromAddress = new Map<string, number>();
+  // Connections turned away at that cap since the log last said so, and when that was.
+  let refusedHere = 0;
+  let refusedHereToldAt = Number.NEGATIVE_INFINITY;
+  // Before the HTTP server's own listener, so a connection over the cap gets no parser at all.
+  app.server.prependListener('connection', (socket: Socket) => {
+    const key = addressKey(socket.remoteAddress);
+    const count = (fromAddress.get(key) ?? 0) + 1;
+    if (count > perAddressMax) {
+      socket.destroy();
+      // Said at most once a minute, as the cap above says it, with the address and how many.
+      refusedHere += 1;
+      if (steadyNow() - refusedHereToldAt >= 60_000) {
+        options.turnedAway?.({ cap: 'address', count: refusedHere, limit: perAddressMax, address: key });
+        log.warn('turned connections away from one address at its cap', {
+          count: refusedHere,
+          cap: perAddressMax,
+          address: key,
+          ...(trusting
+            ? {}
+            : {
+                hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY: each browser then counts by its own address, and the proxy gets a higher cap',
+              }),
+        });
+        refusedHere = 0;
+        refusedHereToldAt = steadyNow();
       }
-      fromAddress.set(key, count);
-      socket.once('close', () => {
-        const left = (fromAddress.get(key) ?? 1) - 1;
-        if (left > 0) fromAddress.set(key, left);
-        else fromAddress.delete(key);
-      });
+      return;
+    }
+    fromAddress.set(key, count);
+    socket.once('close', () => {
+      const left = (fromAddress.get(key) ?? 1) - 1;
+      if (left > 0) fromAddress.set(key, left);
+      else fromAddress.delete(key);
     });
-  }
+  });
   const hub = new EventHub({
     bus: options.bus,
     actions: deps.actions,
@@ -245,6 +347,12 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     queueVersion: (guildId) => options.queue.version(guildId),
     stillValid: (caller) => auth.stillValid(caller),
     limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
+    // Only the cap of every live connection is jukecord's trouble; one login's or one address's is that person's.
+    ...(options.turnedAway
+      ? {
+          refused: (count: number, limit: number) => options.turnedAway?.({ cap: 'live', count, limit }),
+        }
+      : {}),
   });
 
   // Aborted when the server closes: work shared by several requests (an MP3 copy) stops with jukecord, not with one
@@ -260,20 +368,61 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
-  // Answers under way on each connection (see PIPELINED_MAX). An upgrade to a WebSocket leaves its count at one, and
-  // the connection then carries no more requests.
-  const underWay = new WeakMap<Socket, number>();
+  // Answers under way on each connection, and the requests waiting for a place among them (see PIPELINED_MAX). An
+  // upgrade to a WebSocket keeps its place, and the connection then carries no more requests.
+  interface Line {
+    underWay: number;
+    readonly held: ((go: boolean) => void)[];
+  }
+  const lines = new WeakMap<Socket, Line>();
+  // Requests refused past what a connection holds, since the log last said so, and when that was.
+  let refusedPipelined = 0;
+  let refusedPipelinedToldAt = Number.NEGATIVE_INFINITY;
   app.addHook('onRequest', async (request, reply) => {
     const socket = request.raw.socket;
-    const count = (underWay.get(socket) ?? 0) + 1;
-    if (count > PIPELINED_MAX) {
-      // Nothing is sent: the connection goes, with what it asked for.
-      reply.hijack();
-      socket.destroy();
-      return;
+    let line = lines.get(socket);
+    if (!line) {
+      const made: Line = { underWay: 0, held: [] };
+      lines.set(socket, made);
+      // A connection that closes lets go of the requests it held: nobody is left to answer.
+      socket.once('close', () => {
+        for (const release of made.held.splice(0)) release(false);
+      });
+      line = made;
     }
-    underWay.set(socket, count);
-    reply.raw.once('close', () => underWay.set(socket, (underWay.get(socket) ?? 1) - 1));
+    // Every place taken, or others already waiting (a newer request does not pass them): this one waits too.
+    if (line.underWay >= PIPELINED_MAX || line.held.length > 0) {
+      if (line.held.length >= PIPELINED_HELD) {
+        // Said in the log at most once a minute, with how many since it last said so.
+        refusedPipelined += 1;
+        if (steadyNow() - refusedPipelinedToldAt >= 60_000) {
+          log.warn('refused requests sent one after another on one connection, past what it holds at once', {
+            count: refusedPipelined,
+            cap: PIPELINED_MAX + PIPELINED_HELD,
+          });
+          refusedPipelined = 0;
+          refusedPipelinedToldAt = steadyNow();
+        }
+        return later(reply, 'rate-limited', TOO_MANY_READS, 1000);
+      }
+      const held = line.held;
+      const go = await new Promise<boolean>((resolve) => held.push(resolve));
+      // The connection closed while it waited: nothing is made for it.
+      if (!go) {
+        reply.hijack();
+        return;
+      }
+      // Otherwise it has the place of the answer that went out (handed on below), and the count stays as it is.
+    } else {
+      line.underWay += 1;
+    }
+    const own = line;
+    // An answer out: its place goes to the request waiting longest, or is free again.
+    reply.raw.once('close', () => {
+      const next = own.held.shift();
+      if (next) next(true);
+      else own.underWay -= 1;
+    });
   });
 
   // Responses by status class, for /metrics.
@@ -322,7 +471,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (error instanceof ActionError) return failure(reply, error.code, error.message);
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);
     const fastifyError = error as { validation?: unknown; statusCode?: number; message: string };
-    if (fastifyError.validation) return failure(reply, 'invalid', fastifyError.message);
+    if (fastifyError.validation) return failure(reply, 'invalid', unfit(fastifyError as Unfit, request));
     // Fastify's own refusals (bad JSON, body too large, wrong content type) carry a 4xx status.
     if (fastifyError.statusCode && fastifyError.statusCode >= 400 && fastifyError.statusCode < 500) {
       return reply.code(fastifyError.statusCode).send({ error: { code: 'invalid', message: fastifyError.message } });
@@ -420,6 +569,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // fetch). Nothing is taken from any bucket unless every one has a token, so a refusal costs nothing.
         // A change the actions then refuse (no DJ role, an item gone) gives its address's token back: the others behind
         // that address (a household, an office) are not held back by one person's refusals; that person's login still is.
+        // A refusal after a lookup on the site (a search that found nothing) cost a lookup, and keeps it spent: a person
+        // with several logins or tokens behind one address otherwise had no brake from the address at all.
         let giveBack: (() => void) | null = null;
         if (spec.method !== 'GET' && caller && caller.principal.kind !== 'host') {
           if (behind()) return later(reply, 'busy', BUSY, 2000);
@@ -436,10 +587,14 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             if (fetching) fetches.give(address);
           };
         }
-        // A read from anyone but the host is held to the wider rate of reads, by its login and its address (without a
-        // login, by its address alone).
+        // A read from anyone but the host is held to the wider rate of reads: a logged-in one by the person behind it
+        // alone, whatever login or token they use; one without a login by its address. Many people share an address
+        // (a household, an office, Docker's bridge, a proxy not trusted): counted by it, fifteen panels opening at
+        // once behind one were refused, and a refused /me shows the panel's start-failed page.
         if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
-          const keys = [...(caller ? [`login ${loginKey(caller)}`] : []), `address ${addressKey(request.ip)}`];
+          const keys = caller
+            ? [caller.principal.kind === 'user' ? `person ${caller.principal.userId}` : `login ${loginKey(caller)}`]
+            : [`address ${addressKey(request.ip)}`];
           const wait = reads.wait(keys);
           if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
           reads.take(keys);
@@ -459,7 +614,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             deps,
           });
         } catch (error) {
-          if (error instanceof ActionError || error instanceof StoreError) giveBack?.();
+          if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) giveBack?.();
           throw error;
         }
       },
@@ -493,13 +648,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (request.query.format === 'mp3') {
         // Shared by everyone asking at once and not tied to this request: a second browser may be waiting for it. It
         // ends at its own time limit, which grows with the track (see Media.mp3), or when jukecord stops.
-        let mp3: string | null;
+        const making = options.mp3(track, stopping.signal);
+        // A copy that fails after every request stopped waiting for it is Media's to log, not an unhandled rejection.
+        making.catch(() => {});
+        // The request waits a few seconds, which covers the copy of an ordinary song. A long track takes longer (an
+        // hour of audio took most of a minute under two processors), and a request waiting on it moves nothing on its
+        // connection, which the idle limit then cut with no answer at all: it is told to ask again instead (503 with
+        // Retry-After, which the panel takes as "not now"), and the copy goes on meanwhile.
+        let mp3: string | null | undefined;
         try {
-          mp3 = await options.mp3(track, stopping.signal);
+          mp3 = await within(making, timeouts.mp3WaitMs ?? 5000);
         } catch (error) {
-          if (error instanceof BusyError) return failure(reply, 'unavailable', error.message);
+          if (error instanceof BusyError) return later(reply, 'unavailable', error.message, 2000);
           throw error;
         }
+        if (mp3 === undefined) return later(reply, 'unavailable', MAKING_MP3, 2000);
         if (!mp3) return failure(reply, 'conflict', 'the track is not prepared yet');
         file = mp3;
       }

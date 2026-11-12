@@ -11,7 +11,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Access } from './app/access.ts';
 import { Actions, type Directory } from './app/actions.ts';
+import { type AlertSink, Alerts, leftLoopAlert, restartedAlert, turnedAwayAlert } from './app/alerts.ts';
+import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
+import { Rest } from './app/rest.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -30,7 +33,7 @@ import { Resolver } from './media/resolver.ts';
 import { YtDlp } from './media/ytdlp.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
-import { startWatchdog } from './watchdog.ts';
+import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
 import { Auth, ensureHostToken } from './web/auth.ts';
 import { Presenter } from './web/present.ts';
 import { createWebServer, type WebServer } from './web/server.ts';
@@ -88,6 +91,23 @@ async function main(): Promise<number> {
   });
 
   const store = Store.open(path.join(config.dataDir, 'jukecord.db'));
+  // Trouble said in the log and in each server's alerts channel (app/alerts.ts); the bot posts them once it exists.
+  let alertSink: AlertSink | null = null;
+  const alerts = new Alerts({
+    settings: store.settings,
+    sink: () => alertSink,
+    log: log.child('alerts'),
+    clock: systemClock,
+  });
+  // The watchdog ended the last run (its mark, src/watchdog.ts): said once, here and in the alerts channels (those
+  // once the bot is there to post them, below).
+  const watchdogMark = path.join(config.dataDir, 'watchdog.json');
+  const lastRun = takeWatchdogMark(watchdogMark);
+  if (lastRun) {
+    log.warn('the watchdog ended the last run: its main thread had stopped answering', {
+      stillSeconds: Math.round(lastRun.stillMs / 1000),
+    });
+  }
   // A listener that fails is logged with its server; the others still hear the change (see Bus).
   const bus = new Bus((event, guildId, error) => log.error('a listener failed', { event, guild: guildId, error }));
   const queue = new QueueService(store.queue, bus);
@@ -124,6 +144,8 @@ async function main(): Promise<number> {
     tracks: store.tracks,
     log: log.child('media'),
     timeoutMs: config.media.fetchTimeoutMs,
+    // How fetches go tells whether YouTube refuses this jukecord (its check for bots).
+    watch: alerts,
   });
   const players = new Players({
     queue,
@@ -134,6 +156,8 @@ async function main(): Promise<number> {
     clock: systemClock,
     log: log.child('player'),
     fetchTimeoutMs: config.media.fetchTimeoutMs,
+    // A track taken out of a looping queue is told to its server's alerts channel too.
+    onLeftLoop: (guildId, track, reason) => alerts.raise(leftLoopAlert(guildId, track.title, track.id, reason)),
   });
   const prefetcher = new Prefetcher({
     bus,
@@ -150,6 +174,7 @@ async function main(): Promise<number> {
     tracks: store.tracks,
     log: log.child('lookup'),
     ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
+    watch: alerts,
   });
   // The tracks' covers, fetched once into the cache by the same address rule as yt-dlp's (src/media/covers.ts).
   const covers = new Covers({ cache, log: log.child('covers'), allowPrivate: config.media.allowPrivate });
@@ -183,10 +208,18 @@ async function main(): Promise<number> {
         voiceIdleMs: config.voice.idleMs,
         log: log.child('discord'),
         panelUrl: config.publicUrl,
+        voiceChannels: store.voiceChannels,
       })
     : null;
   const directory = (): Directory | null => bot;
   if (bot) actions.setVoice(bot.voice, () => bot.ready(), bot);
+  // The bot posts the alerts (it waits for Discord after a start); browser-only, the log alone says them.
+  alertSink = bot;
+  // The watchdog's restart, read at the start: raised now that the bot is there to post it (raised before, it found no
+  // one to post it and was dropped).
+  if (lastRun) alerts.raise(restartedAlert(lastRun.stillMs));
+  // A disk that runs low is said once (and again once it had room again).
+  alerts.watchDisk(config.dataDir);
 
   // Logins. Without a public address the panel is reached on this machine, which is also where Discord sends people
   // back to after logging in.
@@ -218,6 +251,8 @@ async function main(): Promise<number> {
     live: { total: config.liveMax },
     ready: () => store.db.isOpen,
     discordReady: () => bot?.ready() ?? false,
+    // Connections turned away at a cap are jukecord's trouble, told to the alerts channels.
+    turnedAway: (away) => alerts.raise(turnedAwayAlert(away)),
     deps: {
       actions,
       access,
@@ -229,6 +264,7 @@ async function main(): Promise<number> {
       logDir: path.join(config.dataDir, 'logs'),
       logFiles: config.log.files,
       backupDir: path.join(config.dataDir, 'backups'),
+      backupKeep: config.backups.keep,
       discordMode: bot !== null,
       doctor: () =>
         runDoctor({
@@ -243,6 +279,33 @@ async function main(): Promise<number> {
         }),
     },
   });
+  // A playing server that nobody hears anywhere (the bot not in its voice channel, no browser playing along) pauses
+  // after a while, instead of fetching and counting plays for nobody (JUKECORD_REST_AFTER).
+  const rest = new Rest({
+    bus,
+    players,
+    inVoice: (guildId) => (bot ? bot.voice.channel(guildId) !== null : false),
+    listeners: (guildId) => web.hub.listeners(guildId).count,
+    clock: systemClock,
+    afterMs: config.restAfterMs,
+    log: log.child('rest'),
+  });
+  rest.start();
+
+  // A backup every day at the host's time of day (JUKECORD_BACKUP_AT), when one is set.
+  const schedule = config.backups.at
+    ? new BackupSchedule({
+        store,
+        dir: path.join(config.dataDir, 'backups'),
+        keep: config.backups.keep,
+        at: config.backups.at,
+        clock: systemClock,
+        log: log.child('backups'),
+        alerts,
+      })
+    : null;
+  schedule?.start();
+
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;
@@ -258,6 +321,10 @@ async function main(): Promise<number> {
     prefetcher.stop();
     // Covers being fetched stop with jukecord (each would end by its own time limit otherwise).
     covers.stop();
+    // Leaving voice below is jukecord stopping, not nobody listening.
+    rest.stop();
+    alerts.stop();
+    schedule?.stop();
     players.checkpointAll();
     // The panels are told first (they reconnect to the next jukecord), then Discord, then the database.
     void web
@@ -265,6 +332,8 @@ async function main(): Promise<number> {
       .catch(() => {})
       .then(() => bot?.stop())
       .then(() => egress?.close())
+      // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
+      .then(() => schedule?.idle())
       .finally(() => {
         store.close();
         process.exit(0);
@@ -279,7 +348,7 @@ async function main(): Promise<number> {
   log.info('the panel and the API are up', { listen: `${config.host}:${config.port}`, open: publicUrl });
   // A main thread that stops answering for half a minute ends the process, so the restart policy starts it again
   // (Docker restarts what exits, not what hangs).
-  startWatchdog(30_000);
+  startWatchdog(30_000, watchdogMark);
 
   if (bot) {
     // A stop during the login ends the login too; that is the stop, not a failure to start.

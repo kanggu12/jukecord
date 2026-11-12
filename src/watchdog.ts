@@ -4,8 +4,11 @@
  * that exits, not one that hangs. So a small worker thread watches a counter the main thread moves every second; when
  * the counter has not moved for `limitMs`, the worker writes a line to stderr and ends the process. The restart policy
  * (Docker's under Compose, Kubernetes') then brings jukecord back, paused where each server was: the players
- * save their state on every change.
+ * save their state on every change. The worker leaves a mark in the data directory first, so the next start can say
+ * in jukecord's own log (and in the servers' alerts channels) that the watchdog ended the last run: the line on
+ * stderr goes to the console alone.
  */
+import fs from 'node:fs';
 import { Worker } from 'node:worker_threads';
 
 // The worker's code, the same as a module or a script (getBuiltinModule needs neither import nor require). It writes
@@ -41,12 +44,45 @@ setInterval(() => {
     fs.writeSync(2, 'jukecord: the main thread has not answered for ' + Math.round(still / 1000) +
       ' s; ending the process so that it is started again\\n');
   } catch {}
+  // The mark for the next start (see takeWatchdogMark); a disk that cannot take it must not keep the process either.
+  try {
+    if (workerData.mark) fs.writeFileSync(workerData.mark, JSON.stringify({ at: Date.now(), stillMs: Math.round(still) }));
+  } catch {}
   process.kill(process.pid, 'SIGKILL');
 }, workerData.checkMs);
 `;
 
-/** Starts watching the main thread; returns a function that stops the watch (for a clean shutdown). */
-export function startWatchdog(limitMs = 30_000): () => void {
+/** What the watchdog left when it ended the last run: when, and how long the main thread had been still. */
+export interface WatchdogMark {
+  readonly at: number;
+  readonly stillMs: number;
+}
+
+/** Reads the mark the watchdog left at `file`, once (the file goes); null when the last run was not ended by it. */
+export function takeWatchdogMark(file: string): WatchdogMark | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  fs.rmSync(file, { force: true });
+  try {
+    const mark = JSON.parse(text) as Partial<WatchdogMark>;
+    return typeof mark.at === 'number' && typeof mark.stillMs === 'number'
+      ? { at: mark.at, stillMs: mark.stillMs }
+      : null;
+  } catch {
+    // Half written as the process ended: the watchdog ended it all the same, how long it was still is not known.
+    return { at: 0, stillMs: 0 };
+  }
+}
+
+/**
+ * Starts watching the main thread; returns a function that stops the watch (for a clean shutdown). `mark` is the file
+ * the worker writes before it ends the process (see takeWatchdogMark).
+ */
+export function startWatchdog(limitMs = 30_000, mark: string | null = null): () => void {
   // One shared number: the main thread adds one every second, the worker reads it.
   const beat = new Int32Array(new SharedArrayBuffer(4));
   const heart = setInterval(() => Atomics.add(beat, 0, 1), Math.min(1000, Math.max(50, limitMs / 10)));
@@ -57,7 +93,7 @@ export function startWatchdog(limitMs = 30_000): () => void {
     // None of the main thread's flags or settings: the worker needs nothing, and starts lighter without them.
     execArgv: [],
     env: {},
-    workerData: { buffer: beat.buffer, limitMs, checkMs: Math.min(1000, Math.max(50, limitMs / 10)) },
+    workerData: { buffer: beat.buffer, limitMs, checkMs: Math.min(1000, Math.max(50, limitMs / 10)), mark },
   });
   worker.unref();
   return () => {

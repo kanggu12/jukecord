@@ -323,11 +323,11 @@ describe('PlayerStateRepository and SettingsRepository', () => {
 
   it('defaults to no DJ role and remembers one when set', () => {
     const store = memoryStore();
-    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null });
+    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
     store.settings.setDjRole(GUILD, '200000000000000001');
-    assert.deepEqual(store.settings.get(GUILD), { djRoleId: '200000000000000001' });
+    assert.deepEqual(store.settings.get(GUILD), { djRoleId: '200000000000000001', alertsChannelId: null });
     store.settings.setDjRole(GUILD, null);
-    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null });
+    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
   });
 });
 

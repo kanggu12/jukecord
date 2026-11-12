@@ -101,10 +101,107 @@ describe('the jukecord command', () => {
     assert.equal((await cli('shuffle', { JUKECORD_TOKEN: token, JUKECORD_GUILD: GUILD })).code, 1);
   });
 
+  it('says what a value may be in its own words, before asking jukecord', async () => {
+    const level = await cli('logs --level nonsense');
+    assert.equal(level.code, 2);
+    assert.match(level.out, /^jukecord logs: --level is debug, info, warn or error$/m);
+    const limit = await cli('history --limit 0', { JUKECORD_GUILD: GUILD });
+    assert.equal(limit.code, 2);
+    assert.match(limit.out, /^jukecord history: --limit is 1 to 200$/m);
+    const days = await cli('stats --days=400', { JUKECORD_GUILD: GUILD });
+    assert.equal(days.code, 2);
+    assert.match(days.out, /^jukecord stats: --days is 1 to 366$/m);
+    const guild = await cli('np --guild 123');
+    assert.equal(guild.code, 2);
+    assert.match(guild.out, /^jukecord np: --guild takes a server ID \(see jukecord servers\)$/m);
+  });
+
+  it('shows one command when asked for its help', async () => {
+    const help = await cli('help add');
+    assert.deepEqual(help, {
+      code: 0,
+      out: 'Usage: jukecord add <address or words> [--next]\n  Add to the queue (plays if nothing is)',
+    });
+    assert.deepEqual(await cli('add --help'), help);
+    const two = await cli('help playlist save');
+    assert.match(two.out, /^Usage: jukecord playlist save <name>$/m);
+    const none = await cli('help fly');
+    assert.equal(none.code, 2);
+    assert.match(none.out, /there is no command "fly"/);
+  });
+
+  it('says a refusal under --json as JSON, and exits 4 when jukecord says to try again later', async () => {
+    const out: { text: string; error: boolean }[] = [];
+    const code = await run(['skip', '--json'], { ...env, JUKECORD_GUILD: '100000000000000002' }, (text, error) =>
+      out.push({ text, error: Boolean(error) }),
+    );
+    assert.equal(code, 1);
+    assert.deepEqual(out, [
+      { text: JSON.stringify({ error: { code: 'conflict', message: 'nothing is playing' } }, null, 2), error: true },
+    ]);
+    // A typing mistake too, with its own code, whether it is found before jukecord is asked or after.
+    for (const line of [
+      ['repeat', 'sometimes', '--json'],
+      ['fly', '--json'],
+      ['np', '--jsno', '--json'],
+    ]) {
+      const typed: string[] = [];
+      assert.equal(await run(line, env, (text) => typed.push(text)), 2, line.join(' '));
+      assert.equal(JSON.parse(typed.join('')).error.code, 'usage', line.join(' '));
+    }
+    // Answered "try again later" (a rate, a busy moment: an answer with Retry-After): 4, apart from a refusal.
+    const later = await testServer({ listen: true, rates: { changes: { perSecond: 1, burst: 1 } } });
+    try {
+      later.directory.join(GUILD, '300000000000000001');
+      const made = later.auth.createToken(
+        { principal: { kind: 'user', userId: '300000000000000001' }, scope: 'control', via: 'token' } as never,
+        'script',
+        'control',
+      );
+      const asScript = { JUKECORD_URL: later.url, JUKECORD_TOKEN: made.token, JUKECORD_GUILD: GUILD };
+      const first: string[] = [];
+      assert.equal(await run(['shuffle'], asScript, (text) => first.push(text)), 0);
+      const second: string[] = [];
+      assert.equal(await run(['shuffle'], asScript, (text) => second.push(text)), 4);
+      assert.match(second.join(''), /too many changes at once; try again in a moment/);
+    } finally {
+      await later.close();
+    }
+  });
+
+  it('chooses where jukecord tells the server about trouble, and shows it with the settings', async () => {
+    const extra = { JUKECORD_GUILD: GUILD };
+    const chosen = await cli('alerts 600000000000000001', extra);
+    assert.equal(chosen.code, 0);
+    assert.match(chosen.out, /^Alerts: #jukecord-alerts$/m);
+    assert.match(chosen.out, /^ {2}600000000000000001 {2}#jukecord-alerts$/m);
+    assert.match((await cli('alerts none', extra)).out, /^Alerts: none$/m);
+    assert.equal((await cli('alerts', extra)).code, 2);
+  });
+
   it('prints help with every command', async () => {
     const help = await cli('--help');
     assert.equal(help.code, 0);
     for (const word of ['np', 'add', 'playlist save', 'token create', 'doctor', 'link'])
       assert.ok(help.out.includes(`  ${word}`), word);
+  });
+});
+
+describe('the jukecord command without a Discord bot', () => {
+  it("says jukecord's own refusals once, without its name twice", async () => {
+    const server = await testServer({ listen: true, browserOnly: true });
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-cli-'));
+    try {
+      fs.writeFileSync(path.join(dataDir, 'host-token'), `${HOST_TOKEN}\n`);
+      const out: string[] = [];
+      const code = await run(['join'], { JUKECORD_URL: server.url, JUKECORD_DATA_DIR: dataDir }, (text) =>
+        out.push(text),
+      );
+      assert.equal(code, 1);
+      assert.deepEqual(out, ['jukecord runs without a Discord bot here, so it cannot join voice']);
+    } finally {
+      await server.close();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

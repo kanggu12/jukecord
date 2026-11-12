@@ -87,6 +87,25 @@ describe('Prefetcher', () => {
     );
   });
 
+  it("tells the server's player of each track it fetched from its site, and not of one found in the cache", async () => {
+    const { clock, queue, players, media, tracks } = setup(2);
+    for (const track of tracks) queue.add(GUILD, [track.id], 'end', null);
+    const player = players.get(GUILD);
+    // What the player hears: a track of this server fetched from its site (proof the site works, see Player.failed).
+    let told = 0;
+    player.fetchedAhead = () => {
+      told += 1;
+    };
+    player.play();
+    await clock.advance(300);
+    // Track 1 fetched from its site; Track 2 found in the cache (another server had fetched it meanwhile).
+    media.finish(1000);
+    await clock.advance(0);
+    media.finish(1000, true);
+    await clock.advance(0);
+    assert.equal(told, 1);
+  });
+
   it('keeps fetching the next track through a pause, a seek or a track added at the end', async () => {
     const { clock, queue, players, media, tracks } = setup(1);
     const [first, second, third] = tracks;

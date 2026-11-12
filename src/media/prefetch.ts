@@ -150,7 +150,7 @@ export class Prefetcher {
       const next = this.wanted(guildId).find((track) => {
         const key = MediaCache.keyOf(track.source);
         const failedAt = plan.failed.get(key);
-        const failedLately = failedAt !== undefined && clock.now() - failedAt <= FAILED_RETRY_MS;
+        const failedLately = failedAt !== undefined && clock.steady() - failedAt <= FAILED_RETRY_MS;
         return !this.options.cache.has(key) && !done.has(key) && !failedLately;
       });
       if (!next) break;
@@ -158,11 +158,14 @@ export class Prefetcher {
       plan.fetching = key;
       try {
         // Ahead of time: it takes its turn among every server's fetches, after any track somebody waits for.
-        await this.options.media.prepare(next, abort.signal, undefined, 'ahead');
+        const media = await this.options.media.prepare(next, abort.signal, undefined, 'ahead');
         done.add(key);
+        // Fetched from its site just now (not found in the cache meanwhile): the server's player counts it as proof that
+        // the site works, as one it fetched itself (see Player.fetchedAhead).
+        if (!media.fromCache) this.options.players.existing(guildId)?.fetchedAhead();
       } catch (error) {
         if (abort.signal.aborted) return;
-        plan.failed.set(key, clock.now());
+        plan.failed.set(key, clock.steady());
         // The player will say what is wrong when it gets there; here it is only worth a debug line.
         this.options.log.debug('prefetch failed', { guild: guildId, track: next.url, error });
       } finally {

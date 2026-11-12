@@ -7,6 +7,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
+import { sayNotice } from '../core/say.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
 
@@ -30,6 +31,7 @@ const TEXT = {
   playingNow: { en: 'Playing now', ko: '지금 재생' },
   paused: { en: 'Paused', ko: '일시정지' },
   loading: { en: 'Getting it ready', ko: '준비 중' },
+  waiting: { en: 'Waiting for its turn', ko: '차례를 기다리는 중' },
   nothing: { en: 'Nothing is playing', ko: '재생 중인 곡 없음' },
   queue: { en: 'Queue', ko: '대기열' },
   empty: { en: 'The queue is empty', ko: '대기열이 비어 있음' },
@@ -37,9 +39,9 @@ const TEXT = {
   noHistory: { en: 'Nothing has been played yet', ko: '아직 들은 곡 없음' },
   playlists: { en: 'Playlists', ko: '플레이리스트' },
   noPlaylists: { en: 'No saved playlists', ko: '저장한 플레이리스트 없음' },
-  addedBy: { en: 'added by', ko: '넣은 사람' },
+  addedBy: { en: 'added by', ko: '추가한 사람' },
   page: { en: 'page', ko: '페이지' },
-  total: { en: 'total', ko: '모두' },
+  total: { en: 'total', ko: '총' },
   pause: { en: 'Pause', ko: '일시정지' },
   resume: { en: 'Resume', ko: '이어서 재생' },
   skip: { en: 'Skip', ko: '건너뛰기' },
@@ -51,12 +53,15 @@ const TEXT = {
   listened: { en: 'listened', ko: '들은 시간' },
   distinct: { en: 'tracks', ko: '곡' },
   topTracks: { en: 'Most played', ko: '많이 들은 곡' },
-  topPeople: { en: 'Added most', ko: '많이 넣은 사람' },
+  topPeople: { en: 'Added most', ko: '많이 추가한 사람' },
   nobody: { en: 'the host', ko: '호스트' },
   noStats: { en: 'Nothing was played in this time', ko: '이 기간에 들은 곡 없음' },
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
-  onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
+  onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿀 수 있음' },
+  alerts: { en: 'Alerts channel', ko: '알림 채널' },
+  alertsHere: { en: 'jukecord tells this server about trouble here', ko: 'jukecord가 이 서버의 문제를 여기에 알림' },
+  noAlerts: { en: 'jukecord tells this server about trouble nowhere', ko: 'jukecord가 이 서버에 문제를 알리지 않음' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -103,12 +108,14 @@ export function addedCard(result: AddResult, lang: Lang, playingNow = false): Em
   const left: string[] = [];
   if (result.skippedTooLong > 0)
     left.push(
-      lang === 'ko' ? `너무 긴 곡 ${result.skippedTooLong}곡 뺌` : `${result.skippedTooLong} too long, left out`,
+      lang === 'ko'
+        ? `너무 긴 곡 ${result.skippedTooLong}곡은 추가하지 않음`
+        : `${result.skippedTooLong} too long, left out`,
     );
   if (result.skippedFull > 0)
     left.push(
       lang === 'ko'
-        ? `대기열이 차서 ${result.skippedFull}곡 못 넣음`
+        ? `대기열이 차서 ${result.skippedFull}곡은 추가하지 못함`
         : `${result.skippedFull} did not fit, the queue is full`,
     );
   if (left.length > 0) embed.setFooter({ text: left.join(' · ') });
@@ -125,22 +132,29 @@ function bar(position: number, duration: number | null): string {
 
 /** The current track with a progress bar, and buttons to pause or skip. */
 export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string | null) {
+  // What the player did by itself (a track taken out of the loop), in the card's language, on a line of its own.
+  const notice = snapshot.notice ? `\n${sayNotice(snapshot.notice, lang)}` : '';
   if (!snapshot.track) {
-    return { embeds: [new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.nothing[lang])], components: [] };
+    return {
+      embeds: [new EmbedBuilder().setColor(COLOUR.neutral).setDescription(`${TEXT.nothing[lang]}${notice}`)],
+      components: [],
+    };
   }
   const state =
     snapshot.status === 'playing'
       ? TEXT.playingNow[lang]
       : snapshot.status === 'paused'
         ? TEXT.paused[lang]
-        : TEXT.loading[lang];
+        : snapshot.waiting
+          ? TEXT.waiting[lang]
+          : TEXT.loading[lang];
   const colour =
     snapshot.status === 'playing' ? COLOUR.playing : snapshot.status === 'paused' ? COLOUR.paused : COLOUR.neutral;
   const embed = new EmbedBuilder()
     .setColor(colour)
     .setAuthor({ name: state })
     .setDescription(
-      `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}`,
+      `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}${notice}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
   // The repeat mode, when one is on, under the bar.
@@ -168,16 +182,24 @@ export function queueCard(items: readonly QueueItem[], page: number, lang: Lang)
   const current = Math.min(Math.max(1, page), pages);
   const shown = items.slice((current - 1) * 10, current * 10);
   const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
+  // A page past the end shows the last one, and says so first: shown without a word, it read as that page.
+  const past =
+    page > pages
+      ? lang === 'ko'
+        ? `${page}페이지는 없음: 대기열은 ${pages}페이지까지 있음\n`
+        : `There is no page ${page}: the queue has ${pages === 1 ? '1 page' : `${pages} pages`}\n`
+      : '';
   return new EmbedBuilder()
     .setColor(COLOUR.neutral)
     .setTitle(`${TEXT.queue[lang]} (${items.length})`)
     .setDescription(
-      shown
-        .map(
-          (item) =>
-            `${item.position + 1}. ${line(item.track.title, item.track.url, item.track.durationMs, item.addedBy, lang)}`,
-        )
-        .join('\n'),
+      past +
+        shown
+          .map(
+            (item) =>
+              `${item.position + 1}. ${line(item.track.title, item.track.url, item.track.durationMs, item.addedBy, lang)}`,
+          )
+          .join('\n'),
     )
     .setFooter({ text: `${TEXT.page[lang]} ${current}/${pages} · ${TEXT.total[lang]} ${formatDuration(total)}` });
 }
@@ -412,4 +434,10 @@ export function wrappedCard(
     });
   }
   return { embeds: [embed], components };
+}
+/** Where jukecord tells the server about trouble (app/alerts.ts), or that it tells it nowhere. */
+export function alertsCard(settings: SettingsView, lang: Lang): EmbedBuilder {
+  const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.alerts[lang]);
+  if (settings.alertsChannelId === null) return embed.setDescription(TEXT.noAlerts[lang]);
+  return embed.setDescription(`<#${settings.alertsChannelId}>\n${TEXT.alertsHere[lang]}`);
 }

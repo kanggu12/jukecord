@@ -65,8 +65,9 @@ Every error is the same shape, with the HTTP status that matches its code:
 
 Changes (`POST`, `PUT`, `PATCH`, `DELETE`) are held to ten a second per login and per address, with twenty at once,
 and the changes that start fetching a track at once (`skip`, `play-now`, `jump`, `remove-current`) to two a second
-with five at once. Reads (`GET`) are held to thirty a second with sixty at once, per login and per address (without
-a login, per address). A request over its rate is answered with `429` (`rate-limited`) and `Retry-After` in seconds. While jukecord has fallen behind (its event loop more than 0.2 s late over the last second), audio
+with five at once; a change refused before it did anything gives its address's share back, one refused after a
+lookup (a search that found nothing) does not. Reads (`GET`) are held to thirty a second with sixty at once, per person
+(every login and token of one Discord user together), or per address without a login. A request over its rate is answered with `429` (`rate-limited`) and `Retry-After` in seconds. While jukecord has fallen behind (its event loop more than 0.2 s late over the last second), audio
 and changes are answered with `503` (`busy`) and `Retry-After`, until it has caught up. The host (its command line and
 the browsers it logged in with a link) is held to neither rate, and its changes go through while jukecord is behind;
 its audio waits like everyone's, as sending audio is the work that can wait.
@@ -74,9 +75,11 @@ its audio waits like everyone's, as sending audio is the work that can wait.
 A request must arrive whole within 30 s, its headers within 15 s; a slower one is answered `408` and its connection
 closed. Sending an answer has no time limit while the reader takes it (audio to a slow line takes as long as it takes),
 but a connection on which nothing moves either way for two minutes is closed; a WebSocket is not (it is pinged every
-30 s). At most 4096 connections are open at once, and 256 from one address (an IPv6 address counts by its /56) unless
-`JUKECORD_TRUST_PROXY` says they come through a proxy; one more is closed as it arrives. More than 16 requests sent
-on one connection without reading their answers close it.
+30 s). At most 4096 connections are open at once, 256 from one address (an IPv6 address counts by its /56), or 3840
+from one address when `JUKECORD_TRUST_PROXY` says they come through a proxy; one more is closed as it arrives, and the
+log says so once a minute. Requests sent one after another on one connection without waiting for the answers
+(pipelining) are answered in order, sixteen made at a time and the rest waiting their turn; past 128 waiting, the
+others are answered `429` at once.
 
 ## Servers
 
@@ -152,6 +155,7 @@ playlist) so a program does not need to ask again.
 | `settings` The server's settings and its roles | `GET /api/v1/guilds/{guild}/settings` | read | `jukecord settings` | `/dj show` |
 | `dj-role` Set the role that may change the music (null: everyone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/dj-role` | admin | `jukecord dj` | `/dj set` |
 | `status` The version, the mode and whether Discord is connected | `GET /api/v1/status` | anyone | `jukecord status` | `/version` |
+| `alerts-channel` Set the text channel where jukecord tells this server about trouble (null: nowhere); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/alerts-channel` | admin | `jukecord alerts` | `/alerts set` |
 
 ### Your login
 
@@ -211,7 +215,8 @@ cookie comes from a page that is not the panel's (the panel's address differs fr
 when the login may no longer open the server it shows. Any other close is worth reconnecting after. `1013` (try again
 later) comes at once, with the reason, when a connection would be one too many: jukecord has as many as
 `JUKECORD_LIVE_MAX` allows (1000 by default), or ten are open from the same login, or twenty from the same address
-(the host's own count in the total only); or the address failed to log in too often. Wait longer before trying again:
+(the host's own count in the total only); or the address failed to log in too often. The connections holding the
+places are pinged then, and the ones that do not answer within 15 s are closed. Wait longer before trying again:
 the panel waits 15 s, doubling up to a minute. `voice` lists the
 channels the connection's own person can see in Discord (the host sees them all); when the bot is in a channel that
 person cannot see, `current` has its ID and an empty `name`.
@@ -224,8 +229,9 @@ clock and the server's: `serverTime - (t + time the pong arrived) / 2`, from the
 
 `GET /api/v1/guilds/{guild}/tracks/{track}/audio` sends the audio of a track that server is playing or has queued:
 Ogg Opus, or with `?format=mp3` an MP3 copy (made the first time someone asks, for browsers without Opus; two at a
-time, `503` past that). Range requests work, so a player can start in the middle. Any other track answers `404`, and
-one not prepared yet `409`.
+time, `503` past that). A request waits up to 5 s for its copy; a longer one (a long track) answers `503` with
+`Retry-After` while the copy goes on, and the same address sends it once it is made. Range requests work, so a player
+can start in the middle. Any other track answers `404`, and one not prepared yet `409`.
 
 ## Covers
 

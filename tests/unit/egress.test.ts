@@ -3,6 +3,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { createLogger } from '../../src/log.ts';
+import { NoAnswerError } from '../../src/media/address.ts';
 import { type EgressGuard, startEgressGuard } from '../../src/media/egress.ts';
 
 // Names as the guard resolves them in these tests: "public" points at this machine, which the tests let through
@@ -36,6 +37,8 @@ describe('the egress guard', () => {
     guard = await startEgressGuard({
       log: createLogger({ level: 'error', sinks: [] }),
       lookup: async (host) => {
+        // A name server that does not answer at all (this machine off the internet), for one name.
+        if (host === 'offline.test') throw new NoAnswerError('no name server answered for offline.test');
         const found = NAMES[host];
         if (!found) throw new Error('ENOTFOUND');
         return found;
@@ -99,6 +102,15 @@ describe('the egress guard', () => {
     const answer = await get(`http://nowhere.test:${sitePort}/`);
     assert.equal(answer.status, 502);
     assert.equal(answer.message, 'no such site');
+  });
+
+  it('says when no name server answered at all, which is no network rather than no such site', async () => {
+    const answer = await get(`http://offline.test:${sitePort}/`);
+    assert.equal(answer.status, 502);
+    assert.equal(answer.message, 'jukecord cannot reach the internet');
+    const tunnel = await connect('offline.test:443');
+    assert.equal(tunnel.status, 502);
+    tunnel.socket.destroy();
   });
 
   it('connects a name with private and public answers to the public one only', async () => {

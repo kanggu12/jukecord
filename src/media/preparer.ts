@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { FetchWatch } from '../app/alerts.ts';
 import { steadyNow } from '../core/clock.ts';
 import { fetchLimitMs, type MediaPreparer, type PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
@@ -34,6 +35,8 @@ export interface MediaOptions {
   readonly timeoutMs: number;
   /** How many fetches ahead of time may run at once, across every server (default: half the processors, 2 to 6). */
   readonly fetchLimit?: number;
+  /** Hears how each fetch from a site went (for YouTube's check for bots, see app/alerts.ts). */
+  readonly watch?: FetchWatch;
 }
 
 // A download in progress, shared by everyone waiting for the same track.
@@ -51,6 +54,10 @@ interface Job {
   /** Its place among the fetches of every server. */
   readonly ticket: Ticket;
 }
+
+// How long an MP3 copy that failed is not tried again: a browser asks every couple of seconds while it listens, and a
+// copy that cannot be made (a broken file, an encoder missing) would otherwise start ffmpeg for every ask.
+const MP3_RETRY_MS = 60_000;
 
 // Failures worth one more try: the network or the site stumbled, not "this video does not exist".
 const TRANSIENT =
@@ -88,6 +95,8 @@ export class Media implements MediaPreparer {
   private readonly jobs = new Map<string, Job>();
   // MP3 copies being made, so two Safari listeners do not start two conversions.
   private readonly mp3Jobs = new Map<string, Promise<string>>();
+  // MP3 copies that failed lately, by key: when (on the steady clock) and the error, given again until MP3_RETRY_MS.
+  private readonly mp3Failed = new Map<string, { readonly at: number; readonly error: unknown }>();
   private readonly slots: Slots;
 
   constructor(options: MediaOptions) {
@@ -109,7 +118,8 @@ export class Media implements MediaPreparer {
   ): Promise<PreparedMedia> {
     const key = MediaCache.keyOf(track.source);
     const cached = this.options.cache.get(key);
-    if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs };
+    // From the cache: nothing was asked of the site (the player tells the two apart, see PreparedMedia.fromCache).
+    if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs, fromCache: true };
     let job = this.jobs.get(key);
     // A download being stopped (everyone left it) is not joined: it can only end in "cancelled". A new one starts.
     if (!job || job.abort.signal.aborted) {
@@ -251,6 +261,8 @@ export class Media implements MediaPreparer {
           this.options.log.info('read a track from a whole file', { title: track.title });
         }
         cache.commit(key, tmp, { source: track.source, durationMs, loudness });
+        // Fetched from the site just now: it answers.
+        this.options.watch?.worked(track.url);
         if (loudness !== null) this.options.tracks.setLoudness(track.id, loudness);
         this.options.log.info('cached a track', {
           title: track.title,
@@ -261,6 +273,9 @@ export class Media implements MediaPreparer {
       } catch (error) {
         // A half-written file is useless and counts against the disk; remove it whatever went wrong.
         fs.rmSync(tmp, { force: true });
+        // Given up by everyone who wanted it is no answer from the site.
+        if (!abort.signal.aborted)
+          this.options.watch?.failed(track.url, error instanceof Error ? error.message : String(error));
         throw error;
       } finally {
         // Its place goes to the next fetch waiting, if any.
@@ -284,6 +299,9 @@ export class Media implements MediaPreparer {
     const cache = this.options.cache;
     if (!cache.has(key)) return null;
     if (cache.hasMp3(key)) return cache.mp3Path(key);
+    // A copy that failed a moment ago fails the same way now, without a new ffmpeg.
+    const failed = this.mp3Failed.get(key);
+    if (failed && steadyNow() - failed.at < MP3_RETRY_MS) throw failed.error;
     let job = this.mp3Jobs.get(key);
     if (!job) {
       // Two conversions at a time: each is an ffmpeg process, and requests for many tracks at once would start many.
@@ -302,6 +320,12 @@ export class Media implements MediaPreparer {
         })
         .catch((error: unknown) => {
           fs.rmSync(tmp, { force: true });
+          // Said once here: the requests that asked may have stopped waiting for it (see the audio route).
+          this.options.log.warn('could not make an MP3 copy', { title: track.title, error });
+          // Kept for a while, the old failures dropped first so the list cannot grow.
+          for (const [other, entry] of this.mp3Failed)
+            if (steadyNow() - entry.at >= MP3_RETRY_MS) this.mp3Failed.delete(other);
+          this.mp3Failed.set(key, { at: steadyNow(), error });
           throw error;
         })
         .finally(() => this.mp3Jobs.delete(key));

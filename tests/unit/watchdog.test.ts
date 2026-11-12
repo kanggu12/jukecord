@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { takeWatchdogMark } from '../../src/watchdog.ts';
 
 const WATCHDOG = path.resolve(import.meta.dirname, '../../src/watchdog.ts');
 
@@ -59,6 +62,30 @@ describe('the watchdog', () => {
     const result = await ended;
     assert.equal(result.signal, null, stderr);
     assert.equal(result.code, 0);
+  });
+
+  it('leaves a mark for the next start to read, which reads it once', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-watchdog-'));
+    try {
+      const mark = path.join(dir, 'watchdog.json');
+      const script = `import { startWatchdog } from ${JSON.stringify(WATCHDOG)}; startWatchdog(600, ${JSON.stringify(mark)});
+        const end = Date.now() + 10_000; while (Date.now() < end) {}`;
+      const run = spawn(
+        process.execPath,
+        ['--disable-warning=ExperimentalWarning', '--input-type=module', '-e', script],
+        {
+          stdio: 'ignore',
+        },
+      );
+      await new Promise((resolve) => run.on('exit', resolve));
+      // What the next start says in the log and the alerts channels: when, and how long the main thread was still.
+      const read = takeWatchdogMark(mark);
+      assert.ok(read && read.stillMs >= 600 && read.at > 0, JSON.stringify(read));
+      // Read once: a later start that was not the watchdog's says nothing.
+      assert.equal(takeWatchdogMark(mark), null);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('leaves a process alone that keeps answering, and lets it end by itself', async () => {

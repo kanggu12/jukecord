@@ -6,13 +6,13 @@
  * The progress bar moves on a 4-per-second timer only while something plays; nothing moves while idle or paused.
  */
 
-import { sayFailure } from '../../../src/core/say.ts';
-import { api, coverUrl, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
-import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
+import { sayFailure, sayNotice, translate } from '../../../src/core/say.ts';
+import { ApiError, api, coverUrl, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
+import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
 import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
-import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/layers.ts';
+import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
 export function disc(size: 'lg' | 'sm', track: Track | null, mode: 'playing' | 'paused' | 'idle'): HTMLElement {
@@ -74,16 +74,31 @@ function discMode(player: Player | null): 'playing' | 'paused' | 'idle' {
   return 'idle';
 }
 
-/** Runs an action from a key: the key is busy meanwhile, and a refusal shows as a toast. */
+/**
+ * Runs an action from a key: the key is busy meanwhile, and a refusal shows as a toast. Busy is said (aria-disabled,
+ * the busy look) and presses meanwhile do nothing, but the key is not disabled: a disabled key drops the keyboard
+ * focus to the page, and Enter on Pause, Skip or a row's Play now left the keyboard nowhere.
+ */
 export async function act<T>(button: HTMLButtonElement | null, run: () => Promise<T>): Promise<T | undefined> {
-  if (button) button.disabled = true;
+  // A press while the key's last one is under way asks nothing more.
+  if (button?.classList.contains('busy')) return undefined;
+  // aria-disabled set by someone else (a key done with) stays as it was afterwards.
+  const before = button?.getAttribute('aria-disabled') ?? null;
+  if (button) {
+    button.classList.add('busy');
+    button.setAttribute('aria-disabled', 'true');
+  }
   try {
     return await run();
   } catch (error) {
     problem(error);
     return undefined;
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.classList.remove('busy');
+      if (before === null) button.removeAttribute('aria-disabled');
+      else button.setAttribute('aria-disabled', before);
+    }
   }
 }
 
@@ -114,6 +129,8 @@ export function nowCard(live: Live): HTMLElement {
   const title = h('h3', { class: 'title' });
   const meta = h('div', { class: 'meta' });
   const error = h('div', { class: 'error', role: 'status' });
+  // What the player did by itself (paused with nobody listening, a track taken out of the loop), until a person acts.
+  const notice = h('div', { class: 'player-note', role: 'status' });
   // Why there are no live updates, while there are none for a reason: in whole, where a touch screen shows it too.
   const liveNote = h('div', { class: 'live-note', role: 'status' });
   const fillBar = h('div', { class: 'fill' });
@@ -126,10 +143,11 @@ export function nowCard(live: Live): HTMLElement {
   const pause = h('button', { class: 'key primary', type: 'button', 'data-act': 'pause' });
   const skip = h('button', { class: 'key', type: 'button', 'data-act': 'skip' });
   const stop = h('button', { class: 'key', type: 'button', 'data-act': 'stop' });
-  const drop = h('button', { class: 'key quiet bad', type: 'button', 'data-act': 'drop' });
+  // Framed like the keys beside it: a bare cross at the end of the row read as "close this card".
+  const drop = h('button', { class: 'key bad', type: 'button', 'data-act': 'drop' });
   const repeat = h('button', { class: 'key square', type: 'button', 'data-act': 'repeat' });
   const keys = h('div', { class: 'keys' }, pause, skip, stop, repeat, drop);
-  const info = h('div', { class: 'info' }, title, meta, error, liveNote, progress, keys);
+  const info = h('div', { class: 'info' }, title, meta, error, notice, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
   const card = h(
     'section',
@@ -173,12 +191,15 @@ export function nowCard(live: Live): HTMLElement {
     pill.className = `pill tone-${tone}`;
     // Idle says itself in the title; a label saying it again would be noise.
     pill.hidden = status === 'idle';
+    // A fetch waiting for its turn among every server's fetches says so: "Getting ready" with no progress said nothing.
     const label =
-      status === 'loading' && player?.progress !== null && player?.progress !== undefined
-        ? `${words.loading} ${Math.round(player.progress * 100)}%`
-        : status === 'idle'
-          ? words.idle
-          : { playing: words.playing, paused: words.paused, loading: words.loading }[status];
+      status === 'loading' && player?.waiting
+        ? words.waitingTurn
+        : status === 'loading' && player?.progress !== null && player?.progress !== undefined
+          ? `${words.loading} ${Math.round(player.progress * 100)}%`
+          : status === 'idle'
+            ? words.idle
+            : { playing: words.playing, paused: words.paused, loading: words.loading }[status];
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The track. Everything below is redrawn only when what it shows changes (refill): the title link and the keys
     // must stay the same elements while snapshots arrive, or a click on them is lost.
@@ -211,10 +232,18 @@ export function nowCard(live: Live): HTMLElement {
       title.removeAttribute('aria-hidden');
       refill(meta, `idle|${hint}`, h('span', null, hint));
     }
+    notice.hidden = !player?.notice;
+    // Signed with the language too: switched, the line is said again in the new one.
+    refill(
+      notice,
+      `${state.lang}|${player?.notice ?? ''}`,
+      player?.notice ? icon('info') : null,
+      player?.notice ? h('span', null, sayNotice(player.notice, state.lang)) : null,
+    );
     error.hidden = !player?.error;
     refill(
       error,
-      player?.error ?? '',
+      `${state.lang}|${player?.error ?? ''}`,
       player?.error ? icon('circle-alert') : null,
       player?.error ? words.couldNotPlay(sayFailure(player.error, state.lang)) : null,
     );
@@ -230,24 +259,26 @@ export function nowCard(live: Live): HTMLElement {
     const queued = (state.queue?.items.length ?? 0) > 0;
     const pauseWords = moving ? words.pause : status === 'paused' ? words.resume : words.play;
     refill(pause, `${moving}|${pauseWords}`, icon(moving ? 'pause' : 'play'), pauseWords);
+    // A key turned off with the focus on it hands it to the main key, or with that off too, to the add field.
+    const addField = document.getElementById('add-input');
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
-    pause.disabled = !player || !control || (!track && !queued);
+    setOff(pause, !player || !control || (!track && !queued), addField);
     refill(skip, words.skip, icon('skip-forward'), h('span', { class: 'label' }, words.skip));
     skip.title = words.skip;
-    skip.disabled = !control || !track;
+    setOff(skip, !control || !track, pause, addField);
     refill(stop, words.stop, icon('square'), h('span', { class: 'label' }, words.stop));
     stop.title = words.stop;
-    stop.disabled = !control || !track;
-    refill(drop, words.drop, icon('x'), h('span', { class: 'label' }, words.drop));
+    setOff(stop, !control || !track, pause, addField);
+    refill(drop, words.drop, icon('circle-minus'), h('span', { class: 'label' }, words.drop));
     drop.title = words.dropHint;
-    drop.disabled = !control || !track;
+    setOff(drop, !control || !track, pause, addField);
     const mode2 = player?.repeat ?? 'off';
     refill(repeat, mode2, icon(mode2 === 'track' ? 'repeat-1' : 'repeat'));
     repeat.setAttribute('aria-pressed', String(mode2 !== 'off'));
     const repeatLabel = { off: words.repeatOff, track: words.repeatTrack, queue: words.repeatQueue }[mode2];
     repeat.title = repeatLabel;
     repeat.setAttribute('aria-label', repeatLabel);
-    repeat.disabled = !control || !player;
+    setOff(repeat, !control || !player, pause, addField);
     bar.setAttribute('aria-disabled', String(!control || !track || status === 'loading'));
     bar.setAttribute('aria-label', words.seekLabel);
     tick();
@@ -325,6 +356,9 @@ export function nowCard(live: Live): HTMLElement {
     void act(pause, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
   };
   skip.onclick = () => {
+    // A press while the last skip is under way asks nothing more (act() would refuse it): nor does the card move, or the
+    // track sliding out would come back before the first skip's answer.
+    if (skip.classList.contains('busy')) return;
     // The track slides out to the right while the next one is asked for. The card does not wait for the answer to come
     // back: a slow one (seconds, while jukecord is busy) would leave it empty all that time.
     if (moving()) {
@@ -359,7 +393,13 @@ export function nowCard(live: Live): HTMLElement {
 export function queueCard(): HTMLElement {
   const count = h('span', { class: 'count' });
   const search = h('input', { type: 'search', autocomplete: 'off' });
-  const searchField = h('label', { class: 'field head-search' }, icon('search'), search);
+  // A key that clears the search, shown while there is one (the browser's own is hidden: Firefox has none).
+  const clearSearch = h(
+    'button',
+    { class: 'key sm square quiet field-clear', type: 'button', hidden: true },
+    icon('x'),
+  );
+  const searchField = h('label', { class: 'field head-search' }, icon('search'), search, clearSearch);
   const tool = (name: Parameters<typeof icon>[0], act: string) =>
     h('button', { class: 'key sm', type: 'button', 'data-act': act }, icon(name), h('span', { class: 'label' }));
   const shuffle = tool('shuffle', 'shuffle');
@@ -510,7 +550,10 @@ export function queueCard(): HTMLElement {
       next.tabIndex = -1;
       next.setAttribute('aria-hidden', 'true');
     }
-    const grip = h('span', { class: 'grip', title: words.dragToMove }, icon('grip-vertical'));
+    // The grip only for someone who may move the row; a person who may only look gets its place, empty.
+    const grip = control
+      ? h('span', { class: 'grip', title: words.dragToMove }, icon('grip-vertical'))
+      : h('span', { class: 'grip', 'aria-hidden': 'true' });
     const element = h(
       'li',
       { class: `row ${item.position === 0 ? 'next' : ''}`.trim(), dataset: { id: String(item.id) } },
@@ -620,6 +663,9 @@ export function queueCard(): HTMLElement {
           : `${words.tracks(items.length)} · ${words.total(clock(total))}`;
     search.placeholder = words.searchQueue;
     search.setAttribute('aria-label', words.searchQueue);
+    clearSearch.hidden = !searching;
+    clearSearch.title = words.clearSearch;
+    clearSearch.setAttribute('aria-label', words.clearSearch);
     for (const [button, label] of [
       [shuffle, words.shuffle],
       [dedupe, words.dedupe],
@@ -629,16 +675,21 @@ export function queueCard(): HTMLElement {
     ] as const) {
       (button.querySelector('.label') as HTMLElement).textContent = label;
       button.title = label;
-      button.disabled = !control && button !== load;
     }
     toolsMore.title = words.queueTools;
     toolsMore.setAttribute('aria-label', words.queueTools);
-    toolsMore.disabled = !control;
-    shuffle.disabled = !control || items.length < 2;
-    dedupe.disabled = !control || items.length < 2;
-    clear.disabled = !control || items.length === 0;
-    save.disabled = !control || (items.length === 0 && !state.player?.track);
-    load.disabled = !control || !state.queue;
+    // Open for everyone: Load is in it on a phone, and anyone may look at the saved playlists (the tools in it keep
+    // their own states).
+    toolsMore.disabled = !state.queue;
+    // A tool turned off with the focus on it (Clear, Remove duplicates with nothing left to remove) hands it to the
+    // queue's search, or the add field: the list may be empty now.
+    const addField = document.getElementById('add-input');
+    setOff(shuffle, !control || items.length < 2, search, addField);
+    setOff(dedupe, !control || items.length < 2, search, addField);
+    setOff(clear, !control || items.length === 0, search, addField);
+    setOff(save, !control || (items.length === 0 && !state.player?.track), search, addField);
+    // Anyone may look at the saved playlists: the dialog keeps its keys for those who may change the music.
+    load.disabled = !state.queue;
     // The rows, filtered by the search; the scroll position survives the redraw.
     const query = search.value.trim().toLowerCase();
     const shown = query
@@ -671,7 +722,21 @@ export function queueCard(): HTMLElement {
         // No state yet (connecting): an empty list, not "the queue is empty".
         fill(list);
       } else if (items.length === 0) {
-        fill(list, h('li', { class: 'empty' }, icon('list-music'), words.queueEmpty));
+        // Empty: what to add, and where (the add card is right above), for someone who may add.
+        fill(
+          list,
+          h(
+            'li',
+            { class: 'empty' },
+            icon('list-music'),
+            h(
+              'div',
+              null,
+              h('div', null, words.queueEmpty),
+              control ? h('div', { class: 'faint' }, words.queueEmptyHint) : null,
+            ),
+          ),
+        );
       } else if (shown.length === 0) {
         fill(list, h('li', { class: 'empty' }, icon('search'), words.noMatch));
       } else {
@@ -750,6 +815,13 @@ export function queueCard(): HTMLElement {
   };
 
   search.oninput = draw;
+  // Cleared: every row again, and the keyboard back in the field.
+  clearSearch.onclick = (event) => {
+    event.preventDefault();
+    search.value = '';
+    draw();
+    search.focus();
+  };
   shuffle.onclick = () => void act(shuffle, () => api.shuffle(guild()));
   dedupe.onclick = () =>
     void act(dedupe, async () => {
@@ -876,7 +948,9 @@ function trackMenu(id: number): void {
 async function playlistsDialog(): Promise<void> {
   const words = t();
   const box = h('ul', { class: 'list', style: 'padding: 0' });
-  const dialog = showDialog(words.playlists, box);
+  // For someone who may only look: why the list has no keys.
+  const why = mayControl() ? null : h('p', { class: 'look-only' }, words.playlistsLookOnly);
+  const dialog = showDialog(words.playlists, why ? h('div', null, why, box) : box);
   // The dialog's Close key: where the keyboard goes when no playlist is left to stand on.
   const closeKey = () => box.closest('.dialog')?.querySelector<HTMLElement>('.dialog-keys .key') ?? null;
   const draw = async () => {
@@ -903,10 +977,11 @@ async function playlistsDialog(): Promise<void> {
   };
   // One playlist: its name and size, and its keys (each with a data-key, so the focus can find it again).
   const playlistRow = (playlist: { id: number; name: string; size: number }) => {
+    // The same icon as the queue's Load, which opens this list.
     const loadKey = h(
       'button',
       { class: 'key sm', type: 'button', dataset: { key: 'load' } },
-      icon('list-plus'),
+      icon('folder-open'),
       words.load,
     );
     const renameKey = h(
@@ -961,6 +1036,8 @@ async function playlistsDialog(): Promise<void> {
       });
       if (ok && (await act(null, () => api['playlist-delete'](guild(), playlist.name))) !== undefined) void draw();
     };
+    // Someone who may only look sees the list without its keys (the dialog says why, above it).
+    const control = mayControl();
     return h(
       'li',
       { class: 'channel', dataset: { id: String(playlist.id) } },
@@ -968,11 +1045,13 @@ async function playlistsDialog(): Promise<void> {
         'span',
         { class: 'name' },
         h('b', null, playlist.name),
-        h('span', { class: 'faint' }, ` · ${words.tracks(playlist.size)}`),
+        // The count on a line of its own under the name: after a dot on the same line, a phone broke the line between
+        // the dot and the count, or put the dot first on the next one.
+        h('span', { class: 'faint count-tag' }, words.tracks(playlist.size)),
       ),
-      renameKey,
-      deleteKey,
-      loadKey,
+      control ? renameKey : null,
+      control ? deleteKey : null,
+      control ? loadKey : null,
     );
   };
   await draw();
@@ -990,6 +1069,12 @@ function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: 
   toast(parts.join(' · '), result.skippedTooLong + result.skippedFull > 0 ? 'pause' : 'play');
 }
 
+// An add's refusal as the add card says it: "Could not add:" and jukecord's reason in the panel's language, in the middle
+// of the sentence (no capital); a request that never reached jukecord says so on its own.
+function refusal(reason: unknown): string {
+  return reason instanceof ApiError ? t().couldNotAdd(translate(reason.message, state.lang)) : messageOf(reason);
+}
+
 /** Adding: an address or search words, to the end of the queue or to play now. */
 export function addCard(): HTMLElement {
   const input = h('input', { type: 'text', autocomplete: 'off', enterkeyhint: 'go', id: 'add-input' });
@@ -999,12 +1084,21 @@ export function addCard(): HTMLElement {
   const form = h('form', { class: 'add' }, field, add, now);
   // Why the keys are off for someone who may only look, in words a touch screen shows too (a title it does not).
   const why = h('p', { class: 'look-only', hidden: true });
-  const card = h('section', { class: 'card', 'aria-label': 'add' }, form, why);
+  // Why the last add did not go through, under the field it came from (the bar's toast is far from it on a desktop).
+  // Not an alert of its own: the toast says it out loud already, and a screen reader heard it twice.
+  const failed = h('p', { class: 'add-failed', hidden: true });
+  const card = h('section', { class: 'card add-card', 'aria-label': 'add' }, form, failed, why);
 
   // The key whose lookup is running: its words and its busy state stay while the card redraws for other reasons.
   let busy: HTMLButtonElement | null = null;
+  // The last add's refusal and the server it was for: said in the panel's language of the moment, and only while that
+  // server is shown (another server's refusal is not this one's).
+  let refused: { guild: string; reason: unknown } | null = null;
   const draw = () => {
     const words = t();
+    if (refused && refused.guild !== guild()) refused = null;
+    failed.hidden = refused === null;
+    failed.textContent = refused ? refusal(refused.reason) : '';
     input.placeholder = words.addPlaceholder;
     input.setAttribute('aria-label', words.addPlaceholder);
     card.setAttribute('aria-label', words.add);
@@ -1012,8 +1106,13 @@ export function addCard(): HTMLElement {
     if (busy !== now) fill(now, icon('play'), words.playNow);
     const control = mayControl();
     input.disabled = !control;
-    add.disabled = !control || busy !== null;
-    now.disabled = !control || busy !== null;
+    // While a lookup runs the keys are busy, not disabled: a disabled key drops the keyboard focus.
+    add.disabled = !control;
+    now.disabled = !control;
+    for (const key of [add, now]) {
+      if (busy !== null) key.setAttribute('aria-disabled', 'true');
+      else key.removeAttribute('aria-disabled');
+    }
     field.title = control ? '' : words.lookOnlyHint;
     why.hidden = control || !state.guild;
     why.textContent = words.lookOnlyHint;
@@ -1025,23 +1124,42 @@ export function addCard(): HTMLElement {
   };
   // Both keys look the input up; while that runs (a playlist can take seconds) the keys say so.
   const submit = async (button: HTMLButtonElement, playNow: boolean) => {
+    // A lookup under way already (Enter again, the other key): one at a time.
+    if (busy !== null) return;
     const text = input.value.trim();
     if (!text) {
       input.focus();
       return;
     }
     busy = button;
+    refused = null;
     fill(button, icon('loader-circle', 'spin'), t().adding);
     draw();
-    const result = await act(button, () => (playNow ? api['play-now'](guild(), text) : api.add(guild(), text)));
+    let failure: unknown = null;
+    let result: Awaited<ReturnType<typeof api.add>> | null = null;
+    try {
+      result = await (playNow ? api['play-now'](guild(), text) : api.add(guild(), text));
+    } catch (error) {
+      failure = error;
+    }
     // The key gets its own words back.
     busy = null;
     draw();
     if (result) {
       input.value = '';
       added(result);
+      return;
     }
+    // Said under the field as well as in the bar (see refusal below).
+    toast(refusal(failure), 'bad', 'circle-alert');
+    refused = { guild: guild(), reason: failure };
+    draw();
   };
+  // A new try (typing) takes the last refusal away.
+  input.addEventListener('input', () => {
+    refused = null;
+    failed.hidden = true;
+  });
   form.onsubmit = (event) => {
     event.preventDefault();
     void submit(add, false);
@@ -1077,8 +1195,9 @@ export function voiceCard(): HTMLElement {
     const current = voice?.current ?? null;
     pill.className = `pill ${current ? 'tone-play' : 'tone-idle'}`;
     top.classList.toggle('joined', Boolean(current) && !browserOnly);
-    // Browser-only is said once, in the top bar; here the card explains it.
-    pill.hidden = browserOnly;
+    // The box under the title says where the bot is (or that it is in no channel): a pill saying it too was the
+    // same words twice. Browser-only is said once, in the top bar; here the card explains it.
+    pill.hidden = true;
     fill(pill, h('span', { class: 'dot' }), current ? words.inVoice : words.notInVoice);
     if (browserOnly) {
       fill(where, h('span', { class: 'muted' }, words.noBot));
@@ -1095,12 +1214,14 @@ export function voiceCard(): HTMLElement {
       refill(leave, words.leave, icon('log-out'), words.leave);
       leave.hidden = !current;
       leave.disabled = !mayControl();
-      channels.hidden = false;
-      const list = voice?.channels ?? [];
+      // The channel the bot is in is the box's, not the list's (it showed twice).
+      const list = (voice?.channels ?? []).filter((channel) => channel.id !== current?.channelId);
       const control = mayControl();
       // Rebuilt only when a channel, its people, the bot's place or the rights change: a listener coming or going
       // must not take the Join key from under the pointer.
       const sign = JSON.stringify([list, current?.channelId ?? null, control, state.lang]);
+      // In the only channel there is: nothing more to list.
+      channels.hidden = list.length === 0 && current !== null;
       if (list.length === 0) {
         refill(channels, sign, h('li', { class: 'empty' }, words.noChannels));
       } else {

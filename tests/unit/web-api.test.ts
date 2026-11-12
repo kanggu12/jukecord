@@ -6,6 +6,7 @@ import { MediaCache } from '../../src/media/cache.ts';
 import { API, API_PREFIX, OPERATIONS } from '../../src/web/api.ts';
 import { CSRF_HEADER, SESSION_COOKIE } from '../../src/web/auth.ts';
 import {
+  ALERTS_CHANNEL,
   ALICE,
   asHost,
   BOB,
@@ -104,6 +105,25 @@ describe('the HTTP API', () => {
     assert.equal(missing.json().error.code, 'not-found');
   });
 
+  it("says what a value may be in words, not in the validator's", async () => {
+    const said = async (url: string, payload?: unknown) => {
+      const answer = await inject({
+        method: payload ? 'PUT' : 'GET',
+        url: api(url),
+        headers: asHost,
+        ...(payload ? { payload } : {}),
+      });
+      assert.equal(answer.statusCode, 400, url);
+      return answer.json().error.message;
+    };
+    assert.equal(await said('/logs?level=nonsense'), 'level is debug, info, warn or error');
+    assert.equal(await said(`/guilds/${GUILD}/history?limit=0`), 'limit is 1 to 200');
+    assert.equal(await said(`/guilds/${GUILD}/stats?days=400`), 'days is 1 to 366');
+    assert.equal(await said('/guilds/123/player'), 'guild is a Discord server ID, or "local"');
+    assert.equal(await said(`/guilds/${GUILD}/player/repeat`, { mode: 'sometimes' }), 'mode is off, track or queue');
+    assert.equal(await said(`/guilds/${GUILD}/player/repeat`, { other: 1 }), 'mode is missing');
+  });
+
   it('keeps a read token to looking', async () => {
     const created = await inject({
       method: 'POST',
@@ -180,6 +200,34 @@ describe('the HTTP API', () => {
       (await inject({ method: 'GET', url: api('/guilds'), headers: { cookie: bob.cookie } })).json(),
       [],
     );
+  });
+
+  it('sets the alerts channel for people who can manage the server, to a channel the bot may post in', async () => {
+    const { cookie, csrf } = sessionFor(server, ALICE);
+    const headers = { cookie, [CSRF_HEADER]: csrf };
+    const set = (payload: unknown, as: Record<string, string> = asHost) =>
+      inject({
+        method: 'PUT',
+        url: api(`/guilds/${GUILD}/settings/alerts-channel`),
+        headers: as,
+        payload: payload as never,
+      });
+    // Alice may not: choosing it needs Manage Server.
+    const refused = await set({ channelId: ALERTS_CHANNEL }, headers);
+    assert.equal(refused.statusCode, 403);
+    assert.equal(refused.json().error.message, 'only people who can manage the server can choose the alerts channel');
+    // A channel the bot cannot post in (or not this server's) is refused.
+    assert.equal((await set({ channelId: '600000000000000099' })).statusCode, 404);
+    const chosen = await set({ channelId: ALERTS_CHANNEL });
+    assert.equal(chosen.statusCode, 200);
+    assert.deepEqual(
+      { id: chosen.json().alertsChannelId, channels: chosen.json().channels },
+      { id: ALERTS_CHANNEL, channels: [{ id: ALERTS_CHANNEL, name: 'jukecord-alerts' }] },
+    );
+    // Anyone may see where it is; nowhere again with null.
+    const shown = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers });
+    assert.equal(shown.json().alertsChannelId, ALERTS_CHANNEL);
+    assert.equal((await set({ channelId: null })).json().alertsChannelId, null);
   });
 
   it('keeps the host operations to the host', async () => {
