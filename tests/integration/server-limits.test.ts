@@ -11,6 +11,20 @@ import { after, before, describe, it } from 'node:test';
 import { MediaCache } from '../../src/media/cache.ts';
 import { exampleTrack, GUILD, HOST_TOKEN, type TestServer, testServer } from '../support/web.ts';
 
+// The most of one answer this machine's kernel may hold between the server and a reader that stopped reading: a send
+// buffer and a receive buffer at the largest they grow to (Linux says so in /proc; elsewhere, a generous guess).
+function socketBuffersMost(): number {
+  try {
+    const largest = (name: string) =>
+      Number(fs.readFileSync(`/proc/sys/net/ipv4/${name}`, 'utf8').trim().split(/\s+/).at(-1));
+    const most = largest('tcp_rmem') + largest('tcp_wmem');
+    if (Number.isFinite(most) && most > 0) return most;
+  } catch {
+    // Not Linux: the guess below.
+  }
+  return 64 * 1024 ** 2;
+}
+
 // Sends what `write` sends on a raw connection and resolves with the first line of the answer and when it came.
 function raw(port: number, write: (socket: net.Socket) => void): Promise<{ ms: number; first: string }> {
   return new Promise((resolve) => {
@@ -89,8 +103,10 @@ describe('the web server times requests, not answers', () => {
   });
 
   it('closes an answer whose reader has stopped reading, so stalled readers cannot hold every connection', async () => {
-    // A cached track larger than what the connection's buffers hold.
-    const size = 32 * 1024 ** 2;
+    // A cached track larger than what the connection's buffers hold, whatever they grow to on this machine: twice what
+    // they may hold together (a machine whose receive buffers grow to 32 MiB held all of a 32 MiB track, and the answer
+    // ended before the idle limit could cut it), at least 32 MiB, at most 256 MiB.
+    const size = Math.min(256 * 1024 ** 2, Math.max(32 * 1024 ** 2, 2 * socketBuffersMost()));
     const track = server.store.tracks.upsert(exampleTrack('stalled-reader'));
     server.queue.add(GUILD, [track.id], 'end', null);
     const key = MediaCache.keyOf(track.source);
