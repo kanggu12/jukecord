@@ -365,7 +365,7 @@ export function wrappedCard(
   const totals =
     lang === 'ko'
       ? `재생 **${count(view.plays)}**회 · 들은 시간 **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}**곡 · **${count(view.people)}**명 · 음악을 들은 날 **${count(view.days)}**일`
-      : `**${count(view.plays)}** plays · listened **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}** tracks · **${count(view.people)}** ${view.people === 1 ? 'person' : 'people'} · music on **${count(view.days)}** ${view.days === 1 ? 'day' : 'days'}`;
+      : `**${count(view.plays)}** ${view.plays === 1 ? 'play' : 'plays'} · listened **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}** ${view.tracks === 1 ? 'track' : 'tracks'} · **${count(view.people)}** ${view.people === 1 ? 'person' : 'people'} · music on **${count(view.days)}** ${view.days === 1 ? 'day' : 'days'}`;
   const lines = [totals];
   if (view.song) {
     const song = view.song;

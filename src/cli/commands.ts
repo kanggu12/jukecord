@@ -211,12 +211,23 @@ function showWrapped(answer: unknown): string {
   const time = period.kind === 'last-12-months' ? 'the last 12 months' : period.key;
   const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)} in music (${period.from} to ${period.to})`];
   if (wrapped.plays === 0) return [...lines, 'Nothing was played in this time'].join('\n');
+  // Each count with its word in the singular or the plural, as it reads.
+  const many = (count: number, one: string, more: string) => `${count} ${count === 1 ? one : more}`;
   lines.push(
-    `${wrapped.plays} plays · ${listened(wrapped.playedMs)} · ${wrapped.tracks} tracks · ${wrapped.people} people · music on ${wrapped.days} days`,
+    [
+      many(wrapped.plays, 'play', 'plays'),
+      listened(wrapped.playedMs),
+      many(wrapped.tracks, 'track', 'tracks'),
+      many(wrapped.people, 'person', 'people'),
+      `music on ${many(wrapped.days, 'day', 'days')}`,
+    ].join(' · '),
   );
   if (wrapped.song) {
     const song = wrapped.song;
-    lines.push(`Song of ${time}: ${song.track.title} (played on ${song.days} days, ${song.plays} times)`);
+    // "played on 1 day, once" for a song of a quiet month, as people say it.
+    const days = song.days === 1 ? '1 day' : `${song.days} days`;
+    const times = song.plays === 1 ? 'once' : `${song.plays} times`;
+    lines.push(`Song of ${time}: ${song.track.title} (played on ${days}, ${times})`);
   }
   lines.push('Most played:');
   for (const entry of wrapped.topTracks) lines.push(`  ${String(entry.plays).padStart(4)}  ${entry.track.title}`);
@@ -230,7 +241,9 @@ function showWrapped(answer: unknown): string {
   lines.push(`Busiest: ${names[weekday]}, ${hour}:00-${hour + 1}:00`);
   if (wrapped.longestDay) {
     const day = wrapped.longestDay;
-    lines.push(`Longest day: ${day.day}, ${listened(day.playedMs)} (${day.plays} plays)`);
+    lines.push(
+      `Longest day: ${day.day}, ${listened(day.playedMs)} (${day.plays === 1 ? '1 play' : `${day.plays} plays`})`,
+    );
   }
   if (wrapped.firstTrack) {
     const first = wrapped.firstTrack;

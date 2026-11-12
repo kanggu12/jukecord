@@ -152,9 +152,12 @@ class Ink {
 
   // Sets the context's font and colour for one kind of text.
   private use(type: Type): void {
+    // The panel's own family (Pretendard, then the system's), at the weight and size asked.
     this.ctx.font = `${type.weight} ${type.size}px ${this.look.font}`;
     this.ctx.fillStyle = type.colour;
+    // Left unless said (a count at the end of its line is set from the right).
     this.ctx.textAlign = type.align ?? 'left';
+    // Every y given is a baseline, as type is set.
     this.ctx.textBaseline = 'alphabetic';
     // Where the browser can space letters on a canvas (the labels in capitals are spaced, as the panel's are).
     if ('letterSpacing' in this.ctx) this.ctx.letterSpacing = `${type.spacing ?? 0}px`;
@@ -174,6 +177,7 @@ class Ink {
     this.use(type);
     const fits = (line: string) => this.ctx.measureText(line).width <= width;
     const lines: string[] = [];
+    // The line being filled, word by word.
     let current = '';
     for (const word of text.split(/\s+/).filter(Boolean)) {
       const tried = current ? `${current} ${word}` : word;
@@ -181,6 +185,7 @@ class Ink {
         current = tried;
         continue;
       }
+      // The word does not fit beside the others: the line ends before it.
       if (current) lines.push(current);
       // A word wider than the line on its own: as many letters as fit, line after line.
       current = '';
@@ -206,6 +211,7 @@ class Ink {
   write(text: string, x: number, y: number, type: Type, width = 10_000, most = 1, leading = 1.22): number {
     const lines = this.lines(text, type, width, most);
     this.use(type);
+    // Each line a line's height under the one before.
     lines.forEach((line, index) => {
       this.ctx.fillText(line, x, y + index * type.size * leading);
     });
@@ -215,14 +221,16 @@ class Ink {
   /** Writes the largest size of a type (down to a floor) at which a text fits a width on one line. */
   fit(text: string, x: number, y: number, type: Type, width: number, floor: number): void {
     let size = type.size;
+    // Two pixels smaller at a time until it fits; at the floor, the ellipsis cuts what is left over.
     while (size > floor && this.width(text, { ...type, size }) > width) size -= 2;
     this.write(text, x, y, { ...type, size }, width, 1);
   }
 }
 
-// A rounded rectangle's path.
+// A rounded rectangle's path (drawn by hand: the canvas's own roundRect is newer than the browsers the panel serves).
 function rounded(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   ctx.beginPath();
+  // From the top edge, each corner rounded on the way round.
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
   ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -240,6 +248,7 @@ function field(
   height: number,
   cover: HTMLImageElement | null,
 ) {
+  // The page's own fall from its top colour to its ground, as the body's background (320 of a 1080-wide window).
   const fall = ctx.createLinearGradient(0, 0, 0, height);
   fall.addColorStop(0, look.bgTop);
   fall.addColorStop(0.3, look.bg);
@@ -251,6 +260,7 @@ function field(
     [look.pools[1], 0.88, 0.78, 0.65],
     [look.pools[2], 0.55, 0.05, 0.5],
   ] as const) {
+    // Each pool a soft circle of its colour, fading to nothing at its edge.
     const glow = ctx.createRadialGradient(x * width, y * height, 0, x * width, y * height, r * Math.max(width, height));
     glow.addColorStop(0, pool ?? 'transparent');
     glow.addColorStop(1, 'transparent');
@@ -263,8 +273,10 @@ function field(
   const seed = document.createElement('canvas');
   seed.width = 6;
   seed.height = 6;
+  // Read back once, so the browser keeps it where reading is quick.
   const small = seed.getContext('2d', { willReadFrequently: true });
   if (!small) return;
+  // The cover's middle square, shrunk to six by six (the browser averages as it shrinks).
   const side = Math.min(cover.naturalWidth, cover.naturalHeight);
   small.drawImage(cover, (cover.naturalWidth - side) / 2, (cover.naturalHeight - side) / 2, side, side, 0, 0, 6, 6);
   const pixels = small.getImageData(0, 0, 6, 6);
@@ -279,6 +291,7 @@ function field(
     data[at + 2] = tone((0.213 - 0.213 * s) * r + (0.715 - 0.715 * s) * g + (0.072 + 0.928 * s) * b);
   }
   small.putImageData(pixels, 0, 0);
+  // Grown four times at a time, smoothed at each step.
   let step: HTMLCanvasElement = seed;
   for (const size of [24, 96, 384]) {
     const next = document.createElement('canvas');
@@ -292,6 +305,7 @@ function field(
     step = next;
   }
   ctx.save();
+  // As strong as the panel's light in this theme (its --ambient).
   ctx.globalAlpha = look.ambient;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -304,15 +318,19 @@ function field(
 // A card of the panel's glass: its long soft shadow, the tinted pane, the sheen falling from its top, the bright line
 // along its top edge, and its edge.
 function glass(ctx: CanvasRenderingContext2D, look: Look, x: number, y: number, w: number, h: number): void {
+  // The panel's card corner (18 pixels) at the picture's scale, about two and a half times a phone's.
   const r = 44;
   ctx.save();
+  // The shadow falls long and soft under the card, as --shadow has it.
   ctx.shadowColor = look.shadow;
   ctx.shadowBlur = 72;
   ctx.shadowOffsetY = 28;
   rounded(ctx, x, y, w, h, r);
+  // The pane: the panel's tinted glass, the field showing through it.
   ctx.fillStyle = look.panel;
   ctx.fill();
   ctx.restore();
+  // The sheen from the top edge, gone by a little under half the card (--sheen).
   const sheen = ctx.createLinearGradient(0, y, 0, y + h);
   sheen.addColorStop(0, look.sheen);
   sheen.addColorStop(look.sheenStop, 'rgba(255, 255, 255, 0)');
@@ -330,6 +348,7 @@ function glass(ctx: CanvasRenderingContext2D, look: Look, x: number, y: number, 
   ctx.lineTo(x + w - r * 0.6, y + 2);
   ctx.stroke();
   ctx.restore();
+  // The edge, just inside the card so it is not cut by the card's own corners.
   rounded(ctx, x + 1, y + 1, w - 2, h - 2, r - 1);
   ctx.strokeStyle = look.edge;
   ctx.lineWidth = 2;
@@ -347,9 +366,11 @@ function cover(
   r: number,
 ): void {
   ctx.save();
+  // Everything drawn next stays inside the rounded square.
   rounded(ctx, x, y, size, size, r);
   ctx.clip();
   if (image) {
+    // The picture's middle square (a video's frame is wider than tall), drawn to fill the case.
     const side = Math.min(image.naturalWidth, image.naturalHeight);
     ctx.drawImage(
       image,
@@ -379,12 +400,15 @@ function cover(
 // The music note the panel shows where a cover is missing (Lucide's music-2, drawn at a size).
 function note(ctx: CanvasRenderingContext2D, colour: string, cx: number, cy: number, size: number): void {
   ctx.save();
+  // The icon's own 24-unit grid, placed and scaled to the size asked.
   ctx.translate(cx - size / 2, cy - size / 2);
   ctx.scale(size / 24, size / 24);
+  // Its line as the panel's icons draw theirs: two units wide, round at the ends.
   ctx.strokeStyle = colour;
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  // The stem and its flag, then the note's head.
   ctx.stroke(new Path2D('M12 18V2l8 3.5'));
   ctx.beginPath();
   ctx.arc(8, 18, 4, 0, Math.PI * 2);
@@ -404,12 +428,16 @@ function record(
 ): void {
   // The rainbow rim, travelling round the record as the panel's does (still, here).
   const rim = typeof ctx.createConicGradient === 'function' ? ctx.createConicGradient(-Math.PI / 3, cx, cy) : null;
+  // The mark's colours evenly round the circle, ending where they began (--rainbow).
   if (rim)
     for (const [index, stop] of look.rainbow.entries()) rim.addColorStop(index / (look.rainbow.length - 1), stop);
+  // A disc a little larger than the record, which the record then covers but for its rim (one colour where a browser
+  // has no conic gradient).
   ctx.beginPath();
   ctx.arc(cx, cy, radius + 9, 0, Math.PI * 2);
   ctx.fillStyle = rim ?? look.rainbow[3] ?? '#4aa3ff';
   ctx.fill();
+  // The vinyl, in the panel's disc colour.
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.fillStyle = look.disc;
@@ -437,6 +465,7 @@ function record(
   ctx.arc(cx, cy, label, 0, Math.PI * 2);
   ctx.clip();
   if (image) {
+    // The cover's middle square on the round label, as the panel's disc shows it.
     const side = Math.min(image.naturalWidth, image.naturalHeight);
     ctx.drawImage(
       image,
@@ -450,6 +479,7 @@ function record(
       label * 2,
     );
   } else {
+    // No cover: the plain label the panel's disc has without one.
     const plain = ctx.createLinearGradient(cx - label, cy - label, cx + label, cy + label);
     plain.addColorStop(0, '#3a3d48');
     plain.addColorStop(1, '#23252d');
@@ -476,9 +506,11 @@ function album(
   y: number,
   size: number,
 ) {
+  // The record a little smaller than the case, its middle past the case's edge: half of it shows.
   const radius = size * 0.46;
   record(ctx, look, image, x + size * 0.62 + radius, y + size / 2, radius);
   ctx.save();
+  // The case's shadow on the record behind it, as a row's album has one.
   ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
   ctx.shadowBlur = 36;
   ctx.shadowOffsetY = 14;
@@ -486,6 +518,7 @@ function album(
   ctx.fillStyle = look.disc;
   ctx.fill();
   ctx.restore();
+  // The cover in the case, over it.
   cover(ctx, look, image, x, y, size, size * 0.08);
 }
 
@@ -501,14 +534,17 @@ function face(
   radius: number,
 ): void {
   ctx.save();
+  // A circle, everything inside it.
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.clip();
+  // The field's colour under it, so the glass over the light does not show through a face.
   ctx.fillStyle = look.bg;
   ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
   if (image) {
     ctx.drawImage(image, cx - radius, cy - radius, radius * 2, radius * 2);
   } else {
+    // As the panel's .avatar: the raised glass, the initials in the second ink, in the middle.
     ctx.fillStyle = look.raised;
     ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
     ink.write(initials(name), cx, cy + radius * 0.34, {
@@ -624,12 +660,14 @@ function server(ink: Ink, content: PictureContent, icon: HTMLImageElement | null
   const { ctx, look } = ink;
   const name = content.server.name;
   ctx.save();
+  // The icon round, as the panel's bar shows it.
   ctx.beginPath();
   ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
   ctx.clip();
   ctx.fillStyle = look.raised;
   ctx.fillRect(x, y, size, size);
   if (icon) ctx.drawImage(icon, x, y, size, size);
+  // No icon (or one Discord would not let be read): the name's first letter.
   else
     ink.write([...name][0]?.toUpperCase() ?? '?', x + size / 2, y + size * 0.67, {
       size: Math.round(size * 0.46),
@@ -638,6 +676,7 @@ function server(ink: Ink, content: PictureContent, icon: HTMLImageElement | null
       align: 'center',
     });
   ctx.restore();
+  // The name beside it, on one line (cut with an ellipsis past the width a picture has for it).
   ink.write(name, x + size + 22, y + size * 0.68, { size: Math.round(size * 0.5), weight: 650, colour: look.ink }, 760);
 }
 
@@ -646,6 +685,7 @@ function numbers(ink: Ink, content: PictureContent, x: number, y: number, w: num
   const { ctx, look } = ink;
   glass(ctx, look, x, y, w, h);
   const cells = content.numbers;
+  // The card's width shared evenly; each cell's words start a little inside it.
   const each = w / cells.length;
   const labelSize = Math.round(big * 0.4);
   cells.forEach((cell, index) => {
@@ -659,11 +699,14 @@ function numbers(ink: Ink, content: PictureContent, x: number, y: number, w: num
     const gap = Math.round(big * 0.1);
     const unitWidth = cell.unit ? ink.width(cell.unit, unitType) + gap : 0;
     let size = big;
+    // Big and bold, set a touch tight as the panel's tiles are.
     const valueType = () => ({ size, weight: 700, colour: look.ink, spacing: -size * 0.02 });
     while (size > big * 0.6 && ink.width(cell.value, valueType()) + unitWidth > room) size -= 2;
+    // Under the label by the value's own size.
     const baseline = y + h * 0.36 + size * 1.12;
     ink.write(cell.value, left, baseline, valueType());
     if (cell.unit) ink.write(cell.unit, left + ink.width(cell.value, valueType()) + gap, baseline, unitType, room);
+    // A thin line before every cell but the first.
     if (index > 0) {
       ctx.fillStyle = look.line;
       ctx.fillRect(x + index * each, y + 28, 2, h - 56);
@@ -689,18 +732,22 @@ function songCard(
   glass(ctx, look, x, y, w, h);
   const pad = 44 * scale;
   head(ink, content, song.label, x + pad, y + 66 * scale, Math.round(26 * scale), w - pad * 2);
+  // The album fills the card's height under its head, square.
   const size = h - 150 * scale;
   const top = y + 96 * scale;
   album(ctx, look, cover, x + pad, top, size);
   // The album takes its case and the record's half beyond it, with the rim.
   const left = x + pad + size * 1.54 + 36 * scale;
   const room = x + w - pad - left;
+  // As the playing card sets a track: the title big and bold, the artist and the rest in the second ink.
   const titleType: Type = { size: Math.round(44 * scale), weight: 700, colour: look.ink, spacing: -0.5 };
   const artistType: Type = { size: Math.round(29 * scale), weight: 500, colour: look.ink2 };
   const factType: Type = { size: Math.round(27 * scale), weight: 500, colour: look.ink2 };
+  // A long title takes up to three lines, the last cut short.
   const titles = ink.lines(song.title, titleType, room, 3);
   // The facts on one line when they fit, else each on its own.
   const facts = ink.width(song.facts, factType) <= room ? [song.facts] : [...song.factsApart];
+  // How tall the words are, to centre them.
   const tall =
     titles.length * titleType.size * 1.2 +
     (song.artist ? artistType.size * 1.6 : 0) +
@@ -747,11 +794,14 @@ function listCard(
   head(ink, content, title, x + pad, y + 62 * scale, Math.round(25 * scale), w - pad * 2);
   const rowHeight = 56 * scale;
   const picture = 42 * scale;
+  // The name in the ink, its count in the second ink at the end of the line, as the panel's ranks.
   const textType: Type = { size: Math.round(29 * scale), weight: 600, colour: look.ink };
   const countType: Type = { size: Math.round(27 * scale), weight: 500, colour: look.ink2, align: 'right' };
   rows.forEach((row, index) => {
     const top = y + 86 * scale + index * rowHeight;
+    // Everything on the row is set on its middle: the baseline a little under it.
     const middle = top + rowHeight / 2;
+    // The rank, faint, as the panel's.
     ink.write(String(index + 1), x + pad, middle + 10 * scale, {
       size: Math.round(26 * scale),
       weight: 600,
@@ -760,6 +810,7 @@ function listCard(
     row.draw(x + pad + 36 * scale, middle - picture / 2, picture);
     const countWidth = ink.width(row.count, countType);
     ink.write(row.count, x + w - pad, middle + 10 * scale, countType);
+    // The name takes what is left between its picture and its count, cut short when long.
     const left = x + pad + 36 * scale + picture + 18 * scale;
     ink.write(row.text, left, middle + 10 * scale, textType, x + w - pad - countWidth - 20 * scale - left);
   });
@@ -770,6 +821,7 @@ function momentsCard(ink: Ink, content: PictureContent, x: number, y: number, w:
   const { ctx, look } = ink;
   glass(ctx, look, x, y, w, h);
   const pad = 40;
+  // The card's height shared evenly between the moments.
   const each = (h - 28) / Math.max(1, content.moments.length);
   content.moments.forEach((moment, index) => {
     const top = y + 14 + index * each;
@@ -784,6 +836,7 @@ function momentsCard(ink: Ink, content: PictureContent, x: number, y: number, w:
       w - pad * 2,
       20,
     );
+    // A thin line between one moment and the next.
     if (index > 0) {
       ctx.fillStyle = look.line;
       ctx.fillRect(x + pad, top, w - pad * 2, 2);
@@ -794,6 +847,7 @@ function momentsCard(ink: Ink, content: PictureContent, x: number, y: number, w:
 // jukecord's mark and name at the foot, with the time's days at the other end.
 function foot(ink: Ink, content: PictureContent, x: number, baseline: number, w: number, scale: number): void {
   const size = 44 * scale;
+  // The mark beside its name, as the panel's bar has them, sitting on the name's baseline.
   mark(ink.ctx, ink.look, x, baseline - size * 0.86, size);
   ink.write('jukecord', x + size + 14 * scale, baseline, {
     size: Math.round(32 * scale),
@@ -801,6 +855,7 @@ function foot(ink: Ink, content: PictureContent, x: number, baseline: number, w:
     colour: ink.look.ink,
     spacing: -0.4,
   });
+  // The time's days, faint, at the other end.
   ink.write(content.range, x + w, baseline, {
     size: Math.round(24 * scale),
     weight: 500,

@@ -263,6 +263,26 @@ describe('Wrapped in the jukecord command', () => {
     assert.match(text, /Busiest: Fridays, 22:00-23:00/);
     assert.match(text, /Longest day: 2026-07-04, 40 min \(4 plays\)/);
     assert.match(text, /First track: .*Morning Light, added by Alice/);
+    // A quiet month reads in the singular.
+    const quiet = COMMANDS.wrapped.show({
+      period: { kind: 'month', key: '2025-11', from: '2025-11-01', to: '2025-11-30' },
+      plays: 1,
+      playedMs: 120_000,
+      tracks: 1,
+      people: 1,
+      days: 1,
+      topTracks: [{ track, plays: 1 }],
+      topPeople: [{ name: null, plays: 1 }],
+      weekdays: [1, 0, 0, 0, 0, 0, 0],
+      hours: Array.from({ length: 24 }, (_, hour) => (hour === 4 ? 1 : 0)),
+      longestDay: { day: '2025-11-23', plays: 1, playedMs: 120_000 },
+      firstTrack: null,
+      song: { track, plays: 1, days: 1 },
+      keptFrom: null,
+    });
+    assert.match(quiet, /1 play · 2 min · 1 track · 1 person · music on 1 day/);
+    assert.match(quiet, /Song of 2025-11: Morning Light \(played on 1 day, once\)/);
+    assert.match(quiet, /Longest day: 2025-11-23, 2 min \(1 play\)/);
     const empty = COMMANDS.wrapped.show({
       period: { kind: 'last-12-months', key: 'last-12-months', from: '2025-11-12', to: '2026-11-11' },
       plays: 0,
@@ -306,7 +326,7 @@ describe('Wrapped in Discord', () => {
       assert.equal(card?.title, 'Night Owls · 2026 in music');
       assert.match(
         card?.description ?? '',
-        /\*\*1\*\* plays · listened \*\*1 h 7 min\*\* · \*\*1\*\* tracks · \*\*1\*\* person/,
+        /\*\*1\*\* play · listened \*\*1 h 7 min\*\* · \*\*1\*\* track · \*\*1\*\* person · music on \*\*1\*\* day/,
       );
       assert.match(
         card?.description ?? '',
