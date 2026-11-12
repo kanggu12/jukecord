@@ -78,6 +78,27 @@ an ID it is not read at all (a file that is not there would stop jukecord at sta
 {{- end -}}
 {{- end -}}
 
+{{/*
+The address people reach the panel at, as the pod gets it: JUKECORD_PUBLIC_URL when extraEnv or env sets it, else
+publicUrl, else the Ingress's host (https when the Ingress has TLS). Empty when there is none: no Ingress, or one
+without a host or with a wildcard host, which names no single address. The Deployment and NOTES.txt both use it.
+*/}}
+{{- define "jukecord.publicUrl" -}}
+{{- $url := "" -}}
+{{- if .Values.publicUrl -}}
+{{- $url = .Values.publicUrl -}}
+{{- else if and .Values.ingress.enabled .Values.ingress.host (not (hasPrefix "*" .Values.ingress.host)) -}}
+{{- $url = printf "%s://%s" (ternary "https" "http" (gt (len (default list .Values.ingress.tls)) 0)) .Values.ingress.host -}}
+{{- end -}}
+{{- if hasKey .Values.env "JUKECORD_PUBLIC_URL" -}}
+{{- $url = toString (index .Values.env "JUKECORD_PUBLIC_URL") -}}
+{{- end -}}
+{{- range .Values.extraEnv -}}
+{{- if and (eq .name "JUKECORD_PUBLIC_URL") .value -}}{{- $url = .value -}}{{- end -}}
+{{- end -}}
+{{- $url -}}
+{{- end -}}
+
 {{/* Values that cannot work together, refused with a message that says what to change. */}}
 {{- define "jukecord.validate" -}}
 {{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}

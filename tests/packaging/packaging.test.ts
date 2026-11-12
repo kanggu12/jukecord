@@ -242,6 +242,17 @@ describe('the Helm chart', () => {
     assert.equal(schema.additionalProperties, false);
   });
 
+  it('works out the panel address in one place, for the pod and for the notes after an install', () => {
+    for (const file of ['NOTES.txt', 'deployment.yaml']) {
+      assert.match(read(`deploy/helm/jukecord/templates/${file}`), /include "jukecord\.publicUrl"/, file);
+      assert.doesNotMatch(
+        read(`deploy/helm/jukecord/templates/${file}`),
+        /ingress\.host \| default|printf "%s:\/\/%s"/,
+        file,
+      );
+    }
+  });
+
   it('installs the released image as it is, without the release rewriting the values', () => {
     assert.match(read('deploy/helm/jukecord/values.yaml'), /^ {2}repository: ghcr\.io\/kanggu12\/jukecord$/m);
     assert.doesNotMatch(read('.github/workflows/release.yml'), /sed -i[^\n]*values\.yaml/);

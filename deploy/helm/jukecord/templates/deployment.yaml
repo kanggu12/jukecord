@@ -55,14 +55,13 @@ spec:
               value: "8795"
             - name: JUKECORD_DATA_DIR
               value: /data
-            {{- /* The public address: as set, or the Ingress's host (https when it has TLS), which login and links need. */}}
-            {{- $publicUrl := .Values.publicUrl }}
-            {{- if and (not $publicUrl) .Values.ingress.enabled .Values.ingress.host (not (hasPrefix "*" .Values.ingress.host)) }}
-            {{- $publicUrl = printf "%s://%s" (ternary "https" "http" (gt (len (default list .Values.ingress.tls)) 0)) .Values.ingress.host }}
-            {{- end }}
-            {{- with $publicUrl }}
+            {{- /* The public address, which login and the bot's links need (see jukecord.publicUrl); env or
+            extraEnv may set it themselves. */}}
+            {{- if not (include "jukecord.userSets" (list . "JUKECORD_PUBLIC_URL")) }}
+            {{- with include "jukecord.publicUrl" . }}
             - name: JUKECORD_PUBLIC_URL
               value: {{ . | quote }}
+            {{- end }}
             {{- end }}
             {{- if and .Values.discord.clientId (not (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID"))) }}
             - name: JUKECORD_DISCORD_CLIENT_ID
