@@ -6,6 +6,7 @@
  * exist. People type 1-based queue numbers, as /queue and the panel show them; the commands look the item up.
  */
 
+import { sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
 
@@ -114,7 +115,7 @@ function showPlayer(answer: unknown): string {
   const player = answer as PlayerJson;
   const repeat = player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`;
   // What the player did by itself (a track taken out of the loop), on a line of its own.
-  const notice = player.notice ? `\n${player.notice}` : '';
+  const notice = player.notice ? `\n${sayNotice(player.notice, 'en')}` : '';
   if (!player.track)
     return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}${notice}`;
   // Where it is now: the snapshot's position plus the time since it was taken, while playing.

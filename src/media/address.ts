@@ -84,11 +84,26 @@ export function isPrivateAddress(address: string): boolean {
 // panel's files and the audio wait behind it.
 const resolver = new dns.Resolver({ timeout: 2000, tries: 2 });
 
-/** A name's IPv4 and IPv6 addresses; throws when it has none. */
+/** No name server answered at all (no network, none reachable): nothing is known about the name itself. */
+export class NoAnswerError extends Error {
+  override name = 'NoAnswerError';
+}
+
+// The resolver's codes for a question that got no answer, as opposed to "no such name".
+const NO_ANSWER = new Set(['ETIMEOUT', 'ECONNREFUSED', 'ESERVFAIL', 'EAI_AGAIN', 'ECANCELLED', 'ECONNRESET']);
+
+/** A name's IPv4 and IPv6 addresses; throws when it has none (NoAnswerError when no name server answered). */
 export async function resolveAll(host: string): Promise<string[]> {
   const [v4, v6] = await Promise.allSettled([resolver.resolve4(host), resolver.resolve6(host)]);
   const found = [...(v4.status === 'fulfilled' ? v4.value : []), ...(v6.status === 'fulfilled' ? v6.value : [])];
-  if (found.length === 0) throw new Error(`${host} does not resolve`);
+  if (found.length === 0) {
+    // Both questions unanswered: this machine reaches no name server, which says nothing about the name.
+    const unanswered = [v4, v6].every(
+      (result) => result.status === 'rejected' && NO_ANSWER.has(String((result.reason as { code?: unknown })?.code)),
+    );
+    if (unanswered) throw new NoAnswerError(`no name server answered for ${host}`);
+    throw new Error(`${host} does not resolve`);
+  }
   return found;
 }
 

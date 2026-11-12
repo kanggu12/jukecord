@@ -53,6 +53,12 @@ The panel says why jukecord turned its live connection away, and tries again by 
 - "jukecord has as many live connections as it allows": `JUKECORD_LIVE_MAX` (1000 by default) are open. A machine
   that can take more can be given a higher one.
 
+## "jukecord cannot reach the internet"
+
+Adding or playing a track says so when the machine jukecord runs on reaches no site: no name server answers, there is
+no route out, or a proxy refuses the connection. `./jukecord doctor` checks yt-dlp's release on GitHub, which fails the
+same way; once the network is back, adding works again (a track that failed in a looping queue stays in it).
+
 ## "Turned connections away from one address at its cap"
 
 jukecord takes at most 256 connections from one address. The address in the log line is where they came from: a

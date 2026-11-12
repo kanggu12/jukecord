@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { REASONS } from '../../src/core/reasons.ts';
-import { sayError, sayFailure, translate } from '../../src/core/say.ts';
+import { sayError, sayFailure, sayNotice, translate } from '../../src/core/say.ts';
 import { sayError as sayInDiscord } from '../../src/discord/errors.ts';
 
 // Every file under src, for the messages the actions can give.
@@ -29,6 +29,16 @@ describe('sayError', () => {
       const korean = sayError(message, 'ko');
       assert.notEqual(korean, sayError(message, 'en'), `no Korean for "${message}"`);
     }
+  });
+
+  it('says what the player did by itself as a sentence, or after the title of the track it is about', () => {
+    assert.equal(sayNotice('paused with nobody listening', 'en'), 'Paused with nobody listening');
+    assert.equal(sayNotice('paused with nobody listening', 'ko'), '듣는 사람이 없어 일시정지함');
+    assert.equal(
+      sayNotice('Neon Rain: taken out of the looping queue', 'en'),
+      'Neon Rain: taken out of the looping queue',
+    );
+    assert.equal(sayNotice('Neon Rain: taken out of the looping queue', 'ko'), 'Neon Rain: 대기열 반복에서 뺌');
   });
 
   it('says a place in the track for a seek before its start, not a place in the queue', () => {

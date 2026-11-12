@@ -7,7 +7,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
-import { sayFailure } from '../core/say.ts';
+import { sayNotice } from '../core/say.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
 
@@ -133,7 +133,7 @@ function bar(position: number, duration: number | null): string {
 /** The current track with a progress bar, and buttons to pause or skip. */
 export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string | null) {
   // What the player did by itself (a track taken out of the loop), in the card's language, on a line of its own.
-  const notice = snapshot.notice ? `\n${sayFailure(snapshot.notice, lang)}` : '';
+  const notice = snapshot.notice ? `\n${sayNotice(snapshot.notice, lang)}` : '';
   if (!snapshot.track) {
     return {
       embeds: [new EmbedBuilder().setColor(COLOUR.neutral).setDescription(`${TEXT.nothing[lang]}${notice}`)],

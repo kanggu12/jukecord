@@ -120,6 +120,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.noSuchSite, '사이트를 찾을 수 없음'],
   [REASONS.nothingFound, '검색 결과 없음'],
   [REASONS.failed, '가져오지 못함'],
+  [REASONS.offline, 'jukecord가 인터넷에 연결하지 못함'],
   [/^the site answered (\d{3})$/, '사이트가 $1 오류로 응답함'],
   // The audio of a long track for a browser that needs MP3, while its copy is still being made.
   [
@@ -142,6 +143,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ],
   ['jukecord runs without a Discord bot here, so there are no channels', '디스코드 봇 없이 실행 중이라 채널이 없음'],
   ['that is not a channel of this server the bot may post in', '봇이 글을 올릴 수 있는 이 서버의 채널이 아님'],
+  // An answer that was not jukecord's (a reverse proxy's own page while jukecord restarts), with its status.
+  [/^jukecord did not answer \((\d{3})\)$/, 'jukecord가 응답하지 않음($1)'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */
@@ -164,6 +167,14 @@ export function sayFailure(message: string, lang: Lang): string {
   const at = message.lastIndexOf(': ');
   if (at < 0) return translate(message, lang);
   return `${message.slice(0, at)}: ${translate(message.slice(at + 2), lang)}`;
+}
+
+/**
+ * What the player did by itself (PlayerSnapshot.notice) as people read it: after a track's title, like a failure
+ * ("Title: taken out of the looping queue"); on its own, as a sentence ("Paused with nobody listening").
+ */
+export function sayNotice(message: string, lang: Lang): string {
+  return message.includes(': ') ? sayFailure(message, lang) : sayError(message, lang);
 }
 
 /** A message from the actions as the person reads it: a sentence in their language. */

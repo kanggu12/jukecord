@@ -21,6 +21,7 @@ export const REASONS = {
   noSuchSite: 'no such site',
   nothingFound: 'nothing was found',
   failed: 'it could not be downloaded',
+  offline: 'jukecord cannot reach the internet',
 } as const;
 
 /** The short reason for a failure, from the full text of the error. */
@@ -44,6 +45,15 @@ export function plainReason(message: string): string {
   // A premiere or a live stream that has not begun.
   if (/premieres? in|premiere will begin|live event will begin/i.test(message)) return REASONS.notYet;
   if (/larger than jukecord fetches/i.test(message)) return REASONS.tooLarge;
+  // The machine jukecord runs on reaches no site at all: no name server answers (the address guard says so in these
+  // words), no route out, a connection refused. Before "no such site": an offline machine was told every name, even
+  // youtube.com's, did not exist, and a search "could not be downloaded".
+  if (
+    /cannot reach the internet|EAI_AGAIN|Temporary failure in name resolution|ENETUNREACH|EHOSTUNREACH|Network is unreachable|No route to host|ECONNREFUSED|Connection refused/i.test(
+      message,
+    )
+  )
+    return REASONS.offline;
   const status = /HTTP Error (\d{3})/i.exec(message)?.[1];
   if (status) return `the site answered ${status}`;
   if (/no such site|getaddrinfo|ENOTFOUND|Name or service not known|nodename nor servname/i.test(message))

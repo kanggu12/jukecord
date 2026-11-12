@@ -16,7 +16,7 @@ import http from 'node:http';
 import net from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Logger } from '../log.ts';
-import { isPrivateAddress, resolveAll } from './address.ts';
+import { isPrivateAddress, NoAnswerError, resolveAll } from './address.ts';
 
 /** The running proxy: its address for yt-dlp's --proxy, and a way to stop it. */
 export interface EgressGuard {
@@ -40,6 +40,8 @@ export interface EgressOptions {
 const REFUSED = 'jukecord does not fetch from private networks';
 // The answer for a name with no address at all (a mistyped site), which is not a refusal.
 const UNKNOWN = 'no such site';
+// The answer when no name server answered at all: this machine is off the internet (core/reasons.ts knows the words).
+const OFFLINE = 'jukecord cannot reach the internet';
 
 // Headers that belong to one hop (to the proxy) and must not travel on (RFC 9110 7.6.1).
 const HOP_HEADERS = new Set([
@@ -73,8 +75,8 @@ export async function startEgressGuard(options: EgressOptions): Promise<EgressGu
     let addresses: string[];
     try {
       addresses = net.isIP(bare) ? [bare] : await lookup(bare);
-    } catch {
-      return { status: 502, reason: UNKNOWN };
+    } catch (error) {
+      return { status: 502, reason: error instanceof NoAnswerError ? OFFLINE : UNKNOWN };
     }
     if (addresses.length === 0) return { status: 502, reason: UNKNOWN };
     const usable = addresses.filter((candidate) => allowed(candidate));
