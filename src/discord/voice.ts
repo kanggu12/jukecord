@@ -309,6 +309,9 @@ export class VoiceManager implements VoiceControl {
     if (!allowed?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
       throw new ActionError('forbidden', `the bot may not connect or speak in ${channel.name}`);
     }
+    // A channel at its member limit takes nobody more (the bot only with Move Members): said at once, where trying
+    // ended after twenty seconds in "could not connect in time".
+    if (this.isFull(channel, allowed)) throw new ActionError('conflict', `the voice channel ${channel.name} is full`);
     const current = this.joined.get(guildId);
     if (current?.channelId === target) return { channelId: target, name: channel.name };
     if (current) this.drop(guildId);
@@ -359,6 +362,12 @@ export class VoiceManager implements VoiceControl {
     // Joined a channel that is already empty (the person left meanwhile): the countdown starts now.
     this.voiceStateChanged(guildId);
     return { channelId: target, name: channel.name };
+  }
+
+  // Whether a channel is at its member limit for the bot: full (discord.js counts its members against the limit) and
+  // the bot without Move Members, which Discord lets past the limit.
+  private isFull(channel: { readonly full?: boolean }, allowed: Readonly<PermissionsBitField>): boolean {
+    return channel.full === true && !allowed.has(PermissionFlagsBits.MoveMembers);
   }
 
   leave(guildId: string): boolean {

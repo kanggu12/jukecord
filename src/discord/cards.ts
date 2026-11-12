@@ -40,7 +40,7 @@ const TEXT = {
   noPlaylists: { en: 'No saved playlists', ko: '저장한 플레이리스트 없음' },
   addedBy: { en: 'added by', ko: '넣은 사람' },
   page: { en: 'page', ko: '페이지' },
-  total: { en: 'total', ko: '모두' },
+  total: { en: 'total', ko: '총' },
   pause: { en: 'Pause', ko: '일시정지' },
   resume: { en: 'Resume', ko: '이어서 재생' },
   skip: { en: 'Skip', ko: '건너뛰기' },
@@ -174,16 +174,24 @@ export function queueCard(items: readonly QueueItem[], page: number, lang: Lang)
   const current = Math.min(Math.max(1, page), pages);
   const shown = items.slice((current - 1) * 10, current * 10);
   const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
+  // A page past the end shows the last one, and says so first: shown without a word, it read as that page.
+  const past =
+    page > pages
+      ? lang === 'ko'
+        ? `${page}페이지는 없음: 대기열은 ${pages}페이지까지 있음\n`
+        : `There is no page ${page}: the queue has ${pages === 1 ? '1 page' : `${pages} pages`}\n`
+      : '';
   return new EmbedBuilder()
     .setColor(COLOUR.neutral)
     .setTitle(`${TEXT.queue[lang]} (${items.length})`)
     .setDescription(
-      shown
-        .map(
-          (item) =>
-            `${item.position + 1}. ${line(item.track.title, item.track.url, item.track.durationMs, item.addedBy, lang)}`,
-        )
-        .join('\n'),
+      past +
+        shown
+          .map(
+            (item) =>
+              `${item.position + 1}. ${line(item.track.title, item.track.url, item.track.durationMs, item.addedBy, lang)}`,
+          )
+          .join('\n'),
     )
     .setFooter({ text: `${TEXT.page[lang]} ${current}/${pages} · ${TEXT.total[lang]} ${formatDuration(total)}` });
 }

@@ -128,6 +128,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // Pause and play on, when the player is that way already.
   ['it is already paused', '이미 일시정지됨'],
   ['the track is getting ready', '곡을 준비하는 중'],
+  // A voice channel at its member limit.
+  [/^the voice channel (.+) is full$/, '$1 음성 채널이 가득 참'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

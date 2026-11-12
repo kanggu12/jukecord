@@ -50,6 +50,10 @@ import {
   statsCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
+
+// The names of this version's commands, to tell one from an older registration that it no longer has.
+const COMMAND_NAMES: ReadonlySet<string> = new Set(commandDefinitions().map((definition) => definition.name));
+
 import { sayError } from './errors.ts';
 import { VoiceManager } from './voice.ts';
 
@@ -291,10 +295,13 @@ export class Bot implements Directory {
     const options = interaction.options;
     try {
       // Lookups can take seconds; answer "thinking" first so Discord does not time the command out (3 s). Commands
-      // that only look something up answer the person alone, so the channel keeps the music, not the questions.
+      // that only look something up answer the person alone, so the channel keeps the music, not the questions: the
+      // history and the statistics too, and a command this version no longer has. The now-playing card (/np) is the
+      // channel's, with its keys for everyone.
       const sub = interaction.options.getSubcommand(false);
       const lookup =
-        ['version', 'queue'].includes(interaction.commandName) ||
+        ['version', 'queue', 'history', 'stats'].includes(interaction.commandName) ||
+        !COMMAND_NAMES.has(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
         (interaction.commandName === 'playlist' && sub === 'list');
       await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
@@ -477,9 +484,16 @@ export class Bot implements Directory {
         await interaction.editReply({ embeds: [playlistsCard(actions.playlists(context), lang)] });
         return;
       case 'save': {
-        const saved = actions.playlistSave(context, options.getString('name', true));
+        const name = options.getString('name', true);
+        // Saving over a playlist of that name replaces it, which is said: "Saved" read as if nothing was lost.
+        const replaced = actions.playlists(context).some((playlist) => playlist.name === name.trim());
+        const saved = actions.playlistSave(context, name);
         await interaction.editReply({
-          embeds: [note(lang, `Saved "${saved.name}" (${saved.size})`, `"${saved.name}" 저장(${saved.size}곡)`)],
+          embeds: [
+            replaced
+              ? note(lang, `Replaced "${saved.name}" (${saved.size})`, `"${saved.name}" 덮어씀(${saved.size}곡)`)
+              : note(lang, `Saved "${saved.name}" (${saved.size})`, `"${saved.name}" 저장(${saved.size}곡)`),
+          ],
         });
         return;
       }
@@ -582,8 +596,8 @@ export class Bot implements Directory {
   }
 }
 
-// Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets UTC,
-// which the card's day boundaries make visible only around midnight.
+// Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets the
+// time zone of the machine jukecord runs on (TZ), which is the community's more often than UTC is.
 function offsetOf(locale: string): number {
-  return locale.toLowerCase().startsWith('ko') ? 540 : 0;
+  return locale.toLowerCase().startsWith('ko') ? 540 : -new Date().getTimezoneOffset();
 }

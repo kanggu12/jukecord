@@ -35,3 +35,84 @@ describe('the bot answers', () => {
     await bot.client.destroy();
   });
 });
+
+describe('the bot answers commands', () => {
+  // A bot with two tracks to find, one of them playing.
+  async function playing() {
+    const made = fakeBot();
+    const tracks = addTracks(made.store, 3);
+    made.queue.add(
+      '100000000000000001',
+      tracks.map((track) => track.id),
+      'end',
+      null,
+    );
+    made.players.get('100000000000000001').play();
+    made.media.finish(180_000);
+    await flush();
+    return made;
+  }
+
+  it('says a playlist saved over one of the same name replaced it', async () => {
+    const { bot } = await playing();
+    const first = interaction('command', 'playlist', { sub: 'save', name: 'Mix' });
+    await handlers(bot).onCommand(first.interaction);
+    assert.equal(first.shown[0]?.text, 'Saved "Mix" (3)');
+    const again = interaction('command', 'playlist', { sub: 'save', name: 'Mix' });
+    await handlers(bot).onCommand(again.interaction);
+    assert.equal(again.shown[0]?.text, 'Replaced "Mix" (3)');
+    const korean = interaction('command', 'playlist', { sub: 'save', name: 'Mix' }, { locale: 'ko' });
+    await handlers(bot).onCommand(korean.interaction);
+    assert.equal(korean.shown[0]?.text, '"Mix" 덮어씀(3곡)');
+    await bot.client.destroy();
+  });
+
+  it('says a page past the end of the queue is not there, and shows the last one', async () => {
+    const { bot } = await playing();
+    const past = interaction('command', 'queue', { page: 9 });
+    await handlers(bot).onCommand(past.interaction);
+    assert.match(past.shown[0]?.text ?? '', /^Queue \(2\) \| There is no page 9: the queue has 1 page\n/);
+    const korean = interaction('command', 'queue', { page: 9 }, { locale: 'ko' });
+    await handlers(bot).onCommand(korean.interaction);
+    assert.match(korean.shown[0]?.text ?? '', /\| 9페이지는 없음: 대기열은 1페이지까지 있음\n/);
+    await bot.client.destroy();
+  });
+
+  it('answers look-ups to the person alone, the history and the statistics too, and a command gone from this version', async () => {
+    const { bot } = await playing();
+    for (const name of ['history', 'stats', 'queue', 'version', 'karaoke']) {
+      const asked = interaction('command', name);
+      await handlers(bot).onCommand(asked.interaction);
+      assert.equal(asked.shown[0]?.ephemeral, true, name);
+    }
+    // What changes the music, and the now-playing card, stay in the channel for everyone.
+    for (const name of ['np', 'shuffle']) {
+      const asked = interaction('command', name);
+      await handlers(bot).onCommand(asked.interaction);
+      assert.equal(asked.shown[0]?.ephemeral, false, name);
+    }
+    await bot.client.destroy();
+  });
+
+  it("counts the statistics' days in the host's time zone for everyone but Korean", async () => {
+    const { bot, actions } = await playing();
+    const offsets: number[] = [];
+    const stats = actions.stats.bind(actions);
+    actions.stats = (context, days, offsetMinutes, now) => {
+      offsets.push(offsetMinutes ?? 0);
+      return stats(context, days, offsetMinutes, now);
+    };
+    const zone = process.env.TZ;
+    try {
+      // The host in India (UTC+5:30); an English reader there, and a Korean one (in Korea, almost always).
+      process.env.TZ = 'Asia/Kolkata';
+      await handlers(bot).onCommand(interaction('command', 'stats').interaction);
+      await handlers(bot).onCommand(interaction('command', 'stats', {}, { locale: 'ko' }).interaction);
+      assert.deepEqual(offsets, [330, 540]);
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+      await bot.client.destroy();
+    }
+  });
+});

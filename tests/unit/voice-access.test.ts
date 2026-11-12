@@ -33,6 +33,16 @@ function manager() {
     bob: [VIEW, CONNECT],
   });
   const staff = channel('2', 'Staff', 1, { bot: [VIEW, CONNECT, SPEAK], alice: [VIEW, CONNECT] });
+  // A channel at its member limit (the bot has no Move Members to pass it).
+  const small = {
+    ...channel('3', 'Small', 2, {
+      bot: [VIEW, CONNECT, SPEAK],
+      everyone: [VIEW, CONNECT],
+      alice: [VIEW, CONNECT],
+      bob: [VIEW, CONNECT],
+    }),
+    full: true,
+  };
   const members = new Map([
     ['alice', { id: 'alice' }],
     ['bob', { id: 'bob' }],
@@ -45,6 +55,7 @@ function manager() {
       cache: new Map<string, unknown>([
         ['1', lounge],
         ['2', staff],
+        ['3', small],
       ]),
     },
     voiceStates: { cache: new Map() },
@@ -64,12 +75,26 @@ describe('voice channels and who may see them', () => {
     const voice = manager();
     const names = (viewer: { userId: string | null; all: boolean }) =>
       voice.channels('G', viewer).map((entry) => entry.name);
-    assert.deepEqual(names({ userId: 'alice', all: false }), ['Lounge', 'Staff']);
-    assert.deepEqual(names({ userId: 'bob', all: false }), ['Lounge']);
+    // (A full channel is listed like any other: whether it is full changes by the minute, and joining says so.)
+    assert.deepEqual(names({ userId: 'alice', all: false }), ['Lounge', 'Staff', 'Small']);
+    assert.deepEqual(names({ userId: 'bob', all: false }), ['Lounge', 'Small']);
     // Everyone's view (the shared updates), and someone not in the cache: what everyone sees.
-    assert.deepEqual(names({ userId: null, all: false }), ['Lounge']);
-    assert.deepEqual(names({ userId: 'stranger', all: false }), ['Lounge']);
-    assert.deepEqual(names({ userId: null, all: true }), ['Lounge', 'Staff']);
+    assert.deepEqual(names({ userId: null, all: false }), ['Lounge', 'Small']);
+    assert.deepEqual(names({ userId: 'stranger', all: false }), ['Lounge', 'Small']);
+    assert.deepEqual(names({ userId: null, all: true }), ['Lounge', 'Staff', 'Small']);
+  });
+
+  it('says at once that a channel at its member limit is full, rather than trying to connect for twenty seconds', async () => {
+    const voice = manager();
+    const started = Date.now();
+    await assert.rejects(
+      voice.join('G', '3', null),
+      (error: unknown) =>
+        error instanceof ActionError &&
+        error.code === 'conflict' &&
+        error.message === 'the voice channel Small is full',
+    );
+    assert.ok(Date.now() - started < 1000);
   });
 
   it('refuses to carry the music into a channel the person may not go to themselves', async () => {
