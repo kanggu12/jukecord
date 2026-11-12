@@ -20,7 +20,7 @@ import {
   type Track,
 } from '../api.ts';
 import { ONE_COLUMN } from '../columns.ts';
-import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff } from '../dom.ts';
+import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff, subLine } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
 import { isLiked, keep, liveWhy, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
@@ -737,8 +737,8 @@ export function queueCard(): HTMLElement {
       next.tabIndex = -1;
       next.setAttribute('aria-hidden', 'true');
     }
-    // The grip only for whoever may move the rows (a guest, a read-only login): anyone else keeps the column empty, as a
-    // grip that does nothing would promise a move.
+    // The grip only for whoever may move the rows: anyone else (a guest, a read-only login) gets an empty one, which
+    // style.css gives no column, as a grip that does nothing would promise a move.
     const grip = control
       ? h('span', { class: 'grip', title: words.dragToMove }, icon('grip-vertical'))
       : h('span', { class: 'grip', 'aria-hidden': 'true' });
@@ -756,9 +756,7 @@ export function queueCard(): HTMLElement {
           { class: 'name' },
           h('a', { href: item.track.url, target: '_blank', rel: 'noopener noreferrer' }, item.track.title),
         ),
-        h(
-          'div',
-          { class: 'sub' },
+        subLine(
           item.position === 0 ? h('span', { class: 'badge tone-load' }, words.next) : null,
           item.track.durationMs !== null ? h('span', { class: 'num' }, clock(item.track.durationMs)) : null,
           h('span', null, addedBy(item.addedBy, item.addedByName)),
@@ -2249,7 +2247,7 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
         { class: 'name', title: track.title, 'data-clip': 'ok' },
         h('a', { href: track.url, target: '_blank', rel: 'noopener noreferrer' }, track.title),
       ),
-      h('div', { class: 'sub' }, ...sub),
+      subLine(...sub),
     ),
     h('div', { class: 'acts' }, heartKey(track), now, next, again, more),
   );

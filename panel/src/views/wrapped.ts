@@ -8,7 +8,7 @@
  * choosing another puts it there too, and Back goes to the one before.
  */
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
-import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon } from '../dom.ts';
+import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
 import { state, t, watch } from '../state.ts';
 import { goTo, problem, showDialog } from '../ui/layers.ts';
 import { listened } from './pages.ts';
@@ -169,9 +169,7 @@ export function wrappedPage(): HTMLElement {
                   { class: 'name' },
                   h('a', { href: first.track.url, target: '_blank', rel: 'noopener noreferrer' }, first.track.title),
                 ),
-                h(
-                  'div',
-                  { class: 'sub' },
+                subLine(
                   h('span', null, firstWhen(first.playedAt, wrapped.period)),
                   // Who added it: a person, the host, or autoplay (which played it when the queue ran out).
                   h(
@@ -227,7 +225,7 @@ export function wrappedPage(): HTMLElement {
               { class: 'name' },
               h('a', { href: entry.track.url, target: '_blank', rel: 'noopener noreferrer' }, entry.track.title),
             ),
-            entry.track.uploader ? h('div', { class: 'sub' }, h('span', null, entry.track.uploader)) : null,
+            entry.track.uploader ? subLine(h('span', null, entry.track.uploader)) : null,
           ),
           h('span', { class: 'n' }, words.playsCount(entry.plays)),
         ),

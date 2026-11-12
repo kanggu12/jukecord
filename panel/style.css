@@ -1412,10 +1412,12 @@ img {
 .list > * {
   flex: none;
 }
-/* A row is bare; under the pointer (or the keyboard) a pane comes up behind it (a tint, no line round it). */
+/* A row is bare; under the pointer (or the keyboard) a pane comes up behind it (a tint, no line round it). Its columns:
+   the grip, the number (as wide as three digits; 24 px on a phone), the album, the words, the keys. */
 .row {
+  --pos-w: 28px;
   display: grid;
-  grid-template-columns: 16px 28px 48px minmax(0, 1fr) auto;
+  grid-template-columns: 16px var(--pos-w) 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--s-12);
   min-height: 56px;
@@ -1433,9 +1435,13 @@ img {
   display: grid;
   place-items: center;
 }
-/* A row's place for the grip, empty for someone who may only look: nothing there to take. */
-.row .grip:empty {
-  cursor: auto;
+/* Someone who may not move the rows (a guest, a login that may only look) has no grip: the row gives up its column,
+   and its number stands at the card's inset as a grip would (an empty column left the rows 28 px in from the title). */
+.row:has(> .grip:empty) {
+  grid-template-columns: var(--pos-w) 48px minmax(0, 1fr) auto;
+}
+.row > .grip:empty {
+  display: none;
 }
 .row .pos {
   color: var(--ink-3);
@@ -1455,14 +1461,25 @@ img {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-/* The line under a row's title: smaller, quieter, its parts apart. */
+/* The line under a row's title: smaller, quieter, its parts 8 px apart on one line, the last cut short with an
+   ellipsis when the row is narrow (the whole line is its title: dom.ts subLine), so every row keeps one height. */
 .row .sub {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--ink-3);
   display: flex;
-  flex-wrap: wrap;
-  gap: 0 var(--s-8);
+  gap: var(--s-8);
+  min-width: 0;
+  white-space: nowrap;
+}
+.row .sub > * {
+  flex: none;
+}
+.row .sub > :last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .row .acts {
   display: flex;
@@ -3467,7 +3484,8 @@ kbd {
     display: inline-flex;
   }
   .row {
-    grid-template-columns: 24px 48px minmax(0, 1fr) auto;
+    --pos-w: 24px;
+    grid-template-columns: var(--pos-w) 48px minmax(0, 1fr) auto;
   }
   /* A log record on a narrow window: time, level and component on one line, the message under them. */
   .log {

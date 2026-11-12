@@ -117,6 +117,17 @@ export function refill(parent: HTMLElement, sign: string, ...children: Child[]):
   fill(parent, ...children);
 }
 
+/**
+ * A row's line under its title (when it was played, how long, who added it): its parts on one line, 8 px apart, the
+ * last cut short when the row is narrow (style.css), and all of them in the line's title, so nothing cut is lost (a
+ * line that wrapped made one row taller than the next).
+ */
+export function subLine(...parts: (HTMLElement | null | undefined | false)[]): HTMLElement {
+  const shown = parts.filter((part): part is HTMLElement => part instanceof HTMLElement);
+  const whole = shown.map((part) => part.textContent ?? '').join(' · ');
+  return h('div', { class: 'sub', title: whole, 'data-clip': 'ok' }, ...shown);
+}
+
 const SVG = 'http://www.w3.org/2000/svg';
 
 /** A line icon. Decorative unless given a label (then screen readers read the label). */
