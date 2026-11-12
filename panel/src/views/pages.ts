@@ -150,7 +150,7 @@ function chartCard(title: string, chart: { plot: HTMLElement; table: HTMLElement
 /** Listening statistics of the server shown. */
 export function statsPage(): HTMLElement {
   let days = 30;
-  const content = h('div', { class: 'page-body', style: 'display:flex;flex-direction:column;gap:var(--gap)' });
+  const content = h('div', { class: 'page-body' });
   const range = h('div', { class: 'seg', role: 'group' });
   const title = h('h1');
   // Wrapped, the page under this one: a key with its name (the panel follows the link without reloading).
@@ -528,8 +528,12 @@ export function waitingPage(status: Status | null, text: string): HTMLElement {
         'div',
         { class: 'brand' },
         logoMark(40),
-        h('b', null, 'jukecord'),
-        status ? h('span', { class: 'version' }, `v${status.version}`) : null,
+        h(
+          'span',
+          { class: 'wordmark' },
+          h('b', null, 'jukecord'),
+          status ? h('span', { class: 'version' }, `v${status.version}`) : null,
+        ),
       ),
       // The page's level-one heading, for screen readers: the name the mark and the words beside it show.
       h('h1', { class: 'sr' }, 'jukecord'),
@@ -554,8 +558,12 @@ export function loginPage(status: Status | null, error: string | null): HTMLElem
         'div',
         { class: 'brand' },
         logoMark(40),
-        h('b', null, 'jukecord'),
-        status ? h('span', { class: 'version' }, `v${status.version}`) : null,
+        h(
+          'span',
+          { class: 'wordmark' },
+          h('b', null, 'jukecord'),
+          status ? h('span', { class: 'version' }, `v${status.version}`) : null,
+        ),
       ),
       h('h1', { class: 'sr' }, words.loginTitle),
       message ? h('div', { class: 'notice tone-bad', role: 'alert' }, icon('circle-alert'), message) : null,

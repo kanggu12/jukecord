@@ -247,11 +247,12 @@ export function nowCard(live: Live): HTMLElement {
   const titleRow = h('div', { class: 'title-row' }, title, like);
   const info = h('div', { class: 'info' }, titleRow, meta, error, notice, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
-  // The keys in the card's head: the lyrics (they open beside the player, or as a sheet on a phone).
+  // The keys in the card's head: the lyrics (they open beside the player, or as a sheet on a phone). Quiet, as every
+  // key in a card's head is.
   const lyricsKey = h(
     'button',
     {
-      class: 'key sm',
+      class: 'key sm quiet',
       type: 'button',
       'data-act': 'lyrics',
       'aria-expanded': 'false',
@@ -270,8 +271,8 @@ export function nowCard(live: Live): HTMLElement {
   );
   moreKey.onclick = () => nowMenu();
   const headKeys = h('div', { class: 'head-keys' }, lyricsKey, moreKey);
-  // Said beside the state while the player is to stop when this track ends.
-  const stopsAfter = h('span', { class: 'badge tone-pause', hidden: true });
+  // Said beside the state while the player is to stop when this track ends: a lamp and words, as the state is.
+  const stopsAfter = h('span', { class: 'pill tone-pause', hidden: true });
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'now-h' },
@@ -298,7 +299,7 @@ export function nowCard(live: Live): HTMLElement {
     moreKey.setAttribute('aria-label', words.nowMore);
     moreKey.hidden = !mayControl();
     stopsAfter.hidden = !player?.stopAfter;
-    stopsAfter.textContent = words.stopsAfter;
+    refill(stopsAfter, words.stopsAfter, h('span', { class: 'dot' }), words.stopsAfter);
     const mode = discMode(player);
     card.classList.toggle('playing', mode === 'playing');
     card.classList.toggle('paused', mode === 'paused');
@@ -558,7 +559,7 @@ export function queueCard(): HTMLElement {
   );
   const searchField = h('label', { class: 'field head-search' }, icon('search'), search, clearSearch);
   const tool = (name: Parameters<typeof icon>[0], act: string) =>
-    h('button', { class: 'key sm', type: 'button', 'data-act': act }, icon(name), h('span', { class: 'label' }));
+    h('button', { class: 'key sm quiet', type: 'button', 'data-act': act }, icon(name), h('span', { class: 'label' }));
   const shuffle = tool('shuffle', 'shuffle');
   // Puts the queue in turns, by person, once (beside Shuffle, the other key that reorders the whole queue).
   const turns = tool('users', 'turns');
@@ -566,7 +567,7 @@ export function queueCard(): HTMLElement {
   const save = tool('save', 'save');
   const load = tool('folder-open', 'load');
   const clear = tool('trash-2', 'clear');
-  clear.classList.add('quiet', 'bad');
+  clear.classList.add('bad');
   // Narrow cards (phones): Shuffle keeps its place and the other tools (and autoplay's key) open from this key as a
   // list.
   const toolsMore = h(
@@ -580,8 +581,8 @@ export function queueCard(): HTMLElement {
   // What happens when the queue runs out, beside its title: the mode in words, and a list of the three to choose from.
   const autoKey = h(
     'button',
-    // As tall as the search field beside it on the same row.
-    { class: 'key autoplay-key', type: 'button', 'data-act': 'autoplay', 'aria-haspopup': 'dialog' },
+    // Small and quiet, as the head's other keys, the search field beside it of the same height.
+    { class: 'key sm quiet autoplay-key', type: 'button', 'data-act': 'autoplay', 'aria-haspopup': 'dialog' },
     icon('infinity'),
     h('span', { class: 'label' }),
   );
@@ -1244,7 +1245,7 @@ function trackMenu(id: number): void {
 // The saved playlists: load, rename, delete.
 async function playlistsDialog(): Promise<void> {
   const words = t();
-  const box = h('ul', { class: 'list', style: 'padding: 0' });
+  const box = h('ul', { class: 'list' });
   // For someone who may only look: why the list has no keys.
   const why = mayControl() ? null : h('p', { class: 'look-only' }, words.playlistsLookOnly);
   // A playlist from a file or a pasted list, beside the Close key (for those who may change the music).
@@ -1607,11 +1608,6 @@ export function addCard(): HTMLElement {
     why.textContent = words.lookOnlyHint;
     list.setAttribute('aria-label', words.foundLabel);
     keysHint.textContent = words.foundKeys;
-    // Nothing playing and nothing waiting: the card glows to say where music comes from.
-    card.classList.toggle(
-      'invite',
-      control && Boolean(state.player) && !state.player?.track && (state.queue?.items.length ?? 0) === 0,
-    );
     // Autoplay on and the queue empty: the card says what happens when it runs out.
     const mode = state.player?.autoplay ?? 'off';
     autoNote.hidden = mode === 'off' || (state.queue?.items.length ?? 0) > 0;
@@ -1975,7 +1971,7 @@ export function voiceCard(): HTMLElement {
   const pill = h('span', { class: 'pill tone-idle' });
   const where = h('div', { class: 'where' });
   const leave = h('button', { class: 'key sm', type: 'button' });
-  const top = h('div', { class: 'voice-now' }, icon('radio', 'lg'), where, leave);
+  const top = h('div', { class: 'voice-now' }, icon('radio'), where, leave);
   const channels = h('ul', { class: 'channels scroll' });
   const listening = h('div', { class: 'listeners' });
   // Beside the people listening: inviting more of them (a listening link, or for the host a friend's login link).
@@ -2064,7 +2060,8 @@ export function voiceCard(): HTMLElement {
               'li',
               { class: `channel ${here ? 'current' : ''}`.trim() },
               icon('volume-2'),
-              h('span', { class: 'name' }, channel.name),
+              // One line, cut short when long, its whole name the title (style.css).
+              h('span', { class: 'name', title: channel.name, 'data-clip': 'ok' }, channel.name),
               h('span', { class: 'faint num' }, words.people(channel.people)),
               here ? h('span', { class: 'badge tone-play' }, words.botHere) : join,
             );
@@ -2288,7 +2285,7 @@ export function historyCard(): HTMLElement {
   const choices = h('div', { class: 'seg library-seg', role: 'group' });
   const heading = h('h2', { id: 'history-h', class: 'sr' });
   // With the liked tracks shown: all of them into the queue.
-  const addAll = h('button', { class: 'key sm', type: 'button', 'data-act': 'likes-add' });
+  const addAll = h('button', { class: 'key sm quiet', type: 'button', 'data-act': 'likes-add' });
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'history-h' },

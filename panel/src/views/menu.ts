@@ -177,11 +177,11 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
       },
       words.theme,
     ),
-    h('h3', { style: 'margin-top:14px' }, words.language),
+    h('h3', null, words.language),
     language,
     h(
       'div',
-      { class: 'line', style: 'margin-top:10px' },
+      { class: 'line' },
       h('div', { class: 'grow' }, words.motion),
       (() => {
         const toggle = h('button', {
@@ -320,7 +320,7 @@ function drawDj(box: HTMLElement, guild: string, settings: Settings, again: () =
   fill(
     box,
     h('h3', null, words.djRole),
-    h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.djHint),
+    h('p', { class: 'faint section-hint' }, words.djHint),
     option(null, words.everyone, 0),
     ...settings.roles.map((role) => option(role.id, role.name, role.color)),
   );
@@ -356,7 +356,7 @@ function drawAlerts(box: HTMLElement, guild: string, settings: Settings, again: 
   fill(
     box,
     h('h3', null, words.alerts),
-    h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.alertsHint),
+    h('p', { class: 'faint section-hint' }, words.alertsHint),
     option(null, words.alertsOff),
     ...settings.channels.map((channel) => option(channel.id, channel.name)),
   );
@@ -501,7 +501,7 @@ async function drawTokens(box: HTMLElement): Promise<void> {
     };
     showDialog(
       created.info.name,
-      h('div', null, h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.shownOnce), secret, result),
+      h('div', null, h('p', { class: 'faint dialog-note' }, words.shownOnce), secret, result),
       [copy],
     );
     void drawTokens(box);
@@ -531,9 +531,9 @@ function fillTokens(
   fill(
     box,
     h('h3', null, words.tokens),
-    h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.tokensHint),
+    h('p', { class: 'faint section-hint' }, words.tokensHint),
     ...(list.length === 0
-      ? [h('div', { class: 'faint', style: 'padding:6px 0' }, words.noTokens)]
+      ? [h('p', { class: 'faint section-hint' }, words.noTokens)]
       : list.map((token) => {
           const revoke = h(
             'button',

@@ -15,7 +15,8 @@ export function guestCard(): HTMLElement {
   const until = h('p', { class: 'guest-until' });
   const card = h(
     'section',
-    { class: 'card guest-card', 'aria-labelledby': 'guest-h' },
+    // It fills the column beside the player where there are two (style.css), as the history does for members.
+    { class: 'card fill guest-card', 'aria-labelledby': 'guest-h' },
     h('div', { class: 'card-head' }, h('h2', { id: 'guest-h' }), count),
     people,
     until,

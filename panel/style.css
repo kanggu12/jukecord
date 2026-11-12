@@ -1,11 +1,18 @@
 /*
  * jukecord's panel. Frosted glass over the music: the field behind the cards takes its light from the cover of the
- * track playing, blurred far out of shape, and rests near grey when nothing plays. The cards are glass over it, with a
- * bright line along their top edge and a long soft shadow; keys are smaller glass, inputs are sunk into it, and the rows
- * of a list are bare until the pointer or the keyboard is on them. Sheets and dialogs are nearly opaque, for reading.
+ * track playing, blurred far out of shape, and rests near grey when nothing plays. The cards are flat glass over it, a
+ * translucent pane with a 1px edge and a soft shadow; keys are a face and a 1px line, fields and rows of choices a
+ * darker face, and the rows of a list are bare until the pointer or the keyboard is on them. Sheets and dialogs are
+ * nearly opaque, for reading. Nothing is raised or sunk: no light along a top edge, no shadow under a key, no inner
+ * shadow in a field.
  * Colour means something: the music's own (the field, the glow behind the disc), the state of the player and the
  * connection, and removing. The rainbow means "playing now": it rims the turning disc and runs along the progress bar;
  * paused, it rests white.
+ *
+ * Everything is measured from a few scales (the tokens under "sizes"): one type scale whose line heights centre the
+ * letters, one spacing scale, one control height per size class, one rule for corners. tests/ui/audit.js holds the
+ * panel to them: a row's controls at one height and one centre, an icon on the centre of its words, cards side by side
+ * at one top and one bottom, what is stacked in a card at one left edge, every space on the scale.
  */
 
 /* The font in pieces by character range: a page fetches only the pieces for the characters it shows (an English page
@@ -15,22 +22,22 @@
 /* ---- tokens: dark (the default) ----------------------------------------------------------------------------- */
 :root {
   color-scheme: dark;
+  /* The field: one neutral grey, a step lighter at the top of the window (no coloured pools of light: the light behind
+     the glass is the cover's, while a track plays). */
   --bg: #0d0e12;
   --bg-top: #111318;
-  --pool-a: rgba(120, 130, 165, 0.13);
-  --pool-b: rgba(150, 120, 175, 0.09);
-  --pool-c: rgba(110, 140, 175, 0.08);
   --ambient: 0.32;
   --ambient-tone: saturate(1.5) brightness(0.6);
+  /* The glass of the cards: one flat translucent pane (the field's light shows through it). */
   --panel: rgba(30, 32, 39, 0.55);
-  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 42%);
   --panel-solid: rgba(22, 23, 29, 0.96);
   /* The same, with nothing showing through (less transparency). */
   --panel-opaque: #16171d;
   --edge: rgba(255, 255, 255, 0.085);
   --glass: blur(24px) saturate(160%);
-  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.09);
-  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.18);
+  /* One soft shadow under what floats over the field: a card, a sheet, a dialog. */
+  --shadow: 0 16px 40px -24px rgba(0, 0, 0, 0.7);
+  /* A key's face and the face under the pointer (or chosen); a field's face, darker than the glass it is in. */
   --raised: rgba(255, 255, 255, 0.06);
   --raised-2: rgba(255, 255, 255, 0.1);
   --sunk: rgba(0, 0, 0, 0.28);
@@ -69,18 +76,13 @@
   color-scheme: light;
   --bg: #eef0f4;
   --bg-top: #f6f7f9;
-  --pool-a: rgba(140, 150, 190, 0.14);
-  --pool-b: rgba(190, 160, 205, 0.1);
-  --pool-c: rgba(150, 180, 215, 0.1);
   --ambient: 0.19;
   --ambient-tone: saturate(1.7) brightness(1.3);
   --panel: rgba(255, 255, 255, 0.62);
-  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
   --panel-solid: rgba(255, 255, 255, 0.97);
   --panel-opaque: #ffffff;
   --edge: rgba(255, 255, 255, 0.75);
-  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --shadow: 0 20px 48px -24px rgba(30, 35, 60, 0.28), 0 1px 3px rgba(30, 35, 60, 0.06);
+  --shadow: 0 12px 32px -20px rgba(30, 35, 60, 0.28);
   --raised: rgba(255, 255, 255, 0.7);
   --raised-2: rgba(255, 255, 255, 0.95);
   --sunk: rgba(225, 229, 238, 0.7);
@@ -112,18 +114,13 @@
     color-scheme: light;
     --bg: #eef0f4;
     --bg-top: #f6f7f9;
-    --pool-a: rgba(140, 150, 190, 0.14);
-    --pool-b: rgba(190, 160, 205, 0.1);
-    --pool-c: rgba(150, 180, 215, 0.1);
     --ambient: 0.19;
     --ambient-tone: saturate(1.7) brightness(1.3);
     --panel: rgba(255, 255, 255, 0.62);
-    --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
     --panel-solid: rgba(255, 255, 255, 0.97);
     --panel-opaque: #ffffff;
     --edge: rgba(255, 255, 255, 0.75);
-    --rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    --shadow: 0 20px 48px -24px rgba(30, 35, 60, 0.28), 0 1px 3px rgba(30, 35, 60, 0.06);
+    --shadow: 0 12px 32px -20px rgba(30, 35, 60, 0.28);
     --raised: rgba(255, 255, 255, 0.7);
     --raised-2: rgba(255, 255, 255, 0.95);
     --sunk: rgba(225, 229, 238, 0.7);
@@ -157,11 +154,47 @@
   --font:
     "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
     "Malgun Gothic", "Noto Sans KR", sans-serif;
-  /* Corners: keys and inputs; small labels; rows; cards, sheets and dialogs. */
-  --r: 10px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The type scale: six sizes, each with the line height that centres its letters. The browser rounds the face's
+     ascent and descent to whole pixels (13 px Pretendard: 12 above the baseline, 3 below) and the room left in the
+     line to whole pixels too: when that room is odd, or the line height is not a whole number (1.45 gave 18.85 px),
+     the letters stand half a pixel or more above the middle of their line, and so above the icon beside them. Each
+     line height below leaves an even room (measured for every size, at one and two device pixels per pixel). */
+  --fs-xs: 11px; /* a mark's word: a badge, a count on a key, a face's initials */
+  --lh-xs: 15px;
+  --fs-sm: 12px; /* the small line: under a title, a hint, a label, an axis */
+  --lh-sm: 18px;
+  --fs-md: 13px; /* the panel's words: keys, fields, rows, cards' titles */
+  --lh-md: 19px;
+  --fs-lg: 15px; /* a title over a layer: a dialog's, a page's; words read at length */
+  --lh-lg: 22px;
+  --fs-xl: 20px; /* the track playing, the lyrics' lines, the name in the bar */
+  --lh-xl: 28px; /* as tall as a small key: the heart beside the title stands on its line with no nudge */
+  --fs-2xl: 24px; /* the statistics' figures */
+  --lh-2xl: 31px;
+  /* A field's words on a phone: 16 px, under which Safari zooms the page when the field is touched. */
+  --fs-input: 16px;
+  --lh-input: 21px;
+  /* The spacing scale: every padding, margin and gap is one of these (2 px only between the rows of a list and inside a
+     row of choices; 6 px only between an icon and its words). */
+  --s-2: 2px;
+  --s-4: 4px;
+  --s-6: 6px;
+  --s-8: 8px;
+  --s-12: 12px;
+  --s-16: 16px;
+  --s-20: 20px;
+  --s-24: 24px;
+  --s-32: 32px;
+  /* Corners, by what holds what: a frame (a card, a sheet, a dialog), what sits in a frame (a key, a field, a row, a
+     box, a tooltip), what sits in that (a choice in a row of choices, a cover, a key cap), and round (a label, a face,
+     a switch, a lamp). */
+  --r-lg: 16px;
+  --r: 8px;
   --r-sm: 6px;
-  --r-row: 12px;
-  --r-card: 18px;
+  --r-round: 999px;
+  /* The icons: one size beside words and in keys. */
+  --icon: 16px;
   /* Movement that settles like a spring: quick out, soft landing. */
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* What a phone's notch, rounded corners and home bar cover at the window's edges (the page asks to be drawn under
@@ -215,16 +248,12 @@ html {
 }
 body {
   margin: 0;
-  background: var(--bg);
-  /* Three soft pools of light, fixed to the window: what the glass of the cards shows, blurred. */
-  background-image:
-    radial-gradient(ellipse 80vw 60vh at 15% 20%, var(--pool-a) 0%, transparent 65%),
-    radial-gradient(ellipse 60vw 55vh at 88% 78%, var(--pool-b) 0%, transparent 60%),
-    radial-gradient(ellipse 50vw 45vh at 55% 5%, var(--pool-c) 0%, transparent 55%),
-    linear-gradient(180deg, var(--bg-top), var(--bg) 320px);
-  background-attachment: fixed;
+  /* The field: its own grey, a step lighter under the bar, fixed to the window. What the glass shows over it is the
+     cover's light (.ambient, below) while a track plays; with nothing playing, the glass rests on the plain grey. */
+  background: linear-gradient(180deg, var(--bg-top), var(--bg) 320px) fixed var(--bg);
   color: var(--ink);
-  font: 400 13px / 1.45 var(--font);
+  /* The panel's words: the type scale's middle size, on the line height that centres them. */
+  font: 400 var(--fs-md) / var(--lh-md) var(--font);
   font-feature-settings: "ss06";
   -webkit-font-smoothing: antialiased;
   overflow-wrap: anywhere;
@@ -245,7 +274,8 @@ body {
   top: 50%;
   width: 10vw;
   height: 10vh;
-  margin: -5vh 0 0 -5vw;
+  /* Its middle on the window's middle, where the scale below grows it from. */
+  translate: -50% -50%;
   background: center / cover no-repeat;
   filter: blur(1.1vw) var(--ambient-tone);
   transform: scale(12);
@@ -292,19 +322,19 @@ img {
 .faint {
   color: var(--ink-3);
 }
+/* An icon: 16 px wide and as tall as a line of the words it stands beside (its drawing in the middle of that height,
+   as a picture keeps its shape), so whatever lines up a row, the icon stands on the centre of the words' first line:
+   in a key the key centres both, and beside words that may take two lines (a toast, a reason) the row lines its items
+   up at their tops. The one way an icon is placed beside a label. */
 .icon {
-  width: 16px;
-  height: 16px;
+  width: var(--icon);
+  height: max(var(--icon), 1lh);
   flex: none;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-.icon.lg {
-  width: 18px;
-  height: 18px;
 }
 .sr {
   position: absolute;
@@ -369,32 +399,38 @@ img {
   border-bottom: 1px solid var(--line);
   box-shadow: 0 6px 24px -18px rgba(0, 0, 0, 0.6);
 }
-/* The mark, the name in heavy tight letters, and the version beside them. */
+/* The mark, and beside it the name in heavy tight letters with the version: the name and the version one group on
+   one baseline (centred each on its own, the version stood 1.6 px above the name's line), the group centred with the
+   mark (whose middle is then the capitals' middle), and the version alone on a phone, where the name is not shown,
+   centred as the bar's other words are. */
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--s-8);
   flex: none;
   text-decoration: none;
   color: var(--ink);
 }
 .brand .mark {
   flex: none;
-  /* The arch stands on the text's baseline rather than floating in the middle of the bar. */
-  margin-top: -2px;
+}
+.wordmark {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-8);
 }
 .brand b {
-  font-size: 18px;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
   font-weight: 760;
   letter-spacing: -0.04em;
-  line-height: 1;
 }
 .version {
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   font-weight: 500;
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
-  line-height: 18px;
 }
 .divider {
   width: 1px;
@@ -435,7 +471,8 @@ img {
   background: var(--raised-2);
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
   font-weight: 600;
   color: var(--ink-2);
   overflow: hidden;
@@ -445,28 +482,31 @@ img {
   height: 100%;
   object-fit: cover;
 }
+/* A state said beside what it is about (the connection in the bar, the player in its card): a lamp in the state's
+   colour and its word, with no box round them (a chip in a bar or a card's head is a box in a box). The word keeps the
+   text's second ink, which holds its contrast over any light behind the glass; the lamp carries the colour. */
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 12px;
+  gap: var(--s-6);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   font-weight: 500;
   white-space: nowrap;
-  color: var(--tone, var(--ink-2));
-  /* The tone's tint over the panel's own colour, not over the glass: a bright cover's light behind it took the label
-     under 4.5:1. */
-  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), var(--panel-solid));
+  color: var(--ink-2);
 }
+/* The lamp: lit in the state's colour (its own soft light round it, as a lamp has), unlit grey when nothing goes on. */
 .dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--tone, var(--ink-3));
-  box-shadow: 0 0 6px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 70%, transparent);
+  box-shadow: 0 0 6px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 60%, transparent);
   flex: none;
+}
+.tone-idle .dot,
+.dot.tone-idle {
+  box-shadow: none;
 }
 .tone-play {
   --tone: var(--play);
@@ -498,9 +538,9 @@ img {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-6);
   height: var(--control);
-  padding: 0 10px;
+  padding: 0 var(--s-12);
   border-radius: var(--r);
   text-decoration: none;
   color: var(--ink-2);
@@ -517,8 +557,8 @@ img {
 .nav a[aria-current="page"]::after {
   content: "";
   position: absolute;
-  left: 10px;
-  right: 10px;
+  left: var(--s-12);
+  right: var(--s-12);
   bottom: calc((var(--bar-base) - var(--control)) / -2);
   height: 2px;
   background: var(--ink);
@@ -560,7 +600,8 @@ img {
   background: var(--raised-2);
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
   font-weight: 600;
   color: var(--ink-2);
   overflow: hidden;
@@ -568,7 +609,6 @@ img {
 .avatar.sm {
   width: 20px;
   height: 20px;
-  font-size: 10px;
 }
 
 /* Toasts live inside the bar, never over the cards (they would cut across their edges). */
@@ -578,45 +618,30 @@ img {
   min-width: 0;
   max-width: 100%;
 }
+/* A toast: its icon in the message's colour and its words, on a solid face with a 1px line (nothing runs along its
+   foot: a coloured line on a box reads as decoration). As tall as the bar's keys with one line, the line in the middle;
+   a second line grows it, and the icon stays with the first (the grid's row of words is centred in the box, its items
+   at the row's top). */
 .toast {
   position: relative;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* One line or two: two still fit in the bar's height. */
-  min-height: 32px;
-  padding: 3px 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  align-content: center;
+  gap: var(--s-8);
+  min-height: var(--control);
+  padding: var(--s-4) var(--s-12);
   min-width: 0;
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--panel-solid);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
-  box-shadow:
-    var(--rim),
-    0 8px 20px -10px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 20px -12px rgba(0, 0, 0, 0.5);
   color: var(--ink);
   font-weight: 500;
   animation: toast-in 220ms ease-out;
-}
-/* The time the toast has left, running out along its foot. */
-.toast::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--tone, var(--load));
-  opacity: 0.55;
-  transform-origin: left;
-  animation: toast-time var(--toast-ms, 3500ms) linear forwards;
-}
-@keyframes toast-time {
-  to {
-    transform: scaleX(0);
-  }
 }
 .toast .icon {
   color: var(--tone, var(--ink-2));
@@ -629,7 +654,6 @@ img {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  line-height: 1.3;
 }
 @keyframes toast-in {
   from {
@@ -663,13 +687,14 @@ img {
   container: card / inline-size;
   position: relative;
   isolation: isolate;
-  /* The glass: a sheen falling from the top edge over a tinted view of the field behind. No backdrop blur here: the
-     only thing behind a card is the field, which is blurred already, and blurring it again under every card would
-     cost a phone its smooth scrolling for nothing seen. The bars and the layers, which content passes under, blur. */
-  background: var(--sheen), var(--panel);
+  /* The glass: one flat translucent pane over the field, a 1px edge and a soft shadow; no light falling from its top
+     edge. No backdrop blur here: the only thing behind a card is the field, which is blurred already, and blurring it
+     again under every card would cost a phone its smooth scrolling for nothing seen. The bars and the layers, which
+     content passes under, blur. */
+  background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow), var(--rim);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -681,40 +706,39 @@ img {
   flex: 1;
   min-height: 0;
 }
+/* A card's head: its title and what belongs to it, on one line at the card's inset on both sides (the rows under it
+   start and end their words and keys at the same inset). What stands in a head is bare: a state is a lamp and a word,
+   keys are quiet (no frame of their own: a framed key in a head is a box in a box), and every control in it is of the
+   small size, so the line holds one height. */
 .card-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--s-8);
   /* Never squeezed by a card of fixed height: a head that wraps grows, and the list under it gives up the room. */
   flex: none;
   min-height: 48px;
-  padding: 8px 12px 8px var(--pad);
+  padding: var(--s-8) var(--pad);
   border-bottom: 1px solid var(--line);
 }
+/* Its title in words as written (no capitals, no spacing out): the size of the panel's words, in the second ink, so
+   what the card holds reads first. */
 .card-head h2 {
   margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+  font-weight: 650;
   color: var(--ink-2);
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: var(--s-8);
   white-space: nowrap;
 }
-/* Korean has no capitals, and spaced syllables read apart. */
-:where(:root:lang(ko)) .card-head h2 {
-  letter-spacing: 0.02em;
-}
+/* The count beside the title: the same size on the same baseline, quieter. */
 .card-head .count {
   color: var(--ink-3);
-  font-weight: 500;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
-  /* The count is words and numbers, not a label: no capitals, no spacing. */
-  letter-spacing: 0;
-  text-transform: none;
 }
 .card-head .head-search {
   flex: 0 1 220px;
@@ -724,12 +748,14 @@ img {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-4);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+/* After the search, the tools take the next line when the head has no room for them on its first: there the first
+   key's pane reaches 8 px out of the head's inset, so its icon stands under the title's first letter. */
 .card-head .head-search + .tools {
-  margin-left: 0;
+  margin-left: calc(-1 * var(--s-8));
 }
 .card-body {
   padding: var(--pad);
@@ -737,33 +763,31 @@ img {
 .empty {
   display: grid;
   place-items: center;
-  gap: 6px;
-  padding: 28px 16px;
+  gap: var(--s-8);
+  padding: var(--s-32) var(--pad);
   text-align: center;
   color: var(--ink-3);
 }
+/* The one larger icon: over the words of an empty list, alone on its line. */
 .empty .icon {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   color: var(--ink-3);
 }
 
 /* ---- keys ----------------------------------------------------------------------------------------------------- */
-/* A key is a small piece of glass, lit along its top edge; pressed, it gives a little. The main key is solid: the
-   brightest thing on the card. */
+/* A key is flat: a face and a 1px line, its icon and words in the middle (no light along its top, no shadow under
+   it); pressed, it gives a little. The main key is solid: the brightest thing on the card. */
 .key {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--s-6);
   height: var(--control);
-  padding: 0 14px;
+  padding: 0 var(--s-12);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--raised);
-  box-shadow:
-    var(--rim),
-    0 1px 2px rgba(0, 0, 0, 0.12);
   color: var(--ink);
   font-weight: 500;
   white-space: nowrap;
@@ -773,7 +797,6 @@ img {
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
-    box-shadow 0.18s ease,
     transform 0.18s var(--ease);
 }
 .key:hover {
@@ -784,13 +807,8 @@ img {
   transform: scale(0.97);
 }
 .key.primary {
-  /* The gradient over the key's own colour: what reads the background colour (the audit's contrast, forced colours)
-     gets the colour the words stand on. */
-  background: linear-gradient(180deg, var(--key-hi), var(--key)) var(--key);
+  background: var(--key);
   border-color: transparent;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 6px 16px -8px rgba(0, 0, 0, 0.55);
   color: var(--key-ink);
   font-weight: 600;
 }
@@ -801,9 +819,6 @@ img {
 .key.danger {
   background: var(--bad-key);
   border-color: transparent;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 6px 16px -8px rgba(0, 0, 0, 0.5);
   color: #fff;
   font-weight: 600;
 }
@@ -814,7 +829,6 @@ img {
 .key.quiet {
   background: none;
   border-color: transparent;
-  box-shadow: none;
   color: var(--ink-2);
 }
 .key.quiet:hover {
@@ -826,9 +840,15 @@ img {
   color: var(--bad);
   background: color-mix(in oklch, var(--bad) 12%, transparent);
 }
+/* A key is at least as wide as it is tall: a short word on a small key (Join, Leave) stays a finger's width on a touch
+   screen, where the small size is 44 px too. */
+.key {
+  min-width: var(--control);
+}
 .key.sm {
+  min-width: var(--control-sm);
   height: var(--control-sm);
-  padding: 0 10px;
+  padding: 0 var(--s-8);
 }
 .key.square {
   width: var(--control);
@@ -857,16 +877,16 @@ img {
 }
 
 /* ---- inputs ----------------------------------------------------------------------------------------------------- */
+/* A field: a face darker than the glass it is in and a 1px line, flat (no shadow inside it). */
 .field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s-8);
   height: var(--control);
-  padding: 0 12px;
+  padding: 0 var(--s-12);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--sunk);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
   min-width: 0;
   flex: 1;
   color: var(--ink-3);
@@ -877,18 +897,18 @@ img {
 .field:hover {
   border-color: color-mix(in oklch, var(--ink) 28%, transparent);
 }
+/* Focused: its line in the focus colour and a soft ring of it round the field (no glow). */
 .field:focus-within {
   border-color: var(--focus);
-  box-shadow:
-    inset 0 1px 3px rgba(0, 0, 0, 0.18),
-    0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent),
-    0 0 14px color-mix(in oklch, var(--focus) 25%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
 }
+/* The input fills the field, which holds the room round its words (the browser's own padding would add a pixel). */
 .field input {
   flex: 1;
   width: 0;
   min-width: 0;
   height: 100%;
+  padding: 0;
   border: 0;
   outline: 0;
   background: none;
@@ -902,23 +922,23 @@ img {
   display: none;
 }
 @media (max-width: 900px) {
-  /* Smaller text in an input makes Safari zoom the page. */
+  /* Smaller text in an input makes Safari zoom the page: 16 px there, on its own centring line height. */
   .field input {
-    font-size: 16px;
+    font-size: var(--fs-input);
+    line-height: var(--lh-input);
   }
 }
 
-/* Segmented choice (theme, language, ranges). */
+/* A row of choices (theme, language, ranges): a field's face with its line, the choice in use a key's face with its
+   line inside it, 2px in (its corner the row's less those 2px, so the two curves run together). Flat, as keys are. */
 .seg {
   display: inline-flex;
   height: var(--control);
-  padding: 2px;
-  gap: 2px;
+  padding: var(--s-2);
+  gap: var(--s-2);
   border-radius: var(--r);
   background: var(--sunk);
-  box-shadow:
-    inset 0 0 0 1px var(--line),
-    inset 0 1px 3px rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 @media (pointer: coarse) {
   /* Each choice gets the whole 44px to the finger; its tile is drawn 2px inside (a clear border), so the tile in use
@@ -931,15 +951,12 @@ img {
     border: 2px solid transparent;
     background-clip: padding-box;
   }
-  .seg button[aria-pressed="true"] {
-    box-shadow: var(--rim);
-  }
 }
 .seg button {
   height: 100%;
-  padding: 0 10px;
+  padding: 0 var(--s-12);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: none;
   color: var(--ink-2);
   font-weight: 500;
@@ -952,9 +969,37 @@ img {
 .seg button[aria-pressed="true"] {
   background: var(--raised-2);
   color: var(--ink);
-  box-shadow:
-    var(--rim),
-    0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+/* A field in a head is of the head's small size, as its keys are. */
+.card-head .field {
+  height: var(--control-sm);
+}
+/* A row of choices in a head (the history and the likes): words, the one shown in the weight and ink of a card's title,
+   the other quieter, a key to it (a framed row of choices in a head was a box in a box). The first word starts at the
+   head's inset, its pane under the pointer reaching out of it. */
+.card-head .seg {
+  height: var(--control-sm);
+  margin-left: calc(-1 * var(--s-8));
+  padding: 0;
+  gap: var(--s-4);
+  background: none;
+  box-shadow: none;
+}
+.card-head .seg button {
+  padding: 0 var(--s-8);
+  border-radius: var(--r);
+  color: var(--ink-3);
+}
+.card-head .seg button:hover {
+  background: var(--hover-tint);
+  color: var(--ink-2);
+}
+.card-head .seg button[aria-pressed="true"] {
+  background: none;
+  box-shadow: none;
+  color: var(--ink-2);
+  font-weight: 650;
 }
 
 /* On/off switch. The key itself is only the place to press (a finger's size on touch screens); its track and its
@@ -993,7 +1038,8 @@ img {
   translate: 0 -50%;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  /* A hairline round it, so a white knob reads on a pale track too (no drop shadow: it is not raised). */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
   transition: transform 160ms var(--ease);
 }
 .switch[aria-checked="true"]::before {
@@ -1157,24 +1203,21 @@ img {
 }
 
 /* ---- now playing ------------------------------------------------------------------------------------------------ */
-.card.playing {
-  border-color: color-mix(in oklch, var(--ink) 16%, transparent);
-}
-.card.paused {
-  border-color: color-mix(in oklch, var(--pause) 30%, transparent);
-}
+/* The card keeps the edge every card has, playing or paused (the disc's rim and the bar's rainbow say which; a card
+   edged in a colour of its own reads as decoration). The disc at the card's inset, as the title in the head above
+   it. */
 .now {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 20px;
+  gap: var(--s-20);
   align-items: center;
-  padding: var(--pad) var(--pad) var(--pad) 20px;
+  padding: var(--pad);
 }
 .now .title {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
   font-weight: 700;
-  line-height: 1.3;
   letter-spacing: -0.015em;
 }
 .now .title a {
@@ -1185,35 +1228,36 @@ img {
   text-underline-offset: 3px;
 }
 .now .meta {
-  margin-top: 4px;
+  margin-top: var(--s-4);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: var(--s-4) var(--s-12);
   color: var(--ink-2);
 }
 .now .meta span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--s-6);
 }
+/* Why the track could not play, why there are no live updates, what the player did by itself: an icon and words that
+   may take two lines, the icon on the first (a line tall, as every icon is). */
 .now .error {
-  margin-top: 6px;
+  margin-top: var(--s-8);
   color: var(--bad);
   display: flex;
-  gap: 6px;
+  gap: var(--s-6);
   align-items: flex-start;
 }
 .now .live-note {
-  margin-top: 6px;
+  margin-top: var(--s-8);
   display: flex;
-  gap: 6px;
+  gap: var(--s-6);
   align-items: flex-start;
   color: var(--ink-2);
 }
 /* Its icon in the colour of the bar's label: waiting while turned away for now, bad while refused for good. */
 .now .live-note .icon {
   color: var(--pause);
-  margin-top: 2px;
 }
 .now .live-note.refused .icon {
   color: var(--bad);
@@ -1221,17 +1265,17 @@ img {
 /* What the player did by itself (paused with nobody listening, a track taken out of the loop): a fact, not a
    problem, in the text's own colours. */
 .now .player-note {
-  margin-top: 6px;
+  margin-top: var(--s-8);
   display: flex;
-  gap: 6px;
+  gap: var(--s-6);
   align-items: flex-start;
   color: var(--ink-2);
 }
 .now .keys {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--s-8);
+  margin-top: var(--s-12);
   /* As wide as the column beside the disc: its own width decides whether the keys keep their words (the rule further
      down). The row of keys, not the whole column: the progress bar's four-a-second tick lays the column out, and a
      container there was asked again each time. */
@@ -1240,7 +1284,7 @@ img {
 
 /* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
 .progress {
-  margin-top: 14px;
+  margin-top: var(--s-12);
 }
 .track {
   position: relative;
@@ -1250,7 +1294,8 @@ img {
      the bar lets go without seeking); sideways it drags the knob. */
   touch-action: pan-y;
 }
-/* The groove the bar runs in, sunk into the glass; under the pointer it grows to show it can be taken. */
+/* The groove the bar runs in, a field's darker face with its line; under the pointer it grows to show it can be
+   taken. */
 .track::before {
   content: "";
   position: absolute;
@@ -1284,28 +1329,22 @@ img {
   margin-left: -6px;
   border-radius: 50%;
   background: var(--ink);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  /* A ring of the card's own face round it, so it stands apart from the bar under it (flat: no shadow, no glow). */
+  box-shadow: 0 0 0 2px var(--panel-solid);
 }
-/* Playing: the rainbow runs along the bar and glows, and the knob glows in its colours one after another. */
+/* Playing: the rainbow runs along the bar, and the knob carries its colours. */
 .playing .track .fill {
   background: linear-gradient(90deg, var(--rainbow));
   background-size: var(--track-w, 600px) 100%;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.14);
 }
 .playing .track .knob {
   background: conic-gradient(var(--rainbow));
-  box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--ink) 12%, transparent),
-    0 1px 4px rgba(0, 0, 0, 0.45);
 }
 .paused .track .fill {
   background: color-mix(in oklch, var(--ink) 45%, transparent);
 }
 .paused .track .knob {
   background: var(--rest);
-  box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--ink) 10%, transparent),
-    0 1px 4px rgba(0, 0, 0, 0.4);
 }
 /* Under a mouse pointer the groove grows, to show it can be taken (a finger has no hover, and its bar sits lower). */
 @media (hover: hover) and (pointer: fine) {
@@ -1322,11 +1361,12 @@ img {
   position: absolute;
   bottom: 20px;
   translate: -50% 0;
-  padding: 3px 8px;
+  padding: var(--s-2) var(--s-8);
   border-radius: var(--r-sm);
   background: rgba(8, 9, 15, 0.88);
   color: #fff;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   font-variant-numeric: tabular-nums;
   pointer-events: none;
   white-space: nowrap;
@@ -1343,8 +1383,9 @@ img {
 .times {
   display: flex;
   justify-content: space-between;
-  margin-top: 2px;
-  font-size: 12px;
+  margin-top: var(--s-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   /* The second ink, not the faint one: the disc's glow reaches under the time beside it, and a white cover's glow
      left the faint ink at 3.4:1 on the dark theme, a black one's at 3.8:1 on the pale theme. A soft halo of the
      page's own colour round the digits holds the glow back right beside them. */
@@ -1356,36 +1397,35 @@ img {
 }
 
 /* ---- queue and history rows ------------------------------------------------------------------------------------- */
+/* A list in a card: 8 px in from the card's edge, and each row 8 px in from its own, so a row's words and keys start
+   and end at the card's inset (16 px), under the head's title and keys; the pane under the pointer reaches half way to
+   the card's edge. */
 .list {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: var(--s-8);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--s-2);
 }
 /* A list that scrolls must not squeeze its rows to fit: each keeps the height of what it holds. */
 .list > * {
   flex: none;
 }
-/* A row is bare; under the pointer (or the keyboard) a pane of glass comes up behind it. */
+/* A row is bare; under the pointer (or the keyboard) a pane comes up behind it (a tint, no line round it). */
 .row {
   display: grid;
   grid-template-columns: 16px 28px 48px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 54px;
-  padding: 6px 6px 6px 4px;
-  border-radius: var(--r-row);
-  border: 1px solid transparent;
-  transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+  gap: var(--s-12);
+  min-height: 56px;
+  padding: var(--s-8);
+  border-radius: var(--r);
+  transition: background 0.2s ease;
 }
 .row:hover,
 .row:focus-within {
   background: var(--hover-tint);
-  border-color: var(--line);
 }
 .row .grip {
   color: var(--ink-3);
@@ -1407,7 +1447,6 @@ img {
 }
 .row .name {
   font-weight: 500;
-  line-height: 1.35;
 }
 .row .name a {
   text-decoration: none;
@@ -1416,13 +1455,14 @@ img {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* The line under a row's title: smaller, quieter, its parts apart. */
 .row .sub {
-  margin-top: 1px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 0 var(--s-8);
 }
 .row .acts {
   display: flex;
@@ -1436,7 +1476,7 @@ img {
 .more-rows {
   display: flex;
   justify-content: center;
-  padding: 10px var(--pad);
+  padding: var(--s-12) var(--pad);
 }
 /* The queue tools' list key, for narrow cards only (the container rule below shows it). */
 .card-head .tools .tools-more {
@@ -1445,6 +1485,12 @@ img {
 /* The one key of a narrow card's row (shown by the container rule below). */
 .row .acts > .more-key {
   display: none;
+}
+/* A list in a dialog (the playlists, the listening links): its rows' words at the dialog's inset, under its title, the
+   panes under the pointer reaching 8 px out of it, as the choices' do. */
+.dialog-content .list {
+  padding: 0;
+  margin-inline: calc(-1 * var(--s-8));
 }
 /* A row's keys as a list (trackMenu), in a dialog. */
 .menu-list {
@@ -1455,18 +1501,12 @@ img {
 /* What Copy did, under the token in its dialog. */
 .copy-result {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 20px;
-  margin: 8px 0 0;
-  font-size: 13px;
+  align-items: flex-start;
+  gap: var(--s-6);
+  margin: var(--s-8) 0 0;
 }
 .copy-result:empty {
   display: none;
-}
-.row.next {
-  background: color-mix(in oklch, var(--load) 8%, transparent);
-  border-color: color-mix(in oklch, var(--load) 22%, transparent);
 }
 .row.dragging {
   opacity: 0.45;
@@ -1479,7 +1519,6 @@ img {
 }
 .history .row {
   grid-template-columns: 48px minmax(0, 1fr) auto;
-  padding-left: 8px;
 }
 /* History and liked rows: two lines of a title at most, the whole title the row's tooltip (as a search's results have
    it). Beside the heart and three keys the title has a narrow column, and in the side column under the voice card
@@ -1495,15 +1534,17 @@ img {
 .history .name a:focus-visible {
   outline-offset: -2px;
 }
+/* A label in a line of words (Next, the bot's channel, Look only): its word on a pale tint of its meaning. */
 .badge {
   display: inline-flex;
   flex: none;
   align-items: center;
   height: 18px;
-  padding: 0 7px;
-  border-radius: 999px;
+  padding: 0 var(--s-6);
+  border-radius: var(--r-round);
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
   font-weight: 600;
   color: var(--tone, var(--ink-2));
   /* As the pill: the tone's tint over the panel's own colour, so a bright cover's light does not show through it. */
@@ -1526,12 +1567,11 @@ img {
   z-index: 2;
   width: 38px;
   height: 38px;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--raised-2);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent),
-    0 4px 10px -4px rgba(0, 0, 0, 0.5);
+  /* A hairline round the picture, so a cover of the field's own colour still has an edge (no shadow: it is flat). */
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
 }
 .album .case img {
   width: 100%;
@@ -1563,9 +1603,7 @@ img {
     radial-gradient(circle, transparent 40%, rgba(255, 255, 255, 0.05) 41%, transparent 43%),
     radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.1), transparent 60%), var(--disc);
   /* A faint edge, so the record reads as one against a dark field too. */
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 2px 6px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
   transition: translate 0.35s var(--ease);
 }
 /* Its label: the cover again, small, around the hole. */
@@ -1595,42 +1633,52 @@ img {
 }
 
 /* ---- add -------------------------------------------------------------------------------------------------------- */
+/* The add card: the field and its keys, and under them a line when there is something to say (why the keys are off,
+   why the last add did not go through, what autoplay does), each at the card's inset and 8 px under the one above. */
+.add-card {
+  gap: var(--s-8);
+  padding-block: var(--pad);
+}
 .add {
   display: flex;
-  gap: 8px;
-  padding: 12px;
+  gap: var(--s-8);
+  padding: 0 var(--pad);
 }
-
 .look-only {
   margin: 0;
-  padding: 0 14px 12px;
-  font-size: 12px;
+  padding: 0 var(--pad);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
 }
 /* Why the last add did not go through, under the field it came from. */
 .add-failed {
   margin: 0;
-  padding: 0 14px 12px;
-  font-size: 12px;
+  padding: 0 var(--pad);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--bad);
 }
 /* In a dialog (the playlists for someone who may only look): its own spacing. */
 .dialog .look-only {
-  padding: 0 0 10px;
+  padding: 0 0 var(--s-8);
 }
 /* A key at work: its press is under way (it keeps the keyboard focus, see act()). */
 .key.busy {
   cursor: progress;
 }
-/* The search's own clear key, inside the field at its end. */
+/* The search's own clear key, inside the field at its end: the field gives up most of its room there, so the key's
+   cross stands about where the words end. */
 .field .field-clear {
-  margin-right: -8px;
   flex: none;
+}
+.field:has(> .field-clear:not([hidden])) {
+  padding-right: var(--s-4);
 }
 /* The empty queue: what to add and where, under the words saying it is empty. */
 .empty .faint {
-  margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 /* A playlist's count, on a line of its own under its name. */
 .channel .name:has(> .count-tag) {
@@ -1638,30 +1686,38 @@ img {
   flex-direction: column;
 }
 .count-tag {
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 /* ---- what a search found -------------------------------------------------------------------------------------- */
-/* Under the add field, in the card itself: a solid reading surface, so titles read the same over any light behind the
-   glass. The form keeps its height; in a column that does not scroll (found-fit, two columns) the list shares the column
-   with the queue under the card (below). */
+/* Under the add field, in the card itself (no box of its own inside the card): the results run under a rule across the
+   card, 16 px under the field as the field is under the card's top, their rows at the queue's inset, down to the
+   card's foot. While they show, the card's glass is solid, so titles read the same over any light behind it. The form
+   keeps its height; in a column that does not scroll (found-fit, two columns) the list shares the column with the
+   queue under the card (below). */
 .add-card > .add {
   flex: none;
+}
+.add-card:has(> .found:not([hidden])) {
+  padding-bottom: 0;
+  background: var(--panel-solid);
+}
+/* What autoplay does, and where a dropped link goes: not while the results show (they are what is being read). */
+.add-card:has(> .found:not([hidden])) > :is(.auto-note, .drop-note) {
+  display: none;
 }
 .add-card .found {
   display: flex;
   flex-direction: column;
-  margin: 0 12px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-row);
-  background: var(--panel-solid);
-  box-shadow: var(--rim);
+  margin-top: var(--s-8);
+  border-top: 1px solid var(--line);
 }
 .found-list {
   list-style: none;
   margin: 0;
-  padding: 4px;
-  max-height: calc(5.5 * 52px + 8px);
+  padding: var(--s-8);
+  max-height: calc(5.5 * 56px + 16px);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -1726,9 +1782,9 @@ img {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 52px;
-  padding: 6px;
+  gap: var(--s-12);
+  min-height: 56px;
+  padding: var(--s-8);
   border-radius: var(--r);
   cursor: pointer;
 }
@@ -1744,7 +1800,7 @@ img {
 .result .cover {
   width: 40px;
   height: 40px;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--raised-2);
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
@@ -1769,7 +1825,6 @@ img {
 /* Two lines of a title at most; the whole title is the row's tooltip. */
 .result .name {
   font-weight: 500;
-  line-height: 1.35;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -1778,7 +1833,8 @@ img {
 }
 /* The channel and the length on one line, cut short when long (the whole is its title). */
 .result .sub {
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
@@ -1800,20 +1856,22 @@ img {
   background: var(--hover-tint);
   color: var(--ink);
 }
+/* Looking, nothing found, a search that failed: one line at the rows' inset. */
 .found-state {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: var(--s-6);
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--s-12) var(--pad);
   color: var(--ink-2);
 }
 /* The keys that pick, for a keyboard; a touch screen has none, and nothing found has nothing to pick. */
 .found-keys {
   margin: 0;
-  padding: 6px 12px 8px;
+  padding: var(--s-8) var(--pad);
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
 }
 @media (hover: none) and (pointer: coarse) {
@@ -1824,8 +1882,7 @@ img {
 .found-list:empty + .found-keys {
   display: none;
 }
-/* A link from outside held over the page: the card it goes to is ringed in the focus colour and says so. Over the
-   card's breathing ring (which it replaces while it shows), steady. */
+/* A link from outside held over the page: the card it goes to is ringed in the focus colour and says so. */
 .card.add-card.drop-target::after {
   content: "";
   position: absolute;
@@ -1838,10 +1895,10 @@ img {
 }
 .drop-note {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: var(--s-6);
   margin: 0;
-  padding: 0 14px 12px;
+  padding: 0 var(--pad);
   color: var(--ink-2);
 }
 
@@ -1851,11 +1908,12 @@ img {
   background: color-mix(in oklch, var(--load) 16%, transparent);
   border-color: color-mix(in oklch, var(--load) 40%, transparent);
 }
-/* A card narrower than its head's words (the queue's tools keep theirs to 980 px) keeps the key's icon and its tint;
-   the words stay in its title and for screen readers, and the head stays on one line. */
-@container card (max-width: 1100px) {
+/* The key says what it is in words, as the head's tools do, for as long as they keep theirs (a card of 640 px; an
+   infinity sign alone did not say what it opens); narrower, its icon and its tint, the words in its title and for
+   screen readers. */
+@container card (max-width: 640px) {
   .card-head .autoplay-key {
-    width: var(--control);
+    width: var(--control-sm);
     padding: 0;
   }
   .card-head .autoplay-key .label {
@@ -1870,6 +1928,12 @@ img {
   }
 }
 @media (forced-colors: active) {
+  /* A contrast theme draws a frame round every key and row of choices: what reaches 8 px out of the head's inset on a
+     pane nobody sees (the tools after the search, the history's two words) would stand 8 px out of line, framed. */
+  .card-head .head-search + .tools,
+  .card-head .seg {
+    margin-left: 0;
+  }
   .autoplay-key.on {
     forced-color-adjust: none;
     background: Highlight;
@@ -1883,30 +1947,30 @@ img {
 }
 .choice .choice-hint {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   font-weight: 400;
   color: var(--ink-3);
 }
+/* A line under a list of choices (why autoplay does nothing while a repeat is on): at the choices' words' inset. */
 .choice-note {
   display: flex;
-  gap: 8px;
+  gap: var(--s-6);
   align-items: flex-start;
-  margin: 6px 10px 0;
-  font-size: 12px;
+  margin: var(--s-8) var(--s-12) 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-2);
-}
-/* Its icon level with the first line of words. */
-.note-icon {
-  margin-top: 1px;
 }
 /* The add card's line while autoplay is on and nothing waits. */
 .auto-note {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: var(--s-6);
   margin: 0;
-  padding: 0 14px 12px;
-  font-size: 12px;
+  padding: 0 var(--pad);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-2);
 }
 
@@ -1914,29 +1978,23 @@ img {
 /* The import dialog: what it takes, the name, the list (pasted, or a file's), and its keys. */
 .import-form {
   display: grid;
-  gap: 10px;
+  gap: var(--s-12);
 }
 .import-text {
   margin: 0;
   color: var(--ink-2);
 }
-/* The list sunk into the dialog like a field, in a fixed-width face (addresses and files line up), growing downwards. */
+/* The list in a field's face and line, in a fixed-width face (addresses and files line up), growing downwards. */
 .paste {
   width: 100%;
   min-height: 140px;
   resize: vertical;
-  padding: 8px 12px;
+  padding: var(--s-8) var(--s-12);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--sunk);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
   color: var(--ink);
-  font:
-    12px / 1.5 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
-    monospace;
+  font: var(--fs-sm) / var(--lh-sm) var(--mono);
 }
 .paste::placeholder {
   color: var(--ink-3);
@@ -1946,21 +2004,20 @@ img {
 .paste:focus-visible {
   outline: 0;
   border-color: var(--focus);
-  box-shadow:
-    inset 0 1px 3px rgba(0, 0, 0, 0.18),
-    0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
 }
 /* Smaller text in a field makes Safari zoom the page. */
 @media (max-width: 900px) {
   .paste {
-    font-size: 16px;
+    font-size: var(--fs-input);
+    line-height: var(--lh-input);
   }
 }
 .import-keys {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--s-8);
 }
 
 /* ---- likes ------------------------------------------------------------------------------------------------------ */
@@ -1982,17 +2039,16 @@ img {
 .now .title-row {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--s-4);
 }
 .title-row .title {
   flex: 0 1 auto;
   min-width: 0;
 }
-/* The heart centred on the title's first line (20 px at a line height of 1.3: 26 px) however tall a key is (32 px, or
-   44 px for fingers, which put it 9 px low): it reaches as far above that line as below, so the row keeps the title's
-   height. */
+/* The heart centred on the title's first line however tall a key is: as tall as that line with a mouse (28 px both),
+   and for fingers (44 px) reaching as far above the line as below, so the row keeps the title's height. */
 .now .title-row .like-key {
-  margin-block: calc((26px - var(--control-sm)) / 2);
+  margin-block: calc((var(--lh-xl) - var(--control-sm)) / 2);
 }
 /* The history card's title: its two lists, as a row of two choices, each with its count. */
 .seg .seg-count {
@@ -2040,19 +2096,27 @@ img {
 }
 
 /* ---- voice ------------------------------------------------------------------------------------------------------ */
+/* The voice card's rows, all at the card's inset and 48 px tall (the channels a step shorter, as a list): where the bot
+   is and its Leave key, the other channels, the sound, who listens in browsers. No box inside the card: where the bot
+   is reads as the first row, its icon lit in the colour of playing while it is in a channel. */
 .voice-now {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 10px 4px;
-  padding: 8px 8px 8px 12px;
-  border-radius: var(--r-row);
-  border: 1px solid var(--line);
-  background: var(--raised);
+  /* Its words may take two lines (jukecord with no bot says why): the row's items line up at the top of their line,
+     the icon with the first line of words, and that line is centred in the row's 48 px (one line) or grows it. */
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: flex-start;
+  gap: var(--s-12);
+  min-height: 48px;
+  padding: var(--s-8) var(--pad);
 }
-.voice-now.joined {
-  border-color: color-mix(in oklch, var(--play) 28%, transparent);
-  background: color-mix(in oklch, var(--play) 8%, transparent);
+/* With its Leave key (the bot in a channel, one line of words), the line is centred on the key. */
+.voice-now:has(> .key:not([hidden])) {
+  align-items: center;
+}
+/* (As heavy as the playing card's rule for its icons, which comes first.) */
+.card .voice-now.joined > .icon {
+  color: var(--play);
 }
 .voice-now .where {
   flex: 1;
@@ -2061,34 +2125,35 @@ img {
 .voice-now .where b {
   font-weight: 600;
 }
-.voice-now.joined .where {
-  color: var(--play);
-}
+/* The other channels: rows of a list, their words and keys at the card's inset. */
 .channels {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: 0 var(--s-8);
   max-height: 214px;
 }
 .channel {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s-12);
   min-height: 40px;
-  padding: 4px 6px 4px 10px;
-  border-radius: var(--r-row);
-  border: 1px solid transparent;
-  transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+  padding: 0 var(--s-8);
+  border-radius: var(--r);
+  transition: background 0.2s ease;
 }
 .channel:hover {
   background: var(--hover-tint);
-  border-color: var(--line);
 }
 .channel .name {
   flex: 1;
   min-width: 0;
+}
+/* A voice channel's name on one line, cut short when long (its whole name is its title): beside the icon, its count
+   and its key, a name of two lines left the icon by the second. */
+.channels .channel .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .channel.current .name {
   font-weight: 600;
@@ -2096,11 +2161,11 @@ img {
 .listeners {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px var(--pad);
+  gap: var(--s-8);
+  padding: var(--s-8) var(--pad);
   border-top: 1px solid var(--line);
   color: var(--ink-2);
-  min-height: 44px;
+  min-height: 48px;
 }
 .faces {
   display: flex;
@@ -2206,7 +2271,7 @@ img {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s-12);
 }
 .listen .what {
   min-width: 0;
@@ -2220,7 +2285,8 @@ img {
   text-overflow: ellipsis;
 }
 .listen .what span {
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
 }
 .listen .mini {
@@ -2230,22 +2296,25 @@ img {
 .faces-box {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-6);
 }
 .volume {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s-8);
   color: var(--ink-2);
 }
 .volume input {
   width: 120px;
+  margin: 0;
   accent-color: var(--ink);
 }
+/* The level's number, as wide as its widest ("100%"), so the slider beside it does not move as it changes. */
 .volume .num {
   width: 34px;
   text-align: right;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 /* ---- sheets, dialogs and the scrim ------------------------------------------------------------------------------- */
@@ -2282,10 +2351,8 @@ img {
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-left: 1px solid var(--edge);
-  border-radius: var(--r-card) 0 0 var(--r-card);
-  box-shadow:
-    var(--rim),
-    -24px 0 48px -24px rgba(0, 0, 0, 0.65);
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+  box-shadow: -24px 0 48px -24px rgba(0, 0, 0, 0.65);
   animation: sheet-in 220ms ease-out;
   /* Its words clear of the screen's edge it stands on (a phone held sideways has its notch there). */
   padding-right: var(--safe-right);
@@ -2297,7 +2364,7 @@ img {
   padding-left: var(--safe-left);
   border-left: 0;
   border-right: 1px solid var(--edge);
-  border-radius: 0 var(--r-card) var(--r-card) 0;
+  border-radius: 0 var(--r-lg) var(--r-lg) 0;
   animation-name: sheet-in-left;
 }
 @keyframes sheet-in {
@@ -2320,21 +2387,21 @@ img {
 .sheet .sheet-body {
   flex: 1;
   min-height: 0;
-  padding: 8px 0 16px;
+  padding: var(--s-8) 0 var(--pad);
 }
-/* The sheet's own close key, in its top corner (clear of a phone's rounded corner); the first section leaves it room. */
+/* The sheet's own close key, in its top corner (clear of a phone's rounded corner); the first section leaves it room:
+   the key and the card inset beside it. */
 .sheet-close {
   position: absolute;
-  top: 10px;
-  right: calc(10px + var(--safe-right));
+  top: var(--s-12);
+  right: calc(var(--s-12) + var(--safe-right));
   z-index: 1;
 }
 /* A solid backing of the sheet's own, so what scrolls under the key does not show through it (bare, it read as part
-   of the row passing under it). */
+   of the row passing under it); a 1px line round it, as every key has (no shadow: nothing is raised). */
 .sheet .sheet-close {
   background: var(--panel-opaque);
   border-color: var(--line-2);
-  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.4);
 }
 /* Under the pointer too: the quiet keys' hover tint alone is see-through, so it lies over the same solid backing. */
 .sheet .key.quiet.sheet-close:hover {
@@ -2342,50 +2409,72 @@ img {
   border-color: var(--line-2);
 }
 .sheet .sheet-body > :first-child {
-  padding-right: 56px;
+  padding-right: calc(var(--s-12) + var(--control-sm) + var(--pad));
 }
+/* A section of a sheet: its heading and what it holds at the card inset, a rule under it. */
 .section {
-  padding: 12px var(--pad);
+  padding: var(--s-12) var(--pad);
   border-bottom: 1px solid var(--line);
 }
 .section:last-child {
   border-bottom: 0;
 }
 .section h3 {
-  margin: 0 0 10px;
-  font-size: 12px;
+  margin: 0 0 var(--s-8);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   font-weight: 600;
   color: var(--ink-2);
+}
+/* What a section's choices are for, under its heading, and a section with nothing in it yet. */
+.section-hint {
+  margin: 0 0 var(--s-8);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+/* A heading or a line after a row of choices (the menu's theme, language and motion) stands 12 px under it. */
+.section .seg + :is(h3, .line) {
+  margin-top: var(--s-12);
 }
 .line {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s-12);
   min-height: 36px;
 }
 .line .grow {
   flex: 1;
   min-width: 0;
 }
+/* A choice in a list (the menu's pages, the DJ role, a row's keys in a dialog): its icon and words at the column's
+   edge, under the section's heading; the pane under the pointer, and the frame of the choice in use, reach 8 px out
+   into the margin round them (a pane that started at the column put the words 8 px in from the heading). The pane's
+   line is drawn inside it, so it moves nothing. */
 .choice {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  gap: var(--s-12);
+  width: calc(100% + 2 * var(--s-8));
   min-height: 40px;
-  padding: 4px 10px;
-  border: 1px solid transparent;
+  margin-inline: calc(-1 * var(--s-8));
+  padding: var(--s-8);
+  border: 0;
   border-radius: var(--r);
   background: none;
   text-align: left;
   cursor: pointer;
 }
 .choice:hover {
-  background: var(--raised);
+  background: var(--hover-tint);
+}
+/* A choice that says what it does under its name: its icon (and its check) on the name's line, as every icon stands
+   on the first line of its words. */
+.choice:has(.choice-hint, .hint) {
+  align-items: flex-start;
 }
 .choice:is([aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]) {
-  border-color: var(--line-2);
   background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-2);
   font-weight: 600;
 }
 .choice .check {
@@ -2416,10 +2505,8 @@ img {
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border: 1px solid var(--edge);
-  border-radius: var(--r-card);
-  box-shadow:
-    var(--rim),
-    0 30px 80px -30px rgba(0, 0, 0, 0.8);
+  border-radius: var(--r-lg);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8);
   animation: dialog-in 200ms ease-out;
 }
 /* A short window (a phone held sideways, a page zoomed in): the dialog takes nearly the whole height, from near the
@@ -2436,30 +2523,34 @@ img {
     transform: translateY(6px);
   }
 }
+/* A dialog: its title, what it says, what it holds and its keys, all at the card inset, the title 16 px under its top
+   and the keys 16 px over its foot. */
 .dialog h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-lg);
+  line-height: var(--lh-lg);
   font-weight: 650;
 }
 .dialog .dialog-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px var(--pad) 10px;
+  gap: var(--s-8);
+  padding: var(--pad) var(--pad) var(--s-8);
 }
 .dialog .dialog-text {
+  margin: 0;
   padding: 0 var(--pad);
   color: var(--ink-2);
 }
 .dialog .dialog-content {
-  padding: 12px var(--pad);
+  padding: var(--s-12) var(--pad);
   min-height: 0;
 }
 .dialog .dialog-keys {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px var(--pad) var(--pad);
+  gap: var(--s-8);
+  padding: var(--s-12) var(--pad) var(--pad);
 }
 /* Said in a dialog (its shade covers the bar): above its keys, the whole message. */
 .dialog .dialog-notes {
@@ -2475,24 +2566,23 @@ img {
   display: block;
 }
 .secret {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  padding: 8px 10px;
+  font: var(--fs-sm) / var(--lh-sm) var(--mono);
+  padding: var(--s-8) var(--s-12);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--sunk);
   word-break: break-all;
 }
+/* A key's cap in the shortcuts: a key's face and its line, flat (a thicker foot made it a little 3D key). */
 kbd {
   display: inline-grid;
   place-items: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--s-6);
   border: 1px solid var(--line-2);
-  border-bottom-width: 2px;
-  border-radius: var(--r);
-  font: 500 12px / 1 var(--font);
+  border-radius: var(--r-sm);
+  font: 500 var(--fs-sm) / var(--lh-sm) var(--font);
   color: var(--ink);
   background: var(--raised);
 }
@@ -2508,19 +2598,27 @@ kbd {
 .page-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--s-12);
   flex-wrap: wrap;
 }
+/* A page's body: its cards one under another, the cards' gap apart. */
+.page-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+/* A page's title: the type scale's display size (the track playing has it too), on the line of the page's tools. */
 .page-head h1 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
 .page-head .page-tools {
   margin-left: auto;
   display: flex;
-  gap: 8px;
+  gap: var(--s-8);
   align-items: center;
 }
 .tiles {
@@ -2528,25 +2626,29 @@ kbd {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--gap);
 }
+/* A figure: what it counts over it, small, and the number in the scale's figure size, its unit after it in the words'
+   size on the same baseline. */
 .tile {
-  padding: 14px var(--pad);
+  padding: var(--pad);
 }
 .tile .k {
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-2);
   font-weight: 500;
 }
 .tile .v {
-  margin-top: 4px;
-  font-size: 24px;
+  margin-top: var(--s-4);
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-2xl);
   font-weight: 650;
   letter-spacing: -0.02em;
 }
 .tile .v small {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--ink-2);
-  margin-left: 2px;
+  margin-left: var(--s-2);
 }
 .charts {
   display: grid;
@@ -2554,7 +2656,7 @@ kbd {
   gap: var(--gap);
 }
 .chart {
-  padding: 12px var(--pad) var(--pad);
+  padding: var(--s-12) var(--pad) var(--pad);
 }
 /* Columns: at most 24px wide, rounded at the data end and square on the baseline, 2px apart. The whole slot is the
    hover target (wider than the mark), and the hovered mark lifts. */
@@ -2562,14 +2664,15 @@ kbd {
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--s-8);
 }
 .yaxis {
   position: relative;
   /* As wide as the top number (set by the panel's code), so the bars start at the same place in every chart. */
   width: calc(var(--digits, 3) * 1ch + 2px);
   height: 160px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -2579,12 +2682,11 @@ kbd {
   position: absolute;
   right: 0;
   translate: 0 -50%;
-  line-height: 1;
 }
 .bars {
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  gap: var(--s-2);
   height: 160px;
   border-bottom: 1px solid var(--line-2);
   background:
@@ -2602,7 +2704,7 @@ kbd {
 .bars .b {
   width: min(100%, 24px);
   min-height: 2px;
-  border-radius: 4px 4px 0 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   background: var(--series);
 }
 .bars .slot.zero .b {
@@ -2616,18 +2718,20 @@ kbd {
   position: absolute;
   z-index: 2;
   translate: -50% -100%;
-  padding: 6px 8px;
+  padding: var(--s-8);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--panel-solid);
   box-shadow: var(--shadow);
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   white-space: nowrap;
   pointer-events: none;
 }
 .chart-tip .value {
   display: block;
-  font-size: 13px;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
   font-variant-numeric: tabular-nums;
 }
 /* The labels under the bars: each one centred under its own bar (its place, --at, a percentage of the chart's width,
@@ -2635,9 +2739,10 @@ kbd {
    that much. (Anchored by their outer edge before, the first and the last ended half a bar off on a phone.) */
 .axis {
   position: relative;
-  height: 18px;
-  margin-top: 6px;
-  font-size: 12px;
+  height: var(--lh-sm);
+  margin-top: var(--s-8);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
   /* Its own width, which the labels' limits below are measured in (cqw). */
@@ -2653,7 +2758,8 @@ kbd {
 .chart-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 .chart-table th,
 .chart-table td {
@@ -2671,18 +2777,18 @@ kbd {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--s-8);
 }
 .rank {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--s-8);
   align-items: center;
 }
 .rank .meter {
   grid-column: 2 / 4;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--r-round);
   background: var(--raised-2);
   overflow: hidden;
 }
@@ -2690,7 +2796,7 @@ kbd {
   display: block;
   height: 100%;
   background: var(--series);
-  border-radius: 3px;
+  border-radius: var(--r-round);
 }
 .rank .n {
   font-variant-numeric: tabular-nums;
@@ -2699,7 +2805,7 @@ kbd {
 .rank .who {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s-6);
   min-width: 0;
 }
 
@@ -2713,16 +2819,11 @@ kbd {
   gap: 2px 12px;
   min-width: 0;
 }
-.wrapped-range {
-  font-size: 13px;
-}
+/* The key back to the statistics: a quiet key whose pane reaches 8 px out of the page's column, so its chevron stands
+   at the column's edge, over the cards' edges. */
 .wrapped .back-key {
-  padding: 0 10px 0 6px;
-}
-.wrapped-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
+  margin-left: calc(-1 * var(--s-8));
+  padding: 0 var(--s-8);
 }
 .wrapped-kept {
   margin: 0;
@@ -2733,18 +2834,19 @@ kbd {
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: var(--gap);
 }
+/* The song: its record and its words, at the card's inset as the head's title over them. */
 .wrapped-song .song {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 28px;
-  padding: 20px var(--pad) 22px 22px;
+  gap: var(--s-24);
+  padding: var(--pad);
 }
 .wrapped-song .title {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
   font-weight: 700;
-  line-height: 1.3;
   letter-spacing: -0.015em;
 }
 .wrapped-song .title a {
@@ -2755,11 +2857,11 @@ kbd {
   text-underline-offset: 3px;
 }
 .wrapped-song .meta {
-  margin-top: 4px;
+  margin-top: var(--s-4);
   color: var(--ink-2);
 }
 .wrapped-song .facts {
-  margin-top: 10px;
+  margin-top: var(--s-8);
   color: var(--ink-2);
 }
 /* The song's record: a row's album made big (the cover in its case, the record half out of it with the cover on
@@ -2785,7 +2887,7 @@ kbd {
 .wrapped-song .record .album .case {
   width: 152px;
   height: 152px;
-  border-radius: 14px;
+  border-radius: var(--r);
 }
 .wrapped-song .record .album .vinyl {
   left: 84px;
@@ -2803,43 +2905,37 @@ kbd {
   width: 40px;
   height: 40px;
 }
-/* The first track: its row in the middle of the card's room beside the song's record. */
-.wrapped-first .list {
-  flex: 1;
-  justify-content: center;
-}
-/* The first track and the most played: rows as the history's, a number and the plays beside them. */
+/* The first track and the most played: rows as the history's (the first track's under its card's head, as every
+   card's rows are; set in the middle of the card's room it floated), a number and the plays beside them. */
 .wrapped-first .row {
   grid-template-columns: 48px minmax(0, 1fr);
-  padding-left: 8px;
 }
 .wrapped-tracks .row {
   grid-template-columns: 22px 48px minmax(0, 1fr) auto;
-  padding-left: 4px;
 }
 .wrapped-tracks .n {
-  padding-right: 8px;
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 /* The moments: tiles, each with a line under its value, and a small chart of the counts it names the busiest of. */
 .moment .sub {
-  margin-top: 2px;
-  font-size: 12px;
+  margin-top: var(--s-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
 }
 .spark {
   display: flex;
   align-items: flex-end;
-  gap: 2px;
-  height: 34px;
-  margin-top: 10px;
+  gap: var(--s-2);
+  height: 32px;
+  margin-top: var(--s-12);
 }
 .moment .spark i {
   flex: 1;
   min-width: 0;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   background: color-mix(in oklch, var(--series) 38%, transparent);
 }
 .moment .spark i.top {
@@ -2851,7 +2947,7 @@ kbd {
 /* The picture to save: its shape, and the picture as drawn, as large as the dialog has room for. */
 .picture {
   display: grid;
-  gap: 12px;
+  gap: var(--s-12);
 }
 .picture .seg {
   justify-self: start;
@@ -2868,15 +2964,14 @@ kbd {
   height: auto;
   max-width: 100%;
   max-height: min(46vh, 420px);
-  border-radius: 14px;
-  box-shadow:
-    0 0 0 1px var(--line-2),
-    0 16px 32px -16px rgba(0, 0, 0, 0.6);
+  border-radius: var(--r);
+  /* A hairline round the picture, so its own field shows where it ends (no shadow: it lies flat in the dialog). */
+  box-shadow: 0 0 0 1px var(--line-2);
 }
 .picture-status {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: var(--s-6);
   margin: 0;
   color: var(--ink-2);
 }
@@ -2889,15 +2984,13 @@ kbd {
   /* A phone: the record over the song's words. */
   .wrapped-song .song {
     grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
+    gap: var(--pad);
   }
 }
 
 /* ---- logs ------------------------------------------------------------------------------------------------------- */
 .logs {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  font: var(--fs-sm) / var(--lh-sm) var(--mono);
 }
 .log {
   display: grid;
@@ -2905,8 +2998,8 @@ kbd {
      ("Warning"): each record is a grid of its own, and a column as wide as its own word started the component and
      the message at three different places down the list. */
   grid-template-columns: 172px 64px 96px minmax(0, 1fr);
-  gap: 10px;
-  padding: 5px var(--pad);
+  gap: var(--s-12);
+  padding: var(--s-6) var(--pad);
   border-bottom: 1px solid var(--line);
 }
 .log:last-child {
@@ -2923,8 +3016,8 @@ kbd {
 /* The menu's new-token lines, a little apart: on a touch screen both are a finger's height. */
 .token-new {
   display: grid;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--s-8);
+  margin-top: var(--s-8);
 }
 /* Older records come in above: the key for them sits on top of the list. */
 .card-head.log-older {
@@ -2939,59 +3032,27 @@ kbd {
   padding: max(24px, var(--safe-top)) max(16px, var(--safe-right)) max(24px, var(--safe-bottom))
     max(16px, var(--safe-left));
 }
+/* The login card: no music here yet to light the glass, so the card is the reading surface it would be over any light
+   (the mark's rainbow means "playing now", and is not spread behind it). */
 .login .card {
   width: min(420px, 100%);
-  padding: 28px 24px 24px;
-  gap: 16px;
+  padding: var(--s-24);
+  gap: var(--pad);
+  background: var(--panel-solid);
 }
-/* No music here yet to light the glass, so the mark's own rainbow does: a wide, soft glow behind the card, which
-   breathes slowly (size and strength only). The login card is the one card that blurs what is behind it. */
-.login {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-}
-.login::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: -1;
-  width: min(560px, 120vw);
-  height: 340px;
-  translate: -50% -50%;
-  border-radius: 50%;
-  background: conic-gradient(from 210deg, var(--rainbow));
-  filter: blur(80px);
-  opacity: 0.3;
-  animation: login-glow 9s ease-in-out infinite;
-}
-@keyframes login-glow {
-  0%,
-  100% {
-    opacity: 0.24;
-    scale: 0.96;
-  }
-  50% {
-    opacity: 0.36;
-    scale: 1.06;
-  }
-}
-.login .card {
-  backdrop-filter: var(--glass);
-  -webkit-backdrop-filter: var(--glass);
-}
+/* Its name in the figure size, beside the mark and the version, on the brand's one baseline. */
 .login .brand {
-  gap: 12px;
+  gap: var(--s-12);
 }
 .login .brand b {
-  font-size: 26px;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-2xl);
 }
 /* Which command gives a login link, by how jukecord runs. */
 .login-commands {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 12px;
+  gap: var(--s-8) var(--s-12);
   margin: 0;
   align-items: baseline;
 }
@@ -3005,35 +3066,30 @@ kbd {
   margin: 0;
   color: var(--ink-2);
 }
+/* A command to type, in a field's face and line (a chip in a sentence: its own corner, the smallest). */
 .login code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  padding: 1px 5px;
+  font: var(--fs-sm) / var(--lh-sm) var(--mono);
+  padding: 0 var(--s-6);
   border: 1px solid var(--line-2);
-  border-radius: var(--r);
+  border-radius: var(--r-sm);
   background: var(--sunk);
   color: var(--ink);
 }
+/* Something the page says (a link that has ended, jukecord starting): its icon and words in its meaning's colour, on
+   the card itself (a tinted box in the card was a box in a box). */
 .notice {
   display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--r);
+  align-items: flex-start;
+  gap: var(--s-6);
   color: var(--tone, var(--ink-2));
-  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
 }
 
 /* ---- votes, turns and the sound -------------------------------------------------------------------------------- */
-/* The count of a vote to skip under way, on the Skip key: small, in the key's own ink, beside its word or its icon. */
+/* The count of a vote to skip under way, on the Skip key: words after its word (or its icon), in the key's second ink,
+   on the same line (a chip of its own inside the key was a box in a box). */
 .key .votes {
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--sunk);
-  box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink-2);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
 /* A vote under way makes Skip wider by its count, so the keys give up their words sooner than the now-keys rule below
    has them do (the widest row of keys with words, Korean while paused by touch, takes 519 px with the count). Skip
@@ -3048,7 +3104,7 @@ kbd {
   }
   .now .keys .key[data-act="skip"]:has(.votes) {
     width: auto;
-    padding: 0 10px;
+    padding: 0 var(--s-12);
   }
 }
 /* Narrower, the five keys with the count do not fit one row (a phone's card): the main key takes a row of its own and
@@ -3065,7 +3121,7 @@ kbd {
 /* The server's settings in the menu: one line each, apart. The limit's row of choices goes under its words when the
    sheet is too narrow for both (a phone). */
 .section.settings .line + .line {
-  margin-top: 12px;
+  margin-top: var(--s-12);
 }
 .section.settings .limit {
   flex-wrap: wrap;
@@ -3078,16 +3134,16 @@ kbd {
 .sound {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 4px 12px 4px var(--pad);
+  gap: var(--s-12);
+  min-height: 48px;
+  padding: 0 var(--pad);
   border-top: 1px solid var(--line);
   color: var(--ink-2);
 }
 .sound .volume-part {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s-8);
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -3095,13 +3151,16 @@ kbd {
   flex: 1 1 auto;
   width: 0;
   min-width: 64px;
+  margin: 0;
   accent-color: var(--ink);
 }
+/* The level's number, as wide as its widest ("200%"), so the slider does not move as it changes. */
 .sound .level {
   width: 40px;
   flex: none;
   text-align: right;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 /* Browser-only: the row's word, and the key at the row's end as the channels' keys are. */
 .sound .sound-word {
@@ -3114,7 +3173,8 @@ kbd {
 }
 .choice .hint {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 @media (pointer: coarse) {
   /* The voice volume takes a finger's height, as the listening bar's does. */
@@ -3172,14 +3232,20 @@ kbd {
    window can be 1100.8 px wide, and fell between the two. A touch screen this short has one column (above). */
 @media (width > 1100px) and (max-height: 720px) and (pointer: fine) {
   .now {
-    gap: 16px;
-    padding: 12px 16px 12px 14px;
+    gap: var(--s-16);
+    padding: var(--s-12) var(--pad);
   }
   .now .disc:not(.sm) {
     --size: 104px;
   }
-  .now .title {
-    font-size: 17px;
+  /* The playing card's rows closer together: its height is the column beside the disc, not the disc. */
+  .now .progress,
+  .now .keys {
+    margin-top: var(--s-8);
+  }
+  /* The add card's field and keys keep their size; only the room above and below them shrinks. */
+  .add-card {
+    padding-block: var(--s-8);
   }
 }
 /* A card under 980 px puts its search on a line of its own under the title, so the tools keep their words beside the
@@ -3236,7 +3302,7 @@ kbd {
   /* As heavy as the rule above that makes the tools square, and heavier: Shuffle keeps its word, so its width. */
   .card-head .tools .key.sm:not(.table-key)[data-act="shuffle"]:has(.label) {
     width: auto;
-    padding: 0 10px;
+    padding: 0 var(--s-8);
   }
   .card-head .tools .key.sm:not(.table-key)[data-act="shuffle"]:has(.label) .label {
     display: inline;
@@ -3285,19 +3351,19 @@ kbd {
   .card-head {
     /* The heads' keys are 28 px with a mouse (touch, whose keys are 44, has one column), so 40 px holds them. */
     min-height: 40px;
-    padding-top: 4px;
-    padding-bottom: 4px;
+    padding-top: var(--s-4);
+    padding-bottom: var(--s-4);
   }
-  .add {
-    /* The add card's field and keys keep their size; only the frame around them shrinks. */
-    padding: 8px 12px;
+  /* The lists in cards 4 px from their head and foot (8 at their sides, so their words stay under the head's), and
+     the playing card's lines closer: the queue keeps three whole rows (at 1280 by 610 it had two). */
+  .card .list {
+    padding-block: var(--s-4);
   }
-  .now .progress {
-    /* The playing card's rows closer together: its height is the column beside the disc, not the disc. */
-    margin-top: 8px;
+  .now .meta {
+    margin-top: var(--s-2);
   }
-  .now .keys {
-    margin-top: 8px;
+  .now .times {
+    margin-top: 0;
   }
 }
 /* The now-playing keys keep their words while their row has room for all of them on one line (the widest, Korean
@@ -3333,7 +3399,7 @@ kbd {
     top: 100%;
     left: 0;
     right: 0;
-    padding: 6px max(12px, var(--safe-right)) 6px max(12px, var(--safe-left));
+    padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
     background: color-mix(in oklch, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
@@ -3344,7 +3410,6 @@ kbd {
   }
   .toast {
     flex: 1;
-    padding: 6px 12px;
   }
   /* With a sheet open (the menu, the servers), the strip under the bar covered the sheet's first row and its close
      key for seconds: it hangs at the bottom of the window instead, above the listening bar. (Placed from the bar,
@@ -3378,7 +3443,7 @@ kbd {
   .now {
     grid-template-columns: minmax(0, 1fr);
     justify-items: start;
-    gap: 14px;
+    gap: var(--s-16);
   }
   /* The disc stands at the left; the words, the bar and the keys take the card's whole width (left to fit their
      content, they were as wide as the title, and the progress bar ended where the title did). */
@@ -3414,9 +3479,9 @@ kbd {
   }
 }
 @media (max-width: 560px) {
+  /* A phone's bar: its parts closer together, and its sides at the cards' edges under it, as on any window. */
   .bar {
-    gap: 8px;
-    padding: var(--safe-top) max(10px, var(--safe-right)) 0 max(10px, var(--safe-left));
+    gap: var(--s-8);
   }
 }
 /* The log's tools on a window too narrow for them on one line (the levels, a filter of 260 px and Refresh): the
@@ -3474,7 +3539,7 @@ kbd {
   /* Nothing playing leaves the bar room: the Listen key says its name, the way into listening in the browser. */
   .listen.idle > .key[data-act="listen"] {
     width: auto;
-    padding: 0 12px;
+    padding: 0 var(--s-12);
   }
   .listen.idle > .key[data-act="listen"] .label {
     display: inline;
@@ -3519,7 +3584,7 @@ kbd {
   }
 }
 /* Once risen, the cards stay still when the player page is shown again (an animation restarts when its element
-   comes back from hidden). The card asking for music breathes by its ring, below, which this does not stop. */
+   comes back from hidden). */
 .main.risen .col > .card {
   animation: none;
 }
@@ -3567,37 +3632,6 @@ kbd {
 .row.gone {
   opacity: 0;
   pointer-events: none;
-}
-/* Nothing playing and nothing waiting: the card to add music breathes, slowly, in the focus colour, six breaths, then
-   rests lit. The colour is a ring of its own over the card's edge, and only the ring's opacity changes: the browser
-   animates that without drawing anything again (the edge's own colour, animated before, was redrawn sixty times a
-   second for as long as the panel sat idle). */
-.card.invite::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border: 1px solid color-mix(in oklch, var(--focus) 55%, transparent);
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0;
-  /* Six and a half: it stops halfway through a breath, at its brightest. */
-  animation: invite 2.8s ease-in-out 6.5 forwards;
-}
-@keyframes invite {
-  50% {
-    opacity: 1;
-  }
-}
-
-/* Without motion the ring does not breathe: it is simply lit. (Its resting opacity is 0, which the breaths take it up
-   from: with the animation off it was never seen.) */
-@media (prefers-reduced-motion: reduce) {
-  .card.invite::after {
-    opacity: 1;
-  }
-}
-:root[data-motion="off"] .card.invite::after {
-  opacity: 1;
 }
 
 /* ---- forced colours ------------------------------------------------------------------------------------------ */
@@ -3780,19 +3814,12 @@ kbd {
   .volume input {
     height: 44px;
   }
-  /* The bar's logo is a link home: a finger's size too, even where only the mark shows. (The login card's name row
-     is not a link, and stays where the card's words start.) */
+  /* The bar's logo is a link home: a finger's size too, even where only the mark shows. The mark stays at the bar's
+     edge (over the cards' edges), the extra width reaching to its right. (The login card's name row is not a link,
+     and stays where the card's words start.) */
   .bar .brand {
     min-height: 44px;
     min-width: 44px;
-    justify-content: center;
-  }
-  /* Where only the mark shows, the extra width reaches into the bar's padding and the gap beside it, so the mark
-     stays where it was and the bar's other parts keep their room. */
-  @media (max-width: 400px) {
-    .bar .brand {
-      margin-inline: -9px;
-    }
   }
   .seg button {
     min-width: 44px;
@@ -3819,7 +3846,7 @@ kbd {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-4);
 }
 /* The right column while the lyrics are open: the lyrics in place of the voice channel and the history. */
 .col.side.lyrics-open > :not(.lyrics-card) {
@@ -3838,18 +3865,17 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-transform: none;
-  letter-spacing: 0;
 }
 .lyrics .card-head .tools {
   margin-left: 0;
 }
 /* The lines scroll in their own box, whose content is laid out from it (the line kept in sight is measured so). */
+/* The lines 8 px in, and their words 8 px into each line, so the words start at the card's inset under the title. */
 .lyrics-body {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 10px 8px;
+  padding: var(--s-8);
 }
 /* Room after the last line, so it too can stand a third of the way down when it is sung. */
 .lyrics-body::after {
@@ -3876,12 +3902,12 @@ kbd {
   display: block;
   width: 100%;
   margin: 0;
-  padding: 7px 10px;
+  padding: var(--s-4) var(--s-8);
   border: 0;
   border-radius: var(--r);
   background: none;
   text-align: left;
-  font: 700 19px / 1.35 var(--font);
+  font: 700 var(--fs-xl) / var(--lh-xl) var(--font);
   letter-spacing: -0.01em;
   color: color-mix(in oklch, var(--ink) 52%, transparent);
   transition:
@@ -3895,33 +3921,37 @@ button.lyric:hover {
   background: var(--hover-tint);
   color: color-mix(in oklch, var(--ink) 75%, transparent);
 }
+/* The line being sung: the text's own ink (no glow round it: the brighter words say it). */
 .lyric.lit {
   color: var(--ink);
-  text-shadow: 0 0 22px color-mix(in oklch, var(--ink) 28%, transparent);
 }
 /* A pause between lines, for the eye. */
 .lyric.pause {
   letter-spacing: 0.3em;
 }
 .lyrics-note {
-  margin: 0 10px 6px;
-  font-size: 12px;
+  margin: 0 var(--s-8) var(--s-8);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
 }
+/* Words with no timings, read at length: the title size, with a reading line's room (24 px, which still centres the
+   letters on it). */
 .lyrics-plain {
   margin: 0;
-  padding: 4px 10px;
+  padding: var(--s-4) var(--s-8);
   white-space: pre-line;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: var(--fs-lg);
+  line-height: 24px;
   color: var(--ink-2);
 }
 /* The source, credited under the lines. */
 .lyrics-credit {
   margin: 0;
-  padding: 8px var(--pad) 10px;
+  padding: var(--s-8) var(--pad);
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--ink-3);
 }
 .lyrics .lyrics-credit a {
@@ -3939,7 +3969,7 @@ button.lyric:hover {
   padding-right: 0;
 }
 .lyrics-sheet .card-head {
-  padding-right: 56px;
+  padding-right: calc(var(--s-12) + var(--control-sm) + var(--pad));
 }
 @media (forced-colors: active) {
   /* The line being sung told by the system's highlight, as colour alone would vanish in a contrast theme. */
@@ -3972,7 +4002,7 @@ button.lyric:hover {
    faces), it takes a line of its own under them, at the right, rather than squeezing the words beside the faces. */
 .listeners:has(> .key[data-act="invite"]) {
   flex-wrap: wrap;
-  row-gap: 8px;
+  row-gap: var(--s-8);
 }
 .listeners:has(> .key[data-act="invite"]) > .grow {
   flex: 1 0 auto;
@@ -3985,47 +4015,46 @@ button.lyric:hover {
 }
 /* The Invite dialog: which link (the host's choice), the form, the link made with its QR code, the links that work. */
 .invite-tabs {
-  margin-bottom: 12px;
+  margin-bottom: var(--s-12);
 }
 .invite-hint {
-  margin: 0 0 10px;
+  margin: 0 0 var(--s-12);
 }
 .invite-form {
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--s-8);
 }
+/* The link made: its QR code and the link with its Copy key, under a rule (a sunk box in the dialog was a box in a
+   box); the code keeps its white tile, which a camera needs. */
 .invite-made {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: var(--pad);
   align-items: flex-start;
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-row);
-  background: var(--sunk);
+  margin-top: var(--pad);
+  padding-top: var(--pad);
+  border-top: 1px solid var(--line);
 }
 .invite-link {
   flex: 1 1 200px;
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: var(--s-8);
 }
 .invite-note {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 .invite-url {
   user-select: all;
 }
 .invite h3 {
-  margin: 16px 0 6px;
-  font-size: 12px;
+  margin: var(--pad) 0 var(--s-8);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   font-weight: 600;
   color: var(--ink-2);
-}
-.invite-links {
-  padding: 0;
 }
 /* A QR code: dark on light whatever the theme (cameras read it so), on a white tile with rounded corners. */
 .qr-box {
@@ -4060,7 +4089,7 @@ button.lyric:hover {
 /* ---- listening together: what another app shared ------------------------------------------------------------- */
 .share-card {
   padding: var(--pad);
-  gap: 10px;
+  gap: var(--s-12);
   max-width: 720px;
 }
 .share-label {
@@ -4069,7 +4098,7 @@ button.lyric:hover {
 .share-keys {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--s-8);
 }
 .share-why {
   padding: 0;
@@ -4111,23 +4140,25 @@ button.lyric:hover {
 .guest-people {
   list-style: none;
   margin: 0;
-  padding: 10px var(--pad);
+  padding: var(--s-12) var(--pad);
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: var(--s-8) var(--pad);
 }
 .guest-people li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-6);
   min-width: 0;
 }
+/* The guest's card fills the column beside the player, as the history does for members (so the two columns end
+   together), the guest's link at its foot. */
 .guest-until {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 10px var(--pad) 12px;
+  align-items: flex-start;
+  gap: var(--s-6);
+  margin: auto 0 0;
+  padding: var(--s-12) var(--pad);
   border-top: 1px solid var(--line);
   color: var(--ink-2);
 }

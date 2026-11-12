@@ -184,8 +184,8 @@ function frame(): void {
     // Named in words: on a phone the name beside the mark is hidden, and the link would have no name.
     { class: 'brand', href: '/', 'data-route': 'player', 'aria-label': 'jukecord' },
     logoMark(26),
-    h('b', null, 'jukecord'),
-    version,
+    // The name and the version, one group on one baseline, centred beside the mark.
+    h('span', { class: 'wordmark' }, h('b', null, 'jukecord'), version),
   );
   const serverIcon = h('span', { class: 'guild-icon' });
   const serverName = h('span', { class: 'label' });
