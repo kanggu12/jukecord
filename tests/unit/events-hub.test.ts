@@ -14,6 +14,8 @@ function hub(
     refuse?: () => Error | null;
     queueEveryMs?: number;
     listenersEveryMs?: number;
+    // Called as the hub tells the bus something, while it does (as a listener of the real bus is).
+    onEmit?: (name: string) => void;
   } = {},
 ) {
   const handlers = new Map<string, (payload: { guildId: string }) => void>();
@@ -22,7 +24,10 @@ function hub(
   const bus = {
     on: (name: string, fn: (payload: { guildId: string }) => void) => handlers.set(name, fn),
     off: () => {},
-    emit: (name: string, payload: unknown) => emitted.push({ name, payload }),
+    emit: (name: string, payload: unknown) => {
+      emitted.push({ name, payload });
+      extra.onEmit?.(name);
+    },
   };
   const access = {
     context: async (_principal: unknown, guildId: string) => {
@@ -395,6 +400,24 @@ describe('EventHub', () => {
     browser.gone();
     assert.deepEqual(emitted.at(-1), { name: 'listeners', payload: { guildId: 'G', count: 0 } });
     events.close();
+  });
+
+  it('counts a listener gone by the time the rest of jukecord hears of it, the server still shown', async () => {
+    // What the rest of jukecord reads back as it is told (app/rest.ts asks the hub for the count).
+    const read: number[] = [];
+    const made = hub({}, { onEmit: (name) => name === 'listeners' && read.push(made.events.listeners('G').count) });
+    const watcher = socket();
+    const browser = socket();
+    made.events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    made.events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await settle(10);
+    browser.say({ type: 'listening', on: true });
+    await settle(1);
+    // "Listen here" off, the tab still open (as the host's): nobody listens, and that is what is read back.
+    browser.say({ type: 'listening', on: false });
+    await settle(1);
+    assert.deepEqual(read, [1, 0]);
+    made.events.close();
   });
 
   it('cuts off a panel with 8 MiB waiting for it, and only that one', async () => {

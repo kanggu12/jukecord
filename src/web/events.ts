@@ -590,9 +590,11 @@ export class EventHub {
     const room = this.rooms.get(guildId);
     let count = 0;
     for (const client of room?.clients ?? []) if (client.listening) count += 1;
+    // Worked out anew from now on, before the bus is told: those who hear it read the count back (app/rest.ts), and
+    // got the one from before the change (a server played to nobody until its next change).
+    if (room) room.listeners = null;
     this.options.bus.emit('listeners', { guildId, count });
     if (!room) return;
-    room.listeners = null;
     if (room.listenersTimer) return;
     const wait = Math.max(0, room.listenersSentAt + this.listenersEveryMs - steadyNow());
     room.listenersTimer = setTimeout(() => {
