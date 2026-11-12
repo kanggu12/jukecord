@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type Alert, Alerts } from '../../src/app/alerts.ts';
+import { type Alert, Alerts, turnedAwayAlert } from '../../src/app/alerts.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
 import { FakeClock } from '../support/fakes.ts';
 import { memoryStore } from '../support/store.ts';
@@ -100,5 +100,18 @@ describe('Alerts', () => {
       posted.filter((entry) => entry.guildId === A).map((entry) => entry.alert.kind),
       ['bot-check'],
     );
+  });
+
+  it("says a cap turned connections away without the address it turned away, nor a count that is the minute's first", () => {
+    // Every server's channel hears it (jukecord-wide): one server's member, or the proxy's own address, is no other
+    // server's business. The log names the address, with the minute's count.
+    const away = turnedAwayAlert({ cap: 'address', count: 1, limit: 256, address: '203.0.113.7' });
+    for (const text of [away.en, away.ko]) {
+      assert.doesNotMatch(text, /203\.0\.113\.7/);
+      assert.doesNotMatch(text, /\b1\b/);
+      assert.match(text, /256/);
+    }
+    const live = turnedAwayAlert({ cap: 'live', count: 1, limit: 2000 });
+    assert.doesNotMatch(live.en, /\b1\b/);
   });
 });

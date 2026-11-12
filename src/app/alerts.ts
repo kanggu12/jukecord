@@ -211,26 +211,28 @@ export function turnedAwayAlert(away: {
   readonly limit: number;
   readonly address?: string;
 }): Alert {
-  // The web server logged it already, once a minute, with the same figures.
+  // The web server logged it already, once a minute, with the minute's count and the address. Neither is said here:
+  // the alert goes to every server's channel (one server's member, or the proxy's own address, is no other server's
+  // business), and it is raised at the minute's first refusal, so its count was nearly always 1.
   const base = { kind: 'turned-away' as const, guildId: null, about: away.cap, logged: true };
   if (away.cap === 'address') {
     return {
       ...base,
-      en: `jukecord turned ${away.count} connections from ${away.address} away: that address had as many open as one may (${away.limit})`,
-      ko: `jukecord가 ${away.address}의 연결 ${away.count}개를 거절함: 한 주소에 허용하는 만큼(${away.limit}개) 열려 있었음`,
+      en: `jukecord turned connections away from one address, which had as many open as one may (${away.limit}); the log names it`,
+      ko: `jukecord가 한 주소의 연결을 거절함: 한 주소에 허용하는 만큼(${away.limit}개) 열려 있었음. 주소는 로그에 있음`,
     };
   }
   if (away.cap === 'live') {
     return {
       ...base,
-      en: `jukecord turned ${away.count} live connections away: as many were open as JUKECORD_LIVE_MAX allows (${away.limit})`,
-      ko: `jukecord가 실시간 연결 ${away.count}개를 거절함: JUKECORD_LIVE_MAX가 허용하는 만큼(${away.limit}개) 열려 있었음`,
+      en: `jukecord turned live connections away: as many were open as JUKECORD_LIVE_MAX allows (${away.limit})`,
+      ko: `jukecord가 실시간 연결을 거절함: JUKECORD_LIVE_MAX가 허용하는 만큼(${away.limit}개) 열려 있었음`,
     };
   }
   return {
     ...base,
-    en: `jukecord turned ${away.count} connections away: as many were open as it takes (${away.limit})`,
-    ko: `jukecord가 연결 ${away.count}개를 거절함: 받을 수 있는 만큼(${away.limit}개) 열려 있었음`,
+    en: `jukecord turned connections away: as many were open as it takes (${away.limit})`,
+    ko: `jukecord가 연결을 거절함: 받을 수 있는 만큼(${away.limit}개) 열려 있었음`,
   };
 }
 
