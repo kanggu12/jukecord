@@ -146,6 +146,46 @@ describe('the now-playing card in the channel', () => {
     assert.match(asked.shown.at(-1)?.text ?? '', /^Getting it ready \| \[Track 2\]/);
     await made.bot.client.destroy();
   });
+
+  it('catches up with a change made while its answer was on its way to Discord', async () => {
+    const made = fakeBot();
+    const tracks = addTracks(made.store, 2);
+    made.queue.add(
+      '100000000000000001',
+      tracks.map((track) => track.id),
+      'end',
+      null,
+    );
+    made.players.get('100000000000000001').play();
+    made.media.finish(180_000);
+    await flush();
+    // /skip answers "Getting it ready"; Discord takes its time to show the answer, and meanwhile the next track (in the
+    // cache, the usual case with the prefetch) starts.
+    const asked = interaction('command', 'skip');
+    const answer = asked.interaction.editReply;
+    let arrive = (): void => {};
+    const arrived = new Promise<void>((resolve) => (arrive = resolve));
+    let first = true;
+    asked.interaction.editReply = async (payload: unknown) => {
+      if (first) {
+        first = false;
+        await arrived;
+      }
+      return answer(payload);
+    };
+    const answering = handlers(made.bot).onCommand(asked.interaction);
+    await flush();
+    made.media.finish(180_000, true);
+    await flush();
+    arrive();
+    await answering;
+    assert.match(asked.shown.at(-1)?.text ?? '', /^Getting it ready \| \[Track 2\]/);
+    // The card says what plays now, with Pause, rather than "Getting it ready" until the track ends.
+    await made.clock.advance(0);
+    assert.match(asked.shown.at(-1)?.text ?? '', /^Playing now \| \[Track 2\]/);
+    assert.match(asked.shown.at(-1)?.text ?? '', /\[Pause jukecord:pause:en\]/);
+    await made.bot.client.destroy();
+  });
 });
 
 describe('the alerts channel in Discord', () => {
@@ -185,6 +225,28 @@ describe('the alerts channel in Discord', () => {
     const embed = sent[0]?.embeds[0]?.toJSON();
     assert.equal(embed?.description, 'jukecord 데이터 디스크에 남은 공간: 812 MiB');
     assert.equal(embed?.color, 0xd0473f);
+    await bot.client.destroy();
+  });
+
+  it('waits for Discord with one listener, however many alerts wait (a full disk at the start, in every server)', async () => {
+    const { bot } = fakeBot();
+    const sent: unknown[] = [];
+    const channel = { isSendable: () => true, send: async (payload: unknown) => sent.push(payload) };
+    const servers = Array.from({ length: 12 }, (_, index) => `1000000000000000${String(index + 10)}`);
+    for (const id of servers)
+      (bot.client.guilds.cache as unknown as Map<string, unknown>).set(id, {
+        id,
+        preferredLocale: 'en-US',
+        channels: { cache: new Map([['600000000000000001', channel]]) },
+      });
+    const alert = { kind: 'disk' as const, guildId: null, en: 'The disk is nearly full', ko: '디스크가 거의 꽉 참' };
+    const posting = servers.map((id) => bot.post(id, '600000000000000001', alert));
+    await flush();
+    // Twelve servers' alerts, one wait for Discord: Node warns from eleven listeners on (MaxListenersExceededWarning).
+    assert.equal(bot.client.listenerCount(Events.ClientReady), 1);
+    bot.client.emit(Events.ClientReady as never, bot.client as never);
+    await Promise.all(posting);
+    assert.equal(sent.length, 12);
     await bot.client.destroy();
   });
 });

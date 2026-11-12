@@ -98,6 +98,8 @@ export class Bot implements Directory, AlertSink {
   private readonly memory: VoiceMemory | null;
   // The last now-playing card of each server, kept current as the player changes (see keeper.ts).
   private readonly keeper: CardKeeper;
+  // Settled at the first login, for everyone who waits for Discord (see connected); made by the first to wait.
+  private loggedIn: Promise<void> | null = null;
 
   constructor(options: BotOptions) {
     this.options = options;
@@ -118,6 +120,8 @@ export class Bot implements Directory, AlertSink {
       clock: options.clock ?? systemClock,
       render: (snapshot, lang) => nowCard(snapshot, lang, options.panelUrl),
       log: options.log,
+      // A server's player as it is now, without making one for a server that has none.
+      current: (guildId) => options.players.existing(guildId)?.snapshot() ?? null,
     });
     // Every change of a player draws its server's card again (soon, and only when it shows something else).
     options.bus.on('player', (snapshot) => this.keeper.changed(snapshot));
@@ -264,20 +268,21 @@ export class Bot implements Directory, AlertSink {
     await channel.send({ embeds: [alert.over ? note(lang, text, text) : problem(text)] });
   }
 
-  // Resolves once the bot is connected to Discord, or rejects after `ms`.
+  // Resolves once the bot is connected to Discord, or rejects after `ms`. Everyone waiting shares one listener: an
+  // alert for every server at the start (a full disk) added one each, past the eleven Node warns about.
   private connected(ms: number): Promise<void> {
     if (this.client.isReady()) return Promise.resolve();
+    // The one wait for the first login, made by the first to wait.
+    this.loggedIn ??= new Promise((resolve) => this.client.once(Events.ClientReady, () => resolve()));
+    const loggedIn = this.loggedIn;
     return new Promise((resolve, reject) => {
-      const ready = (): void => {
+      const timer = setTimeout(() => reject(new Error('the bot did not connect to Discord in time')), ms);
+      // Waiting for Discord never keeps jukecord running by itself.
+      timer.unref();
+      void loggedIn.then(() => {
         clearTimeout(timer);
         resolve();
-      };
-      const timer = setTimeout(() => {
-        this.client.off(Events.ClientReady, ready);
-        reject(new Error('the bot did not connect to Discord in time'));
-      }, ms);
-      timer.unref();
-      this.client.once(Events.ClientReady, ready);
+      });
     });
   }
 

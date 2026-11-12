@@ -16,24 +16,29 @@ function snapshot(status: PlayerSnapshot['status'], title = 'Track 1'): PlayerSn
   return { guildId: GUILD, status, track: { title } } as unknown as PlayerSnapshot;
 }
 
-function setup() {
+function setup(now: PlayerSnapshot | null = null) {
   const clock = new FakeClock();
   // The card is drawn as its state and title, which is all these tests compare.
   const keeper = new CardKeeper({
     clock,
     render: (value, lang) => ({ text: `${lang} ${value.status} ${value.track?.title ?? ''}` }) as never,
     log: createLogger({ level: 'error', sinks: [] }),
+    // The player as it is now, when a test says (the others start with nothing to catch up with).
+    current: () => now,
   });
   const edits: string[] = [];
-  let failing = false;
+  // The next edits' failure, as discord.js throws it (a DiscordAPIError's code, or none for a server error).
+  let failing: Error | null = null;
   const card = {
     lang: 'en' as const,
     edit: async (payload: unknown) => {
-      if (failing) throw new Error('Unknown Message');
+      if (failing) throw failing;
       edits.push((payload as { text: string }).text);
     },
   };
-  return { clock, keeper, edits, card, fail: () => (failing = true) };
+  // Deleted in the channel: Discord's "Unknown Message".
+  const fail = (error: Error = Object.assign(new Error('Unknown Message'), { code: 10008 })) => (failing = error);
+  return { clock, keeper, edits, card, fail, heal: () => (failing = null) };
 }
 
 describe('CardKeeper', () => {
@@ -57,6 +62,36 @@ describe('CardKeeper', () => {
     keeper.changed(snapshot('playing', 'Track 2'));
     await clock.advance(10_000);
     assert.equal(edits.length, 2);
+    keeper.stop();
+  });
+
+  it('catches a card up at once with what changed while it was on its way to Discord', async () => {
+    // /skip answered "Getting it ready"; the next track (fetched already) started before Discord showed the answer.
+    const { clock, keeper, edits, card } = setup(snapshot('playing', 'Track 2'));
+    keeper.keep(GUILD, card, { text: 'en loading Track 2' } as never);
+    await clock.advance(0);
+    assert.deepEqual(edits, ['en playing Track 2']);
+    // A card that shows the player as it is now is left as it is.
+    keeper.keep(GUILD, card, { text: 'en playing Track 2' } as never);
+    await clock.advance(10_000);
+    assert.equal(edits.length, 1);
+    keeper.stop();
+  });
+
+  it('keeps a card through a passing failure, and draws it again at the next change', async () => {
+    const { clock, keeper, edits, card, fail, heal } = setup();
+    keeper.keep(GUILD, card, { text: 'en playing Track 1' } as never);
+    // Discord busy (a server error after discord.js's retries): the pause does not show, the card stays kept.
+    fail(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+    keeper.changed(snapshot('paused'));
+    await clock.advance(0);
+    await flush();
+    assert.equal(keeper.kept(GUILD), true);
+    // Discord answers again: the next change draws it, the pause the failed edit did not show among it.
+    heal();
+    keeper.changed(snapshot('paused'));
+    await clock.advance(5000);
+    assert.deepEqual(edits, ['en paused Track 1']);
     keeper.stop();
   });
 
