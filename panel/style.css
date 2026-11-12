@@ -1169,7 +1169,9 @@ img {
   position: relative;
   height: 16px;
   cursor: pointer;
-  touch-action: none;
+  /* A finger moving up or down from the bar scrolls the page, as anywhere (the browser then cancels the pointer and
+     the bar lets go without seeking); sideways it drags the knob. */
+  touch-action: pan-y;
 }
 /* The groove the bar runs in, sunk into the glass; under the pointer it grows to show it can be taken. */
 .track::before {
