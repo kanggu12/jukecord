@@ -73,6 +73,8 @@ export interface WebServerOptions {
     readonly idleMs?: number;
     readonly maxConnections?: number;
     readonly maxConnectionsPerAddress?: number;
+    /** How long an audio request waits for an MP3 copy being made before it is told to ask again (default 5 s). */
+    readonly mp3WaitMs?: number;
   };
 }
 
@@ -112,12 +114,31 @@ const BUSY = 'jukecord is busy; try again in a moment';
 const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 const TOO_MANY_READS = 'too many requests at once; try again in a moment';
+// What an audio request is told while the MP3 copy it asked for is still being made.
+const MAKING_MP3 = 'jukecord is making the MP3 copy of this track; try again in a moment';
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
 // do. A client that sends many in one go and reads nothing had each one answered, and each answer held in memory for a
 // reader that never came: a few connections of small requests filled the heap. More than this many answers under way
 // on one connection closes it.
 const PIPELINED_MAX = 16;
+
+// Waits for `promise` at most `ms`: its value when it settled in time, `undefined` when the time ran out first (the
+// promise goes on; whoever made it keeps it). A rejection in time is passed on.
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  // The wait itself: a timer that ends in `undefined`, and that must not keep a stopping process alive.
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    // Settled first: the timer has nothing left to do.
+    clearTimeout(timer);
+  }
+}
 
 // The answer for an error, in the one shape every API error has.
 function failure(reply: FastifyReply, code: string, message: string): FastifyReply {
@@ -486,13 +507,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (request.query.format === 'mp3') {
         // Shared by everyone asking at once and not tied to this request: a second browser may be waiting for it. It
         // ends at its own time limit, which grows with the track (see Media.mp3), or when jukecord stops.
-        let mp3: string | null;
+        const making = options.mp3(track, stopping.signal);
+        // A copy that fails after every request stopped waiting for it is Media's to log, not an unhandled rejection.
+        making.catch(() => {});
+        // The request waits a few seconds, which covers the copy of an ordinary song. A long track takes longer (an
+        // hour of audio took most of a minute under two processors), and a request waiting on it moves nothing on its
+        // connection, which the idle limit then cut with no answer at all: it is told to ask again instead (503 with
+        // Retry-After, which the panel takes as "not now"), and the copy goes on meanwhile.
+        let mp3: string | null | undefined;
         try {
-          mp3 = await options.mp3(track, stopping.signal);
+          mp3 = await within(making, timeouts.mp3WaitMs ?? 5000);
         } catch (error) {
-          if (error instanceof BusyError) return failure(reply, 'unavailable', error.message);
+          if (error instanceof BusyError) return later(reply, 'unavailable', error.message, 2000);
           throw error;
         }
+        if (mp3 === undefined) return later(reply, 'unavailable', MAKING_MP3, 2000);
         if (!mp3) return failure(reply, 'conflict', 'the track is not prepared yet');
         file = mp3;
       }

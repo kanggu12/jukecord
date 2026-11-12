@@ -223,8 +223,9 @@ clock and the server's: `serverTime - (t + time the pong arrived) / 2`, from the
 
 `GET /api/v1/guilds/{guild}/tracks/{track}/audio` sends the audio of a track that server is playing or has queued:
 Ogg Opus, or with `?format=mp3` an MP3 copy (made the first time someone asks, for browsers without Opus; two at a
-time, `503` past that). Range requests work, so a player can start in the middle. Any other track answers `404`, and
-one not prepared yet `409`.
+time, `503` past that). A request waits up to 5 s for its copy; a longer one (a long track) answers `503` with
+`Retry-After` while the copy goes on, and the same address sends it once it is made. Range requests work, so a player
+can start in the middle. Any other track answers `404`, and one not prepared yet `409`.
 
 ## Health and metrics
 

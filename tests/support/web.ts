@@ -26,7 +26,7 @@ import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
 import type { Rate } from '../../src/web/limits.ts';
 import { Presenter } from '../../src/web/present.ts';
-import { createWebServer, type WebServer } from '../../src/web/server.ts';
+import { createWebServer, type WebServer, type WebServerOptions } from '../../src/web/server.ts';
 import { FakeClock, FakeMedia } from './fakes.ts';
 import { memoryStore } from './store.ts';
 
@@ -135,16 +135,11 @@ export interface TestServerOptions {
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
   readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
   readonly behind?: () => boolean;
-  /** Shorter request and idle timeouts and lower connection caps (to test them). */
   readonly trustProxy?: boolean;
-  readonly timeouts?: {
-    readonly requestMs?: number;
-    readonly headersMs?: number;
-    readonly checkEveryMs?: number;
-    readonly idleMs?: number;
-    readonly maxConnections?: number;
-    readonly maxConnectionsPerAddress?: number;
-  };
+  /** Shorter request and idle timeouts and lower connection caps (to test them): the server's own option, as it is. */
+  readonly timeouts?: WebServerOptions['timeouts'];
+  /** How the MP3 copy for browsers without Opus is made (by default there is never one). */
+  readonly mp3?: WebServerOptions['mp3'];
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -214,7 +209,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     players,
     queue,
     cache,
-    mp3: async () => null,
+    mp3: options.mp3 ?? (async () => null),
     log,
     ...(options.live ? { live: options.live } : {}),
     ...(options.rates ? { rates: options.rates } : {}),

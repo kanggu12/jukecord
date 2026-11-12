@@ -52,6 +52,10 @@ interface Job {
   readonly ticket: Ticket;
 }
 
+// How long an MP3 copy that failed is not tried again: a browser asks every couple of seconds while it listens, and a
+// copy that cannot be made (a broken file, an encoder missing) would otherwise start ffmpeg for every ask.
+const MP3_RETRY_MS = 60_000;
+
 // Failures worth one more try: the network or the site stumbled, not "this video does not exist".
 const TRANSIENT =
   /HTTP Error 5\d\d|timed out|Connection reset|Temporary failure|Remote end closed|IncompleteRead|Read timed out/i;
@@ -88,6 +92,8 @@ export class Media implements MediaPreparer {
   private readonly jobs = new Map<string, Job>();
   // MP3 copies being made, so two Safari listeners do not start two conversions.
   private readonly mp3Jobs = new Map<string, Promise<string>>();
+  // MP3 copies that failed lately, by key: when (on the steady clock) and the error, given again until MP3_RETRY_MS.
+  private readonly mp3Failed = new Map<string, { readonly at: number; readonly error: unknown }>();
   private readonly slots: Slots;
 
   constructor(options: MediaOptions) {
@@ -284,6 +290,9 @@ export class Media implements MediaPreparer {
     const cache = this.options.cache;
     if (!cache.has(key)) return null;
     if (cache.hasMp3(key)) return cache.mp3Path(key);
+    // A copy that failed a moment ago fails the same way now, without a new ffmpeg.
+    const failed = this.mp3Failed.get(key);
+    if (failed && steadyNow() - failed.at < MP3_RETRY_MS) throw failed.error;
     let job = this.mp3Jobs.get(key);
     if (!job) {
       // Two conversions at a time: each is an ffmpeg process, and requests for many tracks at once would start many.
@@ -302,6 +311,12 @@ export class Media implements MediaPreparer {
         })
         .catch((error: unknown) => {
           fs.rmSync(tmp, { force: true });
+          // Said once here: the requests that asked may have stopped waiting for it (see the audio route).
+          this.options.log.warn('could not make an MP3 copy', { title: track.title, error });
+          // Kept for a while, the old failures dropped first so the list cannot grow.
+          for (const [other, entry] of this.mp3Failed)
+            if (steadyNow() - entry.at >= MP3_RETRY_MS) this.mp3Failed.delete(other);
+          this.mp3Failed.set(key, { at: steadyNow(), error });
           throw error;
         })
         .finally(() => this.mp3Jobs.delete(key));

@@ -117,6 +117,11 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.nothingFound, '찾은 곡 없음'],
   [REASONS.failed, '받지 못함'],
   [/^the site answered (\d{3})$/, '사이트 응답 코드 $1'],
+  // The audio of a long track for a browser that needs MP3, while its copy is still being made.
+  [
+    'jukecord is making the MP3 copy of this track; try again in a moment',
+    '이 곡의 MP3 사본을 만드는 중: 잠시 뒤 다시 시도하세요',
+  ],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

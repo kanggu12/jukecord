@@ -261,3 +261,53 @@ describe('the web server caps its connections', () => {
     }
   });
 });
+
+describe('the web server answers a browser that needs MP3 at once', () => {
+  it('says "not now" with Retry-After while a long copy is made, then sends the copy once it is there', async () => {
+    let server: TestServer | null = null;
+    // The copy takes longer than a connection may stand still (600 ms here; two minutes in jukecord): an hour of audio
+    // takes most of a minute to convert on a small machine. One copy is shared by every request, as Media shares it.
+    let copy: Promise<string> | null = null;
+    let calls = 0;
+    server = await testServer({
+      listen: true,
+      timeouts: { idleMs: 600, checkEveryMs: 50, mp3WaitMs: 200 },
+      mp3: () => {
+        calls += 1;
+        copy ??= new Promise((resolve) =>
+          setTimeout(() => {
+            const file = `${server?.dataDir}/copy.mp3`;
+            fs.writeFileSync(file, Buffer.alloc(2048, 5));
+            resolve(file);
+          }, 1500),
+        );
+        return copy;
+      },
+    });
+    try {
+      const track = server.store.tracks.upsert(exampleTrack('a-long-one', 3 * 3_600_000));
+      server.queue.add(GUILD, [track.id], 'end', null);
+      const key = MediaCache.keyOf(track.source);
+      const tmp = server.cache.tmpPath(key);
+      fs.writeFileSync(tmp, Buffer.alloc(1000, 9));
+      server.cache.commit(key, tmp, { source: track.source, durationMs: 3 * 3_600_000, loudness: null });
+      const address = `${server.url}/api/v1/guilds/${GUILD}/tracks/${track.id}/audio?format=mp3`;
+      const started = Date.now();
+      const first = await fetch(address, { headers: { authorization: `Bearer ${HOST_TOKEN}` } });
+      // Answered while the copy is still being made, well inside the idle limit, and told when to ask again.
+      assert.equal(first.status, 503);
+      assert.ok(Date.now() - started < 1000, `answered after ${Date.now() - started} ms`);
+      assert.ok(Number(first.headers.get('retry-after')) >= 1);
+      assert.equal(((await first.json()) as { error: { code: string } }).error.code, 'unavailable');
+      // Once the copy is made, the same address sends it.
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      const second = await fetch(address, { headers: { authorization: `Bearer ${HOST_TOKEN}` } });
+      assert.equal(second.status, 200);
+      assert.equal((await second.arrayBuffer()).byteLength, 2048);
+      // Both asked for the one copy being made; nothing started a second.
+      assert.equal(calls, 2);
+    } finally {
+      await server.close();
+    }
+  });
+});
