@@ -617,7 +617,7 @@ img {
 /* ---- cards ----------------------------------------------------------------------------------------------------- */
 .card {
   /* Cards answer to their own width (the queue's tools lose their words when the card is narrow). */
-  container-type: inline-size;
+  container: card / inline-size;
   position: relative;
   isolation: isolate;
   /* The glass: a sheen falling from the top edge over a tinted view of the field behind. No backdrop blur here: the
@@ -1159,6 +1159,10 @@ img {
   display: flex;
   gap: 6px;
   align-items: flex-start;
+}
+/* The column beside the disc: its own width decides whether the keys keep their words (see the rule further down). */
+.now .info {
+  container: now-info / inline-size;
 }
 .now .keys {
   display: flex;
@@ -2350,8 +2354,11 @@ kbd {
     display: inline;
   }
 }
-/* The now-playing keys keep their words while there is room; on a narrow card only the main key does. */
-@container (max-width: 520px) {
+/* The now-playing keys keep their words while the column they stand in has room for all of them on one row (the
+   widest, Korean while paused by touch, takes 469 px); with less, only the main key does. Measured on the column, not
+   the card: beside the disc, in two columns up to a window about 1,060 px wide, the card was wide enough by the old
+   rule and the last key went alone onto a second row. */
+@container now-info (max-width: 480px) {
   .now .keys .key:has(.label) .label {
     display: none;
   }
@@ -2361,8 +2368,9 @@ kbd {
   }
 }
 /* On the narrowest cards (phones up to about 400 wide) the five keys do not fit one row, and the last one alone on
-   a second row read as "close". There the main key takes a row of its own and the other four share the next. */
-@container (max-width: 370px) {
+   a second row read as "close". There the main key takes a row of its own and the other four share the next. The
+   card's width, by its name: the column the keys stand in is a container of its own (above). */
+@container card (max-width: 370px) {
   .now .keys .key.primary {
     flex: 1 1 100%;
   }

@@ -13,6 +13,7 @@
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
  *   the bar's toast, a dialog's shade over the bar);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
+ * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
  *   room for fewer than three whole rows (a short window left the queue one row beside the cards above it, or none);
  * - sizes: the font sizes in use (reported, not a finding).
@@ -304,6 +305,19 @@ window.__audit = () => {
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);
+  }
+
+  // The playing card's keys: wrapped onto more rows, the last row must not hold one key alone under several.
+  for (const keys of document.querySelectorAll('.now .keys')) {
+    if (!shown(keys)) continue;
+    const rows = new Map();
+    for (const key of [...keys.children].filter(shown)) {
+      const top = Math.round(key.getBoundingClientRect().top / 8);
+      rows.set(top, (rows.get(top) ?? 0) + 1);
+    }
+    const counts = [...rows.entries()].sort((a, b) => a[0] - b[0]).map((entry) => entry[1]);
+    if (counts.length > 1 && counts.at(-1) === 1 && Math.max(...counts) > 1)
+      add('lone-key', keys, `keys in rows of ${counts.join(' + ')}`);
   }
 
   // Lists that scroll inside their card must show at least three whole rows when they hold more than they show.
