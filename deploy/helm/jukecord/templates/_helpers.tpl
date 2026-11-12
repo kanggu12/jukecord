@@ -25,12 +25,22 @@ app.kubernetes.io/name: {{ include "jukecord.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-{{/* Every label of the chart's objects. */}}
+{{/*
+Every label of the chart's objects. The component tells jukecord's own objects from helm test's pod; it is not one of
+the selector labels, which a Deployment cannot change after it is made.
+*/}}
 {{- define "jukecord.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{ include "jukecord.selectorLabels" . }}
+app.kubernetes.io/component: server
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{/* The pod's labels: podLabels from the values, under the chart's own, which win (the Service and the NetworkPolicy
+find the pod by them). */}}
+{{- define "jukecord.podLabels" -}}
+{{- toYaml (merge (include "jukecord.labels" . | fromYaml) .Values.podLabels) -}}
 {{- end -}}
 
 {{/* "repository:tag", the tag defaulting to the chart's appVersion. */}}

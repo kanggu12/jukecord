@@ -15,3 +15,24 @@ keywords:
 home: https://github.com/kanggu12/jukecord
 sources:
   - https://github.com/kanggu12/jukecord
+# The jukebox mark, square as an icon is shown (the logos in docs/assets are wide, with the name beside the mark).
+icon: https://raw.githubusercontent.com/kanggu12/jukecord/main/panel/favicon.svg
+maintainers:
+  - name: J.-G. Kang
+    url: https://github.com/kanggu12
+annotations:
+  # What Artifact Hub shows beside the chart.
+  artifacthub.io/license: MIT
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/kanggu12/jukecord/blob/main/docs/KUBERNETES.md
+    - name: Changelog
+      url: https://github.com/kanggu12/jukecord/blob/main/CHANGELOG.md
+  # The image the chart runs, which Artifact Hub scans for known vulnerabilities: this version's own tag, which
+  # scripts/check-version.ts checks along with version and appVersion.
+  artifacthub.io/images: |
+    - name: jukecord
+      image: ghcr.io/kanggu12/jukecord:0.1.1
+      platforms:
+        - linux/amd64
+        - linux/arm64

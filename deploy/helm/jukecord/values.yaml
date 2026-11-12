@@ -83,6 +83,9 @@ podSecurityContext:
   runAsUser: 10001
   runAsGroup: 10001
   fsGroup: 10001
+  # The data volume's files are given to fsGroup only when its top folder is not jukecord's already, instead of
+  # Kubernetes going through every file of the media cache at each start.
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 
@@ -117,6 +120,8 @@ networkPolicy:
     - 169.254.0.0/16
 
 podAnnotations: {}
+# Labels for the pod, besides the chart's own (which win on the same key).
+podLabels: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}

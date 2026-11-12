@@ -122,6 +122,7 @@
       }
     },
     "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
     "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
     "tolerations": { "type": "array" },
     "affinity": { "type": "object" }

@@ -1,7 +1,7 @@
 /**
  * Checks that one version is named everywhere a release reads it: src/version.ts (the one place it is set),
- * package.json, the Helm chart's version and appVersion, and, given a tag (v1.2.3), the tag. Exits 1 with the
- * differences otherwise.
+ * package.json, the Helm chart's version and appVersion and the image tag in its artifacthub.io/images annotation, and,
+ * given a tag (v1.2.3), the tag. Exits 1 with the differences otherwise.
  *
  *   node scripts/check-version.ts [v1.2.3]
  */
@@ -16,6 +16,9 @@ const chartVersion = /^version:\s*(\S+)$/m.exec(chart)?.[1];
 const appVersion = /^appVersion:\s*"?([^"\s]+)"?$/m.exec(chart)?.[1];
 if (chartVersion !== VERSION) problems.push(`the chart's version is ${chartVersion}`);
 if (appVersion !== VERSION) problems.push(`the chart's appVersion is ${appVersion}`);
+// The image Artifact Hub scans, named with its tag in the chart's annotations.
+const imageTag = /^ {6}image: ghcr\.io\/[^\s:]+:(\S+)$/m.exec(chart)?.[1];
+if (imageTag !== VERSION) problems.push(`the chart's artifacthub.io/images tag is ${imageTag}`);
 const tag = process.argv[2];
 if (tag !== undefined && tag !== `v${VERSION}`) problems.push(`the tag is ${tag}`);
 if (problems.length > 0) {

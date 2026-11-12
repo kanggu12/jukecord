@@ -21,10 +21,8 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    - {{- with .Values.ingress.host }}
-      host: {{ . | quote }}
-      {{- end }}
-      http:
+    # One rule for the whole site; without a host it answers for every name.
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -33,4 +31,7 @@ spec:
                 name: {{ include "jukecord.fullname" . }}
                 port:
                   name: http
+      {{- with .Values.ingress.host }}
+      host: {{ . | quote }}
+      {{- end }}
 {{- end }}

@@ -34,6 +34,8 @@ describe('versions', () => {
     const chart = read('deploy/helm/jukecord/Chart.yaml');
     assert.match(chart, new RegExp(`^version: ${VERSION.replace(/\./g, '\\.')}$`, 'm'));
     assert.match(chart, new RegExp(`^appVersion: "${VERSION.replace(/\./g, '\\.')}"$`, 'm'));
+    // The image Artifact Hub scans is this version's.
+    assert.match(chart, new RegExp(`^ {6}image: ghcr\\.io/kanggu12/jukecord:${VERSION.replace(/\./g, '\\.')}$`, 'm'));
   });
 
   it('has notes for the version in CHANGELOG.md, or an Unreleased section on its way to it', () => {

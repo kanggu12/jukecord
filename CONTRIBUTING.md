@@ -63,15 +63,16 @@ npm package comes on its own, and the next major version of Node is not proposed
 
 ## Versions and releases
 
-The version is set in one place, `src/version.ts`; `package.json` and the chart's `version` and `appVersion` follow it
-(`node scripts/check-version.ts` checks). Versions follow SemVer: a feature raises the minor number, a fix the patch.
+The version is set in one place, `src/version.ts`; `package.json`, the chart's `version` and `appVersion` and the
+image named in its Artifact Hub annotation follow it (`node scripts/check-version.ts` checks). Versions follow SemVer: a feature raises the minor number, a fix the patch.
 
 To release:
 
 1. Move the `Unreleased` section of [CHANGELOG.md](CHANGELOG.md) under the new version with today's date. That section
    is the release's notes.
-2. Set the version in `src/version.ts`, `package.json` and `deploy/helm/jukecord/Chart.yaml`, run
-   `sh .github/badges.sh` and `node scripts/api-doc.ts`, and commit.
+2. Set the version in `src/version.ts`, `package.json` and `deploy/helm/jukecord/Chart.yaml` (its `version`,
+   `appVersion` and the image's tag in `artifacthub.io/images`), run `sh .github/badges.sh` and
+   `node scripts/api-doc.ts`, and commit.
 3. Tag `vX.Y.Z` and push the tag. `release.yml` checks the versions and the notes, runs the tests and the chart test,
    publishes the image for amd64 and arm64 and the chart to ghcr.io with signed build provenance, and makes the GitHub
    release.

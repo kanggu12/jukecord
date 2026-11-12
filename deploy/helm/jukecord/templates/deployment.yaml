@@ -18,7 +18,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "jukecord.labels" . | nindent 8 }}
+        {{- include "jukecord.podLabels" . | nindent 8 }}
       annotations:
         # A changed token or secret in the values restarts the pod, which reads them only when it starts.
         checksum/secret: {{ printf "%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret | sha256sum | trunc 16 }}
