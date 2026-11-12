@@ -19,6 +19,16 @@ spec:
     - ports:
         - port: 8795
           protocol: TCP
+      {{- with .Values.networkPolicy.ingressFrom }}
+      # Only from these (networkPolicy.ingressFrom): the Ingress controller, so that the X-Forwarded-For jukecord
+      # believes comes from it. And from helm test's pod, which checks the panel through the Service.
+      from:
+        {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+              app.kubernetes.io/component: test
+      {{- end }}
   egress:
     # Names, from the cluster's DNS (which lives in a private range, hence its own rule).
     - ports:

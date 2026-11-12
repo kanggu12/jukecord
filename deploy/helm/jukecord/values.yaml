@@ -97,6 +97,17 @@ networkPolicy:
   # Incoming: the panel's port only. Outgoing: DNS, and the internet (Discord, its voice servers, the sites tracks
   # come from) but not the cluster's private networks.
   enabled: true
+  # Who may reach the panel's port, as NetworkPolicy peers (podSelector, namespaceSelector, ipBlock); empty: anyone.
+  # With the Ingress on, jukecord believes the X-Forwarded-For of one proxy in front (for its login limiter), and a pod
+  # that reaches the port directly could put any address in it; naming the Ingress controller here leaves only it.
+  # helm test's pod is let in as well. A Prometheus that reads /metrics needs a peer here too. For ingress-nginx:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: ingress-nginx
+  #     podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: ingress-nginx
+  ingressFrom: []
   # Private ranges the pod may not reach; adjust when the cluster uses others.
   privateRanges:
     - 10.0.0.0/8

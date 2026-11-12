@@ -113,6 +113,11 @@
       "additionalProperties": false,
       "properties": {
         "enabled": { "type": "boolean" },
+        "ingressFrom": {
+          "type": "array",
+          "description": "NetworkPolicy peers (podSelector, namespaceSelector, ipBlock) that may reach the panel's port; empty: anyone",
+          "items": { "type": "object" }
+        },
         "privateRanges": { "type": "array", "items": { "type": "string" } }
       }
     },

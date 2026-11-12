@@ -31,7 +31,7 @@ checks every part jukecord needs.
 | `extraEnv`                                                        | `[]`                                                | more variables as Kubernetes writes them (`name` with `value`, or `valueFrom` a ConfigMap): `NODE_OPTIONS`, `TZ`, `HTTPS_PROXY`; the names refused in `env` are refused here too                                                                                                                               |
 | `ingress.enabled`, `.host`, `.className`, `.annotations`, `.tls`  | off                                                 | the panel from outside the cluster                                                                                                                                                                                                                                                                             |
 | `persistence.enabled`, `.size`, `.storageClass`, `.existingClaim` | on, `5Gi`                                           | the data volume (kept when the release is uninstalled)                                                                                                                                                                                                                                                         |
-| `networkPolicy.enabled`, `.privateRanges`                         | on                                                  | see below                                                                                                                                                                                                                                                                                                      |
+| `networkPolicy.enabled`, `.ingressFrom`, `.privateRanges`         | on, anyone may reach the port                       | [below](#the-networkpolicy)                                                                                                                                                                                                                                                                                    |
 | `resources`                                                       | 250m, 512Mi; limit 1536Mi                           | requests and limits ([below](#memory-and-cpu))                                                                                                                                                                                                                                                                 |
 | `service.type`, `.port`                                           | `ClusterIP`, `8795`                                 | the Service                                                                                                                                                                                                                                                                                                    |
 
@@ -55,7 +55,8 @@ ingress:
 ```
 
 With the Ingress on, jukecord believes one proxy's `X-Forwarded-For` (for the login limiter), unless `env` sets
-`JUKECORD_TRUST_PROXY` otherwise.
+`JUKECORD_TRUST_PROXY` otherwise. A pod that reaches jukecord's port directly, not through the controller, could then
+put any address in that header; `networkPolicy.ingressFrom` (below) lets in the controller alone.
 
 ## The NetworkPolicy
 
@@ -64,6 +65,21 @@ choose), but none of the private ranges in `networkPolicy.privateRanges`: jukeco
 cluster. If your cluster's pods or services use other ranges, list them; if jukecord should reach something private (a
 proxy for the internet, say), turn the policy off or add your own. Fetching tracks from a private address also needs
 `JUKECORD_ALLOW_PRIVATE_ADDRESSES: "true"` in `env`, since jukecord refuses those addresses on its own as well.
+
+Anyone in the cluster may reach the panel's port unless `networkPolicy.ingressFrom` names who may, as NetworkPolicy
+peers. Behind an Ingress, name its controller, so that the `X-Forwarded-For` jukecord believes can only come from it;
+helm test's pod is let in as well, and a Prometheus that reads `/metrics` needs a peer of its own. For ingress-nginx:
+
+```yaml
+networkPolicy:
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+```
 
 ## Security
 

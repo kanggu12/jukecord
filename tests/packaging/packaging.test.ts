@@ -314,6 +314,15 @@ describe('the Helm chart', () => {
       ],
       { encoding: 'utf8' },
     );
+    // With networkPolicy.ingressFrom, only those peers (and helm test's pod) may reach the panel's port.
+    const policy = (text: string) => text.slice(text.indexOf('\nkind: NetworkPolicy\n'), text.indexOf('egress:'));
+    assert.doesNotMatch(policy(rendered), /from:/);
+    const fenced = execFileSync(
+      'helm',
+      ['template', 't', 'deploy/helm/jukecord', '--set', 'networkPolicy.ingressFrom[0].ipBlock.cidr=192.0.2.0/24'],
+      { encoding: 'utf8' },
+    );
+    assert.match(policy(fenced), /from:\n\s+- ipBlock:\n\s+cidr: 192\.0\.2\.0\/24\n[\s\S]*component: test/);
     const testPod = placed.slice(placed.indexOf('\nkind: Pod\n'));
     for (const key of ['imagePullSecrets:', 'nodeSelector:', 'tolerations:']) assert.ok(testPod.includes(key), key);
     const existing = execFileSync(
