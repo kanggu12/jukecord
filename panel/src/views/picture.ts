@@ -582,17 +582,10 @@ function mark(ctx: CanvasRenderingContext2D, look: Look, x: number, y: number, s
   ctx.restore();
 }
 
-// A card's head: in English in spaced capitals, as the panel's are; in Korean as it is, barely spaced (Korean has no
-// capitals, and spaced syllables read apart).
-function head(ink: Ink, content: PictureContent, text: string, x: number, y: number, size: number, width: number) {
-  const english = content.lang === 'en';
-  ink.write(
-    english ? text.toUpperCase() : text,
-    x,
-    y,
-    { size, weight: 650, colour: ink.look.ink2, spacing: size * (english ? 0.08 : 0.02) },
-    width,
-  );
+// A card's head as the panel's are: its words as written, in the second ink. Spaced capitals read as decoration, and
+// the panel has none.
+function head(ink: Ink, text: string, x: number, y: number, size: number, width: number) {
+  ink.write(text, x, y, { size, weight: 650, colour: ink.look.ink2 }, width);
 }
 
 /** Draws the picture of a time in one shape; resolves with the canvas, ready to be saved. */
@@ -734,7 +727,7 @@ function songCard(
   const { ctx, look } = ink;
   glass(ctx, look, x, y, w, h);
   const pad = 44 * scale;
-  head(ink, content, song.label, x + pad, y + 66 * scale, Math.round(26 * scale), w - pad * 2);
+  head(ink, song.label, x + pad, y + 66 * scale, Math.round(26 * scale), w - pad * 2);
   // The album fills the card's height under its head, square.
   const size = h - 150 * scale;
   const top = y + 96 * scale;
@@ -778,7 +771,6 @@ function songCard(
 // A card listing tracks on their covers (or people on their faces), each with its count at the end of the line.
 function listCard(
   ink: Ink,
-  content: PictureContent,
   title: string,
   rows: readonly {
     readonly text: string;
@@ -794,7 +786,7 @@ function listCard(
   const { ctx, look } = ink;
   glass(ctx, look, x, y, w, h);
   const pad = 44 * scale;
-  head(ink, content, title, x + pad, y + 62 * scale, Math.round(25 * scale), w - pad * 2);
+  head(ink, title, x + pad, y + 62 * scale, Math.round(25 * scale), w - pad * 2);
   const rowHeight = 56 * scale;
   const picture = 42 * scale;
   // The name in the ink, its count in the second ink at the end of the line, as the panel's ranks.
@@ -917,12 +909,12 @@ function story(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent,
   }
   numbers(ink, content, m, y, w, totals, 58);
   y += totals + gap;
-  listCard(ink, content, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 5), m, y, w, tracks, 1);
+  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 5), m, y, w, tracks, 1);
   y += tracks + gap;
   // Who added most, and the moments, side by side.
   const half = (w - gap) / 2;
   if (content.people.length > 0)
-    listCard(ink, content, content.peopleLabel, peopleRows(ink, content, pictures.faces), m, y, half, low, 0.88);
+    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m, y, half, low, 0.88);
   momentsCard(ink, content, m + half + gap, y, half, low);
   foot(ink, content, m, 1846, w, 1);
   void ctx;
@@ -950,19 +942,9 @@ function square(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent
   numbers(ink, content, m, y, w, totals, 50);
   y += totals + gap;
   const half = (w - gap) / 2;
-  listCard(ink, content, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 3), m, y, half, low, 0.8);
+  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 3), m, y, half, low, 0.8);
   if (content.people.length > 0)
-    listCard(
-      ink,
-      content,
-      content.peopleLabel,
-      peopleRows(ink, content, pictures.faces),
-      m + half + gap,
-      y,
-      half,
-      low,
-      0.8,
-    );
+    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m + half + gap, y, half, low, 0.8);
   foot(ink, content, m, 1036, w, 0.8);
   void ctx;
 }

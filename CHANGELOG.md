@@ -6,6 +6,10 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Wrapped's picture heads its cards as the panel does, in the words as written, without spaced capitals.
+
 ## [0.3.0] - 2026-11-13
 
 What no other bot does, made more of: the queue heard in any browser in step with the voice channel now has guests
