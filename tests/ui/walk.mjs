@@ -214,7 +214,10 @@ async function asDiscord(page) {
           : body.map((guild) => ({ ...guild, name: MADE_UP.guild, icon: null }));
     await route.fulfill({ response, json });
   });
+  // The page's side of each socket, so a state can say something of its own to the page (madeUpSay below).
+  page.madeUpSockets = [];
   await page.routeWebSocket(/\/api\/v1\/events/, (ws) => {
+    page.madeUpSockets.push(ws);
     const server = ws.connectToServer();
     server.onMessage((message) => {
       let data;
@@ -232,6 +235,10 @@ async function asDiscord(page) {
     });
     ws.onMessage((message) => server.send(message));
   });
+}
+// A live message of the walk's own to a page in the made-up Discord.
+function madeUpSay(page, message) {
+  for (const ws of page.madeUpSockets ?? []) ws.send(JSON.stringify({ v: 1, guild: 'local', ...message }));
 }
 
 // ---- the walk ---------------------------------------------------------------------------------------------------
@@ -382,6 +389,51 @@ await sweep(
   async (page) => {
     await tool(page, 'dedupe');
     await page.waitForSelector('.toast');
+  },
+  { discord: true },
+);
+// A toast raised over a layer: jukecord's long refusal (a live error message, put in by standing between the page
+// and its connection). With the menu open (on a narrow window the bar's strip hangs over the sheet, and must show over
+// it), and with a dialog open (its shade covers the bar: the dialog says it).
+const LONG_REFUSAL = 'jukecord runs without a Discord bot here, so it cannot join voice';
+async function refusal(page) {
+  const inject = await intercept(page);
+  await page.reload();
+  await page.waitForSelector('.app .card');
+  // Connected, so the message comes as the live connection's.
+  await page.waitForSelector('.bar .pill.tone-idle');
+  return () => inject({ type: 'error', message: LONG_REFUSAL });
+}
+await sweep('menu-toast', NARROW, async (page) => {
+  const raise = await refusal(page);
+  await page.click('[data-act="menu"]');
+  await page.waitForSelector('.sheet .section');
+  raise();
+  await page.waitForSelector('.toast');
+  await page.waitForTimeout(300);
+});
+await sweep('dialog-toast', FEW, async (page) => {
+  const raise = await refusal(page);
+  await tool(page, 'load');
+  await page.waitForSelector('.dialog .channel');
+  raise();
+  // Wherever it is said: the instrument tells whether it can be seen.
+  await page.waitForSelector('.toast');
+  await page.waitForTimeout(300);
+});
+// The same long reason in the bar of a wide window, beside the made-up server's name: on two lines.
+await sweep(
+  'toast-wide',
+  [
+    [1024, 768],
+    [1440, 900],
+  ],
+  async (page) => {
+    // Connected, so the message comes as the live connection's.
+    await page.waitForSelector('.bar .pill.tone-play');
+    madeUpSay(page, { type: 'error', message: LONG_REFUSAL });
+    await page.waitForSelector('.toast');
+    await page.waitForTimeout(300);
   },
   { discord: true },
 );

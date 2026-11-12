@@ -541,8 +541,9 @@ img {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  padding: 0 12px;
+  /* One line or two: two still fit in the bar's height. */
+  min-height: 32px;
+  padding: 3px 12px;
   min-width: 0;
   border: 1px solid var(--line-2);
   border-radius: var(--r);
@@ -577,10 +578,15 @@ img {
 .toast .icon {
   color: var(--tone, var(--ink-2));
 }
+/* A long message takes a second line rather than being cut at once (a reason needs reading); past two lines it is cut,
+   and its whole text is the title. */
 .toast span {
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.3;
 }
 @keyframes toast-in {
   from {
@@ -1719,7 +1725,8 @@ img {
 .scrim {
   position: fixed;
   inset: var(--bar-h) 0 var(--listen-h) 0;
-  z-index: 29;
+  /* Under the bar, with the sheet: what the bar holds (a toast hanging under it on a narrow window) stays over both. */
+  z-index: 28;
   background: var(--scrim);
   animation: fade 160ms ease-out;
 }
@@ -1738,7 +1745,8 @@ img {
   top: var(--bar-h);
   bottom: var(--listen-h);
   right: 0;
-  z-index: 31;
+  /* Under the bar it hangs from, so a toast in the bar's strip shows over it. */
+  z-index: 29;
   width: min(calc(var(--side-w) + 16px + var(--gap) / 2), 100vw);
   display: flex;
   flex-direction: column;
@@ -1900,6 +1908,19 @@ img {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px var(--pad) var(--pad);
+}
+/* Said in a dialog (its shade covers the bar): above its keys, the whole message. */
+.dialog .dialog-notes {
+  padding: 0 var(--pad);
+}
+.dialog .dialog-notes:empty {
+  display: none;
+}
+.dialog .dialog-notes .toast {
+  box-shadow: none;
+}
+.dialog .dialog-notes .toast span {
+  display: block;
 }
 .secret {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2366,15 +2387,7 @@ kbd {
   }
   .toast {
     flex: 1;
-    height: auto;
-    min-height: 32px;
     padding: 6px 12px;
-  }
-  .toast span {
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
   }
 }
 @media (max-width: 900px) {

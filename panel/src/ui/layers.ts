@@ -16,24 +16,57 @@ import { state, t } from '../state.ts';
 type Tone = 'play' | 'load' | 'pause' | 'bad';
 
 let toastTimer = 0;
+// The toast shown now, and when its time ends.
+let shown: { element: HTMLElement; ends: number } | null = null;
 
-/** Shows a short message in the bar: what happened, in a few words. */
+/**
+ * Shows a short message in the bar: what happened, in a few words. While a dialog is open the bar is under its shade,
+ * so the message is said in the dialog instead, and moves to the bar for the rest of its time if the dialog closes
+ * first.
+ */
 export function toast(message: string, tone: Tone = 'load', name: IconName = 'check'): void {
-  const box = document.querySelector('.toasts');
+  const box = toastBox();
   if (!box) return;
   window.clearTimeout(toastTimer);
+  shown?.element.remove();
   // Problems stay a little longer: they usually need reading.
   const lasts = tone === 'bad' ? 6000 : 3500;
   const element = h(
     'div',
     { class: `toast tone-${tone}`, role: tone === 'bad' ? 'alert' : 'status' },
     icon(name),
-    h('span', null, message),
+    // Two lines at most in the bar; a longer message is cut, and its whole text is the title.
+    h('span', { title: message, 'data-clip': 'ok' }, message),
   );
   // The line along its foot runs out in the same time.
   element.style.setProperty('--toast-ms', `${lasts}ms`);
   box.replaceChildren(element);
-  toastTimer = window.setTimeout(() => box.replaceChildren(), lasts);
+  const mine = { element, ends: Date.now() + lasts };
+  shown = mine;
+  toastTimer = window.setTimeout(() => {
+    element.remove();
+    if (shown === mine) shown = null;
+  }, lasts);
+}
+
+// Where a toast goes: the dialog on top, when one is open (its shade covers the bar), else the bar.
+function toastBox(): Element | null {
+  const top = layers.at(-1)?.element;
+  return top?.matches('.dialog') ? top.querySelector('.dialog-notes') : document.querySelector('.toasts');
+}
+
+// A dialog closing with a toast still in it: the toast goes on in the bar (or the dialog below) for the rest of its
+// time, its line running out from there.
+function handOver(from: HTMLElement): void {
+  if (!shown || !from.contains(shown.element)) return;
+  const left = shown.ends - Date.now();
+  const box = toastBox();
+  if (!box || left < 300) {
+    shown.element.remove();
+    return;
+  }
+  shown.element.style.setProperty('--toast-ms', `${left}ms`);
+  box.replaceChildren(shown.element);
 }
 
 /** Shows an error from an action as a toast, in the panel's language. */
@@ -165,6 +198,8 @@ function dialog<T>(
       off();
       scrim.remove();
       box.remove();
+      // A toast said in this dialog goes on where the next one is said (the bar, or the dialog below).
+      handOver(box);
       previous?.focus?.();
       resolve(value);
     };
@@ -175,6 +210,8 @@ function dialog<T>(
       h('div', { class: 'dialog-head' }, h('h2', null, parts.title)),
       parts.text ? h('p', { class: 'dialog-text' }, parts.text) : null,
       parts.content ? h('div', { class: 'dialog-content scroll' }, parts.content) : null,
+      // Toasts raised while this dialog is on top: its shade covers the bar where they are said otherwise.
+      h('div', { class: 'dialog-notes' }),
       h('div', { class: 'dialog-keys' }, ...parts.keys),
     );
     off = push(box, () => finish(cancel));

@@ -10,7 +10,8 @@
  * - contrast: text below 4.5:1 against what is really behind it (translucent layers composited), 3:1 when large;
  * - align: controls on one row of a group that differ in height or centre by more than 1px;
  * - crossing: a floating layer (toast, sheet, chart tip) whose edge cuts across another box;
- * - covered: the middle of a sheet or dialog is not the sheet or dialog (something is drawn over it);
+ * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
+ *   the bar's toast, a dialog's shade over the bar);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - sizes: the font sizes in use (reported, not a finding).
  *
@@ -146,7 +147,7 @@ window.__audit = () => {
     if (!clips || element.closest('.sr')) continue;
     if (element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 2) {
       // Allowed only where the whole text is also given (a title), and marked as such.
-      const allowed = element.closest('[data-clip="ok"]');
+      const allowed = element.closest('[data-clip="ok"]')?.getAttribute('title');
       if (!allowed)
         add(
           'clipped',
@@ -248,6 +249,17 @@ window.__audit = () => {
   for (const layer of layers) {
     const a = layer.getBoundingClientRect();
     if (layer.matches('.toast')) {
+      // Said in a dialog (its shade covers the bar): inside the dialog's own box.
+      const dialog = layer.closest('.dialog')?.getBoundingClientRect();
+      if (dialog) {
+        const out =
+          a.left < dialog.left - 0.5 ||
+          a.right > dialog.right + 0.5 ||
+          a.top < dialog.top - 0.5 ||
+          a.bottom > dialog.bottom + 0.5;
+        if (out) add('crossing', layer, 'outside its dialog');
+        continue;
+      }
       // A toast lives inside the top bar, or (on a narrow window) in the strip hanging right under it, as wide as the
       // window: the strip is part of the bar, and content passes under both.
       const barElement = document.querySelector('.bar');
@@ -285,8 +297,8 @@ window.__audit = () => {
     if (crossed > 0) add('crossing', layer, `${crossed} boxes: ${names.join(', ')}`);
   }
 
-  // The middle of a sheet or dialog must be the sheet or dialog (not a scrim drawn over it).
-  for (const layer of [...document.querySelectorAll('.sheet, .dialog')].filter(shown)) {
+  // The middle of a sheet, a dialog or a toast must be that layer (not a scrim or a sheet drawn over it).
+  for (const layer of [...document.querySelectorAll('.sheet, .dialog, .toast')].filter(shown)) {
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);
