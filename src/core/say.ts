@@ -124,6 +124,9 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ],
   // What the player did by itself (PlayerSnapshot.notice), after the track's title.
   ['taken out of the looping queue', '대기열 반복에서 뺌'],
+  // Pause and play on, when the player is that way already.
+  ['it is already paused', '이미 일시정지됨'],
+  ['the track is getting ready', '곡을 준비하는 중'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

@@ -528,6 +528,15 @@ export class Bot implements Directory {
       // The card itself is updated in place, so the channel does not fill with copies.
       await interaction.update(nowCard(snapshot, cardLang, this.options.panelUrl));
     } catch (error) {
+      // A card out of date (paused since, another track, nothing playing now): its key did nothing because the player
+      // is that way already. The card is drawn again from what plays now; a refusal left it wrong, and told the person
+      // "nothing is playing" about a paused track.
+      if (error instanceof ActionError && error.code === 'conflict') {
+        await interaction
+          .update(nowCard(actions.nowPlaying(context), cardLang, this.options.panelUrl))
+          .catch((failure: unknown) => this.options.log.debug('could not draw a card again', { error: failure }));
+        return;
+      }
       await this.fail(interaction, error);
     }
   }

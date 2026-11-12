@@ -155,6 +155,27 @@ describe('Actions resume', () => {
     assert.equal(actions.nowPlaying(DJ).status, 'idle');
     // After a stop the play key starts the queue again.
     assert.equal(actions.resume(DJ).status, 'loading');
-    assert.throws(() => actions.resume(DJ), /already playing/);
+    // While it gets ready it is on its way to playing, which is what is said (it is not playing yet).
+    assert.throws(() => actions.resume(DJ), /^ActionError: the track is getting ready$/);
+  });
+
+  it('says a paused track is already paused, not that nothing is playing', async () => {
+    const { actions, media } = setup();
+    await actions.add(DJ, 'one');
+    media.finish(180_000);
+    await flush();
+    actions.pause(DJ);
+    // A second press of Pause (/pause twice, two people at once, an old card's key).
+    assert.throws(() => actions.pause(DJ), /^ActionError: it is already paused$/);
+    actions.resume(DJ);
+    assert.throws(() => actions.resume(DJ), /^ActionError: it is already playing$/);
+    // Paused while it loads: it starts paused, which a second pause also says.
+    await actions.add(DJ, 'two');
+    actions.skip(DJ);
+    actions.pause(DJ);
+    assert.throws(() => actions.pause(DJ), /^ActionError: it is already paused$/);
+    // And with nothing at all, nothing is playing.
+    actions.stop(DJ);
+    assert.throws(() => actions.pause(DJ), /^ActionError: nothing is playing$/);
   });
 });

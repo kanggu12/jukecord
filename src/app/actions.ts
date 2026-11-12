@@ -320,8 +320,10 @@ export class Actions {
   pause(context: ActionContext): PlayerSnapshot {
     this.control(context);
     const player = this.options.players.get(context.guildId);
-    if (!player.pause()) throw new ActionError('conflict', 'nothing is playing');
-    return player.snapshot();
+    if (player.pause()) return player.snapshot();
+    // Nothing changed: either it is paused already (or will start paused), or there is nothing to pause.
+    const status = player.snapshot().status;
+    throw new ActionError('conflict', status === 'idle' ? 'nothing is playing' : 'it is already paused');
   }
 
   /**
@@ -332,9 +334,16 @@ export class Actions {
     this.control(context);
     const player = this.options.players.get(context.guildId);
     if (player.resume() || player.play()) return player.snapshot();
-    // Neither worked: either something is already playing, or there is nothing to start.
-    const idle = player.snapshot().status === 'idle';
-    throw new ActionError('conflict', idle ? 'the queue is empty' : 'it is already playing');
+    // Neither worked: there is nothing to start, a track is getting ready to play, or one is playing.
+    const status = player.snapshot().status;
+    throw new ActionError(
+      'conflict',
+      status === 'idle'
+        ? 'the queue is empty'
+        : status === 'loading'
+          ? 'the track is getting ready'
+          : 'it is already playing',
+    );
   }
 
   /** Moves to a place in the current track, in milliseconds from the start. */

@@ -31,6 +31,18 @@ describe('sayError', () => {
     }
   });
 
+  it('has Korean for pausing what is paused, playing on what gets ready, and the MP3 copy being made', () => {
+    assert.equal(sayError('it is already paused', 'ko'), '이미 일시정지됨');
+    assert.equal(sayError('the track is getting ready', 'ko'), '곡을 준비하는 중');
+    assert.equal(sayError('it is already paused', 'en'), 'It is already paused');
+    assert.notEqual(
+      sayError('jukecord is making the MP3 copy of this track; try again in a moment', 'ko'),
+      'jukecord is making the MP3 copy of this track; try again in a moment',
+    );
+    // A track taken out of a loop, after its title.
+    assert.equal(sayFailure('Neon Rain: taken out of the looping queue', 'ko'), 'Neon Rain: 대기열 반복에서 뺌');
+  });
+
   it('has Korean for why a live connection, a change or audio is turned away', () => {
     for (const reason of [
       'too many changes at once; try again in a moment',
