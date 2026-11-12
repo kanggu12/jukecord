@@ -524,7 +524,9 @@ export function waitingPage(status: Status | null, text: string): HTMLElement {
 export function loginPage(status: Status | null, error: string | null): HTMLElement {
   const words = t();
   const next = new URLSearchParams(location.search).get('next') ?? '/';
-  const message = error ? (words.loginErrors[error] ?? error) : null;
+  // Only the panel's own words for the errors it knows: the address's text is anyone's to write, and the page must not
+  // say it in jukecord's name. Another code says only that the login did not go through.
+  const message = error ? (words.loginErrors[error] ?? words.loginFailed) : null;
   return h(
     'main',
     { class: 'login' },

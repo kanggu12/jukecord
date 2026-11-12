@@ -2733,8 +2733,9 @@ kbd {
   .volume input {
     height: 44px;
   }
-  /* The logo is a link home: a finger's size too, even where only the mark shows. */
-  .brand {
+  /* The bar's logo is a link home: a finger's size too, even where only the mark shows. (The login card's name row
+     is not a link, and stays where the card's words start.) */
+  .bar .brand {
     min-height: 44px;
     min-width: 44px;
     justify-content: center;
@@ -2742,7 +2743,7 @@ kbd {
   /* Where only the mark shows, the extra width reaches into the bar's padding and the gap beside it, so the mark
      stays where it was and the bar's other parts keep their room. */
   @media (max-width: 400px) {
-    .brand {
+    .bar .brand {
       margin-inline: -9px;
     }
   }
