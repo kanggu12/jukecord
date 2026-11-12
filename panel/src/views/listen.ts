@@ -127,23 +127,35 @@ export function listenBar(live: Live): HTMLElement {
 
   // Failures of the playing track: the file is asked for again on the next check (the server may be busy making an
   // MP3 copy, or restarting), a second Opus failure switches this page to MP3 (some Safari versions claim Opus and
-  // cannot play it), and the fourth says so in the bar. A new track starts the count again.
+  // cannot play it), and the fourth says so in the bar. A new track starts the count again. An answer that only says
+  // "not now" (503: jukecord is busy; 409: the track is not ready yet) is not counted: the audio element cannot tell
+  // it from a format it cannot play, so the server is asked (one byte) before the failure counts.
   let failures = 0;
   let failedTrack: number | null = null;
   audio.onerror = () => {
     const track = state.player?.track?.id ?? null;
-    if (track !== failedTrack) {
-      failedTrack = track;
-      failures = 0;
-    }
-    failures += 1;
-    if (format === 'opus' && failures >= 2) format = 'mp3';
-    if (failures >= 4) {
-      setSync('failed');
-      return;
-    }
-    loaded = null;
-    setSync('catching');
+    const source = audio.currentSrc || audio.src;
+    void notNow(source).then((later) => {
+      // A newer track or source meanwhile: this failure is about one no longer played.
+      if ((state.player?.track?.id ?? null) !== track || (audio.currentSrc || audio.src) !== source) return;
+      if (later) {
+        loaded = null;
+        setSync('catching');
+        return;
+      }
+      if (track !== failedTrack) {
+        failedTrack = track;
+        failures = 0;
+      }
+      failures += 1;
+      if (format === 'opus' && failures >= 2) format = 'mp3';
+      if (failures >= 4) {
+        setSync('failed');
+        return;
+      }
+      loaded = null;
+      setSync('catching');
+    });
   };
   // Buffering counts as catching up only while a track plays; play() on an empty element fires it too.
   audio.onwaiting = () => {
@@ -315,4 +327,18 @@ export function listenBar(live: Live): HTMLElement {
   }, 2000);
   draw();
   return bar;
+}
+
+// Whether jukecord answers a track's address with "not now" (busy, or not ready yet) rather than with the audio.
+async function notNow(source: string): Promise<boolean> {
+  if (!source) return false;
+  try {
+    const answer = await fetch(source, { headers: { range: 'bytes=0-0' }, credentials: 'same-origin' });
+    // Only the status is wanted; the one byte (or the refusal) is left unread.
+    void answer.body?.cancel();
+    return answer.status === 503 || answer.status === 409;
+  } catch {
+    // jukecord not answering at all is a lost connection, which the live connection already says.
+    return true;
+  }
 }

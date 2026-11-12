@@ -73,6 +73,14 @@ from there, adding only its own part (its voice channels). There are at most `JU
 ten per login and twenty per address; one more is closed at once with 1013 and the reason, which the panel shows
 before it tries again, later than after a drop.
 
+## When it is busy
+
+Changes are held to a rate per login and per address (token buckets: ten a second with twenty at once, and two a
+second for the ones that start a fetch, like skip), answered with 429 and Retry-After beyond it. One process serves
+every server, so while its event loop has fallen behind (the 99th percentile of its delay over the last second above
+0.2 s) it turns away what can wait, audio and changes from anyone but the host, with 503 and Retry-After until it has
+caught up. The voice of every server and the panels' live updates are what it catches up on.
+
 ## Getting a track
 
 The resolver turns what was typed into tracks: an address seen before without asking the site, anything else through

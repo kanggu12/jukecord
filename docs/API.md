@@ -57,7 +57,18 @@ Every error is the same shape, with the HTTP status that matches its code:
 |    404 | `not-found`    | no such server, queue item, playlist or token                                  |
 |    409 | `conflict`     | not possible now: nothing is playing, the queue is full                        |
 |    429 | `too-many`     | too many failed logins from this address                                       |
+|    429 | `rate-limited` | changes faster than the rates below; `Retry-After` says when to try again      |
 |    503 | `unavailable`  | a part jukecord needs is missing: no bot (browser-only), Discord not answering |
+|    503 | `busy`         | jukecord has fallen behind and turns away what can wait; `Retry-After` too     |
+
+### Rates and busy moments
+
+Changes (`POST`, `PUT`, `PATCH`, `DELETE`) are held to ten a second per login and per address, with twenty at once,
+and the changes that start fetching a track at once (`skip`, `play-now`, `jump`, `remove-current`) to two a second
+with five at once. A change over the rate is answered with `429` (`rate-limited`) and `Retry-After` in seconds; reads
+are not limited. While jukecord has fallen behind (its event loop more than 0.2 s late over the last second), audio
+and changes are answered with `503` (`busy`) and `Retry-After`, until it has caught up. The host (its command line and
+the browsers it logged in with a link) is held to neither.
 
 ## Servers
 

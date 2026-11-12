@@ -63,6 +63,10 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     /^"(.+)" is not a time in the track \(examples: 83, 1:23, 1m23s\)$/,
     '"$1"은 곡 안의 시간이 아님(예: 83, 1:23, 1m23s)',
   ],
+  // Changes faster than the rates allow (429), and work turned away while jukecord is behind (503).
+  ['too many changes at once; try again in a moment', '한꺼번에 너무 많이 바꿈: 잠시 뒤 다시'],
+  ['too many skips at once; try again in a moment', '한꺼번에 너무 많이 넘김: 잠시 뒤 다시'],
+  ['jukecord is busy; try again in a moment', 'jukecord가 바쁨: 잠시 뒤 다시'],
   // Why a live connection was turned away (1013), which the panel shows.
   ['jukecord has as many live connections as it allows', 'jukecord의 실시간 연결이 가득 참'],
   [

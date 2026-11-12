@@ -106,3 +106,13 @@ cut off. Sending only what changed would be smaller still, but every panel would
 and ask again after a gap. Instead the queue's messages are combined (at most four a second, each with the latest
 queue) and each message is compressed once, as gzip that the browser unpacks itself (`DecompressionStream`), and sent
 as the same bytes to every panel; a client that cannot unpack gzip gets the JSON as text.
+
+## Rates per login and address, and shedding by the event loop's delay
+
+One script, or a crowd pressing skip, could make jukecord do more than one process can: each skip starts yt-dlp and
+ffmpeg, and each change goes out to every panel. Changes are held to a rate per login and per address, so one source
+cannot crowd out the others, and the host (its own command line) is not held to it. When jukecord is behind anyway,
+the measure is the event loop's delay rather than the processor's use: a busy processor is fine while the loop keeps
+up, and the loop's delay is what the voice of every server and every panel feel. Work that can be asked for again in
+a moment (audio, changes) is then turned away at once with 503, which costs almost nothing, instead of being queued
+behind work nobody can see.

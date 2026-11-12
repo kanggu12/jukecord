@@ -23,9 +23,10 @@ import { MediaCache } from '../media/cache.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
-import { type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
+import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
+import { Buckets, CHANGES, FETCHES, Pressure, type Rate } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
 
 export interface WebServerOptions {
@@ -50,6 +51,10 @@ export interface WebServerOptions {
   /** Whether jukecord can serve requests (for /readyz). */
   readonly ready: () => boolean;
   readonly discordReady: () => boolean;
+  /** The rates changes are held to, and the clock they are counted on (tests set both). */
+  readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
+  /** Whether jukecord has fallen behind and sheds what can wait (tests set it; by default the event loop says). */
+  readonly behind?: () => boolean;
 }
 
 export interface WebServer {
@@ -74,12 +79,33 @@ const STATUS: Readonly<Record<string, number>> = {
   'not-found': 404,
   conflict: 409,
   'too-many': 429,
+  'rate-limited': 429,
   unavailable: 503,
+  busy: 503,
 };
+
+// The changes that start a fetch somebody waits for (yt-dlp and ffmpeg, at once): the tighter rate applies to them.
+const FETCHING: ReadonlySet<OperationName> = new Set(['skip', 'play-now', 'jump', 'remove-current']);
+
+// What a refusal says when jukecord sheds work it can do later, and when a login or an address sends changes faster
+// than the rates allow.
+const BUSY = 'jukecord is busy; try again in a moment';
+const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
+const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 
 // The answer for an error, in the one shape every API error has.
 function failure(reply: FastifyReply, code: string, message: string): FastifyReply {
   return reply.code(STATUS[code] ?? 500).send({ error: { code, message } });
+}
+
+// A refusal that says when to try again (Retry-After, in whole seconds).
+function later(reply: FastifyReply, code: string, message: string, ms: number): FastifyReply {
+  return failure(reply.header('retry-after', String(Math.max(1, Math.ceil(ms / 1000)))), code, message);
+}
+
+// The key a caller's changes are counted under: its session, or its API token.
+function loginKey(caller: Caller): string {
+  return caller.sessionHash ? `session ${caller.sessionHash}` : `token ${caller.tokenId ?? 'host'}`;
 }
 
 // OpenAPI paths use {name}; Fastify uses :name.
@@ -131,6 +157,13 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     stillValid: (caller) => auth.stillValid(caller),
     limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
   });
+
+  // The rates of changes, per login and per address, and whether the event loop has fallen behind.
+  const clock = options.rates?.now ?? Date.now;
+  const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
+  const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
+  const pressure = options.behind ? null : new Pressure();
+  const behind = options.behind ?? (() => pressure?.behind ?? false);
 
   // Responses by status class, for /metrics.
   const responses = new Map<string, number>();
@@ -271,6 +304,19 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         ) {
           return failure(reply, 'forbidden', "the change came without the panel's CSRF token; reload the panel");
         }
+        // A change from anyone but the host waits while jukecord is behind, and is held to the rates: one token from
+        // its login's bucket and one from its address's (and from the tighter buckets for a change that starts a
+        // fetch). Nothing is taken from any bucket unless every one has a token, so a refusal costs nothing.
+        if (spec.method !== 'GET' && caller && caller.principal.kind !== 'host') {
+          if (behind()) return later(reply, 'busy', BUSY, 2000);
+          const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
+          const fetching = FETCHING.has(name);
+          const forFetch = fetching ? fetches.wait(keys) : 0;
+          const wait = Math.max(changes.wait(keys), forFetch);
+          if (wait > 0) return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
+          changes.take(keys);
+          if (fetching) fetches.take(keys);
+        }
         const params = (request.params ?? {}) as Record<string, unknown>;
         const context =
           typeof params.guild === 'string' && caller ? await deps.access.context(caller.principal, params.guild) : null;
@@ -292,6 +338,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   app.get<{ Params: { guild: string; track: string }; Querystring: { format?: string } }>(
     `${API_PREFIX}/guilds/:guild/tracks/:track/audio`,
     async (request, reply) => {
+      // Sending audio is the heaviest thing jukecord does for a browser; while it is behind, the browser asks again in
+      // a moment (the panel does not take this for a format it cannot play).
+      if (behind()) return later(reply, 'busy', BUSY, 2000);
       // An address that failed too often is refused here too, for a credential that does not work.
       const { caller, blocked } = identify(request, reply);
       if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
@@ -428,7 +477,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (request.headers['x-forwarded-for'] !== undefined || !isPrivateAddress(peer)) {
       return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
     }
-    return reply.type('text/plain; version=0.0.4').send(metrics(options, hub, responses));
+    return reply.type('text/plain; version=0.0.4').send(metrics(options, hub, responses, pressure));
   });
 
   // Anything else: the panel's page for a browser asking for a page (the panel draws /stats, /login ... itself), a
@@ -450,6 +499,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     listen: () => app.listen({ host: options.host, port: options.port }),
     close: async () => {
       hub.close();
+      pressure?.stop();
       await app.close();
     },
   };
@@ -465,7 +515,12 @@ function sameOrigin(request: FastifyRequest, publicUrl: string): boolean {
 }
 
 // The Prometheus text: what is playing, queues, the cache, the panels, and the answers given.
-function metrics(options: WebServerOptions, hub: EventHub, responses: Map<string, number>): string {
+function metrics(
+  options: WebServerOptions,
+  hub: EventHub,
+  responses: Map<string, number>,
+  pressure: Pressure | null,
+): string {
   const lines: string[] = [];
   const gauge = (name: string, help: string, values: [string, number][]) => {
     lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`);
@@ -499,6 +554,12 @@ function metrics(options: WebServerOptions, hub: EventHub, responses: Map<string
   gauge('jukecord_cache_tracks', 'Tracks in the media cache.', [['', options.cache.count()]]);
   gauge('jukecord_panel_connections', 'Open live connections from panels.', [['', counts.connections]]);
   gauge('jukecord_browser_listeners', 'Browsers playing along.', [['', counts.listening]]);
+  // How far behind the event loop is: above 0.2 s, audio and changes from anyone but the host are turned away.
+  if (pressure) {
+    gauge('jukecord_event_loop_delay_seconds', "The 99th percentile of the event loop's delay over the last second.", [
+      ['', Math.round(pressure.delayMs) / 1000],
+    ]);
+  }
   lines.push('# HELP jukecord_http_responses_total Answers given, by status class.');
   lines.push('# TYPE jukecord_http_responses_total counter');
   for (const [group, count] of [...responses.entries()].sort())

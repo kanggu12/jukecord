@@ -24,6 +24,7 @@ import type { Resolver } from '../../src/media/resolver.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
+import type { Rate } from '../../src/web/limits.ts';
 import { Presenter } from '../../src/web/present.ts';
 import { createWebServer, type WebServer } from '../../src/web/server.ts';
 import { FakeClock, FakeMedia } from './fakes.ts';
@@ -131,6 +132,9 @@ export interface TestServerOptions {
   readonly found?: Record<string, NewTrack[]>;
   /** The caps on live connections (lower than the defaults to test them). */
   readonly live?: Partial<LiveLimits>;
+  /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
+  readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
+  readonly behind?: () => boolean;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -203,6 +207,9 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     mp3: async () => null,
     log,
     ...(options.live ? { live: options.live } : {}),
+    ...(options.rates ? { rates: options.rates } : {}),
+    // Never behind unless a test says so: a busy test machine must not make changes fail at random.
+    behind: options.behind ?? (() => false),
     ready: () => true,
     discordReady: () => !options.browserOnly,
     deps: {

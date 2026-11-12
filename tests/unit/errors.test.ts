@@ -31,8 +31,11 @@ describe('sayError', () => {
     }
   });
 
-  it('has Korean for why a live connection is turned away', () => {
+  it('has Korean for why a live connection, a change or audio is turned away', () => {
     for (const reason of [
+      'too many changes at once; try again in a moment',
+      'too many skips at once; try again in a moment',
+      'jukecord is busy; try again in a moment',
       'jukecord has as many live connections as it allows',
       'too many live connections for this login; close a tab or two',
       'too many live connections from this address; close a tab or two',
