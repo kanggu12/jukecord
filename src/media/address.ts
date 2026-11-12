@@ -90,18 +90,37 @@ export class NoAnswerError extends Error {
 }
 
 // The resolver's codes for a question that got no answer, as opposed to "no such name".
-const NO_ANSWER = new Set(['ETIMEOUT', 'ECONNREFUSED', 'ESERVFAIL', 'EAI_AGAIN', 'ECANCELLED', 'ECONNRESET']);
+const NO_ANSWER = new Set(['ETIMEOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'ECANCELLED', 'ECONNRESET']);
+
+// Whether the name servers reach the internet's own: the root zone's servers are named by any resolver that does.
+async function reachesRoot(servers: NameServers): Promise<boolean> {
+  try {
+    await servers.resolveNs('.');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The questions resolveAll asks (the module's resolver, or a test's). */
+export type NameServers = Pick<dns.Resolver, 'resolve4' | 'resolve6' | 'resolveNs'>;
 
 /** A name's IPv4 and IPv6 addresses; throws when it has none (NoAnswerError when no name server answered). */
-export async function resolveAll(host: string): Promise<string[]> {
-  const [v4, v6] = await Promise.allSettled([resolver.resolve4(host), resolver.resolve6(host)]);
+export async function resolveAll(host: string, servers: NameServers = resolver): Promise<string[]> {
+  const [v4, v6] = await Promise.allSettled([servers.resolve4(host), servers.resolve6(host)]);
   const found = [...(v4.status === 'fulfilled' ? v4.value : []), ...(v6.status === 'fulfilled' ? v6.value : [])];
   if (found.length === 0) {
-    // Both questions unanswered: this machine reaches no name server, which says nothing about the name.
-    const unanswered = [v4, v6].every(
-      (result) => result.status === 'rejected' && NO_ANSWER.has(String((result.reason as { code?: unknown })?.code)),
+    const codes = [v4, v6].map((result) =>
+      result.status === 'rejected' ? String((result.reason as { code?: unknown })?.code) : 'ENODATA',
     );
-    if (unanswered) throw new NoAnswerError(`no name server answered for ${host}`);
+    // Both questions unanswered: this machine reaches no name server, which says nothing about the name.
+    const unanswered = codes.every((code) => NO_ANSWER.has(code));
+    // A name server answered that it failed (SERVFAIL): the site's own DNS is broken, or a resolver in between (Docker's,
+    // systemd's) reaches nothing upstream and says so for every name. The root's servers tell the two apart.
+    const failed = !unanswered && codes.every((code) => NO_ANSWER.has(code) || code === 'ESERVFAIL');
+    if (unanswered || (failed && !(await reachesRoot(servers)))) {
+      throw new NoAnswerError(`no name server answered for ${host}`);
+    }
     throw new Error(`${host} does not resolve`);
   }
   return found;

@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createLogger } from '../../src/log.ts';
-import { AddressError, isPrivateAddress, publicAddressesOnly } from '../../src/media/address.ts';
+import {
+  AddressError,
+  isPrivateAddress,
+  NoAnswerError,
+  publicAddressesOnly,
+  resolveAll,
+} from '../../src/media/address.ts';
 import { BusyError } from '../../src/media/busy.ts';
 import { Resolver } from '../../src/media/resolver.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
@@ -173,5 +179,36 @@ describe('Resolver limits', () => {
     await new Promise((resolve) => setImmediate(resolve));
     waiting.at(-1)?.();
     await again;
+  });
+});
+
+describe('resolveAll', () => {
+  // Name servers that answer each question with an error code, or the root's servers with an answer.
+  const servers = (codes: { names: string; root: string | null }) => {
+    const fail = (code: string) => Promise.reject(Object.assign(new Error(code), { code }));
+    return {
+      resolve4: () => fail(codes.names),
+      resolve6: () => fail(codes.names),
+      resolveNs: () => (codes.root ? fail(codes.root) : Promise.resolve(['a.root-servers.net'])),
+    } as never;
+  };
+
+  it("tells a site's broken DNS (SERVFAIL, the internet reachable) from no network", async () => {
+    // A name server answered that it failed for this name, and the root's servers answer: the site's DNS is broken.
+    await assert.rejects(
+      resolveAll('broken.example', servers({ names: 'ESERVFAIL', root: null })),
+      (error: unknown) => !(error instanceof NoAnswerError) && /does not resolve/.test(String(error)),
+    );
+    // A resolver in between that reaches nothing upstream (Docker's, systemd's) answers SERVFAIL for every name, the
+    // root's included: no network.
+    await assert.rejects(
+      resolveAll('site.example', servers({ names: 'ESERVFAIL', root: 'ESERVFAIL' })),
+      (error: unknown) => error instanceof NoAnswerError,
+    );
+    // No answer at all: no network, without asking the root.
+    await assert.rejects(
+      resolveAll('site.example', servers({ names: 'ETIMEOUT', root: null })),
+      (error: unknown) => error instanceof NoAnswerError,
+    );
   });
 });
