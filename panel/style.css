@@ -3166,8 +3166,8 @@ button.lyric:hover {
 
 /* ---- listening together: the light that moves with the music ------------------------------------------------- */
 /* While this browser listens, the glow behind the disc and the light behind the glass follow the music's low end
-   (views/light.ts sets their opacity and scale, the two things a browser changes without drawing again). At rest these
-   layers are not seen, and the look is the one above. */
+   (views/light.ts sets their opacity, which a browser changes without drawing again or sorting its layers anew). At
+   rest these layers are not seen, and the look is the one above. */
 .art .beat {
   position: absolute;
   inset: 6%;
@@ -3177,17 +3177,19 @@ button.lyric:hover {
   filter: blur(26px) saturate(1.6);
   opacity: 0;
   transform: scale(1.1);
-  will-change: opacity, transform;
+  will-change: opacity;
   pointer-events: none;
 }
+/* The glow's wider layer, further out and softer, seen only on the loudest beats: the glow seems to swell with them
+   while nothing changes size. */
+.art .beat.wide {
+  filter: blur(34px) saturate(1.6);
+  transform: scale(1.32);
+}
 /* The field's extra light: the cover again (its place and blur are the field's layers', above), with no fade of its
-   own, as it follows the music frame by frame. */
+   own, as it follows the music 20 times a second. */
 .ambient > .beat {
   transition: none;
-}
-/* The field as a whole comes a little closer with the low end: its own layer, so that moves without drawing it. */
-.ambient {
-  will-change: transform;
 }
 @media (forced-colors: active) {
   .art .beat {

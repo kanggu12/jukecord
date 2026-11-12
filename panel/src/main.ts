@@ -375,10 +375,10 @@ function frame(): void {
   document.body.prepend(ambient);
   const layers = [...ambient.children] as HTMLElement[];
   // A third layer of the same cover, unseen at rest, that brightens with the music's low end while this browser
-  // listens (light.ts); the field itself comes a little closer with it.
+  // listens (light.ts).
   const beat = h('div', { class: 'beat' });
   ambient.append(beat);
-  lightField(ambient, beat);
+  lightField(beat);
   // The cover asked for (the track playing now), the one on the top layer, and which layer is on top.
   let ambientCover: string | null = null;
   let shownCover: string | null = null;

@@ -162,10 +162,16 @@ The light needs the music's low end, which only WebAudio can measure. Routing th
 AudioContext (createMediaElementSource) would make the sound itself depend on WebAudio: on a phone that suspends audio
 contexts in the background, listening on a locked screen would stop. So the analyser reads a copy of the element's
 stream (captureStream), and the sound plays as it always did. Browsers without it (Safari, and Firefox, whose
-mozCaptureStream silences the element it copies) keep the glow's slow breathing. Only opacity and transform change, at
-most about 35 times a second and only when the change shows, and nothing runs, the audio context suspended, while the
-tab is hidden, the music is paused or not heard here, or motion is off: at rest the panel does exactly what it did
-before.
+mozCaptureStream silences the element it copies) keep the glow's slow breathing. Only opacity changes, 20 times a second
+at most, on a timer, and only when the change shows: the glow seems to swell because a wider layer of it fades in on the
+loudest beats. Measured in Chromium on a GPU (ten seconds of listening, a bass line playing), a first version that
+changed opacity and scale at every animation frame took the main thread 1.5 to 1.9 s, against 0.2 s for the panel
+without it: asking for every frame made the browser run its style and layer passes 60 times a second whether or not
+anything had changed, and each change of scale made it sort its layers anew. This one took 0.54 s in the same
+conditions, with about 18 style passes a second (8 without it, 64 for the first version) and the same frames, paints and
+layouts as without it; on a busy machine its time stays within the spread of the panel's own. Nothing runs, the audio
+context suspended, while the tab is hidden, the music is paused or not heard here, or motion is off: at rest the panel
+does exactly what it did before (paused: no frames, style passes, layouts or paints, as without it).
 
 ## The panel as an app
 
