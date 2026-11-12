@@ -87,6 +87,9 @@ async function boot(): Promise<void> {
 
 // The live connection, made once the frame is up.
 let live: Live;
+// Whether it has been open for the server shown: until then the bar says "Connecting", after that "Reconnecting" (a
+// server switch starts again from "Connecting", as the card does: nothing was lost).
+let everOpen = false;
 
 function frame(): void {
   live = new Live({
@@ -112,8 +115,7 @@ function frame(): void {
     },
   });
 
-  // Whether the live connection has been open once: until then the bar says "Connecting", after that "Reconnecting".
-  let everOpen = false;
+  // Open for the server shown: a drop from now on is a reconnection.
   watch(['live'], () => {
     if (state.live === 'open') everOpen = true;
   });
@@ -344,6 +346,7 @@ function choose(id: string): void {
   keep('guild', guild.id);
   // An open sheet (the menu with the old server's DJ role) belongs to the server it was opened for.
   closeSheets();
+  everOpen = false;
   update({ guild, player: null, queue: null, voice: null, listeners: { people: [], count: 0 }, history: [] });
   live.show(guild.id);
   void refreshHistory();

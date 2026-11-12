@@ -386,7 +386,8 @@ export function queueCard(): HTMLElement {
 
   // Dragging a row by its grip: which item, and where it would land.
   let dragged: QueueItem | null = null;
-  // The items drawn last time (null before the first state), so a row that is new can slide in.
+  // The items drawn last time (null before the first state, and again after a server switch), so a row that is new
+  // can slide in.
   let drawnIds: Set<number> | null = null;
   // The search the rows were last drawn for: rows glide only from one unfiltered drawing to the next (the rows of a
   // search that ends are not where they were drawn, and would glide over each other).
@@ -812,6 +813,8 @@ export function queueCard(): HTMLElement {
   // Another server starts again from its first rows (watched before the drawing, which then uses it).
   watch(['guild'], () => {
     shownLimit = PAGE;
+    // The new server's rows are not new to its queue: none slides in as if just added.
+    drawnIds = null;
   });
   watch(['queue', 'lang', 'guild', 'me'], draw);
   watch(['player'], () => {
