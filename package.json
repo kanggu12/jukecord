@@ -22,7 +22,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.6.6",
     "@types/node": "24.19.2",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "esbuild": "0.28.2",
     "typescript": "7.0.2"
   },
@@ -32,6 +32,6 @@
     "@fastify/websocket": "11.3.7",
     "discord.js": "14.28.1",
     "fastify": "5.12.8",
-    "typebox": "1.4.4"
+    "typebox": "1.4.6"
   }
 }
