@@ -26,6 +26,7 @@ import { MediaCache } from './media/cache.ts';
 import { startEgressGuard } from './media/egress.ts';
 import { publicFetch } from './media/fetch.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
+import { Links } from './media/links.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
@@ -164,6 +165,15 @@ async function main(): Promise<number> {
   const fetchOut = publicFetch({ allowPrivate: config.media.allowPrivate });
   // Lookups that come in lists (an imported playlist, a link's tracks), three at a time across every list.
   const batch = new BatchLookups();
+  const links = new Links({
+    fetch: fetchOut,
+    ytdlp,
+    tracks: store.tracks,
+    batch,
+    log: log.child('links'),
+    services: config.links.services,
+    spotify: config.links.spotify,
+  });
   // A track when a queue runs out, for the servers that turn autoplay on.
   const autoplay = new Autoplay({
     bus,
@@ -190,6 +200,7 @@ async function main(): Promise<number> {
     autoplay,
     ...(checkAddress ? { checkAddress } : {}),
     batch,
+    links,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);

@@ -83,6 +83,9 @@ export const AddResultSchema = Type.Object(
     items: Type.Array(QueueItemSchema),
     skippedTooLong: Type.Integer(),
     skippedFull: Type.Integer(),
+    skippedNotFound: Type.Integer({
+      description: 'Tracks of a Deezer, Spotify or Apple Music link not found on YouTube',
+    }),
   },
   { title: 'AddResult' },
 );

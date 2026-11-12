@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { LINK_SERVICES, type LinkService } from './media/links.ts';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
 /** How much the logger writes; each level includes the ones after it. */
@@ -71,6 +72,13 @@ export interface Config {
   };
   /** Settings that were read but look wrong without being fatal (an unknown JUKECORD_ variable, mostly typos). */
   readonly warnings: readonly string[];
+  /** Links of other music services jukecord reads (and finds on YouTube). */
+  readonly links: {
+    /** The services read (JUKECORD_LINK_SERVICES); a link of another is refused. */
+    readonly services: ReadonlySet<LinkService>;
+    /** The host's own Spotify app, for Spotify albums and playlists; null without one. */
+    readonly spotify: { readonly clientId: string; readonly clientSecret: string } | null;
+  };
 }
 
 /** Settings that cannot be used; `problems` lists every one, each naming the variable. */
@@ -120,6 +128,10 @@ const KNOWN = new Set([
   'JUKECORD_IMAGE',
   // Set by compose.yaml from JUKECORD_PORT: the port outside the container.
   'JUKECORD_PUBLISHED_PORT',
+  'JUKECORD_LINK_SERVICES',
+  'JUKECORD_SPOTIFY_CLIENT_ID',
+  'JUKECORD_SPOTIFY_CLIENT_SECRET',
+  'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
@@ -324,6 +336,32 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     files: read('JUKECORD_LOG_FILES', 5, integer(1, 50)),
   };
 
+  // Links of other music services: which are read (all by default; "none" for none), and the host's Spotify app.
+  const services = read('JUKECORD_LINK_SERVICES', new Set<LinkService>(LINK_SERVICES), (text) => {
+    if (/^(none|off)$/i.test(text.trim())) return new Set<LinkService>();
+    const names = text
+      .toLowerCase()
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    const unknown = names.filter((name) => !LINK_SERVICES.includes(name as LinkService));
+    if (unknown.length > 0)
+      throw new Error(`"${unknown.join(', ')}" is not one of ${LINK_SERVICES.join(', ')} (or none)`);
+    return new Set(names as LinkService[]);
+  });
+  const spotifyId = read('JUKECORD_SPOTIFY_CLIENT_ID', null as string | null, (text) => {
+    // A Spotify app's client ID: letters and digits (32 of them).
+    if (!/^[A-Za-z0-9]{16,64}$/.test(text)) throw new Error('a Spotify client ID is letters and digits');
+    return text;
+  });
+  const spotifySecret = secret('JUKECORD_SPOTIFY_CLIENT_SECRET');
+  // One without the other cannot be used: a mistake worth stopping for, as Discord's are.
+  if ((spotifyId === null) !== (spotifySecret === null))
+    problems.push('set both JUKECORD_SPOTIFY_CLIENT_ID and JUKECORD_SPOTIFY_CLIENT_SECRET, or neither');
+  const links = {
+    services,
+    spotify: spotifyId && spotifySecret ? { clientId: spotifyId, clientSecret: spotifySecret } : null,
+  };
+
   // Unknown JUKECORD_ variables are not fatal, but they are almost always a misspelt setting that silently does nothing.
   for (const name of Object.keys(env).sort()) {
     if (name.startsWith('JUKECORD_') && !KNOWN.has(name)) warnings.push(`${name} is not a jukecord setting`);
@@ -346,6 +384,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     voice,
     log,
     warnings,
+    links,
   };
 }
 
@@ -378,5 +417,8 @@ export function describeConfig(config: Config): Record<string, string> {
     'queue limit': String(config.queueMax),
     'live connections limit': String(config.liveMax),
     'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
+    'links read': config.links.services.size > 0 ? [...config.links.services].join(', ') : 'none',
+    'spotify app': config.links.spotify?.clientId ?? 'not set',
+    'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
   };
 }

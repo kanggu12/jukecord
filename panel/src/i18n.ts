@@ -281,6 +281,8 @@ const EN = {
   imported: (name: string, n: number, left: number) =>
     `Imported "${name}": ${n === 1 ? '1 track' : `${n} tracks`}${left > 0 ? ` · ${left} left out` : ''}`,
   fileTooLarge: 'The file is larger than 1 MiB',
+  // Links of other services.
+  leftNotFound: (n: number) => `${n} left out: not found on YouTube`,
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -546,6 +548,7 @@ const KO: Strings = {
   importing: '가져오는 중',
   imported: (name: string, n: number, left: number) => `"${name}" 가져옴: ${n}곡${left > 0 ? ` · ${left}곡 빠짐` : ''}`,
   fileTooLarge: '1MiB보다 큰 파일',
+  leftNotFound: (n: number) => `${n}곡은 YouTube에서 못 찾아 뺌`,
 };
 
 /** The languages. */

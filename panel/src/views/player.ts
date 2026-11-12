@@ -1267,12 +1267,20 @@ function importDialog(done: () => void): void {
 }
 
 // What an add did, as a toast: how many went in and what was left out.
-function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: number }): void {
+function added(result: {
+  items: unknown[];
+  skippedTooLong: number;
+  skippedFull: number;
+  skippedNotFound?: number;
+}): void {
   const words = t();
   const parts = [words.added(result.items.length)];
   if (result.skippedTooLong > 0) parts.push(words.leftLong(result.skippedTooLong));
   if (result.skippedFull > 0) parts.push(words.leftFull(result.skippedFull));
-  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull > 0 ? 'pause' : 'play');
+  // A link of another service: its tracks not found on YouTube.
+  const notFound = result.skippedNotFound ?? 0;
+  if (notFound > 0) parts.push(words.leftNotFound(notFound));
+  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + notFound > 0 ? 'pause' : 'play');
 }
 
 /**

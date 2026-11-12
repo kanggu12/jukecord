@@ -75,6 +75,7 @@ interface AddJson {
   items: ItemJson[];
   skippedTooLong: number;
   skippedFull: number;
+  skippedNotFound?: number;
 }
 
 // The text of the words joined, for inputs typed without quotes ("jukecord add never gonna give you up").
@@ -136,6 +137,7 @@ function showAdded(answer: unknown): string {
       : [`Added ${added.items.length} tracks`];
   if (added.skippedTooLong > 0) lines.push(`${added.skippedTooLong} left out: longer than the limit`);
   if (added.skippedFull > 0) lines.push(`${added.skippedFull} left out: the queue is full`);
+  if ((added.skippedNotFound ?? 0) > 0) lines.push(`${added.skippedNotFound} left out: not found on YouTube`);
   return lines.join('\n');
 }
 

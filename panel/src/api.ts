@@ -159,6 +159,7 @@ export interface AddResult {
   items: QueueItem[];
   skippedTooLong: number;
   skippedFull: number;
+  skippedNotFound: number;
 }
 export interface HistoryEntry {
   id: number;

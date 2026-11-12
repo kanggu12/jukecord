@@ -122,6 +122,12 @@ export function addedCard(result: AddResult, lang: Lang, playingNow = false): Em
         ? `대기열이 차서 ${result.skippedFull}곡 못 넣음`
         : `${result.skippedFull} did not fit, the queue is full`,
     );
+  if (result.skippedNotFound > 0)
+    left.push(
+      lang === 'ko'
+        ? `YouTube에서 못 찾은 ${result.skippedNotFound}곡 뺌`
+        : `${result.skippedNotFound} not found on YouTube, left out`,
+    );
   if (left.length > 0) embed.setFooter({ text: left.join(' · ') });
   return embed;
 }

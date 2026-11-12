@@ -118,6 +118,9 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_YTDLP_COOKIES`                                             |                    | a cookies file for YouTube's sign-in check ([Troubleshooting](TROUBLESHOOTING.md))             |
 | `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                                     |
 | `JUKECORD_LOG_LEVEL`                                                 | `info`             | `debug`, `info`, `warn` or `error`                                                             |
+| `JUKECORD_LINK_SERVICES`                                             | all three          | the services whose links are read: `deezer`, `spotify`, `apple-music` (`none`: none)           |
+| `JUKECORD_SPOTIFY_CLIENT_ID`, `JUKECORD_SPOTIFY_CLIENT_SECRET`       |                    | your own Spotify app (developer.spotify.com), for Spotify albums and playlists                 |
+| `JUKECORD_SPOTIFY_CLIENT_SECRET_FILE`                                |                    | the Spotify app's secret read from a file                                                      |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             | `5MiB`, `5`        | the log file's size and how many are kept                                                      |
 
 jukecord checks every setting when it starts and lists every problem at once. `jukecord doctor` shows the settings in

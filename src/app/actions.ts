@@ -14,6 +14,7 @@ import type { Logger } from '../log.ts';
 import { type AddressCheck, AddressError } from '../media/address.ts';
 import { BATCH_MOST, BatchLookups } from '../media/batch.ts';
 import { BusyError } from '../media/busy.ts';
+import { LinkError, type Links } from '../media/links.ts';
 import type { Resolver } from '../media/resolver.ts';
 import type { Search } from '../media/search.ts';
 import { canonicalSource, parseInput, youtubeVideoId } from '../media/source.ts';
@@ -210,6 +211,8 @@ export interface ActionsOptions {
   readonly batch?: BatchLookups;
   /** The check of addresses a file brings (private networks refused); none: every address passes. */
   readonly checkAddress?: AddressCheck;
+  /** Links of Deezer, Spotify and Apple Music, read and found on YouTube (absent: they are addresses like any). */
+  readonly links?: Links;
 }
 
 /** A playlist as a file (see playlist-files.ts). */
@@ -237,6 +240,8 @@ export interface AddResult {
   readonly skippedTooLong: number;
   /** Tracks that did not fit because the queue reached its limit (JUKECORD_QUEUE_MAX). */
   readonly skippedFull: number;
+  /** Tracks of a link from another service (Deezer, Spotify, Apple Music) not found on YouTube. */
+  readonly skippedNotFound: number;
 }
 
 /**
@@ -305,6 +310,7 @@ export class Actions {
   /** Adds what an address or search finds (all of a playlist) and starts playing if nothing was. */
   async add(context: ActionContext, input: string, at: InsertAt = 'end', signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
+    if (this.options.links?.handles(input)) return this.addLink(context, input, at, false, signal);
     const result = this.enqueue(context, await this.lookup(input, signal, context), at);
     this.options.players.get(context.guildId).play();
     return result;
@@ -334,12 +340,84 @@ export class Actions {
       place,
       context.userId,
     );
-    return { items, skippedTooLong, skippedFull };
+    return { items, skippedTooLong, skippedFull, skippedNotFound: 0 };
+  }
+
+  // A link of Deezer, Spotify or Apple Music: its tracks, found on YouTube, go into the queue as they are found and in
+  // the link's order, so the first one plays while the rest are searched (see media/links.ts). `now` plays the first
+  // at once, as Play now does.
+  private async addLink(
+    context: ActionContext,
+    input: string,
+    at: InsertAt,
+    now: boolean,
+    signal?: AbortSignal,
+  ): Promise<AddResult> {
+    const links = this.options.links;
+    if (!links) throw new ActionError('unavailable', 'links of other services are not read here');
+    const player = this.options.players.get(context.guildId);
+    const items: QueueItem[] = [];
+    let skippedTooLong = 0;
+    let skippedFull = 0;
+    let started = false;
+    const take = (tracks: Track[]) => {
+      // After this link's last track still waiting, so the link's order holds whatever else changes meanwhile (one
+      // that started playing leaves the next place to the rest); "at the end" stays at the end.
+      let place: InsertAt = at;
+      const last = items.at(-1);
+      if (last && at !== 'end') {
+        const waiting = this.options.store.queue.get(last.id);
+        place = waiting && waiting.guildId === context.guildId ? waiting.position + 1 : 'next';
+      }
+      let part: AddResult;
+      try {
+        part = this.enqueue(context, tracks, place);
+      } catch (error) {
+        // Nothing of this part fitted: counted, and the link goes on (a later part may be shorter).
+        if (error instanceof ActionError && error.code === 'conflict') skippedFull += tracks.length;
+        else if (error instanceof ActionError && error.code === 'invalid') skippedTooLong += tracks.length;
+        else throw error;
+        return;
+      }
+      items.push(...part.items);
+      skippedTooLong += part.skippedTooLong;
+      skippedFull += part.skippedFull;
+      if (!started) {
+        started = true;
+        // The first track found plays now (the current one skipped), or starts the player if nothing played.
+        if (now) {
+          if (!player.play()) player.skip();
+        } else {
+          player.play();
+        }
+      }
+    };
+    let notFound: number;
+    try {
+      notFound = (await links.resolve(input, { who: context.userId, ...(signal ? { signal } : {}), each: take }))
+        .notFound;
+    } catch (error) {
+      if (error instanceof LinkError) throw new ActionError(error.code, error.message);
+      if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+      throw error;
+    }
+    if (items.length === 0) {
+      if (skippedFull > 0)
+        throw new ActionError('conflict', `the queue is full (${this.options.queueMax ?? 1000} tracks)`);
+      if (skippedTooLong > 0)
+        throw new ActionError(
+          'invalid',
+          `longer than the ${Math.round((this.options.trackMaxMs ?? 3 * 3_600_000) / 60_000)} minute limit`,
+        );
+      throw new ActionError('not-found', 'none of its tracks was found on YouTube');
+    }
+    return { items, skippedTooLong, skippedFull, skippedNotFound: notFound };
   }
 
   /** Puts what an input finds first and plays it now; the current track is skipped. */
   async playNow(context: ActionContext, input: string, signal?: AbortSignal): Promise<AddResult> {
     this.control(context);
+    if (this.options.links?.handles(input)) return this.addLink(context, input, 'next', true, signal);
     const result = this.enqueue(context, await this.lookup(input, signal, context), 'next');
     const player = this.options.players.get(context.guildId);
     // Idle: play starts the first of the new items. Otherwise skipping moves on to it.
