@@ -68,12 +68,15 @@ persistence:
     - ReadWriteOnce
 
 resources:
+  # Node with the panel open in many browsers (about 200 MB), and a yt-dlp and an ffmpeg (about 70 MB each) for a
+  # track or two being fetched beside it.
   requests:
-    cpu: 100m
-    memory: 256Mi
+    cpu: 250m
+    memory: 512Mi
   limits:
-    # yt-dlp and ffmpeg run beside Node while a track is fetched.
-    memory: 1Gi
+    # Node sets its heap ceiling at about half of this; yt-dlp and ffmpeg use the rest, for up to six tracks fetched at
+    # once on a large node. Keep it at 768Mi or more (docs/KUBERNETES.md, "Memory and CPU").
+    memory: 1536Mi
 
 podSecurityContext:
   runAsNonRoot: true

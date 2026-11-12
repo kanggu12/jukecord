@@ -90,20 +90,25 @@ spec:
             # extraEnv, as given.
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          # Started: the web server answers (a first start creates the database; a minute is plenty).
+          # Started: the web server answers (a first start creates the database; a minute is plenty). Up to 3 s for each
+          # answer instead of Kubernetes' 1 s: a small or busy node can be slow to answer while jukecord starts.
           startupProbe:
             httpGet:
               path: /healthz
               port: http
             periodSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 30
-          # Ready: it can serve the panel and the API (Discord connecting or not: browsers still play).
+          # Ready: it can serve the panel and the API (Discord connecting or not: browsers still play). 5 s for each
+          # answer and six misses in a row (a minute) before the Service stops sending people here: several downloads
+          # and encodes at once on a small node can hold an answer back for a few seconds while nothing is wrong.
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
             periodSeconds: 10
-            failureThreshold: 3
+            timeoutSeconds: 5
+            failureThreshold: 6
           # Alive: the process answers at all.
           livenessProbe:
             httpGet:

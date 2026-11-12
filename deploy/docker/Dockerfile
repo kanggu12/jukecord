@@ -151,8 +151,10 @@ RUN mkdir -p /data && chown 10001:10001 /data
 USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8795
-# Healthy when the web server answers; Node's own fetch, as the image has no curl.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# Healthy when the web server answers; Node's own fetch, as the image has no curl. Once a minute: each check starts a
+# Node of its own (about 60 MB for a moment). While the container starts, Docker 25 and newer check every 5 s (their
+# default start interval), so it shows healthy within seconds all the same.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.JUKECORD_PORT||8795)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 # Labels the registries and scanners read. Here at the end: the version and revision change with every release, and
 # a build argument declared before a RUN makes that RUN (and every one after it) run again instead of coming from the

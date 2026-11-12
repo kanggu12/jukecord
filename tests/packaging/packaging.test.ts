@@ -108,7 +108,7 @@ describe('the image', () => {
 
   it('runs as a fixed non-root user with a health check, and carries the panel and the command', () => {
     assert.match(dockerfile, /^USER 10001:10001$/m);
-    assert.match(dockerfile, /^HEALTHCHECK /m);
+    assert.match(dockerfile, /^HEALTHCHECK --interval=60s /m);
     assert.match(dockerfile, /COPY --from=panel (--chmod=\S+ )?\/app\/panel\/dist \.\/panel\/dist/);
     assert.match(dockerfile, /\/usr\/local\/bin\/jukecord/);
   });
@@ -290,6 +290,10 @@ describe('the Helm chart', () => {
     }
     assert.match(rendered, /enableServiceLinks: false/);
     assert.match(rendered, /readOnlyRootFilesystem: true/);
+    // Probes that wait out a busy moment, and memory enough for Node's heap and the downloads beside it.
+    assert.match(rendered, /startupProbe:\n(?: {12}.*\n)*? {12}timeoutSeconds: 3\n/);
+    assert.match(rendered, /readinessProbe:\n(?: {12}.*\n)*? {12}timeoutSeconds: 5\n {12}failureThreshold: 6\n/);
+    assert.match(rendered, /limits:\n {14}memory: 1536Mi\n/);
     // The secrets reach jukecord as files, not as variables that yt-dlp and ffmpeg would inherit; an existing
     // Secret must hold the token, and its OAuth secret is read only with a client ID to go with it.
     assert.match(rendered, /name: JUKECORD_DISCORD_TOKEN_FILE\n/);

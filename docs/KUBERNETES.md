@@ -32,7 +32,7 @@ checks every part jukecord needs.
 | `ingress.enabled`, `.host`, `.className`, `.annotations`, `.tls`  | off                                                 | the panel from outside the cluster                                                                                                                                                                                                                                                                             |
 | `persistence.enabled`, `.size`, `.storageClass`, `.existingClaim` | on, `5Gi`                                           | the data volume (kept when the release is uninstalled)                                                                                                                                                                                                                                                         |
 | `networkPolicy.enabled`, `.privateRanges`                         | on                                                  | see below                                                                                                                                                                                                                                                                                                      |
-| `resources`                                                       | 100m, 256Mi; limit 1Gi                              | requests and limits                                                                                                                                                                                                                                                                                            |
+| `resources`                                                       | 250m, 512Mi; limit 1536Mi                           | requests and limits ([below](#memory-and-cpu))                                                                                                                                                                                                                                                                 |
 | `service.type`, `.port`                                           | `ClusterIP`, `8795`                                 | the Service                                                                                                                                                                                                                                                                                                    |
 
 Every value is checked against the chart's `values.schema.json`, so a misspelt key fails the install.
@@ -72,6 +72,21 @@ seccomp profile, no Kubernetes API token and no Service environment variables. T
 `/tmp`. The bot's token and the OAuth secret are mounted from the Secret as files in `/run/secrets/jukecord`, readable
 by jukecord's group only, and jukecord reads them through `JUKECORD_DISCORD_TOKEN_FILE` and
 `JUKECORD_DISCORD_CLIENT_SECRET_FILE`: they are not in the environment that yt-dlp and ffmpeg start with.
+
+## Memory and CPU
+
+The pod asks for 250m of CPU and 512Mi of memory, and may use up to 1536Mi. Node sets the ceiling of its heap at
+about half of the container's memory limit (816 MiB at 1536Mi, 408 MiB at 768Mi), and yt-dlp and ffmpeg run beside it
+within the same limit: about 70 MB each for every track being fetched. jukecord fetches ahead as many tracks at once as
+half the processors Node sees, between 2 and 6, so a large node fetches more at a time; a CPU limit
+(`resources.limits.cpu`) lowers how many processors Node sees, and with them that number.
+
+Keep the memory limit at 768Mi or more. Node lets its heap grow to about half the limit; the other half holds the
+rest of Node and the yt-dlp and ffmpeg of the tracks being fetched, at least two at once. Below 768Mi that half is too
+small for both, so a busy moment takes the pod past its limit, and the kernel ends it (`OOMKilled`, with nothing in
+jukecord's log) before Node notices anything. Under 512Mi it gets worse: the heap ceiling stops shrinking with the
+limit (Node keeps about 260 MiB). To set the ceiling yourself, give `NODE_OPTIONS` with `--max-old-space-size=<MiB>`
+in `extraEnv`, at no more than half the limit.
 
 ## k3s and Raspberry Pi clusters
 
