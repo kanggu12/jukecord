@@ -179,6 +179,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
   });
 
+  // Aborted when the server closes: work shared by several requests (an MP3 copy) stops with jukecord, not with one
+  // of the requests.
+  const stopping = new AbortController();
   // The rates of changes, per login and per address, and whether the event loop has fallen behind.
   const clock = options.rates?.now ?? Date.now;
   const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
@@ -378,10 +381,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (!options.cache.has(key)) return failure(reply, 'conflict', 'the track is not prepared yet');
       let file = options.cache.opusPath(key);
       if (request.query.format === 'mp3') {
-        // Shared by everyone asking at once and not tied to this request: a second browser may be waiting for it.
+        // Shared by everyone asking at once and not tied to this request: a second browser may be waiting for it. It
+        // ends at its own time limit, which grows with the track (see Media.mp3), or when jukecord stops.
         let mp3: string | null;
         try {
-          mp3 = await options.mp3(track, AbortSignal.timeout(120_000));
+          mp3 = await options.mp3(track, stopping.signal);
         } catch (error) {
           if (error instanceof BusyError) return failure(reply, 'unavailable', error.message);
           throw error;
@@ -521,6 +525,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     close: async () => {
       hub.close();
       pressure?.stop();
+      stopping.abort();
       await app.close();
     },
   };

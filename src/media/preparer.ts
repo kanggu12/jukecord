@@ -246,8 +246,12 @@ export class Media implements MediaPreparer {
       if (this.mp3Jobs.size >= 2)
         throw new BusyError('jukecord is making other MP3 copies right now; try again in a moment');
       const tmp = cache.tmpPath(key, 'mp3');
+      // The same time limit as getting the track, which grows with its length (see fetchLimitMs): a three-hour track
+      // takes over a minute to convert on a small machine, and a fixed limit refused its copy every time. The length is
+      // the cached file's own, measured when it was made.
+      const durationMs = cache.get(key)?.durationMs ?? track.durationMs;
       job = this.options.ffmpeg
-        .toMp3(cache.opusPath(key), tmp, signal, this.options.timeoutMs)
+        .toMp3(cache.opusPath(key), tmp, signal, fetchLimitMs(this.options.timeoutMs, durationMs))
         .then(() => {
           cache.addMp3(key, tmp);
           return cache.mp3Path(key);
