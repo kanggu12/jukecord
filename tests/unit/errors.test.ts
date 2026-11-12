@@ -31,6 +31,10 @@ describe('sayError', () => {
     }
   });
 
+  it('says a place in the track for a seek before its start, not a place in the queue', () => {
+    assert.equal(sayError('the position must be 0 or more', 'ko'), '재생 위치는 0초 이상이어야 함');
+  });
+
   it('has Korean for pausing what is paused, playing on what gets ready, and the MP3 copy being made', () => {
     assert.equal(sayError('it is already paused', 'ko'), '이미 일시정지됨');
     assert.equal(sayError('the track is getting ready', 'ko'), '곡을 준비하는 중');

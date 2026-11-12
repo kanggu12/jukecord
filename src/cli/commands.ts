@@ -101,6 +101,14 @@ function trackLine(track: TrackJson, by: string | null): string {
   return parts.join(' · ');
 }
 
+// Listening time as people say it, in whole minutes with the hours made from them: "3 h 12 min", "45 min". The
+// minutes rounded after the hours were taken printed 59 min 59 s as "0 h 60 min".
+function hoursMinutes(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+}
+
 function showPlayer(answer: unknown): string {
   const player = answer as PlayerJson;
   const repeat = player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`;
@@ -299,10 +307,8 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
         topTracks: { track: TrackJson; plays: number }[];
         topPeople: { name: string | null; plays: number }[];
       };
-      const hours = Math.floor(stats.playedMs / 3_600_000);
-      const minutes = Math.round((stats.playedMs % 3_600_000) / 60_000);
       const lines = [
-        `The last ${stats.span} days: ${stats.plays} plays, ${hours} h ${minutes} min, ${stats.tracks} tracks`,
+        `The last ${stats.span} days: ${stats.plays} plays, ${hoursMinutes(stats.playedMs)}, ${stats.tracks} tracks`,
       ];
       if (stats.topTracks.length > 0) lines.push('Most played:');
       for (const entry of stats.topTracks.slice(0, 10)) lines.push(`  ${entry.plays}  ${entry.track.title}`);

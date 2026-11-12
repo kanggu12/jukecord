@@ -26,7 +26,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['join a voice channel first, or name one', '먼저 음성 채널에 들어가거나 채널을 고르세요'],
   ['that is not a voice channel', '음성 채널이 아님'],
   ['the bot does not play on stages', '스테이지 채널에서는 재생하지 않음'],
-  ['the position must be 0 or more', '자리 번호는 0 이상'],
+  // Only seek gives it: a time in the track, not a place in the queue.
+  ['the position must be 0 or more', '재생 위치는 0초 이상이어야 함'],
   ['there is nothing to save: the queue is empty', '저장할 곡 없음: 대기열이 비어 있음'],
   [/^longer than the (\d+) minute limit$/, '$1분보다 긴 곡'],
   ['that role is not in this server', '이 서버에 없는 역할'],
