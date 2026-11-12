@@ -473,10 +473,9 @@ describe('workflows and scripts', () => {
   });
 
   it('pins by commit the outside actions that run with a token that may write, and checks before it publishes', () => {
+    // Every action that is neither GitHub's own (actions/…) nor in this repository: by commit, the release in a comment.
     for (const file of workflows) {
-      for (const match of read(file).matchAll(
-        /uses: ((?:softprops\/action-gh-release|azure\/setup-helm|docker\/[\w-]+)@\S+)/g,
-      )) {
+      for (const match of read(file).matchAll(/uses: ((?!actions\/|\.\/)[\w.-]+\/[\w.-]+@\S+)/g)) {
         assert.match(match[1] ?? '', /@[0-9a-f]{40}$/, `${file} uses ${match[1]} by a tag that can move`);
       }
     }
