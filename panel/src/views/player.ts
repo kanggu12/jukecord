@@ -1103,15 +1103,16 @@ export function voiceCard(): HTMLElement {
   const top = h('div', { class: 'voice-now' }, icon('radio', 'lg'), where, leave);
   const channels = h('ul', { class: 'channels scroll' });
   const listening = h('div', { class: 'listeners' });
-  // The voice channel's sound: its volume (with a bot only), and its preset, which browsers listening apply too.
+  // The voice channel's sound on one row, so the card grows by no more than a row: its volume (with a bot only), and
+  // its preset, which browsers listening apply too, on a key that opens the presets (named in short on the key, in
+  // whole in its title and for screen readers).
   const volume = h('input', { type: 'range', min: '0', max: '200', step: '5' });
   const volumeLevel = h('span', { class: 'num level' });
-  const volumeName = h('span', { class: 'grow' });
-  const volumeRow = h('label', { class: 'sound-row' }, icon('volume-2'), volumeName, volume, volumeLevel);
-  const presetName = h('span', { class: 'grow' });
+  const volumePart = h('label', { class: 'volume-part' }, icon('volume-2'), volume, volumeLevel);
+  // Browser-only has no voice volume: the row says what the key is for instead.
+  const soundWord = h('span', { class: 'sound-word' });
   const presetKey = h('button', { class: 'key sm', type: 'button', 'aria-haspopup': 'dialog', 'data-act': 'sound' });
-  const presetRow = h('div', { class: 'sound-row' }, icon('audio-lines'), presetName, presetKey);
-  const soundBox = h('div', { class: 'sound' }, volumeRow, presetRow);
+  const soundBox = h('div', { class: 'sound' }, volumePart, soundWord, presetKey);
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'voice-h' },
@@ -1188,21 +1189,25 @@ export function voiceCard(): HTMLElement {
     // The voice channel's sound. The volume is the voice channel's alone (browser-only has none).
     const sound = state.sound;
     const control = mayControl();
-    volumeRow.hidden = browserOnly;
-    volumeName.textContent = words.voiceVolume;
+    volumePart.hidden = browserOnly;
+    soundWord.hidden = !browserOnly;
+    soundWord.textContent = words.soundName;
     volume.setAttribute('aria-label', words.voiceVolume);
+    volume.title = words.voiceVolume;
     if (!held) volume.value = String(sound.volume);
     volumeLevel.textContent = `${held ? volume.value : sound.volume}%`;
     volume.disabled = !control;
-    presetName.textContent = words.soundName;
     refill(
       presetKey,
       `${sound.preset}|${state.lang}`,
-      words.presets[sound.preset] ?? sound.preset,
+      icon('audio-lines'),
+      words.presetsShort[sound.preset] ?? sound.preset,
       icon('chevron-down'),
     );
-    // The key names the setting and its value for a screen reader; to the eye the row's words name the setting.
-    presetKey.setAttribute('aria-label', `${words.soundName}: ${words.presets[sound.preset] ?? sound.preset}`);
+    // The key's short word in whole, with what it is for: to a screen reader and on hover.
+    const presetLabel = `${words.soundName}: ${words.presets[sound.preset] ?? sound.preset}`;
+    presetKey.setAttribute('aria-label', presetLabel);
+    presetKey.title = presetLabel;
     presetKey.disabled = !control;
     // Who listens in browsers.
     const people = state.listeners.people;

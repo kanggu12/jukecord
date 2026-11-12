@@ -2399,29 +2399,40 @@ kbd {
 .section.settings .line.limit .grow {
   min-width: 160px;
 }
-/* The voice channel's sound in its card: the volume and the preset, a row each, between the channels and who listens
-   in browsers. */
+/* The voice channel's sound in its card, one row between the channels and who listens in browsers: the volume, which
+   takes the room there is, and the key of the presets. */
 .sound {
-  border-top: 1px solid var(--line);
-  padding: 4px var(--pad);
-}
-.sound-row {
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 44px;
+  padding: 4px 12px 4px var(--pad);
+  border-top: 1px solid var(--line);
   color: var(--ink-2);
 }
-.sound-row input[type="range"] {
-  width: 132px;
+.sound .volume-part {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
   min-width: 0;
-  flex: 0 1 132px;
+}
+.sound input[type="range"] {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 64px;
   accent-color: var(--ink);
 }
-.sound-row .level {
+.sound .level {
   width: 40px;
+  flex: none;
   text-align: right;
   font-size: 12px;
+}
+/* Browser-only: the row's word, and the key at the row's end as the channels' keys are. */
+.sound .sound-word {
+  flex: 1;
+  min-width: 0;
 }
 /* The presets' dialog: each choice says what it does under its name. */
 .dialog-note {
@@ -2433,7 +2444,7 @@ kbd {
 }
 @media (pointer: coarse) {
   /* The voice volume takes a finger's height, as the listening bar's does. */
-  .sound-row input[type="range"] {
+  .sound input[type="range"] {
     height: 44px;
   }
 }

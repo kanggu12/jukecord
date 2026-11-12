@@ -259,6 +259,13 @@ const EN = {
     bright: 'Brighter',
     night: 'Softer at night',
   } as Record<string, string>,
+  presetsShort: {
+    off: 'Off',
+    bass: 'Bass',
+    voices: 'Voices',
+    bright: 'Bright',
+    night: 'Night',
+  } as Record<string, string>,
   presetHints: {
     off: 'The track as it is',
     bass: 'The lows up',
@@ -515,6 +522,13 @@ const KO: Strings = {
     voices: '목소리 또렷하게',
     bright: '밝게',
     night: '밤에 부드럽게',
+  },
+  presetsShort: {
+    off: '끔',
+    bass: '저음',
+    voices: '목소리',
+    bright: '밝게',
+    night: '밤',
   },
   presetHints: {
     off: '원래 소리 그대로',
