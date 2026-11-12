@@ -19,7 +19,7 @@ discord:
   # way the chart mounts them as files that jukecord reads, not as variables, which yt-dlp and ffmpeg would inherit.
   existingSecret: ""
   # The bot's token. Without one (and without existingSecret) jukecord runs browser-only. The release's values (helm
-  # get values) then hold it too, which is why existingSecret is the better place.
+  # get values) then hold it too; existingSecret keeps it in a Secret of yours.
   token: ""
   # The application's ID, for logging in with Discord.
   clientId: ""

@@ -64,8 +64,9 @@ The panel is published on 127.0.0.1. For friends to log in and listen:
 - **A reverse proxy with HTTPS** (Caddy, nginx, Traefik) in front of jukecord, with `JUKECORD_PUBLIC_URL` set to its
   address and `JUKECORD_TRUST_PROXY=1` (one proxy in front, whose `X-Forwarded-For` and `X-Forwarded-Proto` jukecord
   then believes). It must pass WebSocket upgrades for `/api/v1/events` and allow a long read timeout (the panel keeps
-  that connection open). It should not pass `/metrics`, which answers without a login and tells anyone how many people
-  listen: Prometheus reads it on this machine, at `127.0.0.1:8795`. With Caddy, which gets the certificate itself:
+  that connection open). `/metrics` answers without a login, and jukecord gives it only to a scraper on this machine
+  or its network (a request that carries `X-Forwarded-For` or comes from a public address gets a 404); the examples
+  below answer 404 for it at the proxy as well. With Caddy, which gets the certificate itself:
 
   ```
   music.example.com {

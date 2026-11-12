@@ -21,26 +21,24 @@ No bot token was given, so jukecord runs browser-only. Set discord.existingSecre
 {{- end }}
 {{- if or .Values.discord.token .Values.discord.clientSecret }}
 
-Note: the bot's token or the OAuth secret is in the values, so the release keeps a copy (helm get values shows it to
-anyone who may read this namespace's Secrets). A Secret of your own keeps it out of the release:
+The bot's token or the OAuth secret is in the values, so the release keeps a copy of it (helm get values shows it).
+discord.existingSecret reads them from a Secret of yours instead:
   kubectl -n {{ .Release.Namespace }} create secret generic jukecord-discord --from-literal=token=... --from-literal=clientSecret=...
-  then discord.existingSecret=jukecord-discord, with discord.token and discord.clientSecret empty.
 {{- end }}
 {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (not (hasPrefix "https://" $url)) }}
 
-Note: the Ingress has no TLS, so logins and the panel's cookies cross the network unencrypted. Add ingress.tls (a
-certificate's Secret, from cert-manager for example), or, when TLS ends in front of the Ingress controller, set
-publicUrl to the https:// address.
+The Ingress has no TLS, so the panel is served over plain http. ingress.tls takes a certificate's Secret (from
+cert-manager, for example); when TLS ends in front of the Ingress controller, publicUrl takes the https:// address.
 {{- end }}
 {{- if and .Values.ingress.enabled (not $url) }}
 {{- if .Values.ingress.host }}
 
-Note: the Ingress has a wildcard host, so it answers for many names, and jukecord has no single address of its own
+The Ingress has a wildcard host, so it answers for many names, and jukecord has no single address of its own
 {{- else }}
 
-Note: the Ingress has no host, so it answers for every name, and jukecord has no address of its own
+The Ingress has no host, so it answers for every name, and jukecord has no address of its own
 {{- end }}
-for the Discord login and the bot's links. Set publicUrl to the address people open.
+for the Discord login and the bot's links. publicUrl takes the address people open.
 {{- end }}
 
 Check every part it needs:
