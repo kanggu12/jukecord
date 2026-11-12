@@ -10,7 +10,7 @@
  * a moment when the music is paused); the position is set once the file is known.
  */
 import { api, type Player } from '../api.ts';
-import { avatarUrl, face, fill, h, icon } from '../dom.ts';
+import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { act, disc } from './player.ts';
@@ -243,15 +243,13 @@ export function listenBar(live: Live): HTMLElement {
       blocked: words.blocked,
       failed: words.listenFailed,
     }[sync];
-    fill(
+    // The small disc is built again only when the track or its mode changes: built on every drawing (a volume step,
+    // someone joining), it started its turn over each time.
+    const mode = player?.status === 'playing' ? 'playing' : player?.status === 'paused' ? 'paused' : 'idle';
+    refill(
       art,
-      player?.track
-        ? disc(
-            'sm',
-            player.track,
-            player.status === 'playing' ? 'playing' : player.status === 'paused' ? 'paused' : 'idle',
-          )
-        : null,
+      player?.track ? `${player.track.id}|${player.track.thumbnail}|${mode}` : '',
+      player?.track ? disc('sm', player.track, mode) : null,
     );
     fill(
       what,
@@ -278,9 +276,13 @@ export function listenBar(live: Live): HTMLElement {
     skipKey.disabled = !mayControl() || !player?.track;
     // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
     bar.classList.toggle('idle', !player?.track);
-    // Who else listens.
-    const people = state.listeners.people;
-    fill(faces, ...people.slice(0, 5).map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')));
+    // Who else listens: the faces built again only when the people change (their pictures would load again).
+    const people = state.listeners.people.slice(0, 5);
+    refill(
+      faces,
+      JSON.stringify(people.map((person) => [person.id, person.name, person.avatar])),
+      ...people.map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')),
+    );
     count.textContent = state.listeners.count > 0 ? words.listeners(state.listeners.count) : '';
     slider.value = String(Math.round(state.volume * 100));
     slider.setAttribute('aria-label', words.volume);
