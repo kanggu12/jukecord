@@ -860,9 +860,23 @@ window.__audit = () => {
         const leaves = leavesOf(child, !card && !child.matches(ROWISH));
         if (leaves.length === 0) return null;
         const left = Math.min(...leaves.map((leaf) => leaf.box.left));
-        // The right edge: the box that ends its last line, when the last thing on it is a box.
+        // The right edge: the box that ends its lines, when the last thing is a box set at the end of its row, and that
+        // row at the end of what holds it, up to the child (a key pushed to the right of its row); a box that merely
+        // comes last (a heart after a title) ends nowhere in particular.
         const last = leaves.reduce((end, leaf) => (leaf.box.right > end.box.right ? leaf : end));
-        return { element: child, box: child.getBoundingClientRect(), left, right: last.drawn ? last.box.right : null };
+        let flush = last.drawn;
+        let node = last.element;
+        let right = last.box.right;
+        while (flush && node !== child && node.parentElement) {
+          const parent = node.parentElement;
+          const style = getComputedStyle(parent);
+          const box = parent.getBoundingClientRect();
+          const inner = box.right - Number.parseFloat(style.paddingRight) - Number.parseFloat(style.borderRightWidth);
+          flush = Math.abs(right - inner) <= 1;
+          node = parent;
+          right = box.right;
+        }
+        return { element: child, box: child.getBoundingClientRect(), left, right: flush ? last.box.right : null };
       })
       .filter(Boolean);
     const said = new Set();
@@ -998,12 +1012,20 @@ window.__audit = () => {
       `${value} px off the scale: ${places.slice(0, 4).join(', ')}${places.length > 4 ? ` and ${places.length - 4} more` : ''}`,
     );
   // The heights of the controls a person sees (one inside another is part of it).
+  // A field of many lines (a list to paste) is as tall as what it holds, not a control of a row's height.
   for (const control of document.querySelectorAll(CONTROL))
-    if (seen(control) && !control.parentElement?.closest(CONTROL) && !control.matches(APART))
+    if (seen(control) && !control.parentElement?.closest(CONTROL) && !control.matches(`${APART}, textarea`))
       used.controls.add(px(control.getBoundingClientRect().height));
   const sorted = (set) => [...set].sort((a, b) => (Number.parseFloat(a) || 0) - (Number.parseFloat(b) || 0));
   const distinct = {
-    fonts: sorted(new Set([...sizes.keys()].map((size) => px(Number.parseFloat(size))))),
+    // The sizes of words a person sees (a heading kept for screen readers alone is a pixel wide).
+    fonts: sorted(
+      new Set(
+        texts
+          .filter((element) => !element.closest('.sr'))
+          .map((element) => px(Number.parseFloat(getComputedStyle(element).fontSize))),
+      ),
+    ),
     controls: sorted(used.controls),
     radii: sorted(used.radii),
     paddings: sorted(used.paddings),
