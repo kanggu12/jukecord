@@ -239,6 +239,18 @@ const EN = {
   lyricsFrom: 'Lyrics from',
   lyricsRetry: 'Try again',
   lyricsGoTo: (time: string) => `Play from ${time}`,
+  // The playing card's More menu.
+  nowMore: 'More for the playing track',
+  stopAfter: 'Stop after this track',
+  stopsAfter: 'Stops after this track',
+  // The sleep timer in the listening bar.
+  sleep: 'Sleep timer',
+  sleepEnd: 'End of track',
+  sleepLeft: (time: string) => `${time} left`,
+  sleepMinutes: (n: number) => `${n} minutes`,
+  sleepEndChoice: 'When this track ends',
+  sleepOff: 'Turn the timer off',
+  sleepStopped: 'Sleep timer: stopped listening here',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -470,6 +482,16 @@ const KO: Strings = {
   lyricsFrom: '가사 출처',
   lyricsRetry: '다시 시도',
   lyricsGoTo: (time: string) => `${time}부터 재생`,
+  nowMore: '지금 곡 메뉴',
+  stopAfter: '이 곡이 끝나면 정지',
+  stopsAfter: '이 곡이 끝나면 멈춤',
+  sleep: '취침 타이머',
+  sleepEnd: '이 곡까지',
+  sleepLeft: (time: string) => `${time} 남음`,
+  sleepMinutes: (n: number) => `${n}분`,
+  sleepEndChoice: '이 곡이 끝나면',
+  sleepOff: '타이머 끄기',
+  sleepStopped: '취침 타이머로 여기서 듣기를 멈춤',
 };
 
 /** The languages. */

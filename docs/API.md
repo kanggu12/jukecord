@@ -106,6 +106,7 @@ playlist) so a program does not need to ask again.
 | `repeat` Repeat nothing, the current track, or the queue | `PUT /api/v1/guilds/{guild}/player/repeat` | control | `jukecord repeat` | `/repeat` |
 | `stop` Stop playing; the queue stays | `POST /api/v1/guilds/{guild}/player/stop` | control | `jukecord stop` | `/stop` |
 | `lyrics` The lyrics of the track playing, timed when they can be (from LRCLIB, kept once found) | `GET /api/v1/guilds/{guild}/lyrics` | read | `jukecord lyrics` | `/lyrics` |
+| `stop-after` Stop when the current track ends (on), or play on after it (off); the queue stays | `PUT /api/v1/guilds/{guild}/player/stop-after` | control | `jukecord stop-after` | `/stop` |
 
 ### Queue
 

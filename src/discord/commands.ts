@@ -48,6 +48,8 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   'dj-role': '/dj set',
   status: '/version',
   lyrics: '/lyrics',
+  // /stop with its after-track option.
+  'stop-after': '/stop',
 };
 
 // One command: English name and description, Korean name and description.
@@ -150,7 +152,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           { name: 'The queue', value: 'queue', name_localizations: { ko: '대기열' } },
         ),
     ),
-    command('stop', 'Stop playing (the queue stays)', '정지', '재생 멈춤(대기열은 그대로)'),
+    command('stop', 'Stop playing (the queue stays)', '정지', '재생 멈춤(대기열은 그대로)').addBooleanOption((option) =>
+      option
+        .setName('after-track')
+        .setDescription('True: stop when this track ends instead of now; False: play on after it')
+        .setNameLocalizations({ ko: '곡끝나면' })
+        .setDescriptionLocalizations({ ko: 'True: 지금 말고 이 곡이 끝나면 멈춤, False: 곡이 끝나도 계속 재생' }),
+    ),
     command('np', 'What is playing now', '지금곡', '지금 재생 중인 곡'),
     command('queue', 'Show the queue', '대기열', '대기열 보기').addIntegerOption((option) =>
       option

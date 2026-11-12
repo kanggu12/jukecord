@@ -128,6 +128,9 @@ people use most.
 - **Lyrics in time.** The words of the track playing, from [LRCLIB](https://lrclib.net), beside the player (a sheet on a
   phone) with the line being sung lit; whoever may change the music picks a line to play from there. Also `/lyrics`,
   `jukecord lyrics` and the API; `JUKECORD_LYRICS=off` turns them off.
+- **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
+  `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
+  the end of the track.
 
 ### Light on a small machine
 

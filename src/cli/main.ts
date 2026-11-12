@@ -35,7 +35,7 @@ class Unreachable extends Error {
 
 // Options that take a value, and the switches; anything else starting with -- is a typing mistake.
 const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope']);
-const SWITCHES = new Set(['json', 'help', 'version', 'next']);
+const SWITCHES = new Set(['json', 'help', 'version', 'next', 'synced', 'after-track']);
 
 // What people type from Discord's names, to the command it means here.
 const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [
@@ -68,6 +68,17 @@ export function parseLine(argv: readonly string[]): Words {
     else flags.set(name, true);
   }
   return { args, flags };
+}
+
+/**
+ * "jukecord stop --after-track" as people say it: the stop-after command. The option means nothing to any other
+ * command, which is told so (as for a mistyped option) by leaving it in place for that check.
+ */
+export function afterTrack(words: Words): Words {
+  if (words.args[0] !== 'stop' || !words.flags.has('after-track')) return words;
+  const flags = new Map(words.flags);
+  flags.delete('after-track');
+  return { args: ['stop-after', ...words.args.slice(1)], flags };
 }
 
 /** Finds the command the words start with (the longest name wins: "playlist save" over a "playlist"). */
@@ -211,7 +222,9 @@ export async function run(
 ): Promise<number> {
   // -h is --help, as in most commands: as an option only, before any "--" (after it, "-h" is something to search for).
   const end = argv.indexOf('--');
-  const words = parseLine(argv.map((word, index) => (word === '-h' && (end < 0 || index < end) ? '--help' : word)));
+  const words = afterTrack(
+    parseLine(argv.map((word, index) => (word === '-h' && (end < 0 || index < end) ? '--help' : word))),
+  );
   if (words.flags.has('version')) {
     print(`jukecord ${VERSION}`);
     return 0;
@@ -222,7 +235,8 @@ export async function run(
   }
   // A mistyped option is said at once, not silently left out ("--jsno"); so is one that needs a value and has none.
   for (const [name, value] of words.flags) {
-    if (!VALUED.has(name) && !SWITCHES.has(name)) {
+    // --after-track belongs to "stop" alone (afterTrack took it from there); anywhere else it is a mistake.
+    if (!VALUED.has(name) && (!SWITCHES.has(name) || name === 'after-track')) {
       print(`jukecord: there is no option --${name} (see jukecord --help)`, true);
       return 2;
     }

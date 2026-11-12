@@ -3044,3 +3044,14 @@ button.lyric:hover {
     min-height: 44px;
   }
 }
+@media (max-width: 560px) {
+  /* Listening already, with nothing playing: the key shows its icon alone as at any other time, leaving the room to
+     the sleep timer beside it (its words, to stop listening, are its name for screen readers and its tooltip). */
+  .listen.idle > .key[data-act="listen"][aria-pressed="true"] {
+    width: var(--control);
+    padding: 0;
+  }
+  .listen.idle > .key[data-act="listen"][aria-pressed="true"] .label {
+    display: none;
+  }
+}

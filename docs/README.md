@@ -28,6 +28,10 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
 - **Lyrics** (in the playing card's head): the words of the track playing, from LRCLIB, in the right column of a wide
   window and as a sheet on a phone. The line being sung is lit and kept in sight; if you may change the music, choose a
   line to play from there. Words without timings show as they are, and a track LRCLIB does not know says so.
+- **⋯** (in the playing card's head): **Stop after this track** stops the player, for everyone, when the track ends;
+  the queue stays. Pressed again, the player plays on after it.
+- **The sleep timer** (beside **Listen here** while this browser listens): this browser stops listening after 15, 30 or
+  60 minutes, or when the track playing ends; the last seconds fade out. It is this browser's alone.
 
 At the bottom, **Listen here** plays the music in this browser, in time with the voice channel; the volume is this
 browser's own. The page title shows what is playing, and the media keys and the lock screen of your computer or phone
@@ -66,6 +70,7 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
 | `/version`                                   | the version                                                         |
 | `/lyrics`                                    | the lyrics of the track playing, to you alone, a page at a time     |
+| `/stop after-track:`                         | True: stop when this track ends; False: play on after it            |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
@@ -91,6 +96,7 @@ node src/cli/main.ts np
 ./jukecord stats --days 7
 ./jukecord token create phone --scope control
 ./jukecord lyrics --synced
+./jukecord stop --after-track
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it

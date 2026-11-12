@@ -562,6 +562,21 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       return `${body}\n\nLyrics from ${lyrics.source?.name ?? 'LRCLIB'} (${lyrics.source?.url ?? 'https://lrclib.net'})`;
     },
   },
+  // Also typed "jukecord stop --after-track", which main.ts turns into this.
+  'stop-after': {
+    name: 'stop-after',
+    usage: '[on|off]',
+    summary: 'Stop when this track ends (off: play on after it)',
+    request: (words) => {
+      const choice = words.args[0] ?? 'on';
+      if (choice !== 'on' && choice !== 'off') throw new UsageError('stop-after on or off');
+      return { body: { on: choice === 'on' } };
+    },
+    show: (answer) =>
+      (answer as PlayerJson & { stopAfter?: boolean }).stopAfter
+        ? 'Stops after this track'
+        : 'Plays on after this track',
+  },
 };
 
 /** Whether an operation's path names a server (and so the command needs one). */

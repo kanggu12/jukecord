@@ -78,6 +78,8 @@ export interface PlayerSnapshot {
   readonly progress: number | null;
   /** Grows by one with every snapshot, so clients can ignore one that arrives out of order. */
   readonly version: number;
+  /** Whether the player stops when the current track ends (see Player.setStopAfter). */
+  readonly stopAfter: boolean;
 }
 
 export interface PlayerOptions {
@@ -162,6 +164,9 @@ export class Player {
   // Restarts of outputs that ended early, counted per session (see outputEnded).
   private earlySession = -1;
   private earlyRestarts = 0;
+  // Whether the player stops when the current track ends by itself (see setStopAfter). Any end of the current track
+  // clears it (finishCurrent): the end it was waiting for, a skip, a jump, a stop.
+  private stopAfter = false;
 
   // Playing: the timer that ends the track if no output reports the end.
   private endTimer: TimerHandle | null = null;
@@ -208,6 +213,7 @@ export class Player {
       repeat: this.repeat,
       progress: this.status === 'loading' ? this.progress : null,
       version: this.version,
+      stopAfter: this.stopAfter,
     };
   }
 
@@ -384,6 +390,19 @@ export class Player {
     return true;
   }
 
+  /**
+   * Stops the player when the current track ends by itself, the queue left as it is (on), or plays on after it (off).
+   * Only for a track that is current: another track (a skip, a jump, play now) or a stop clears it, so it never
+   * stops a track nobody chose it for. Not kept across a restart, which comes back paused anyway.
+   */
+  setStopAfter(on: boolean): boolean {
+    if (on && this.status === 'idle') return false;
+    if (on === this.stopAfter) return false;
+    this.stopAfter = on;
+    this.emit();
+    return true;
+  }
+
   /** Writes the current position, so a restart comes back here. Called on shutdown. */
   checkpoint(): void {
     this.persist();
@@ -418,9 +437,17 @@ export class Player {
     return true;
   }
 
-  // A track ended by itself: the repeat mode decides what comes next.
+  // A track ended by itself: the repeat mode decides what comes next, unless the player was asked to stop after it.
   private ended(): void {
     const current = this.current;
+    if (this.stopAfter) {
+      // It played to its end and goes into the history; a looping queue keeps it at its end, as after any track.
+      if (this.repeat === 'queue' && current)
+        this.options.queue.add(this.guildId, [current.track.id], 'end', current.addedBy);
+      this.finishCurrent(true);
+      this.goIdle();
+      return;
+    }
     if (this.repeat === 'track' && current && this.media) {
       // The same track again from the top: it is still prepared, so nothing is fetched.
       this.record();
@@ -463,6 +490,8 @@ export class Player {
     this.cancelSeek();
     // A new session makes any late "ended" from the old stream harmless.
     this.session += 1;
+    // Asked of the track that ends here; the next one plays on unless asked again.
+    this.stopAfter = false;
     // Only a track that was current has a stream to stop; an idle output is left alone.
     if (current) for (const output of this.outputs.keys()) output.stop();
     this.current = null;

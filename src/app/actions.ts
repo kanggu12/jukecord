@@ -55,6 +55,7 @@ export const ACTIONS = [
   'dj-role',
   'status',
   'lyrics',
+  'stop-after',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -570,6 +571,19 @@ export class Actions {
       if (error instanceof LyricsUnavailable) throw new ActionError('unavailable', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Stops the player when the current track ends (on), the queue staying as it is, or plays on after it (off): for
+   * the whole server, whoever listens where.
+   */
+  stopAfter(context: ActionContext, on: boolean): PlayerSnapshot {
+    this.control(context);
+    const player = this.options.players.get(context.guildId);
+    // Turning it on needs a track to stop after; asking for what is so already changes nothing and is no mistake.
+    if (!player.setStopAfter(on) && on && player.snapshot().status === 'idle')
+      throw new ActionError('conflict', 'nothing is playing');
+    return player.snapshot();
   }
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".
   private fromStore(error: unknown): unknown {

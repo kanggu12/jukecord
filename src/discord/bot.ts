@@ -340,12 +340,19 @@ export class Bot implements Directory {
           await interaction.editReply(nowCard(actions.seek(context, at), lang, this.options.panelUrl));
           return;
         }
-        case 'stop':
+        case 'stop': {
+          // With after-track: when this track ends (True), or not after all (False); the card says which.
+          const after = options.getBoolean('after-track');
+          if (after !== null) {
+            await interaction.editReply(nowCard(actions.stopAfter(context, after), lang, this.options.panelUrl));
+            return;
+          }
           actions.stop(context);
           await interaction.editReply({
             embeds: [note(lang, 'Stopped (the queue stays)', '재생 멈춤(대기열은 그대로)')],
           });
           return;
+        }
         case 'np':
           await interaction.editReply(nowCard(actions.nowPlaying(context), lang, this.options.panelUrl));
           return;

@@ -147,10 +147,20 @@ export function nowCard(live: Live): HTMLElement {
   );
   lyricsKey.onclick = () => toggleLyrics();
   whenLyricsChange(() => lyricsKey.setAttribute('aria-expanded', String(lyricsOpen())));
+  // More for the playing track, as a list (stop after this track).
+  const moreKey = h(
+    'button',
+    { class: 'key sm square quiet', type: 'button', 'data-act': 'now-more', 'aria-haspopup': 'dialog' },
+    icon('ellipsis'),
+  );
+  moreKey.onclick = () => nowMenu();
+  const headKeys = h('div', { class: 'head-keys' }, lyricsKey, moreKey);
+  // Said beside the state while the player is to stop when this track ends.
+  const stopsAfter = h('span', { class: 'badge tone-pause', hidden: true });
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'now-h' },
-    h('div', { class: 'card-head' }, h('h2', { id: 'now-h' }, ''), pill),
+    h('div', { class: 'card-head' }, h('h2', { id: 'now-h' }, ''), pill, stopsAfter, headKeys),
     body,
   );
 
@@ -168,6 +178,12 @@ export function nowCard(live: Live): HTMLElement {
     // The Lyrics key says its name, and is there only where lyrics are looked up (JUKECORD_LYRICS).
     (lyricsKey.querySelector('.label') as HTMLElement).textContent = words.lyrics;
     lyricsKey.hidden = !state.status?.lyrics;
+    // The More key holds what changes the music: there for whoever may.
+    moreKey.title = words.nowMore;
+    moreKey.setAttribute('aria-label', words.nowMore);
+    moreKey.hidden = !mayControl();
+    stopsAfter.hidden = !player?.stopAfter;
+    stopsAfter.textContent = words.stopsAfter;
     const mode = discMode(player);
     card.classList.toggle('playing', mode === 'playing');
     card.classList.toggle('paused', mode === 'paused');
@@ -850,6 +866,33 @@ export function queueCard(): HTMLElement {
   });
   draw();
   return card;
+}
+
+// The playing card's More menu, as a list: stop after this track (pressed again, play on after it). Read when a choice
+// is pressed: the track may have changed while the list was open.
+function nowMenu(): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(words.nowPlaying, box);
+  const player = state.player;
+  const stopAfter = h(
+    'button',
+    {
+      class: 'choice',
+      type: 'button',
+      'aria-pressed': String(Boolean(player?.stopAfter)),
+      dataset: { choice: 'stop-after' },
+    },
+    icon('circle-stop'),
+    h('span', { class: 'grow' }, words.stopAfter),
+    icon('check', 'check'),
+  );
+  stopAfter.disabled = !mayControl() || !player?.track;
+  stopAfter.onclick = () => {
+    dialog.close();
+    void act(null, () => api['stop-after'](guild(), !state.player?.stopAfter));
+  };
+  fill(box, stopAfter);
 }
 
 // A queued track's keys as a list (narrow cards and touch screens without dragging): play now, play next, one place

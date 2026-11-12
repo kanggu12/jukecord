@@ -675,6 +675,44 @@ await sweep('lyrics-none', FEW, async (page) => {
   await openLyrics(page);
 });
 await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
+// The playing card's More menu, and the card while the player is to stop after this track.
+await sweep('now-more', FEW, async (page) => {
+  await page.click('[data-act="now-more"]');
+  await page.waitForSelector('.dialog [data-choice="stop-after"]');
+});
+// From the top of the track, so it does not end (and stop) while these pages are looked at.
+await api('POST', '/guilds/local/player/seek', { positionMs: 0 });
+await api('PUT', '/guilds/local/player/stop-after', { on: true });
+await sweep('stops-after', FEW);
+await api('PUT', '/guilds/local/player/stop-after', { on: false });
+// Playing again if the track ended meanwhile (it stopped after it).
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+// The sleep timer: its choices, and the listening bar with thirty minutes set (phones show its key alone).
+async function listenHere(page) {
+  await page.click('[data-act="listen"]');
+  await page.waitForSelector('[data-act="sleep"]:not([hidden])');
+}
+await sweep('sleep-menu', FEW, async (page) => {
+  await listenHere(page);
+  await page.click('[data-act="sleep"]');
+  await page.waitForSelector('.dialog [data-sleep="30"]');
+});
+await sweep('sleep', [...NARROW, ...FEW], async (page) => {
+  await listenHere(page);
+  await page.click('[data-act="sleep"]');
+  await page.click('.dialog [data-sleep="30"]');
+  await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
+});
+await api('DELETE', '/guilds/local/queue');
+await api('POST', '/guilds/local/player/stop').catch(() => {});
+// Listening with nothing playing, the timer set: the bar keeps to the phone's width.
+await sweep('sleep-idle', NARROW, async (page) => {
+  await listenHere(page);
+  await page.click('[data-act="sleep"]');
+  await page.click('.dialog [data-sleep="30"]');
+  await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
+});
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

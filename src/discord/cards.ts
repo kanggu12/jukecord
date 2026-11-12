@@ -62,6 +62,7 @@ const TEXT = {
   noLyrics: { en: 'No lyrics found for this track', ko: '이 곡의 가사를 찾지 못함' },
   instrumental: { en: 'Instrumental: no words', ko: '연주곡: 가사 없음' },
   lyricsFrom: { en: 'Lyrics from LRCLIB', ko: '가사 출처: LRCLIB' },
+  stopsAfter: { en: 'Stops after this track', ko: '이 곡이 끝나면 멈춤' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -148,9 +149,12 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
-  // The repeat mode, when one is on, under the bar.
+  // The repeat mode, when one is on, and a stop asked for after this track, under the bar.
+  const footer: string[] = [];
   if (snapshot.repeat !== 'off')
-    embed.setFooter({ text: snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang] });
+    footer.push(snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang]);
+  if (snapshot.stopAfter) footer.push(TEXT.stopsAfter[lang]);
+  if (footer.length > 0) embed.setFooter({ text: footer.join(' · ') });
   // The card's language travels in the buttons, so a press redraws the card in the language it was made in, not the
   // presser's (a card in the channel is everyone's).
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(

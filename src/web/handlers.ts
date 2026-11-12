@@ -235,4 +235,5 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       source: lyrics.kind === 'none' ? null : { ...LYRICS_SOURCE },
     };
   },
+  'stop-after': ({ context, body, deps }) => deps.presenter.player(deps.actions.stopAfter(context, body.on)),
 };

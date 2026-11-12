@@ -497,6 +497,16 @@ export const API = {
     params: InGuild,
     response: LyricsSchema,
   }),
+  'stop-after': op({
+    method: 'PUT',
+    path: '/guilds/{guild}/player/stop-after',
+    summary: 'Stop when the current track ends (on), or play on after it (off); the queue stays',
+    tag: 'player',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object({ on: Type.Boolean() }, strict),
+    response: PlayerSchema,
+  }),
 } satisfies Record<OperationName, OperationSpec>;
 
 /** The operations in a stable order: the table's own. */

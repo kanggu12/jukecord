@@ -14,6 +14,7 @@ import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { act, disc } from './player.ts';
+import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
 const DRIFT_MS = 300;
@@ -32,6 +33,8 @@ export function listenBar(live: Live): HTMLElement {
   let format: 'opus' | 'mp3' = audio.canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'mp3';
   let loaded: string | null = null;
   let sync: Sync = 'off';
+  // How loud the sound is as a share of the volume chosen: below 1 only while the sleep timer fades it out.
+  let fade = 1;
 
   const toggle = h('button', { class: 'key', type: 'button', 'data-act': 'listen' });
   // Three bars that dance on the Listen key while the sound plays here, each a box of its own so that only its scale
@@ -49,10 +52,21 @@ export function listenBar(live: Live): HTMLElement {
   const slider = h('input', { type: 'range', min: '0', max: '100', step: '1' });
   const level = h('span', { class: 'num' });
   const volume = h('label', { class: 'volume' }, icon('volume-2'), slider, level);
+  // The sleep timer: this browser stops listening when it runs out, as the Listen key would stop it (set below, once
+  // that is made).
+  let stopListening = () => {};
+  const sleep = sleepKey({
+    stop: () => stopListening(),
+    fade: (level) => {
+      fade = level;
+      audio.volume = state.volume * fade;
+    },
+  });
   const bar = h(
     'footer',
     { class: 'listen' },
     toggle,
+    sleep,
     status,
     mini,
     h('div', { class: 'faces-box' }, faces, count),
@@ -112,7 +126,7 @@ export function listenBar(live: Live): HTMLElement {
       setSync('in-sync');
       return;
     }
-    audio.volume = state.volume;
+    audio.volume = state.volume * fade;
     if (audio.paused) {
       audio.play().then(
         () => setSync('in-sync'),
@@ -300,13 +314,8 @@ export function listenBar(live: Live): HTMLElement {
   };
   skipKey.onclick = () => void act(skipKey, () => api.skip(guild()));
 
-  toggle.onclick = () => {
-    // Blocked: this press is the asking the browser waited for.
-    if (state.listening && sync === 'blocked') {
-      playFromPress();
-      return;
-    }
-    const on = !state.listening;
+  // Listening here on or off, said to the others and kept for this browser.
+  const listen = (on: boolean) => {
     update({ listening: on });
     live.listening(on);
     keep('listening', on ? 'on' : 'off');
@@ -315,9 +324,20 @@ export function listenBar(live: Live): HTMLElement {
     align();
     if (on) playFromPress();
   };
+  stopListening = () => {
+    if (state.listening) listen(false);
+  };
+  toggle.onclick = () => {
+    // Blocked: this press is the asking the browser waited for.
+    if (state.listening && sync === 'blocked') {
+      playFromPress();
+      return;
+    }
+    listen(!state.listening);
+  };
   slider.oninput = () => {
     const value = Number(slider.value) / 100;
-    audio.volume = value;
+    audio.volume = value * fade;
     update({ volume: value });
     keep('volume', String(value));
   };

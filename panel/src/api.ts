@@ -46,6 +46,7 @@ export const PANEL_ACTIONS = [
   'token-revoke',
   'logs',
   'lyrics',
+  'stop-after',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -145,6 +146,8 @@ export interface Player {
   repeat: 'off' | 'track' | 'queue';
   progress: number | null;
   version: number;
+  /** Whether the player stops when this track ends. */
+  stopAfter: boolean;
 }
 export interface AddResult {
   items: QueueItem[];
@@ -295,6 +298,7 @@ export const api = {
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
   lyrics: (guild: string) => request<Lyrics>('GET', `${g(guild)}/lyrics`),
+  'stop-after': (guild: string, on: boolean) => request<Player>('PUT', `${g(guild)}/player/stop-after`, { on }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */
