@@ -4,7 +4,9 @@
  * prompt), and each closes with Escape.
  *
  * Toasts never float over the cards: they take the free space in the bar, one at a time, so they cannot cut across
- * another box's edge. Sheets hang below the bar with the scrim under the bar too, so the bar stays readable.
+ * another box's edge (on a narrow window, a strip of the bar hanging under it); while a dialog is open, whose shade
+ * covers the bar, they are said in the dialog. Sheets hang below the bar, under it, with the scrim under the bar too,
+ * so the bar and its toasts stay readable over them. The system's Back closes the layer on top.
  */
 
 import { sayError } from '../../../src/core/say.ts';
