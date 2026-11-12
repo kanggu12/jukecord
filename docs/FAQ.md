@@ -18,7 +18,7 @@ channels of your Discord servers, and your friends log in to the panel with Disc
 At rest jukecord takes about 110 MB of memory and next to no processor time. Each track is fetched and its loudness
 evened out once, which keeps one processor core busy for a few seconds (about six for a four-minute track on a
 desktop, longer on a Raspberry Pi); the next tracks are fetched while one plays. While a track plays, its file goes to
-Discord as it is, without encoding it again. The image is about 450 MB, and the cache keeps up to 2 GiB of tracks
+Discord as it is, without encoding it again. The image is about 430 MB, and the cache keeps up to 2 GiB of tracks
 (`JUKECORD_CACHE_MAX`).
 
 **Do I have to open a port on my router?**
