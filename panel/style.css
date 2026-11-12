@@ -2841,6 +2841,12 @@ kbd {
   margin-left: calc(-1 * var(--s-8));
   padding: 0 var(--s-8);
 }
+/* A contrast theme frames the key, pane and all: framed, it starts at the column's edge with the title under it. */
+@media (forced-colors: active) {
+  .wrapped .back-key {
+    margin-left: 0;
+  }
+}
 .wrapped-kept {
   margin: 0;
 }
