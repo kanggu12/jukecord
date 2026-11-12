@@ -32,6 +32,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Node's types stay on the oldest Node jukecord runs on (24): typed against a newer one, code could use what that
+    # Node does not have, and the type check fails as it is.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns: ["*"]
