@@ -704,8 +704,8 @@ export class Bot implements Directory, AlertSink {
             await interaction.editReply({
               embeds: [
                 moved === 0
-                  ? note(lang, 'The queue takes turns already', '대기열이 이미 차례대로임')
-                  : note(lang, `Put the queue in turns: ${moved} moved`, `대기열을 차례대로 맞춤: ${moved}곡 옮김`),
+                  ? note(lang, 'The queue takes turns already', '대기열이 이미 번갈아 정렬됨')
+                  : note(lang, `Put the queue in turns: ${moved} moved`, `대기열을 번갈아 정렬함: ${moved}곡 옮김`),
               ],
             });
             return;
@@ -714,8 +714,8 @@ export class Bot implements Directory, AlertSink {
           await interaction.editReply({
             embeds: [
               settings.takeTurns
-                ? note(lang, "Tracks added go in their person's turn", '넣는 곡이 사람마다 차례대로 들어감')
-                : note(lang, 'Tracks added go at the end', '넣는 곡이 맨 뒤로 들어감'),
+                ? note(lang, "Tracks added go in their person's turn", '추가하는 곡이 사람마다 번갈아 들어감')
+                : note(lang, 'Tracks added go at the end', '추가하는 곡이 맨 뒤로 들어감'),
             ],
           });
           return;
@@ -729,7 +729,7 @@ export class Bot implements Directory, AlertSink {
                 : note(
                     lang,
                     `Each person may have ${settings.personLimit} tracks in the queue`,
-                    `한 사람이 대기열에 ${settings.personLimit}곡까지 넣을 수 있음`,
+                    `한 사람이 대기열에 ${settings.personLimit}곡까지 추가할 수 있음`,
                   ),
             ],
           });
@@ -750,7 +750,7 @@ export class Bot implements Directory, AlertSink {
           const liked = actions.like(context, track.id);
           const title = liked.track.title;
           await interaction.editReply({
-            embeds: [note(lang, `Liked "${title}"`, `좋아요 목록에 넣음: "${title}"`)],
+            embeds: [note(lang, `Liked "${title}"`, `좋아요 목록에 추가: "${title}"`)],
           });
           return;
         }

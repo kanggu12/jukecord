@@ -517,13 +517,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .addStringOption(modeOption),
     // Shown to everyone: "now" is for whoever may change the music; "set" is refused for those who cannot manage.
-    command('turns', 'Take turns in the queue, by person', '차례', '사람마다 차례대로 대기열에 넣기')
+    command('turns', 'Take turns in the queue, by person', '차례', '대기열을 사람마다 번갈아 재생')
       .addSubcommand((sub) =>
         sub
           .setName('set')
           .setDescription('Tracks added go in turn, by person (needs Manage Server)')
           .setNameLocalizations({ ko: '정하기' })
-          .setDescriptionLocalizations({ ko: '넣는 곡을 사람마다 차례대로 배치(서버 관리 권한 필요)' })
+          .setDescriptionLocalizations({ ko: '추가하는 곡을 사람마다 번갈아 배치(서버 관리 권한 필요)' })
           .addStringOption(modeOption),
       )
       .addSubcommand((sub) =>
@@ -531,13 +531,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setName('now')
           .setDescription('Put the queue in turns once')
           .setNameLocalizations({ ko: '맞추기' })
-          .setDescriptionLocalizations({ ko: '지금 대기열을 한 번 차례대로 맞추기' }),
+          .setDescriptionLocalizations({ ko: '지금 대기열을 한 번 번갈아 정렬' }),
       ),
     command(
       'limit',
       'The most tracks one person may have in the queue',
       '곡수제한',
-      '한 사람이 대기열에 넣을 수 있는 곡 수',
+      '한 사람이 대기열에 추가할 수 있는 곡 수',
     )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .addIntegerOption((option) =>
@@ -611,8 +611,8 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
         sub
           .setName('add')
           .setDescription('Add every track you liked to the queue')
-          .setNameLocalizations({ ko: '모두넣기' })
-          .setDescriptionLocalizations({ ko: '좋아요 한 곡을 모두 대기열에 넣기' })
+          .setNameLocalizations({ ko: '모두추가' })
+          .setDescriptionLocalizations({ ko: '좋아요 한 곡을 모두 대기열에 추가' })
           .addStringOption((option) =>
             option
               .setName('where')

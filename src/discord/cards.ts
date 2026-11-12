@@ -82,7 +82,7 @@ const TEXT = {
   on: { en: 'on', ko: '켬' },
   off: { en: 'off', ko: '끔' },
   voteSkip: { en: 'Vote to skip', ko: '건너뛰기 투표' },
-  takeTurns: { en: 'Take turns', ko: '차례대로 넣기' },
+  takeTurns: { en: 'Take turns', ko: '번갈아 재생' },
   personLimit: { en: 'Tracks per person', ko: '한 사람당 곡 수' },
   noLimit: { en: 'no limit', ko: '제한 없음' },
   stay: { en: 'Stay in voice', ko: '음성 채널에 머물기' },
@@ -170,7 +170,7 @@ export function addedCard(result: AddResult, lang: Lang, playingNow = false): Em
   if (result.skippedLimit > 0)
     left.push(
       lang === 'ko'
-        ? `한 사람당 곡 수 제한으로 ${result.skippedLimit}곡 못 넣음`
+        ? `한 사람당 곡 수 제한으로 ${result.skippedLimit}곡 추가하지 못함`
         : `${result.skippedLimit} did not fit, the limit per person`,
     );
   if (result.skippedNotFound > 0)

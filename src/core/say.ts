@@ -183,7 +183,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // How a server's people share the music.
   ['only people who can manage the server can change this setting', '서버 관리 권한이 있어야 이 설정을 바꿀 수 있음'],
   ['only people listening can vote to skip', '듣고 있는 사람만 건너뛰기에 투표할 수 있음'],
-  [/^each person may have (\d+) tracks in the queue here$/, '이 서버에서는 한 사람이 대기열에 $1곡까지 넣을 수 있음'],
+  [/^each person may have (\d+) tracks in the queue here$/, '이 서버에서는 한 사람이 대기열에 $1곡까지 추가할 수 있음'],
   [/^the limit is 0 \(none\) to (\d+) tracks$/, '제한은 0(없음)부터 $1곡까지'],
   [/^the volume is 0 to (\d+) percent$/, '음량은 0부터 $1퍼센트까지'],
   [/^the sound is one of (.+)$/, '음색은 $1 중 하나'],
@@ -198,7 +198,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     '이 서버에서 재생 중이거나 대기열이나 플레이리스트에 있거나 들은 곡이 아님',
   ],
   ['that track is not in your likes', '내 좋아요 목록에 없는 곡임'],
-  ['there are no liked tracks to add', '넣을 좋아요 곡 없음'],
+  ['there are no liked tracks to add', '추가할 좋아요 곡 없음'],
   [/^your likes are full \((\d+) tracks\)$/, '좋아요 목록이 가득 참($1곡)'],
   // Autoplay.
   [/^autoplay is one of (.+)$/, '자동 재생은 $1 중 하나'],
@@ -213,7 +213,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['Discord did not hand over the file', '디스코드가 파일을 넘겨주지 않음'],
   [
     'jukecord is still adding a list of yours; try again when it is done',
-    '내 목록을 아직 넣는 중: 끝나면 다시 시도하세요',
+    '내 목록을 아직 추가하는 중: 끝나면 다시 시도하세요',
   ],
   // Links of other music services.
   ['that is not a link jukecord reads', 'jukecord가 읽는 링크가 아님'],
