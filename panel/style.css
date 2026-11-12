@@ -1599,40 +1599,70 @@ img {
   background: color-mix(in oklch, var(--load) 16%, transparent);
   border-color: color-mix(in oklch, var(--load) 42%, transparent);
 }
-/* Three bars that dance while the browser listens. */
-.listen .key[data-act="listen"][aria-pressed="true"]::after {
-  content: "";
+/* Three bars that dance while the browser listens, standing still while the sound waits. Each bar is a box of its
+   own scaled from its foot: the browser animates a scale without laying anything out or drawing it again (the
+   bars' heights, animated before, cost seventy style passes a second for as long as anyone listened). */
+.listen .key[data-act="listen"] .eq {
+  display: none;
+  align-items: flex-end;
+  gap: 2px;
   width: 13px;
   height: 12px;
   margin-left: 2px;
-  background:
-    linear-gradient(currentColor, currentColor) 0 100% / 3px 40% no-repeat,
-    linear-gradient(currentColor, currentColor) 5px 100% / 3px 90% no-repeat,
-    linear-gradient(currentColor, currentColor) 10px 100% / 3px 60% no-repeat;
   color: color-mix(in oklch, var(--load) 80%, var(--ink));
 }
-.listen .key[data-act="listen"].sounding[aria-pressed="true"]::after {
-  animation: eq 1.1s ease-in-out infinite;
+.listen .key[data-act="listen"][aria-pressed="true"] .eq {
+  display: flex;
 }
-@keyframes eq {
-  0%,
-  100% {
-    background-size:
-      3px 40%,
-      3px 90%,
-      3px 60%;
-  }
+.eq i {
+  width: 3px;
+  height: 100%;
+  flex: none;
+  background: currentColor;
+  transform-origin: bottom;
+}
+/* At rest: 40, 90 and 60 per cent of their height, the dance's first step. */
+.eq i:nth-child(1) {
+  transform: scaleY(0.4);
+}
+.eq i:nth-child(2) {
+  transform: scaleY(0.9);
+}
+.eq i:nth-child(3) {
+  transform: scaleY(0.6);
+}
+.listen .key[data-act="listen"].sounding[aria-pressed="true"] .eq i:nth-child(1) {
+  animation: eq-1 1.1s ease-in-out infinite;
+}
+.listen .key[data-act="listen"].sounding[aria-pressed="true"] .eq i:nth-child(2) {
+  animation: eq-2 1.1s ease-in-out infinite;
+}
+.listen .key[data-act="listen"].sounding[aria-pressed="true"] .eq i:nth-child(3) {
+  animation: eq-3 1.1s ease-in-out infinite;
+}
+/* The three bars' steps, as before: a third of the way and two thirds through each round. */
+@keyframes eq-1 {
   33% {
-    background-size:
-      3px 95%,
-      3px 45%,
-      3px 80%;
+    transform: scaleY(0.95);
   }
   66% {
-    background-size:
-      3px 60%,
-      3px 70%,
-      3px 35%;
+    transform: scaleY(0.6);
+  }
+}
+@keyframes eq-2 {
+  33% {
+    transform: scaleY(0.45);
+  }
+  66% {
+    transform: scaleY(0.7);
+  }
+}
+@keyframes eq-3 {
+  33% {
+    transform: scaleY(0.8);
+  }
+  66% {
+    transform: scaleY(0.35);
   }
 }
 .listen .state {
@@ -2488,8 +2518,8 @@ kbd {
   }
 }
 /* Once risen, the cards stay still when the player page is shown again (an animation restarts when its element
-   comes back from hidden). The card asking for music keeps its breathing. */
-.main.risen .col > .card:not(.invite) {
+   comes back from hidden). The card asking for music breathes by its ring, below, which this does not stop. */
+.main.risen .col > .card {
   animation: none;
 }
 /* Another track comes in from below; Skip moves the old one out to the right. */
@@ -2537,17 +2567,24 @@ kbd {
   opacity: 0;
   pointer-events: none;
 }
-/* Nothing playing and nothing waiting: the card to add music breathes, slowly, in the focus colour. */
-.card.invite {
-  animation: invite 2.8s ease-in-out infinite;
+/* Nothing playing and nothing waiting: the card to add music breathes, slowly, in the focus colour, six breaths, then
+   rests lit. The colour is a ring of its own over the card's edge, and only the ring's opacity changes: the browser
+   animates that without drawing anything again (the edge's own colour, animated before, was redrawn sixty times a
+   second for as long as the panel sat idle). */
+.card.invite::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 1px solid color-mix(in oklch, var(--focus) 55%, transparent);
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  /* Six and a half: it stops halfway through a breath, at its brightest. */
+  animation: invite 2.8s ease-in-out 6.5 forwards;
 }
 @keyframes invite {
-  0%,
-  100% {
-    border-color: var(--edge);
-  }
   50% {
-    border-color: color-mix(in oklch, var(--focus) 55%, transparent);
+    opacity: 1;
   }
 }
 

@@ -34,6 +34,9 @@ export function listenBar(live: Live): HTMLElement {
   let sync: Sync = 'off';
 
   const toggle = h('button', { class: 'key', type: 'button', 'data-act': 'listen' });
+  // Three bars that dance on the Listen key while the sound plays here, each a box of its own so that only its scale
+  // moves (the browser does that without drawing anything again).
+  const eq = h('span', { class: 'eq', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
   // Pause and skip, made once and kept: keys rebuilt on every snapshot would lose a click and the keyboard focus.
   const pauseKey = h('button', { class: 'key square', type: 'button' });
   const skipKey = h('button', { class: 'key square', type: 'button' }, icon('skip-forward'));
@@ -214,7 +217,8 @@ export function listenBar(live: Live): HTMLElement {
     const sign = `${name}|${words}|${text}`;
     if (key.dataset.sign === sign) return;
     key.dataset.sign = sign;
-    fill(key, icon(name), text ? h('span', { class: 'label' }, words) : null);
+    // The Listen key keeps its dancing bars (style.css shows them while it is pressed).
+    fill(key, icon(name), text ? h('span', { class: 'label' }, words) : null, key === toggle ? eq : null);
     key.title = words;
     key.setAttribute('aria-label', words);
   };
