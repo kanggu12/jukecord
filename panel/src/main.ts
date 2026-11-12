@@ -295,20 +295,46 @@ function frame(): void {
   // out while the new one fades in. Nothing playing: the field rests near grey.
   const ambient = h('div', { class: 'ambient', 'aria-hidden': 'true' }, h('div'), h('div'));
   document.body.prepend(ambient);
+  const layers = [...ambient.children] as HTMLElement[];
+  // The cover asked for (the track playing now), the one on the top layer, and which layer is on top.
   let ambientCover: string | null = null;
+  let shownCover: string | null = null;
   let ambientTop = 0;
+  // While the layer that would take the next cover is still fading out its own, the change waits (a picture swapped
+  // under a half-faded layer shows as a cut, which quick skips made every other time).
+  let ambientWait = 0;
+  const light = () => {
+    ambientWait = 0;
+    const cover = ambientCover;
+    if (cover === shownCover) return;
+    const top = layers[ambientTop];
+    const free = layers[1 - ambientTop];
+    if (!top || !free) return;
+    if (!cover) {
+      // Nothing playing: the light fades out and the field rests.
+      top.classList.remove('on');
+      shownCover = null;
+      return;
+    }
+    // Still showing some of its old cover (its fade-out lasts 1.4 s): asked again in a moment, with whatever cover
+    // is the newest by then. With motion off it is clear at once.
+    if (Number(getComputedStyle(free).opacity) > 0.01) {
+      ambientWait = window.setTimeout(light, 150);
+      return;
+    }
+    free.style.backgroundImage = cssUrl(cover);
+    // The new cover fades in over the old one, which fades out.
+    free.classList.add('on');
+    top.classList.remove('on');
+    ambientTop = 1 - ambientTop;
+    shownCover = cover;
+  };
   watch(['player'], () => {
     const cover = state.player?.track?.thumbnail ?? null;
     if (cover === ambientCover) return;
     ambientCover = cover;
-    const layers = [...ambient.children] as HTMLElement[];
-    layers[ambientTop]?.classList.remove('on');
-    if (!cover) return;
-    ambientTop = 1 - ambientTop;
-    const next = layers[ambientTop];
-    if (!next) return;
-    next.style.backgroundImage = cssUrl(cover);
-    next.classList.add('on');
+    // A change already waiting takes the newest cover when its turn comes.
+    if (!ambientWait) light();
   });
   // The tab shows what plays; on its own watch, so player snapshots do not redraw the bar.
   watch(['player'], () => {
