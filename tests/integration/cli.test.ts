@@ -139,10 +139,16 @@ describe('the jukecord command', () => {
     assert.deepEqual(out, [
       { text: JSON.stringify({ error: { code: 'conflict', message: 'nothing is playing' } }, null, 2), error: true },
     ]);
-    // A typing mistake too, with its own code.
-    const typed: string[] = [];
-    assert.equal(await run(['repeat', 'sometimes', '--json'], env, (text) => typed.push(text)), 2);
-    assert.equal(JSON.parse(typed.join('')).error.code, 'usage');
+    // A typing mistake too, with its own code, whether it is found before jukecord is asked or after.
+    for (const line of [
+      ['repeat', 'sometimes', '--json'],
+      ['fly', '--json'],
+      ['np', '--jsno', '--json'],
+    ]) {
+      const typed: string[] = [];
+      assert.equal(await run(line, env, (text) => typed.push(text)), 2, line.join(' '));
+      assert.equal(JSON.parse(typed.join('')).error.code, 'usage', line.join(' '));
+    }
     // Answered "try again later" (a rate, a busy moment: an answer with Retry-After): 4, apart from a refusal.
     const later = await testServer({ listen: true, rates: { changes: { perSecond: 1, burst: 1 } } });
     try {

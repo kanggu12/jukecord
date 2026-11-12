@@ -247,14 +247,19 @@ export async function run(
     print(`jukecord ${VERSION}`);
     return 0;
   }
+  // A typing mistake found before anything is asked: as JSON under --json too (code "usage"), as the later ones are.
+  const mistake = (message: string): number => {
+    print(
+      words.flags.has('json') ? JSON.stringify({ error: { code: 'usage', message } }, null, 2) : `jukecord: ${message}`,
+      true,
+    );
+    return 2;
+  };
   // One command's help: "help add", or "add --help".
   const asked = words.args[0] === 'help' ? words.args.slice(1) : words.flags.has('help') ? words.args : [];
   if (asked.length > 0) {
     const found = findCommand(asked);
-    if (!found) {
-      print(`jukecord: there is no command "${asked.join(' ')}" (see jukecord --help)`, true);
-      return 2;
-    }
+    if (!found) return mistake(`there is no command "${asked.join(' ')}" (see jukecord --help)`);
     print(commandHelp(found.command));
     return 0;
   }
@@ -264,24 +269,12 @@ export async function run(
   }
   // A mistyped option is said at once, not silently left out ("--jsno"); so is one that needs a value and has none.
   for (const [name, value] of words.flags) {
-    if (!VALUED.has(name) && !SWITCHES.has(name)) {
-      print(`jukecord: there is no option --${name} (see jukecord --help)`, true);
-      return 2;
-    }
-    if (VALUED.has(name) && (value === true || value === '')) {
-      print(`jukecord: --${name} needs a value`, true);
-      return 2;
-    }
-    if (SWITCHES.has(name) && value !== true) {
-      print(`jukecord: --${name} takes no value`, true);
-      return 2;
-    }
+    if (!VALUED.has(name) && !SWITCHES.has(name)) return mistake(`there is no option --${name} (see jukecord --help)`);
+    if (VALUED.has(name) && (value === true || value === '')) return mistake(`--${name} needs a value`);
+    if (SWITCHES.has(name) && value !== true) return mistake(`--${name} takes no value`);
   }
   const found = findCommand(words.args);
-  if (!found) {
-    print(`jukecord: there is no command "${words.args.join(' ')}" (see jukecord --help)`, true);
-    return 2;
-  }
+  if (!found) return mistake(`there is no command "${words.args.join(' ')}" (see jukecord --help)`);
   const { operation, command, rest } = found;
   const { url, token } = connection(words.flags, env);
   const client = new Client(url, token);
