@@ -312,6 +312,8 @@ export class Auth {
       kind: principal.kind,
       userId: principal.kind === 'user' ? principal.userId : null,
       csrf: newSecret(),
+      // Everything the login may do: the host's and a Discord user's panel logins are not narrowed.
+      scope: 'admin',
       expiresAt: this.now() + SESSION_MS,
     });
     // Old logins are cleared now and then; the start of a new one is a natural moment.

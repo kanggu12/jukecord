@@ -144,4 +144,60 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    sql: `
+      -- Lyrics found for a track, or that none were found (asked again after a while), from LRCLIB: kept, so a track
+      -- is asked about once. "kind" is synced (timed lines, with the plain text beside them), plain (no timings),
+      -- instrumental or none; "source_id" is LRCLIB's own number for the record.
+      CREATE TABLE lyrics (
+        track_id   INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        kind       TEXT    NOT NULL,
+        synced     TEXT,
+        plain      TEXT,
+        source_id  INTEGER,
+        fetched_at INTEGER NOT NULL
+      );
+
+      -- What the site says a recording is, when it says (YouTube Music's song, artist and album): what its lyrics are
+      -- looked up by. A track without a row has its title and channel read instead.
+      CREATE TABLE track_music (
+        track_id   INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        artist     TEXT    NOT NULL,
+        title      TEXT    NOT NULL,
+        album      TEXT,
+        updated_at INTEGER NOT NULL
+      );
+
+      -- Listening links: a code that lets guests without a Discord account listen along to one server until the link
+      -- expires. Only the code's SHA-256 is stored, as for every secret; "max_guests" is how many browsers it takes.
+      CREATE TABLE listen_links (
+        id         INTEGER PRIMARY KEY,
+        hash       TEXT    NOT NULL UNIQUE,
+        guild_id   TEXT    NOT NULL,
+        created_by TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        max_guests INTEGER NOT NULL
+      );
+      CREATE INDEX listen_links_by_guild ON listen_links(guild_id, expires_at);
+
+      -- The browsers that came in with a listening link. A table of their own, never the sessions table: a session
+      -- there without a user is the host's. They end with their link, when it expires and, deleted with it, at once
+      -- when it is revoked.
+      CREATE TABLE guest_sessions (
+        id_hash    TEXT    PRIMARY KEY,
+        link_id    INTEGER NOT NULL REFERENCES listen_links(id) ON DELETE CASCADE,
+        csrf       TEXT    NOT NULL,
+        created_at INTEGER NOT NULL,
+        seen_at    INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX guest_sessions_by_link ON guest_sessions(link_id);
+
+      -- What a panel login may do: all its login may (admin, as every login before this version could), or for a
+      -- friend the host let in with a login link, only look (read) or also change the music (control).
+      ALTER TABLE sessions ADD COLUMN scope TEXT NOT NULL DEFAULT 'admin';
+    `,
+  },
 ];

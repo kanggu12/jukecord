@@ -84,6 +84,10 @@ export class Store {
   readonly users: UserRepository;
   readonly sessions: SessionRepository;
   readonly tokens: TokenRepository;
+  readonly lyrics: LyricsRepository;
+  readonly music: MusicRepository;
+  readonly listenLinks: ListenLinkRepository;
+  readonly guests: GuestSessionRepository;
   // How deep the current transaction is nested; inner ones become savepoints.
   private depth = 0;
 
@@ -100,6 +104,10 @@ export class Store {
     this.users = new UserRepository(this, now);
     this.sessions = new SessionRepository(this, now);
     this.tokens = new TokenRepository(this, now);
+    this.lyrics = new LyricsRepository(this, now);
+    this.music = new MusicRepository(this, now);
+    this.listenLinks = new ListenLinkRepository(this, now);
+    this.guests = new GuestSessionRepository(this, now);
   }
 
   /**
@@ -964,15 +972,20 @@ export class UserRepository {
 /** Whose login or token it is: the host (the machine running jukecord) or a Discord user. */
 export type PrincipalKind = 'host' | 'user';
 
+/** Whose panel login it is: the host's, a Discord user's, or a friend's the host let in with a login link. */
+export type SessionKind = PrincipalKind | 'friend';
+
 /** One panel login. */
 export interface SessionRow {
   /** SHA-256 of the cookie's secret, in hex. */
   readonly idHash: string;
-  readonly kind: PrincipalKind;
+  readonly kind: SessionKind;
   /** The Discord user, for kind "user". */
   readonly userId: string | null;
   /** The token the panel sends with every change, so another site cannot make changes with the cookie. */
   readonly csrf: string;
+  /** What it may do: everything its login may (admin), or a friend's view (read) or control. */
+  readonly scope: TokenScope;
   readonly createdAt: number;
   readonly seenAt: number;
   readonly expiresAt: number;
@@ -992,10 +1005,10 @@ export class SessionRepository {
     const now = this.now();
     this.store.db
       .prepare(
-        `INSERT INTO sessions (id_hash, kind, user_id, csrf, created_at, seen_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (id_hash, kind, user_id, csrf, scope, created_at, seen_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(session.idHash, session.kind, session.userId, session.csrf, now, now, session.expiresAt);
+      .run(session.idHash, session.kind, session.userId, session.csrf, session.scope, now, now, session.expiresAt);
     return { ...session, createdAt: now, seenAt: now };
   }
 
@@ -1027,12 +1040,18 @@ export class SessionRepository {
 }
 
 function sessionFrom(row: Row): SessionRow {
+  const kind = text(row, 'kind');
+  const scope = text(row, 'scope');
   return {
     idHash: text(row, 'id_hash'),
-    // Anything but "host" is read as a user: a stored row cannot widen itself into host rights.
-    kind: text(row, 'kind') === 'host' ? 'host' : 'user',
+    // Anything but "host" or "friend" is read as a user: a stored row cannot widen itself into host rights.
+    kind: kind === 'host' || kind === 'friend' ? kind : 'user',
     userId: textOrNull(row, 'user_id'),
     csrf: text(row, 'csrf'),
+    // An unknown scope (a hand edit) is read as the narrowest one, as a token's is; a friend's is never wider than
+    // control.
+    scope:
+      scope === 'admin' && kind !== 'friend' ? 'admin' : scope === 'control' || scope === 'admin' ? 'control' : 'read',
     createdAt: int(row, 'created_at'),
     seenAt: int(row, 'seen_at'),
     expiresAt: int(row, 'expires_at'),
@@ -1134,4 +1153,318 @@ function tokenFrom(row: Row): TokenRow {
     createdAt: int(row, 'created_at'),
     usedAt: intOrNull(row, 'used_at'),
   };
+}
+
+/** What is known about a track's lyrics: timed lines, words without timings, an instrumental, or that none were found. */
+export type LyricsKind = 'synced' | 'plain' | 'instrumental' | 'none';
+
+/** A track's lyrics as they are kept. */
+export interface LyricsRow {
+  readonly trackId: number;
+  readonly kind: LyricsKind;
+  /** The timed lines as LRC ("[01:02.30] words"), for kind synced. */
+  readonly synced: string | null;
+  /** The words without timings (synced lyrics have them too). */
+  readonly plain: string | null;
+  /** The record's number at the source (LRCLIB), or null when none was found. */
+  readonly sourceId: number | null;
+  /** When they were looked up: a "none" is looked up again after a while, as the source may have them by then. */
+  readonly fetchedAt: number;
+}
+
+// The most characters kept of one track's lyrics, timed or plain: songs have a few thousand, and a record far longer
+// is not a song's words. Past it the words are cut at the end of a line.
+const LYRICS_MAX = 64_000;
+
+// Text cut to the limit at the last line break before it, so no line is kept half.
+function capped(value: string | null): string | null {
+  if (value === null || value.length <= LYRICS_MAX) return value;
+  const cut = value.lastIndexOf('\n', LYRICS_MAX);
+  return value.slice(0, cut > 0 ? cut : LYRICS_MAX);
+}
+
+/** Lyrics by track, one row each: what was found for it, or that nothing was. */
+export class LyricsRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** What is kept for a track, or null when it was never looked up. */
+  get(trackId: number): LyricsRow | null {
+    const row = this.store.db.prepare('SELECT * FROM lyrics WHERE track_id = ?').get(trackId) as Row | undefined;
+    return row ? lyricsFrom(row) : null;
+  }
+
+  /** Keeps what a lookup found (or that it found nothing), replacing what was kept, and returns it as kept. */
+  save(lyrics: Omit<LyricsRow, 'fetchedAt'>): LyricsRow {
+    const row = this.store.db
+      .prepare(
+        `INSERT INTO lyrics (track_id, kind, synced, plain, source_id, fetched_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (track_id) DO UPDATE SET kind = excluded.kind, synced = excluded.synced, plain = excluded.plain,
+           source_id = excluded.source_id, fetched_at = excluded.fetched_at
+         RETURNING *`,
+      )
+      .get(
+        lyrics.trackId,
+        lyrics.kind,
+        capped(lyrics.synced),
+        capped(lyrics.plain),
+        lyrics.sourceId,
+        this.now(),
+      ) as Row;
+    return lyricsFrom(row);
+  }
+}
+
+function lyricsFrom(row: Row): LyricsRow {
+  const kind = text(row, 'kind');
+  return {
+    trackId: int(row, 'track_id'),
+    // An unknown kind (a newer version's, or a hand edit) is read as none found, which is looked up again in time.
+    kind: kind === 'synced' || kind === 'plain' || kind === 'instrumental' ? kind : 'none',
+    synced: textOrNull(row, 'synced'),
+    plain: textOrNull(row, 'plain'),
+    sourceId: intOrNull(row, 'source_id'),
+    fetchedAt: int(row, 'fetched_at'),
+  };
+}
+
+/** What a site says a recording is: the song, its artist and its album (YouTube says it for many music videos). */
+export interface TrackMusic {
+  readonly artist: string;
+  readonly title: string;
+  readonly album: string | null;
+}
+
+// The longest name kept for an artist, a song or an album: longer is not a name.
+const MUSIC_NAME_MAX = 300;
+
+/** The song, artist and album of tracks whose site said them, by track. */
+export class MusicRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** What the site said a track is, or null when it said nothing. */
+  get(trackId: number): TrackMusic | null {
+    const row = this.store.db.prepare('SELECT artist, title, album FROM track_music WHERE track_id = ?').get(trackId) as
+      | Row
+      | undefined;
+    return row ? { artist: text(row, 'artist'), title: text(row, 'title'), album: textOrNull(row, 'album') } : null;
+  }
+
+  /** Keeps what a site said a track is; a later lookup that says it again replaces it. */
+  set(trackId: number, music: TrackMusic): void {
+    const cut = (value: string) => value.trim().slice(0, MUSIC_NAME_MAX);
+    this.store.db
+      .prepare(
+        `INSERT INTO track_music (track_id, artist, title, album, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (track_id) DO UPDATE SET artist = excluded.artist, title = excluded.title, album = excluded.album,
+           updated_at = excluded.updated_at`,
+      )
+      .run(trackId, cut(music.artist), cut(music.title), music.album === null ? null : cut(music.album), this.now());
+  }
+}
+
+/** A listening link as it is listed (never with its code, which is kept only as a hash). */
+export interface ListenLinkRow {
+  readonly id: number;
+  readonly guildId: string;
+  /** The Discord user who made it, or null for the host. */
+  readonly createdBy: string | null;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  /** How many browsers it lets in at most. */
+  readonly maxGuests: number;
+  /** How many browsers came in with it and are in still. */
+  readonly guests: number;
+}
+
+// A link's columns with how many of its guests are in still (their sessions not expired), for `now` (bound first).
+const LINK_SELECT = `SELECT l.*, (SELECT COUNT(*) FROM guest_sessions g WHERE g.link_id = l.id AND g.expires_at > ?)
+  AS guests FROM listen_links l`;
+
+/** Listening links by server. An expired link counts as gone (it is deleted the next time links are pruned). */
+export class ListenLinkRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  create(link: {
+    hash: string;
+    guildId: string;
+    createdBy: string | null;
+    expiresAt: number;
+    maxGuests: number;
+  }): ListenLinkRow {
+    const row = this.store.db
+      .prepare(
+        `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      )
+      .get(link.hash, link.guildId, link.createdBy, this.now(), link.expiresAt, link.maxGuests) as Row;
+    const made = this.get(int(row, 'id'));
+    if (!made) throw new StoreError('the listening link just written cannot be read back');
+    return made;
+  }
+
+  /** The link with this ID while it has not expired, or null. */
+  get(id: number): ListenLinkRow | null {
+    const now = this.now();
+    const row = this.store.db.prepare(`${LINK_SELECT} WHERE l.id = ? AND l.expires_at > ?`).get(now, id, now) as
+      | Row
+      | undefined;
+    return row ? linkFrom(row) : null;
+  }
+
+  /** The link whose code has this hash while it has not expired, or null. */
+  byHash(hash: string): ListenLinkRow | null {
+    const now = this.now();
+    const row = this.store.db.prepare(`${LINK_SELECT} WHERE l.hash = ? AND l.expires_at > ?`).get(now, hash, now) as
+      | Row
+      | undefined;
+    return row ? linkFrom(row) : null;
+  }
+
+  /** A server's links that have not expired, newest first: everyone's, or one person's (`createdBy`). */
+  list(guildId: string, createdBy?: string): ListenLinkRow[] {
+    const now = this.now();
+    const rows =
+      createdBy === undefined
+        ? this.store.db
+            .prepare(`${LINK_SELECT} WHERE l.guild_id = ? AND l.expires_at > ? ORDER BY l.id DESC`)
+            .all(now, guildId, now)
+        : this.store.db
+            .prepare(`${LINK_SELECT} WHERE l.guild_id = ? AND l.expires_at > ? AND l.created_by = ? ORDER BY l.id DESC`)
+            .all(now, guildId, now, createdBy);
+    return rows.map((row) => linkFrom(row as Row));
+  }
+
+  /** How many links of a server have not expired. */
+  count(guildId: string): number {
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM listen_links WHERE guild_id = ? AND expires_at > ?')
+      .get(guildId, this.now()) as Row;
+    return int(row, 'n');
+  }
+
+  /** Deletes a link and, with it, the sessions of its guests; false when there was none. */
+  remove(id: number): boolean {
+    return Number(this.store.db.prepare('DELETE FROM listen_links WHERE id = ?').run(id).changes) > 0;
+  }
+
+  /** Deletes the links that have expired (their guests' sessions go with them) and returns how many went. */
+  prune(): number {
+    return Number(this.store.db.prepare('DELETE FROM listen_links WHERE expires_at <= ?').run(this.now()).changes);
+  }
+}
+
+function linkFrom(row: Row): ListenLinkRow {
+  return {
+    id: int(row, 'id'),
+    guildId: text(row, 'guild_id'),
+    createdBy: textOrNull(row, 'created_by'),
+    createdAt: int(row, 'created_at'),
+    expiresAt: int(row, 'expires_at'),
+    maxGuests: int(row, 'max_guests'),
+    guests: int(row, 'guests'),
+  };
+}
+
+/** A browser that came in with a listening link. */
+export interface GuestSessionRow {
+  /** SHA-256 of the cookie's secret, in hex. */
+  readonly idHash: string;
+  readonly linkId: number;
+  /** The one server its link opens. */
+  readonly guildId: string;
+  /** The token its changes would need (a guest's only change is leaving). */
+  readonly csrf: string;
+  readonly createdAt: number;
+  readonly seenAt: number;
+  /** When its link expires: a guest's session never outlives the link. */
+  readonly expiresAt: number;
+}
+
+/** The sessions of guests, looked up by the hash of the cookie's secret. */
+export class GuestSessionRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  create(session: { idHash: string; linkId: number; csrf: string; expiresAt: number }): void {
+    const now = this.now();
+    this.store.db
+      .prepare(
+        `INSERT INTO guest_sessions (id_hash, link_id, csrf, created_at, seen_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(session.idHash, session.linkId, session.csrf, now, now, session.expiresAt);
+  }
+
+  /**
+   * The guest with this hash, with the server of its link, or null when there is none: never was, logged out, its
+   * link revoked (deleted with it) or expired (an expired one is removed).
+   */
+  get(idHash: string): GuestSessionRow | null {
+    const row = this.store.db
+      .prepare(
+        `SELECT g.*, l.guild_id FROM guest_sessions g JOIN listen_links l ON l.id = g.link_id WHERE g.id_hash = ?`,
+      )
+      .get(idHash) as Row | undefined;
+    if (!row) return null;
+    const session: GuestSessionRow = {
+      idHash: text(row, 'id_hash'),
+      linkId: int(row, 'link_id'),
+      guildId: text(row, 'guild_id'),
+      csrf: text(row, 'csrf'),
+      createdAt: int(row, 'created_at'),
+      seenAt: int(row, 'seen_at'),
+      expiresAt: int(row, 'expires_at'),
+    };
+    if (session.expiresAt <= this.now()) {
+      this.remove(idHash);
+      return null;
+    }
+    return session;
+  }
+
+  /** Notes that the guest was seen now (at most once a minute, by its caller). */
+  touch(idHash: string): void {
+    this.store.db.prepare('UPDATE guest_sessions SET seen_at = ? WHERE id_hash = ?').run(this.now(), idHash);
+  }
+
+  /** Ends a guest's session (the guest left); false when there was none. */
+  remove(idHash: string): boolean {
+    return Number(this.store.db.prepare('DELETE FROM guest_sessions WHERE id_hash = ?').run(idHash).changes) > 0;
+  }
+
+  /** How many guests of a link are in (their sessions not expired). */
+  count(linkId: number): number {
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM guest_sessions WHERE link_id = ? AND expires_at > ?')
+      .get(linkId, this.now()) as Row;
+    return int(row, 'n');
+  }
+
+  /** Deletes the expired sessions of guests and returns how many went. */
+  prune(): number {
+    return Number(this.store.db.prepare('DELETE FROM guest_sessions WHERE expires_at <= ?').run(this.now()).changes);
+  }
 }
