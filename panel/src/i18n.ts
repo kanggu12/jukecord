@@ -226,6 +226,7 @@ const EN = {
     "This page's address is not the one jukecord was set up with (JUKECORD_PUBLIC_URL), so live updates are refused",
   // Problems.
   offline: 'jukecord is not answering; trying again',
+  startFailed: 'jukecord could not open the panel just now; trying again',
   failed: (message: string) => message,
   reload: 'jukecord was updated: reload the page',
 } as const;
@@ -447,6 +448,7 @@ const KO: Strings = {
   hiddenChannel: '볼 수 없는 채널',
   wrongAddress: '이 페이지 주소가 jukecord에 설정된 주소(JUKECORD_PUBLIC_URL)와 달라 실시간 연결이 거절됨',
   offline: 'jukecord가 응답하지 않음: 다시 연결 중',
+  startFailed: 'jukecord가 지금 패널을 열지 못함: 다시 시도하는 중',
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
 };

@@ -45,16 +45,21 @@ async function boot(): Promise<void> {
     return;
   }
   whenLoggedOut(() => toLogin());
-  let me: Awaited<ReturnType<typeof api.me>>;
-  try {
-    me = await api.me();
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      toLogin();
-      return;
+  // Who is logged in. jukecord not answering, or answering with a failure (busy, an error of its own): the page says
+  // so and asks again (1 s, doubling up to 10 s), as for the servers below, instead of staying blank.
+  let me: Awaited<ReturnType<typeof api.me>> | null = null;
+  for (let wait = 1000; me === null; wait = Math.min(10_000, wait * 2)) {
+    try {
+      me = await api.me();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        toLogin();
+        return;
+      }
+      // A request that never got an answer is jukecord not answering; an answer that is a failure is its own.
+      fill(root, waitingPage(state.status, error instanceof ApiError ? t().startFailed : t().offline));
+      await new Promise((resolve) => window.setTimeout(resolve, wait));
     }
-    problem(error);
-    return;
   }
   setCsrf(me.csrf);
   update({ me });
