@@ -53,7 +53,10 @@ page that ran past the window and scrolled its bars with it). On the pages it ph
 accessibility rules (names, roles, landmarks, headings). It also counts, for each page, the different font sizes,
 control heights, corner radii, paddings and gaps it shows, into the report and a summary at the walk's end: the fewer,
 the more the panel reads as one system. It also presses **Listen here** and waits for the browser to be in time with
-the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
+the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given. The whole walk takes
+about 40 minutes on a GitHub runner, so the look workflow walks it in four groups at once: `tests/ui/groups.ts` deals
+the walk's states out (`ONLY="$(node tests/ui/groups.ts 0 4)" tests/ui/run.sh <folder>` is the first quarter), and
+the last group also takes the README's pictures and the two playing-along checks.
 
 The walk also looks at listening together: the lyrics beside the player and as a sheet (timed, plain, none found, and
 in a contrast theme), the playing card's ⋯ list and a stop after the track, the sleep timer (its choices, and the

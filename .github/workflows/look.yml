@@ -2,6 +2,7 @@
 # menus and dialogs, the statistics, the log, the login page, an empty and a 200-track queue) at eight window sizes,
 # both themes and both languages, measured by tests/ui/audit.js (clipped text, overlaps, contrast, alignment,
 # floating layers across other boxes, touch targets), and the browser playing along. The pictures are kept for a week.
+# The states are walked in four groups at once (tests/ui/groups.ts): one walk of them all took 40 of the 45 minutes.
 name: look
 
 on:
@@ -19,8 +20,14 @@ permissions:
 
 jobs:
   walk:
+    name: walk ${{ matrix.group }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      # Every group to its end: a finding in one does not hide another group's.
+      fail-fast: false
+      matrix:
+        group: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -36,13 +43,17 @@ jobs:
           load: true
           tags: jukecord:dev
           cache-from: type=gha,scope=linux/amd64
-      - name: Walk the panel
-        run: tests/ui/run.sh "$RUNNER_TEMP/look" | tee "$RUNNER_TEMP/look.log"
+      - name: Walk the panel (one group of its states)
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          set -o pipefail
+          ONLY="$(node tests/ui/groups.ts "$GROUP" 4)" tests/ui/run.sh "$RUNNER_TEMP/look" | tee "$RUNNER_TEMP/look.log"
       - name: No finding is allowed
         run: node tests/ui/verdict.mjs "$RUNNER_TEMP/look/report.json"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: look
+          name: look-${{ matrix.group }}
           path: ${{ runner.temp }}/look
           retention-days: 7
