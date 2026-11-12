@@ -1,7 +1,7 @@
 /**
- * Fills a data directory with example data for looking at the panel: tracks with made-up titles and drawn covers, a
- * queue, a month of history from a few people, playlists, and a cached audio file for every track, so playing works
- * with no network. Nothing here points at a real site, song or person.
+ * Fills a data directory with example data for looking at the panel: tracks with made-up titles and covers
+ * (covers.ts), a queue, a month of history from a few people, playlists, and a cached audio file for every track, so
+ * playing works with no network. Nothing here points at a real site, song or person.
  *
  *   node tests/ui/seed.ts <data directory> [--queue N] [--ffmpeg path]
  *
@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MediaCache } from '../../src/media/cache.ts';
 import { Store } from '../../src/store/store.ts';
+import { cover } from './covers.ts';
 
 const dataDir = path.resolve(process.argv[2] ?? 'data');
 const option = (name: string, fallback: string) => {
@@ -63,13 +64,6 @@ const PEOPLE = [
   { id: '300000000000000003', name: '하늘' },
   { id: '300000000000000004', name: 'Sol' },
 ];
-
-// A cover drawn as SVG: two colours and a shape, different for every track.
-function cover(index: number): string {
-  const hue = (index * 47) % 360;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},62%,58%)"/><stop offset="1" stop-color="hsl(${(hue + 60) % 360},55%,32%)"/></linearGradient></defs><rect width="120" height="120" fill="url(#g)"/><circle cx="${30 + (index % 5) * 15}" cy="${40 + (index % 3) * 20}" r="${18 + (index % 4) * 6}" fill="hsl(${(hue + 180) % 360},70%,75%)" opacity=".55"/></svg>`;
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-}
 
 fs.mkdirSync(dataDir, { recursive: true });
 const store = Store.open(path.join(dataDir, 'jukecord.db'));
