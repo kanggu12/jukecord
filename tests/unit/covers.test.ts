@@ -136,6 +136,31 @@ describe('fetching a picture', () => {
     assert.ok(Date.now() - started < 2000);
   });
 
+  it('keeps to public addresses by default, and reaches this machine by its system name when private ones are allowed', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-covers-private-'));
+    try {
+      const cache = new MediaCache({ dir, maxBytes: 1024 ** 2, log });
+      cache.init();
+      // This machine's own site: by its address (nothing is asked of DNS), and by the name the system gives it (from
+      // /etc/hosts, which DNS asked directly lacks).
+      const local = (name: string, host: string): Track => ({
+        id: 1,
+        source: `https://example.com/watch?v=${name}`,
+        url: `https://example.com/watch?v=${name}`,
+        title: name,
+        uploader: null,
+        durationMs: 1000,
+        thumbnail: `http://${host}:${port}/cover.png`,
+        loudness: null,
+      });
+      assert.equal(await new Covers({ cache, log }).get(local('refused', '127.0.0.1')), null);
+      const allowed = await new Covers({ cache, log, allowPrivate: true }).get(local('allowed', 'localhost'));
+      assert.equal(allowed?.type, 'png');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('takes a picture given inline as it is, checked the same way', async () => {
     const png = await fetchPicture(`data:image/png;base64,${PNG.toString('base64')}`, rules);
     assert.equal(png.type, 'png');

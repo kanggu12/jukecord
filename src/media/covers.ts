@@ -10,6 +10,7 @@
  * script). A few are fetched at once, the same one once however many ask, and one that cannot be had is not asked for
  * again for an hour.
  */
+import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -273,9 +274,14 @@ export class Covers {
   constructor(options: CoversOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
+    // With private addresses allowed (a media server on the local network), a name is looked up as the system looks it
+    // up, as yt-dlp then does too (a name in /etc/hosts, a .local one), and every address may be reached.
+    const anywhere = {
+      lookup: async (host: string) => (await dns.lookup(host, { all: true })).map((found) => found.address),
+      allowed: () => true,
+    };
     this.fetch =
-      options.fetch ??
-      ((address, signal) => fetchPicture(address, options.allowPrivate ? { allowed: () => true } : {}, signal));
+      options.fetch ?? ((address, signal) => fetchPicture(address, options.allowPrivate ? anywhere : {}, signal));
   }
 
   /** The cover a track has in the cache now (marked as used), or null; nothing is fetched. */
