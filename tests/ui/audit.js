@@ -992,6 +992,8 @@ window.__audit = () => {
       }
     for (const [what, value] of spaces) {
       if (SCALE.some((step) => Math.abs(value - step) < 0.05)) continue;
+      // The room a screen's notch, corners or home bar take (its safe-area insets) is the device's, not the design's.
+      if (Object.values(safe).some((inset) => inset > 0 && Math.abs(value - inset) < 0.05)) continue;
       const key = px(value);
       if (!offScale.has(key)) offScale.set(key, []);
       const places = offScale.get(key);
