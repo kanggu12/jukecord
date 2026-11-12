@@ -117,6 +117,17 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.nothingFound, '찾은 곡 없음'],
   [REASONS.failed, '받지 못함'],
   [/^the site answered (\d{3})$/, '사이트 응답 코드 $1'],
+  // Covers and Wrapped.
+  ['that track is not in this server', '이 서버에 없는 곡'],
+  ['that track has no cover', '커버 이미지가 없는 곡'],
+  [
+    'jukecord is fetching other covers right now; try again in a moment',
+    '다른 커버 이미지를 받는 중: 잠시 뒤 다시 시도하세요',
+  ],
+  [
+    'the period is a year (2026), a month (2026-03) or last-12-months',
+    '기간은 연도(2026), 달(2026-03), last-12-months 중 하나',
+  ],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

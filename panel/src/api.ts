@@ -45,6 +45,7 @@ export const PANEL_ACTIONS = [
   'token-create',
   'token-revoke',
   'logs',
+  'wrapped',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -188,6 +189,24 @@ export interface Stats {
   topTracks: { track: Track; plays: number; playedMs: number }[];
   topPeople: { userId: string | null; name: string | null; avatar: string | null; plays: number; playedMs: number }[];
 }
+export interface Wrapped {
+  period: { kind: 'year' | 'month' | 'last-12-months'; key: string; from: string; to: string };
+  plays: number;
+  playedMs: number;
+  tracks: number;
+  people: number;
+  days: number;
+  topTracks: { track: Track; plays: number; playedMs: number }[];
+  topPeople: { userId: string | null; name: string | null; avatar: string | null; plays: number; playedMs: number }[];
+  weekdays: number[];
+  hours: number[];
+  longestDay: { day: string; plays: number; playedMs: number } | null;
+  firstTrack: { track: Track; playedAt: number; addedBy: string | null; addedByName: string | null } | null;
+  song: { track: Track; plays: number; playedMs: number; days: number } | null;
+  keptFrom: string | null;
+  years: string[];
+  months: string[];
+}
 export interface Settings {
   djRoleId: string | null;
   roles: { id: string; name: string; color: number }[];
@@ -283,6 +302,12 @@ export const api = {
       if (value !== undefined && value !== '') params.set(key, String(value));
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
+  // This browser's time zone, so the days and hours are the ones here; no time is this year.
+  wrapped: (guild: string, period?: string) =>
+    request<Wrapped>(
+      'GET',
+      `${g(guild)}/wrapped?${new URLSearchParams({ ...(period ? { period } : {}), tz: String(-new Date().getTimezoneOffset()) })}`,
+    ),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

@@ -14,7 +14,7 @@ import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import type { Resolver } from '../media/resolver.ts';
-import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
+import type { HistoryStats, HistoryWrapped, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 
@@ -53,6 +53,7 @@ export const ACTIONS = [
   'settings',
   'dj-role',
   'status',
+  'wrapped',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -156,6 +157,32 @@ export interface StatsView extends Omit<HistoryStats, 'days'> {
   readonly from: string;
 }
 
+/** The times Wrapped covers: a calendar year, a calendar month, or the twelve months up to today. */
+export type WrappedKind = 'year' | 'month' | 'last-12-months';
+
+/** A server's time in music (Wrapped), with what time it is and what other times there are. */
+export interface WrappedView extends HistoryWrapped {
+  readonly period: {
+    readonly kind: WrappedKind;
+    /** As it is asked for: "2026", "2026-03" or "last-12-months". */
+    readonly key: string;
+    /** The first day and the last (YYYY-MM-DD in the viewer's time zone); the last is today while the time lasts. */
+    readonly from: string;
+    readonly to: string;
+  };
+  /**
+   * The first day the history still reaches, when the time goes back further than that (jukecord keeps a server's
+   * newest plays, HISTORY_KEEP of them); null when it reaches the whole time.
+   */
+  readonly keptFrom: string | null;
+  /** The years and the months with plays, newest first ("2026", "2026-03"), to choose another time from. */
+  readonly years: readonly string[];
+  readonly months: readonly string[];
+}
+
+// Why a time was refused: the three ways to name one.
+const PERIOD_FORMS = 'the period is a year (2026), a month (2026-03) or last-12-months';
+
 /** What the status action reports. */
 export interface Status {
   readonly version: string;
@@ -208,6 +235,10 @@ export const REPEAT_MODES: readonly RepeatMode[] = ['off', 'track', 'queue'];
 
 export class Actions {
   private readonly options: ActionsOptions;
+  // Wrapped's answers, by what they were asked for and the newest play they counted: the same question asked again
+  // (a page reloaded, the picture's page and a card) is answered without walking the history again, until a play is
+  // added. Bounded: the oldest answer goes past the limit.
+  private readonly wrappedKept = new Map<string, WrappedView>();
 
   constructor(options: ActionsOptions) {
     this.options = options;
@@ -512,6 +543,71 @@ export class Actions {
       return byDay.get(day) ?? { day, plays: 0, playedMs: 0 };
     });
     return { ...raw, days: filled, span: days, from: filled[0]?.day ?? '' };
+  }
+
+  /**
+   * A server's time in music (anyone may look): a year ("2026"), a month ("2026-03") or the last twelve months
+   * ("last-12-months"), this year when none is named. Days and hours are the viewer's (`offsetMinutes` east of UTC,
+   * as for the statistics).
+   */
+  wrapped(context: ActionContext, period?: string, offsetMinutes = 0, now = Date.now()): WrappedView {
+    if (!Number.isInteger(offsetMinutes) || offsetMinutes < -720 || offsetMinutes > 840) {
+      throw new ActionError('invalid', 'the time zone offset is -720 to 840 minutes');
+    }
+    const offsetMs = offsetMinutes * 60_000;
+    const DAY = 86_400_000;
+    // Today, as a day number and as a date, where the viewer is.
+    const today = Math.floor((now + offsetMs) / DAY);
+    const date = new Date(today * DAY);
+    const year = date.getUTCFullYear();
+    const asked = period ?? String(year);
+    // The time's first day and the day after its last, as day numbers since the epoch (in the viewer's calendar).
+    let kind: WrappedKind;
+    let first: number;
+    let after: number;
+    const yearMatch = /^(\d{4})$/.exec(asked);
+    const monthMatch = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(asked);
+    if (asked === 'last-12-months') {
+      // From the day after this date a year ago, through today: 365 days, or 366 across a 29th of February.
+      kind = asked;
+      first = Date.UTC(year - 1, date.getUTCMonth(), date.getUTCDate() + 1) / DAY;
+      after = today + 1;
+    } else if (yearMatch && Number(yearMatch[1]) >= 1970) {
+      kind = 'year';
+      first = Date.UTC(Number(yearMatch[1]), 0, 1) / DAY;
+      after = Date.UTC(Number(yearMatch[1]) + 1, 0, 1) / DAY;
+    } else if (monthMatch && Number(monthMatch[1]) >= 1970) {
+      kind = 'month';
+      first = Date.UTC(Number(monthMatch[1]), Number(monthMatch[2]) - 1, 1) / DAY;
+      after = Date.UTC(Number(monthMatch[1]), Number(monthMatch[2]), 1) / DAY;
+    } else {
+      throw new ActionError('invalid', PERIOD_FORMS);
+    }
+    const since = first * DAY - offsetMs;
+    const until = after * DAY - offsetMs;
+    // Asked before, with no play added since and on the same day here: the same answer.
+    const kept = `${context.guildId} ${asked} ${offsetMinutes} ${today} ${this.options.store.history.newest(context.guildId)}`;
+    const known = this.wrappedKept.get(kept);
+    if (known) return known;
+    const day = (number: number) => new Date(number * DAY).toISOString().slice(0, 10);
+    const raw = this.options.store.history.wrapped(context.guildId, since, until, offsetMs);
+    const reach = this.options.store.history.months(context.guildId, offsetMs);
+    // The history no longer goes back to the time's start: said with the day it starts from (the oldest play kept).
+    const keptFrom =
+      reach.full && reach.oldest !== null && reach.oldest > since
+        ? day(Math.floor((reach.oldest + offsetMs) / DAY))
+        : null;
+    const view: WrappedView = {
+      ...raw,
+      // The last day is today while the time lasts (a year so far), its own last day once it is over.
+      period: { kind, key: asked, from: day(first), to: day(today >= first && today < after ? today : after - 1) },
+      keptFrom,
+      years: [...new Set(reach.months.map((month) => month.slice(0, 4)))],
+      months: reach.months,
+    };
+    this.wrappedKept.set(kept, view);
+    if (this.wrappedKept.size > 32) this.wrappedKept.delete(this.wrappedKept.keys().next().value ?? kept);
+    return view;
   }
 
   /** The server's settings and the roles to choose the DJ role from (anyone may look). */

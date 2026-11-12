@@ -31,6 +31,7 @@ import {
   TokenCreatedSchema,
   TokenSchema,
   VoiceSchema,
+  WrappedSchema,
 } from './schemas.ts';
 
 /** The operations about the login rather than a server. */
@@ -484,6 +485,29 @@ export const API = {
     tag: 'host',
     access: 'host',
     response: DoctorSchema,
+  }),
+
+  // Wrapped.
+  wrapped: op({
+    method: 'GET',
+    path: '/guilds/{guild}/wrapped',
+    summary:
+      "The server's year (or a month, or the last 12 months) in music: totals, top five tracks and people, moments",
+    tag: 'history',
+    access: 'read',
+    params: InGuild,
+    query: Type.Object({
+      period: Type.Optional(
+        Type.String({
+          pattern: '^(\\d{4}|\\d{4}-(0[1-9]|1[0-2])|last-12-months)$',
+          description: 'A year (2026), a month (2026-03) or last-12-months; this year when left out',
+        }),
+      ),
+      tz: Type.Optional(
+        Type.Integer({ minimum: -720, maximum: 840, default: 0, description: 'Minutes east of UTC (Seoul is 540)' }),
+      ),
+    }),
+    response: WrappedSchema,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

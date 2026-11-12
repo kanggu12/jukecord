@@ -229,6 +229,77 @@ const EN = {
   startFailed: 'jukecord could not open the panel just now; trying again',
   failed: (message: string) => message,
   reload: 'jukecord was updated: reload the page',
+  // Wrapped.
+  wrapped: 'Wrapped',
+  // A time's name inside a sentence: "2026", "November 2026", "the last 12 months".
+  wrappedYear: (year: string) => year,
+  wrappedMonth: (year: string, month: number) =>
+    `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month - 1]} ${year}`,
+  wrappedTwelve: 'the last 12 months',
+  // The page's title and the song's card, from the time's name (the title starts with a capital).
+  wrappedTitle: (time: string) => `${time.charAt(0).toUpperCase()}${time.slice(1)} in music`,
+  wrappedSong: (time: string) => `Song of ${time}`,
+  songFacts: (days: number, plays: number) =>
+    `played on ${days === 1 ? '1 day' : `${days} days`} · ${plays === 1 ? '1 play' : `${plays} plays`}`,
+  wrappedPeriods: 'Which time',
+  wrappedThisYear: (year: string) => `This year (${year})`,
+  wrappedRange: (from: string, to: string) => `${from} to ${to}`,
+  tileDays: 'Days with music',
+  daysUnit: 'days',
+  busiestDay: 'Busiest day',
+  busiestHour: 'Busiest hour',
+  longestDay: 'Longest day',
+  firstTrack: 'First track',
+  // The busiest day of the week as said of the whole time ("Fridays"), and each day's name for the chart's label.
+  // Lists of words, typed as such, so the Korean table can hold its own words in them.
+  weekdaysMany: [
+    'Sundays',
+    'Mondays',
+    'Tuesdays',
+    'Wednesdays',
+    'Thursdays',
+    'Fridays',
+    'Saturdays',
+  ] as readonly string[],
+  weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as readonly string[],
+  // A day of the time: "June 24", with its year when the time spans two ("December 31, 2025").
+  dayOf: (month: number, day: number, year: string | null) =>
+    `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month - 1]} ${day}${year ? `, ${year}` : ''}`,
+  byWeekday: 'Plays by day of the week',
+  byHour: 'Plays by hour of the day',
+  keptFrom: (day: string, kept: string) =>
+    `The history goes back to ${day}: jukecord keeps a server's newest ${kept} plays`,
+  savePicture: 'Save as picture',
+  pictureShape: 'Shape',
+  story: 'Story',
+  square: 'Square',
+  drawing: 'Drawing the picture',
+  notDrawn: 'Could not draw the picture',
+  share: 'Share',
+  pictureAlt: (title: string, server: string) => `${server}: ${title}`,
+  // The picture's time, big, and the words under it: "2026" over "in music", "November" over "2026 in music".
+  monthName: (month: number) =>
+    [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ][month - 1] ?? '',
+  twelveMonths: '12 months',
+  inMusic: (year: string | null) => (year ? `${year} in music` : 'in music'),
+  // The song's facts apart, for a picture that sets each on its own line when they do not fit one.
+  songFactsApart: (days: number, plays: number) => [
+    `played on ${days === 1 ? '1 day' : `${days} days`}`,
+    plays === 1 ? '1 play' : `${plays} plays`,
+  ],
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -451,6 +522,40 @@ const KO: Strings = {
   startFailed: 'jukecord가 지금 패널을 열지 못함: 다시 시도하는 중',
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
+  wrapped: '음악 결산',
+  wrappedYear: (year: string) => `${year}년`,
+  wrappedMonth: (year: string, month: number) => `${year}년 ${month}월`,
+  wrappedTwelve: '최근 12개월',
+  wrappedTitle: (time: string) => `${time} 음악 결산`,
+  wrappedSong: (time: string) => `${time}의 노래`,
+  songFacts: (days: number, plays: number) => `${days}일에 걸쳐 ${plays}번 재생`,
+  wrappedPeriods: '기간',
+  wrappedThisYear: (year: string) => `올해(${year}년)`,
+  wrappedRange: (from: string, to: string) => `${from} ~ ${to}`,
+  tileDays: '음악을 들은 날',
+  daysUnit: '일',
+  busiestDay: '가장 많이 들은 요일',
+  busiestHour: '가장 많이 들은 시간',
+  longestDay: '가장 오래 들은 날',
+  firstTrack: '첫 곡',
+  weekdaysMany: ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'],
+  weekdays: ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'],
+  dayOf: (month: number, day: number, year: string | null) => `${year ? `${year}년 ` : ''}${month}월 ${day}일`,
+  byWeekday: '요일별 재생',
+  byHour: '시간대별 재생',
+  keptFrom: (day: string, kept: string) => `기록은 ${day}부터 남아 있음: 서버마다 최근 ${kept}회까지 남김`,
+  savePicture: '이미지로 저장',
+  pictureShape: '모양',
+  story: '스토리',
+  square: '정사각형',
+  drawing: '이미지를 그리는 중',
+  notDrawn: '이미지를 그리지 못함',
+  share: '공유',
+  pictureAlt: (title: string, server: string) => `${server}: ${title}`,
+  monthName: (month: number) => `${month}월`,
+  twelveMonths: '최근 12개월',
+  inMusic: (year: string | null) => (year ? `${year}년 음악 결산` : '음악 결산'),
+  songFactsApart: (days: number, plays: number) => [`${days}일에 걸쳐`, `${plays}번 재생`],
 };
 
 /** The languages. */

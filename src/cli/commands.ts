@@ -159,6 +159,89 @@ function showPlaylist(answer: unknown): string {
   return `${playlist.name} (${playlist.size} tracks)`;
 }
 
+// What a server's time in music has, as the CLI reads it (the API's Wrapped, the fields the text uses).
+interface WrappedJson {
+  period: { kind: string; key: string; from: string; to: string };
+  plays: number;
+  playedMs: number;
+  tracks: number;
+  people: number;
+  days: number;
+  topTracks: { track: TrackJson; plays: number }[];
+  topPeople: { name: string | null; plays: number }[];
+  weekdays: number[];
+  hours: number[];
+  longestDay: { day: string; plays: number; playedMs: number } | null;
+  firstTrack: { track: TrackJson; playedAt: number; addedByName: string | null } | null;
+  song: { track: TrackJson; plays: number; days: number } | null;
+  keptFrom: string | null;
+}
+
+// "12 h 5 min", "45 min": time listened as people say it.
+function listened(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
+}
+
+// The time Wrapped is asked for, from the options: a year, a month of it (or of this year), or the last 12 months;
+// nothing at all is this year, which jukecord picks.
+function wrappedPeriod(words: Words): { period?: string } {
+  const year = words.flags.get('year');
+  const month = words.flags.get('month');
+  if (words.flags.has('last')) {
+    if (year !== undefined || month !== undefined)
+      throw new UsageError('--last is the last 12 months: no --year or --month');
+    return { period: 'last-12-months' };
+  }
+  if (year !== undefined && (year === true || !/^\d{4}$/.test(year)))
+    throw new UsageError('--year takes a year (2026)');
+  if (month === undefined) return year === undefined ? {} : { period: String(year) };
+  if (month !== true && /^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { period: month };
+  if (month === true || !/^(0?[1-9]|1[0-2])$/.test(month))
+    throw new UsageError('--month takes a month (3) or a year and a month (2026-03)');
+  // A month alone is of the year given, or of this year here.
+  const of = typeof year === 'string' ? year : String(new Date().getFullYear());
+  return { period: `${of}-${month.padStart(2, '0')}` };
+}
+
+function showWrapped(answer: unknown): string {
+  const wrapped = answer as WrappedJson;
+  const { period } = wrapped;
+  // "2026", "2026-03" or "the last 12 months", in the title and the song's line.
+  const time = period.kind === 'last-12-months' ? 'the last 12 months' : period.key;
+  const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)} in music (${period.from} to ${period.to})`];
+  if (wrapped.plays === 0) return [...lines, 'Nothing was played in this time'].join('\n');
+  lines.push(
+    `${wrapped.plays} plays · ${listened(wrapped.playedMs)} · ${wrapped.tracks} tracks · ${wrapped.people} people · music on ${wrapped.days} days`,
+  );
+  if (wrapped.song) {
+    const song = wrapped.song;
+    lines.push(`Song of ${time}: ${song.track.title} (played on ${song.days} days, ${song.plays} times)`);
+  }
+  lines.push('Most played:');
+  for (const entry of wrapped.topTracks) lines.push(`  ${String(entry.plays).padStart(4)}  ${entry.track.title}`);
+  lines.push('Added most:');
+  for (const entry of wrapped.topPeople)
+    lines.push(`  ${String(entry.plays).padStart(4)}  ${entry.name ?? 'the host'}`);
+  // The busiest day of the week and hour of the day: the first of the most, as the panel shows them.
+  const weekday = wrapped.weekdays.indexOf(Math.max(...wrapped.weekdays));
+  const hour = wrapped.hours.indexOf(Math.max(...wrapped.hours));
+  const names = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+  lines.push(`Busiest: ${names[weekday]}, ${hour}:00-${hour + 1}:00`);
+  if (wrapped.longestDay) {
+    const day = wrapped.longestDay;
+    lines.push(`Longest day: ${day.day}, ${listened(day.playedMs)} (${day.plays} plays)`);
+  }
+  if (wrapped.firstTrack) {
+    const first = wrapped.firstTrack;
+    const by = first.addedByName ? `, added by ${first.addedByName}` : '';
+    lines.push(`First track: ${new Date(first.playedAt).toLocaleString()}, ${first.track.title}${by}`);
+  }
+  // The history no longer reaches the time's start: from when it does.
+  if (wrapped.keptFrom) lines.push(`The history goes back to ${wrapped.keptFrom}`);
+  return lines.join('\n');
+}
+
 /** Every command, by the operation it runs. */
 export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'now-playing': { name: 'np', usage: '', summary: 'What is playing', request: () => ({}), show: showPlayer },
@@ -538,6 +621,14 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
     },
+  },
+  wrapped: {
+    name: 'wrapped',
+    usage: '[--year 2026] [--month 3] [--last]',
+    summary: 'A year in music (a month, or --last: 12 months)',
+    // The time zone of this machine, so "this year" and the days are the ones here.
+    request: (words) => ({ query: { ...wrappedPeriod(words), tz: -new Date().getTimezoneOffset() } }),
+    show: showWrapped,
   },
 };
 

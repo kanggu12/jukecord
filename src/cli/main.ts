@@ -34,8 +34,8 @@ class Unreachable extends Error {
 }
 
 // Options that take a value, and the switches; anything else starting with -- is a typing mistake.
-const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope']);
-const SWITCHES = new Set(['json', 'help', 'version', 'next']);
+const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope', 'year', 'month']);
+const SWITCHES = new Set(['json', 'help', 'version', 'next', 'last']);
 
 // What people type from Discord's names, to the command it means here.
 const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [

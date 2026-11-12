@@ -632,6 +632,175 @@ export class HistoryRepository {
       })),
     };
   }
+
+  /**
+   * A server's time in music from `since` up to `until` (Wrapped): the totals, the days with music, the top tracks
+   * and people, plays by day of the week and by hour, the longest day, the first play and the song of the time.
+   *
+   * Days, weekdays and hours are the viewer's, as in stats(): `offsetMs` is added to every timestamp first. A day is
+   * the whole number of days since the epoch of that sum, which SQLite's integer division gives without formatting a
+   * date for each row (the offset is cast to an integer for it: the driver binds every JavaScript number as a real,
+   * and a real's division keeps the fraction). Five questions, each one pass over the server's plays of the time by
+   * the index on (server, time played): per track, per person, per day and per hour, and the first play; the totals,
+   * the weekdays, the longest day and the song are summed from those answers here (the seven questions this took
+   * before cost twice the time on a year of 10,000 plays).
+   */
+  wrapped(guildId: string, since: number, until: number, offsetMs: number, top = 5): HistoryWrapped {
+    const db = this.store.db;
+    // The plays of the time, the same three bound values in every question below.
+    const span = 'h.guild_id = ? AND h.played_at >= ? AND h.played_at < ?';
+    const within = [guildId, since, until] as const;
+    // Each track's plays, time and days with plays; its title and the rest are read for the few shown only.
+    const perTrack = (
+      db
+        .prepare(
+          `SELECT h.track_id, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms,
+                  COUNT(DISTINCT (h.played_at + CAST(? AS INTEGER)) / 86400000) AS days
+           FROM history h WHERE ${span} GROUP BY h.track_id`,
+        )
+        .all(offsetMs, ...within) as Row[]
+    ).map((row) => ({
+      id: int(row, 'track_id'),
+      plays: int(row, 'plays'),
+      playedMs: int(row, 'played_ms'),
+      days: int(row, 'days'),
+    }));
+    const perPerson = (
+      db
+        .prepare(
+          `SELECT h.added_by, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms FROM history h WHERE ${span}
+           GROUP BY h.added_by`,
+        )
+        .all(...within) as Row[]
+    ).map((row) => ({
+      userId: textOrNull(row, 'added_by'),
+      plays: int(row, 'plays'),
+      playedMs: int(row, 'played_ms'),
+    }));
+    const perDay = (
+      db
+        .prepare(
+          `SELECT (h.played_at + CAST(? AS INTEGER)) / 86400000 AS day, COUNT(*) AS plays,
+                  SUM(h.played_ms) AS played_ms
+           FROM history h WHERE ${span} GROUP BY day`,
+        )
+        .all(offsetMs, ...within) as Row[]
+    ).map((row) => ({ day: int(row, 'day'), plays: int(row, 'plays'), playedMs: int(row, 'played_ms') }));
+    const hours = db
+      .prepare(
+        `SELECT ((h.played_at + CAST(? AS INTEGER)) % 86400000) / 3600000 AS hour, COUNT(*) AS plays
+         FROM history h WHERE ${span} GROUP BY hour`,
+      )
+      .all(offsetMs, ...within) as Row[];
+    const first = db
+      .prepare(
+        `SELECT h.id, h.guild_id, h.added_by, h.played_at, h.played_ms, ${TRACK_COLUMNS}
+         FROM history h JOIN tracks t ON t.id = h.track_id WHERE ${span} ORDER BY h.played_at, h.id LIMIT 1`,
+      )
+      .get(...within) as Row | undefined;
+    // The orders, as the statistics break ties: the most plays, then the most time, then the lowest ID (a person: the
+    // host first, as SQLite sorts a null first, then by ID).
+    const byPlays = <T extends { plays: number; playedMs: number }>(a: T, b: T) =>
+      b.plays - a.plays || b.playedMs - a.playedMs;
+    const tracks = [...perTrack].sort((a, b) => byPlays(a, b) || a.id - b.id).slice(0, top);
+    // Two IDs compared as SQLite compares text (byte by byte), the host's null before any.
+    const byId = (a: string | null, b: string | null) =>
+      a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1;
+    const people = [...perPerson].sort((a, b) => byPlays(a, b) || byId(a.userId, b.userId)).slice(0, top);
+    // The song of the time: the track that came back on the most days (a song played every week all year over one
+    // played fifty times in one night), then the most plays, the most time, the lowest ID.
+    const song = [...perTrack].sort((a, b) => b.days - a.days || byPlays(a, b) || a.id - b.id)[0];
+    // The day with the most time listened; the earlier of two equal days.
+    const longest = [...perDay].sort((a, b) => b.playedMs - a.playedMs || b.plays - a.plays || a.day - b.day)[0];
+    // Seven and twenty-four slots, zero where nothing played, so a chart can draw every one. Day 0 of the epoch was a
+    // Thursday: (day + 4) % 7 is the day of the week, Sunday being 0.
+    const byWeekday = Array.from({ length: 7 }, () => 0);
+    for (const day of perDay) byWeekday[(day.day + 4) % 7] = (byWeekday[(day.day + 4) % 7] ?? 0) + day.plays;
+    const byHour = Array.from({ length: 24 }, () => 0);
+    for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
+    // A track as the database has it, for the few shown.
+    const track = (id: number) => {
+      const found = this.store.tracks.get(id);
+      if (!found) throw new StoreError(`track ${id} of the history cannot be read`);
+      return found;
+    };
+    return {
+      plays: perTrack.reduce((sum, entry) => sum + entry.plays, 0),
+      playedMs: perTrack.reduce((sum, entry) => sum + entry.playedMs, 0),
+      tracks: perTrack.length,
+      people: perPerson.length,
+      days: perDay.length,
+      topTracks: tracks.map((entry) => ({ track: track(entry.id), plays: entry.plays, playedMs: entry.playedMs })),
+      topPeople: people,
+      weekdays: byWeekday,
+      hours: byHour,
+      longestDay: longest
+        ? {
+            day: new Date(longest.day * 86_400_000).toISOString().slice(0, 10),
+            plays: longest.plays,
+            playedMs: longest.playedMs,
+          }
+        : null,
+      firstPlay: first ? historyFrom(first) : null,
+      song: song ? { track: track(song.id), plays: song.plays, playedMs: song.playedMs, days: song.days } : null,
+    };
+  }
+
+  /** The newest play's ID of a server (0 when it has none): what changes whenever its history does. */
+  newest(guildId: string): number {
+    const row = this.store.db.prepare('SELECT MAX(id) AS id FROM history WHERE guild_id = ?').get(guildId) as Row;
+    return intOrNull(row, 'id') ?? 0;
+  }
+
+  /**
+   * The months a server has plays in, newest first (YYYY-MM in the viewer's time zone), and how far back its history
+   * reaches: its oldest play, and whether it holds as many plays as it keeps (older ones were let go).
+   */
+  months(guildId: string, offsetMs: number): { months: string[]; oldest: number | null; full: boolean } {
+    const rows = this.store.db
+      .prepare(
+        `SELECT DISTINCT strftime('%Y-%m', (played_at + ?) / 1000, 'unixepoch') AS month FROM history
+         WHERE guild_id = ? ORDER BY month DESC`,
+      )
+      .all(offsetMs, guildId) as Row[];
+    const reach = this.store.db
+      .prepare('SELECT MIN(played_at) AS oldest, COUNT(*) AS plays FROM history WHERE guild_id = ?')
+      .get(guildId) as Row;
+    return {
+      months: rows.map((row) => text(row, 'month')),
+      oldest: intOrNull(reach, 'oldest'),
+      full: int(reach, 'plays') >= HISTORY_KEEP,
+    };
+  }
+}
+
+/** A server's time in music, for Wrapped (see HistoryRepository.wrapped). */
+export interface HistoryWrapped {
+  readonly plays: number;
+  readonly playedMs: number;
+  /** Distinct tracks played. */
+  readonly tracks: number;
+  /** Distinct people whose tracks were played; the host counts as one, as in the statistics. */
+  readonly people: number;
+  /** The days with any music. */
+  readonly days: number;
+  readonly topTracks: readonly { readonly track: Track; readonly plays: number; readonly playedMs: number }[];
+  readonly topPeople: readonly { readonly userId: string | null; readonly plays: number; readonly playedMs: number }[];
+  /** Plays by day of the week, Sunday first (as JavaScript and SQLite count them). */
+  readonly weekdays: readonly number[];
+  /** Plays by hour of the day, index 0 being midnight to one. */
+  readonly hours: readonly number[];
+  /** The day with the most time listened (YYYY-MM-DD), or null with no plays. */
+  readonly longestDay: { readonly day: string; readonly plays: number; readonly playedMs: number } | null;
+  /** The first play of the time. */
+  readonly firstPlay: HistoryEntry | null;
+  /** The song of the time: the track played on the most days, then the most times, then the longest. */
+  readonly song: {
+    readonly track: Track;
+    readonly plays: number;
+    readonly playedMs: number;
+    readonly days: number;
+  } | null;
 }
 
 /** Listening figures for the statistics screen (see HistoryRepository.stats). */

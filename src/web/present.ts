@@ -5,7 +5,7 @@
  * The response schemas drop anything they do not list, so these functions are about adding (names) and shaping
  * (mutable arrays for the schema types), not about hiding; hiding is the schemas' job.
  */
-import type { StatsView } from '../app/actions.ts';
+import type { StatsView, WrappedView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Person, UserRepository } from '../store/store.ts';
@@ -115,6 +115,50 @@ export class Presenter {
         plays: entry.plays,
         playedMs: entry.playedMs,
       })),
+    };
+  }
+
+  wrapped(view: WrappedView) {
+    // The names of the top people and of whoever added the first track, looked up once.
+    const ids = [...view.topPeople.map((entry) => entry.userId), view.firstPlay?.addedBy ?? null];
+    const people = this.users.many(ids.flatMap((id) => (id ? [id] : [])));
+    const first = view.firstPlay;
+    return {
+      period: { ...view.period },
+      plays: view.plays,
+      playedMs: view.playedMs,
+      tracks: view.tracks,
+      people: view.people,
+      days: view.days,
+      topTracks: view.topTracks.map((entry) => ({
+        track: track(entry.track),
+        plays: entry.plays,
+        playedMs: entry.playedMs,
+      })),
+      topPeople: view.topPeople.map((entry) => ({
+        userId: entry.userId,
+        name: this.nameOf(people, entry.userId),
+        avatar: entry.userId ? (people.get(entry.userId)?.avatar ?? null) : null,
+        plays: entry.plays,
+        playedMs: entry.playedMs,
+      })),
+      weekdays: [...view.weekdays],
+      hours: [...view.hours],
+      longestDay: view.longestDay ? { ...view.longestDay } : null,
+      firstTrack: first
+        ? {
+            track: track(first.track),
+            playedAt: first.playedAt,
+            addedBy: first.addedBy,
+            addedByName: this.nameOf(people, first.addedBy),
+          }
+        : null,
+      song: view.song
+        ? { track: track(view.song.track), plays: view.song.plays, playedMs: view.song.playedMs, days: view.song.days }
+        : null,
+      keptFrom: view.keptFrom,
+      years: [...view.years],
+      months: [...view.months],
     };
   }
 }

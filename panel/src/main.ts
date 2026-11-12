@@ -2,7 +2,7 @@
  * The panel's start: who is logged in, which server to show, the frame (the bar, the page, the listening bar), the
  * live connection, and the keyboard shortcuts.
  *
- * Pages: / (the player), /stats, /logs (the host only) and /login. Moving between them keeps the player screen and
+ * Pages: / (the player), /stats, /stats/wrapped, /logs (the host only) and /login. Moving between them keeps the player screen and
  * the listening bar alive, so the music in this browser does not stop when someone looks at the statistics.
  */
 import { ApiError, api, coverUrl, type Player, setCsrf, whenLoggedOut } from './api.ts';
@@ -15,13 +15,16 @@ import { listenBar } from './views/listen.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
 import { act, addCard, historyCard, nowCard, queueCard, voiceCard } from './views/player.ts';
+import { wrappedPage } from './views/wrapped.ts';
 
 const root = document.getElementById('app') as HTMLElement;
 
-type Route = 'player' | 'stats' | 'logs';
+type Route = 'player' | 'stats' | 'logs' | 'wrapped';
 
 // The page a path shows; the log is the host's only.
 function routeOf(path: string): Route {
+  // Wrapped is a page under the statistics: its own address, before the statistics' own.
+  if (path.startsWith('/stats/wrapped')) return 'wrapped';
   if (path.startsWith('/stats')) return 'stats';
   if (path.startsWith('/logs') && state.me?.kind === 'host') return 'logs';
   return 'player';
@@ -192,7 +195,7 @@ function frame(): void {
     if (route === 'player') {
       fill(page);
     } else {
-      const built = collect(() => (route === 'stats' ? statsPage() : logsPage()));
+      const built = collect(() => (route === 'stats' ? statsPage() : route === 'wrapped' ? wrappedPage() : logsPage()));
       leave = built.dispose;
       fill(page, built.value);
     }
@@ -276,7 +279,13 @@ function frame(): void {
       ).map(([path, name, iconName, text]) =>
         h(
           'a',
-          { href: path, 'data-route': name, 'aria-current': route === name ? 'page' : null, title: text },
+          {
+            href: path,
+            'data-route': name,
+            // Wrapped is under the statistics: their link stays the current one there.
+            'aria-current': route === name || (name === 'stats' && route === 'wrapped') ? 'page' : null,
+            title: text,
+          },
           icon(iconName),
           h('span', { class: 'label' }, text),
         ),

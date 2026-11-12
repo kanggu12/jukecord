@@ -140,6 +140,75 @@ export const StatsSchema = Type.Object(
   { title: 'Stats' },
 );
 
+// One time's top person: who, by name and avatar as jukecord met them, and how much of theirs played.
+const Person = Type.Object({
+  userId: Nullable(Type.String({ description: 'Discord user ID; null for the host' })),
+  name: Nullable(Type.String()),
+  avatar: Nullable(Type.String()),
+  plays: Type.Integer(),
+  playedMs: Type.Integer(),
+});
+
+export const WrappedSchema = Type.Object(
+  {
+    period: Type.Object({
+      kind: Type.Union([Type.Literal('year'), Type.Literal('month'), Type.Literal('last-12-months')]),
+      key: Type.String({ description: 'The time as it is asked for: 2026, 2026-03 or last-12-months' }),
+      from: Type.String({ description: 'The first day, YYYY-MM-DD in the time zone asked for' }),
+      to: Type.String({ description: 'The last day: today while the time lasts' }),
+    }),
+    plays: Type.Integer(),
+    playedMs: Type.Integer(),
+    tracks: Type.Integer({ description: 'Different tracks played' }),
+    people: Type.Integer({ description: 'People whose tracks were played (the host counts as one)' }),
+    days: Type.Integer({ description: 'Days with music' }),
+    topTracks: Type.Array(Type.Object({ track: TrackSchema, plays: Type.Integer(), playedMs: Type.Integer() }), {
+      maxItems: 5,
+    }),
+    topPeople: Type.Array(Person, { maxItems: 5 }),
+    weekdays: Type.Array(Type.Integer(), {
+      minItems: 7,
+      maxItems: 7,
+      description: 'Plays by day of the week, Sunday first',
+    }),
+    hours: Type.Array(Type.Integer(), { minItems: 24, maxItems: 24, description: 'Plays by hour of the day' }),
+    longestDay: Nullable(
+      Type.Object(
+        { day: Type.String(), plays: Type.Integer(), playedMs: Type.Integer() },
+        { description: 'The day with the most time listened' },
+      ),
+    ),
+    firstTrack: Nullable(
+      Type.Object(
+        {
+          track: TrackSchema,
+          playedAt: Type.Integer(),
+          addedBy: Nullable(Type.String()),
+          addedByName: Nullable(Type.String()),
+        },
+        { description: 'The first track played in the time' },
+      ),
+    ),
+    song: Nullable(
+      Type.Object(
+        {
+          track: TrackSchema,
+          plays: Type.Integer(),
+          playedMs: Type.Integer(),
+          days: Type.Integer({ description: 'The days it was played on' }),
+        },
+        { description: 'The song of the time: the track played on the most days, then the most times' },
+      ),
+    ),
+    keptFrom: Nullable(
+      Type.String({ description: 'The first day the history still reaches, when the time goes back further' }),
+    ),
+    years: Type.Array(Type.String(), { description: 'The years with plays, newest first' }),
+    months: Type.Array(Type.String(), { description: 'The months with plays (YYYY-MM), newest first' }),
+  },
+  { title: 'Wrapped' },
+);
+
 export const SettingsSchema = Type.Object(
   {
     djRoleId: Nullable(Type.String()),

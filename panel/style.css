@@ -2219,6 +2219,196 @@ kbd {
   min-width: 0;
 }
 
+/* ---- wrapped --------------------------------------------------------------------------------------------------- */
+/* A server's time in music, under the statistics: the key back to them, the time's title with its days beside it,
+   and the keys to choose another time and to save the picture. */
+.wrapped-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
+}
+.wrapped-range {
+  font-size: 13px;
+}
+.wrapped .back-key {
+  padding: 0 10px 0 6px;
+}
+.wrapped-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+.wrapped-kept {
+  margin: 0;
+}
+/* The song of the time beside the first track; the song's card the wider. */
+.wrapped-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--gap);
+}
+.wrapped-song .song {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 28px;
+  padding: 20px var(--pad) 22px 22px;
+}
+.wrapped-song .title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+.wrapped-song .title a {
+  text-decoration: none;
+}
+.wrapped-song .title a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.wrapped-song .meta {
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+.wrapped-song .facts {
+  margin-top: 10px;
+  color: var(--ink-2);
+}
+/* The song's record: a row's album made big (the cover in its case, the record half out of it with the cover on
+   its label), still; the cover's colours glow behind it, as behind the disc. */
+.record {
+  position: relative;
+  isolation: isolate;
+}
+.record::before {
+  content: "";
+  position: absolute;
+  inset: 4px 60px 4px 4px;
+  z-index: -1;
+  border-radius: 24px;
+  background: var(--glow, none) center / cover;
+  filter: blur(26px) saturate(1.5);
+  opacity: 0.55;
+}
+.wrapped-song .record .album {
+  width: 226px;
+  height: 152px;
+}
+.wrapped-song .record .album .case {
+  width: 152px;
+  height: 152px;
+  border-radius: 14px;
+}
+.wrapped-song .record .album .vinyl {
+  left: 84px;
+  width: 142px;
+  height: 142px;
+}
+.wrapped-song .record .album .vinyl::before {
+  inset: 38px;
+}
+.wrapped-song .record .album .vinyl::after {
+  width: 8px;
+  height: 8px;
+}
+.wrapped-song .record .album .case .note .icon {
+  width: 40px;
+  height: 40px;
+}
+/* The first track: its row in the middle of the card's room beside the song's record. */
+.wrapped-first .list {
+  flex: 1;
+  justify-content: center;
+}
+/* The first track and the most played: rows as the history's, a number and the plays beside them. */
+.wrapped-first .row {
+  grid-template-columns: 48px minmax(0, 1fr);
+  padding-left: 8px;
+}
+.wrapped-tracks .row {
+  grid-template-columns: 22px 48px minmax(0, 1fr) auto;
+  padding-left: 4px;
+}
+.wrapped-tracks .n {
+  padding-right: 8px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The moments: tiles, each with a line under its value, and a small chart of the counts it names the busiest of. */
+.moment .sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 34px;
+  margin-top: 10px;
+}
+.moment .spark i {
+  flex: 1;
+  min-width: 0;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in oklch, var(--series) 38%, transparent);
+}
+.moment .spark i.top {
+  background: var(--series);
+}
+.moment .spark i.zero {
+  background: var(--line-2);
+}
+/* The picture to save: its shape, and the picture as drawn, as large as the dialog has room for. */
+.picture {
+  display: grid;
+  gap: 12px;
+}
+.picture .seg {
+  justify-self: start;
+}
+.picture-frame {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+}
+.picture-preview {
+  display: block;
+  /* The canvas's own pixels are the picture's (1080 wide): shown at the frame's size, its shape kept. */
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(46vh, 420px);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    0 16px 32px -16px rgba(0, 0, 0, 0.6);
+}
+.picture-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink-2);
+}
+@media (max-width: 1100px) {
+  .wrapped-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 560px) {
+  /* A phone: the record over the song's words. */
+  .wrapped-song .song {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+}
+
 /* ---- logs ------------------------------------------------------------------------------------------------------- */
 .logs {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2783,6 +2973,18 @@ kbd {
   }
   .rank .meter {
     border: 1px solid CanvasText;
+  }
+  /* Wrapped's small charts: every column in the text's colour, the busiest in the highlight's; the glow behind the
+     song's record is a picture, which would light the canvas. */
+  .moment .spark i {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .moment .spark i.top {
+    background: Highlight;
+  }
+  .record::before {
+    display: none;
   }
 }
 

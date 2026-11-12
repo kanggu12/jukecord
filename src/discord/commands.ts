@@ -47,6 +47,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   settings: '/dj show',
   'dj-role': '/dj set',
   status: '/version',
+  wrapped: '/wrapped',
 };
 
 // One command: English name and description, Korean name and description.
@@ -318,6 +319,21 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
       ),
     command('version', 'The jukecord version', '버전', 'jukecord 버전'),
+    command('wrapped', "This server's year in music", '음악결산', '이 서버의 한 해 음악 결산').addStringOption(
+      (option) =>
+        option
+          .setName('period')
+          .setDescription('Which time (default: this year)')
+          .setNameLocalizations({ ko: '기간' })
+          .setDescriptionLocalizations({ ko: '어느 기간(기본: 올해)' })
+          .addChoices(
+            { name: 'This year', value: 'this-year', name_localizations: { ko: '올해' } },
+            { name: 'The last 12 months', value: 'last-12-months', name_localizations: { ko: '최근 12개월' } },
+            { name: 'This month', value: 'this-month', name_localizations: { ko: '이번 달' } },
+            { name: 'Last month', value: 'last-month', name_localizations: { ko: '지난달' } },
+            { name: 'Last year', value: 'last-year', name_localizations: { ko: '작년' } },
+          ),
+    ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

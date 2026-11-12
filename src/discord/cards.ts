@@ -5,7 +5,7 @@
  * (playing, paused, added, a problem), the one place colour means something in Discord's layout.
  */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
-import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
+import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
@@ -264,4 +264,152 @@ export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
   if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
   return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
+}
+
+/**
+ * A /wrapped choice as the time it names, for a person `offsetMinutes` east of UTC: this year ("2026"), the last 12
+ * months, this month or the last ("2026-11"), or last year.
+ */
+export function relativePeriod(choice: string | null, offsetMinutes: number, now = Date.now()): string {
+  const date = new Date(now + offsetMinutes * 60_000);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const two = (value: number) => String(value).padStart(2, '0');
+  if (choice === 'last-12-months') return choice;
+  if (choice === 'this-month') return `${year}-${two(month)}`;
+  // January's last month is the December before it.
+  if (choice === 'last-month') return month === 1 ? `${year - 1}-12` : `${year}-${two(month - 1)}`;
+  if (choice === 'last-year') return String(year - 1);
+  return String(year);
+}
+
+// Wrapped's words, side by side as above.
+const WRAPPED = {
+  title: { en: (time: string) => `${time} in music`, ko: (time: string) => `${time} 음악 결산` },
+  song: { en: (time: string) => `Song of ${time}`, ko: (time: string) => `${time}의 노래` },
+  songFacts: {
+    en: (days: number, plays: number) =>
+      `played on ${days === 1 ? '1 day' : `${days} days`}, ${plays === 1 ? 'once' : `${plays} times`}`,
+    ko: (days: number, plays: number) => `${days}일에 걸쳐 ${plays}번 재생`,
+  },
+  lastYear: { en: 'the last 12 months', ko: '최근 12개월' },
+  busiestDay: { en: 'Busiest day', ko: '가장 많이 들은 요일' },
+  busiestHour: { en: 'Busiest hour', ko: '가장 많이 들은 시간' },
+  longestDay: { en: 'Longest day', ko: '가장 오래 들은 날' },
+  firstTrack: { en: 'First track', ko: '첫 곡' },
+  weekdays: {
+    en: ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'],
+    ko: ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'],
+  },
+  kept: { en: (day: string) => `The history goes back to ${day}`, ko: (day: string) => `기록은 ${day}부터 남아 있음` },
+  between: { en: 'to', ko: '~' },
+} as const;
+
+// A time's name in a sentence: "2026", "November 2026" or "the last 12 months" (Korean "2026년", "2026년 11월",
+// "최근 12개월").
+function timeName(period: WrappedView['period'], lang: Lang): string {
+  if (period.kind === 'last-12-months') return WRAPPED.lastYear[lang];
+  const [year, month] = period.key.split('-');
+  if (!month) return lang === 'ko' ? `${year}년` : String(year);
+  if (lang === 'ko') return `${year}년 ${Number(month)}월`;
+  const name = new Date(Date.UTC(2000, Number(month) - 1, 1)).toLocaleString('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+  });
+  return `${name} ${year}`;
+}
+
+// A day of the time as people say it ("June 24", "6월 24일"), with its year when the time spans two.
+function dayName(day: string, period: WrappedView['period'], lang: Lang): string {
+  const [year, month, date] = day.split('-').map(Number);
+  const withYear = period.kind === 'last-12-months';
+  if (lang === 'ko') return `${withYear ? `${year}년 ` : ''}${month}월 ${date}일`;
+  const name = new Date(Date.UTC(2000, (month ?? 1) - 1, 1)).toLocaleString('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+  });
+  return `${name} ${date}${withYear ? `, ${year}` : ''}`;
+}
+
+/**
+ * A server's time in music: the totals, the song of the time, the top five tracks and people, and its moments (the
+ * busiest day and hour, the longest day, the first track), with a key to the panel's page of it.
+ */
+export function wrappedCard(
+  view: WrappedView,
+  lang: Lang,
+  guildName: string,
+  panelUrl: string | null,
+  offsetMinutes: number,
+) {
+  const time = timeName(view.period, lang);
+  // The title begins with a capital in English ("The last 12 months in music").
+  const title = WRAPPED.title[lang](lang === 'en' ? `${time.charAt(0).toUpperCase()}${time.slice(1)}` : time);
+  const embed = new EmbedBuilder()
+    .setColor(COLOUR.neutral)
+    .setTitle(guildName ? `${guildName} · ${title}` : title)
+    .setFooter({ text: `${view.period.from} ${WRAPPED.between[lang]} ${view.period.to}` });
+  // The panel's page of the same time, where it can be saved as a picture.
+  const components = panelUrl
+    ? [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setLabel(TEXT.panel[lang])
+            .setStyle(ButtonStyle.Link)
+            .setURL(`${panelUrl}/stats/wrapped?period=${encodeURIComponent(view.period.key)}`),
+        ),
+      ]
+    : [];
+  if (view.plays === 0) return { embeds: [embed.setDescription(TEXT.noStats[lang])], components };
+  const count = (value: number) => value.toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US');
+  const totals =
+    lang === 'ko'
+      ? `재생 **${count(view.plays)}**회 · 들은 시간 **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}**곡 · **${count(view.people)}**명 · 음악을 들은 날 **${count(view.days)}**일`
+      : `**${count(view.plays)}** plays · listened **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}** tracks · **${count(view.people)}** ${view.people === 1 ? 'person' : 'people'} · music on **${count(view.days)}** ${view.days === 1 ? 'day' : 'days'}`;
+  const lines = [totals];
+  if (view.song) {
+    const song = view.song;
+    lines.push(
+      '',
+      `**${WRAPPED.song[lang](time)}**`,
+      `${line(song.track.title, song.track.url, null, null, lang)} · ${WRAPPED.songFacts[lang](song.days, song.plays)}`,
+    );
+    // The song's picture as the card's: Discord fetches it from the site itself (it cannot reach jukecord's address).
+    const picture = song.track.thumbnail;
+    if (picture && /^https?:\/\//.test(picture)) embed.setThumbnail(picture);
+  }
+  lines.push('', `**${TEXT.topTracks[lang]}**`);
+  for (const [index, entry] of view.topTracks.entries())
+    lines.push(`${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${count(entry.plays)}`);
+  lines.push('', `**${TEXT.topPeople[lang]}**`);
+  for (const [index, entry] of view.topPeople.entries())
+    lines.push(`${index + 1}. ${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${count(entry.plays)}`);
+  if (view.keptFrom) lines.push('', WRAPPED.kept[lang](view.keptFrom));
+  embed.setDescription(lines.join('\n'));
+  // The moments, side by side: the busiest day of the week and hour of the day (the first of the most), the longest
+  // day, the first track.
+  const weekday = view.weekdays.indexOf(Math.max(...view.weekdays));
+  const hour = view.hours.indexOf(Math.max(...view.hours));
+  embed.addFields(
+    { name: WRAPPED.busiestDay[lang], value: WRAPPED.weekdays[lang][weekday] ?? '', inline: true },
+    { name: WRAPPED.busiestHour[lang], value: `${hour}:00-${hour + 1}:00`, inline: true },
+  );
+  if (view.longestDay) {
+    const day = view.longestDay;
+    embed.addFields({
+      name: WRAPPED.longestDay[lang],
+      value: `${dayName(day.day, view.period, lang)} · ${hoursMinutes(day.playedMs, lang)}`,
+      inline: true,
+    });
+  }
+  if (view.firstPlay) {
+    const first = view.firstPlay;
+    // Its day where the person is, as the time's days are counted.
+    const day = new Date(first.playedAt + offsetMinutes * 60_000).toISOString().slice(0, 10);
+    embed.addFields({
+      name: WRAPPED.firstTrack[lang],
+      value: `${line(first.track.title, first.track.url, null, null, lang)} · ${dayName(day, view.period, lang)}`,
+    });
+  }
+  return { embeds: [embed], components };
 }

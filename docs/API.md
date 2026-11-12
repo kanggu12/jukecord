@@ -125,6 +125,7 @@ playlist) so a program does not need to ask again.
 | :-- | :-- | :-- | :-- | :-- |
 | `history` Played tracks, newest first | `GET /api/v1/guilds/{guild}/history` | read | `jukecord history` | `/history` |
 | `stats` Listening figures: plays per day and hour, most played tracks, who added most | `GET /api/v1/guilds/{guild}/stats` | read | `jukecord stats` | `/stats` |
+| `wrapped` The server's year (or a month, or the last 12 months) in music: totals, top five tracks and people, moments | `GET /api/v1/guilds/{guild}/wrapped` | read | `jukecord wrapped` | `/wrapped` |
 
 ### Playlists
 
@@ -225,6 +226,18 @@ clock and the server's: `serverTime - (t + time the pong arrived) / 2`, from the
 Ogg Opus, or with `?format=mp3` an MP3 copy (made the first time someone asks, for browsers without Opus; two at a
 time, `503` past that). Range requests work, so a player can start in the middle. Any other track answers `404`, and
 one not prepared yet `409`.
+
+## Covers
+
+`GET /api/v1/guilds/{guild}/tracks/{track}/cover` sends a track's cover, for a track that server shows: playing,
+queued, in its history or in one of its playlists (any other answers `404`). jukecord fetches each cover once, from the
+address the site gave, by the same rule as everything it fetches (public addresses only, redirects checked again), at
+most 2 MiB within ten seconds, and keeps it only when its own bytes say it is a JPEG, PNG, GIF, WebP or AVIF picture.
+It is kept in the media cache beside the track's audio, counts towards `JUKECORD_CACHE_MAX`, and is sent from there
+with a day's caching and an ETag. A track without a picture, or whose picture cannot be had, answers `404` (and is not
+asked of the site again for an hour). Covers that must be fetched first are held to ten a second per login and per
+address (sixty at once; the host is not held), and are not fetched while jukecord is behind (`503`); four are fetched
+at once, and past a line of 32 waiting the answer is `503` too.
 
 ## Health and metrics
 

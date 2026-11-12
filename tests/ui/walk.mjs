@@ -617,6 +617,67 @@ await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 await sweep('empty', FEW);
 
+// Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
+// choose from, the picture to save, and the page in a contrast theme.
+const year = await api('GET', '/guilds/local/wrapped?period=last-12-months');
+const firstMonth = year.months.at(-1) ?? 'last-12-months';
+async function wrappedAt(page, period) {
+  await page.goto(`${BASE}/stats/wrapped?period=${period}`);
+  await page.waitForSelector('.wrapped .page-body > *');
+}
+await sweep('wrapped', SIZES, (page) => wrappedAt(page, 'last-12-months'), { discord: true });
+await sweep('wrapped-few', FEW, (page) => wrappedAt(page, firstMonth), { discord: true });
+await sweep('wrapped-empty', FEW, (page) => wrappedAt(page, '2020'));
+await sweep('wrapped-periods', FEW, async (page) => {
+  await wrappedAt(page, 'last-12-months');
+  await page.click('[data-act="period"]');
+  await page.waitForSelector('.dialog .choice');
+});
+await sweep(
+  'wrapped-picture',
+  FEW,
+  async (page) => {
+    await wrappedAt(page, 'last-12-months');
+    await page.click('[data-act="picture"]');
+    await page.waitForSelector('.picture-preview:not([hidden])', { timeout: 30000 });
+  },
+  { discord: true },
+);
+await sweep('forced-wrapped', FEW, (page) => wrappedAt(page, 'last-12-months'), { forced: true });
+// The pictures themselves, saved at their full size to look at: both shapes, both themes and languages, from the
+// year and from the first month.
+for (const theme of ONLY && !ONLY.has('pictures') ? [] : ['dark', 'light']) {
+  for (const lang of ['ko', 'en']) {
+    for (const [name, period] of [
+      ['year', 'last-12-months'],
+      ['few', firstMonth],
+    ]) {
+      const setting = { theme, lang, width: 1440, height: 900 };
+      const { context, page, errors } = await open({ ...setting, discord: true });
+      const findings = [];
+      try {
+        await wrappedAt(page, period);
+        await page.click('[data-act="picture"]');
+        for (const shape of ['story', 'square']) {
+          if (shape === 'square') await page.click('.picture .seg button:nth-child(2)');
+          await page.waitForSelector('.picture-preview:not([hidden])', { timeout: 30000 });
+          const [download] = await Promise.all([
+            page.waitForEvent('download'),
+            page.click('[data-act="save-picture"]'),
+          ]);
+          await download.saveAs(path.join(OUT, `picture-${name}-${shape}-${theme}-${lang}.png`));
+        }
+      } catch (error) {
+        findings.push({ kind: 'walk', where: `pictures ${name}`, detail: String(error) });
+        process.stdout.write(`  pictures ${name} ${theme} ${lang}: ${error}\n`);
+      } finally {
+        report.push({ state: `pictures-${name}`, ...setting, findings, errors });
+        await context.close();
+      }
+    }
+  }
+}
+
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

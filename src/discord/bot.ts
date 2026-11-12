@@ -47,7 +47,9 @@ import {
   playlistsCard,
   problem,
   queueCard,
+  relativePeriod,
   statsCard,
+  wrappedCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
 import { sayError } from './errors.ts';
@@ -452,6 +454,21 @@ export class Bot implements Directory {
           await interaction.editReply({
             embeds: [note(lang, `jukecord ${status.version}`, `jukecord ${status.version}`)],
           });
+          return;
+        }
+        case 'wrapped': {
+          // The choice ("this month") as the time it names where the person is, then that time in music.
+          const offset = offsetOf(interaction.locale);
+          const period = relativePeriod(options.getString('period'), offset);
+          await interaction.editReply(
+            wrappedCard(
+              actions.wrapped(context, period, offset),
+              lang,
+              interaction.guild?.name ?? '',
+              this.options.panelUrl,
+              offset,
+            ),
+          );
           return;
         }
         default:

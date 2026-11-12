@@ -18,8 +18,8 @@ function listenedWords(ms: number): string {
   return state.lang === 'ko' ? `${big}${rest}` : `${big} ${rest}`;
 }
 
-// Hours and minutes as people say them ("12 h 5 min", "45 min").
-function listened(ms: number): [string, string] {
+/** Hours and minutes as people say them ("12 h 5 min", "45 min"): the number, and the rest beside it. */
+export function listened(ms: number): [string, string] {
   const words = t();
   const minutes = Math.round(ms / 60_000);
   const hours = Math.floor(minutes / 60);
@@ -153,17 +153,20 @@ export function statsPage(): HTMLElement {
   const content = h('div', { class: 'page-body', style: 'display:flex;flex-direction:column;gap:var(--gap)' });
   const range = h('div', { class: 'seg', role: 'group' });
   const title = h('h1');
+  // Wrapped, the page under this one: a key with its name (the panel follows the link without reloading).
+  const wrapped = h('a', { class: 'key', href: '/stats/wrapped', 'data-route': 'wrapped' });
   // The page's own main landmark (the player's is hidden while this one shows).
   const page = h(
     'main',
     { class: 'page' },
-    h('div', { class: 'page-head' }, title, h('div', { class: 'page-tools' }, range)),
+    h('div', { class: 'page-head' }, title, h('div', { class: 'page-tools' }, range, wrapped)),
     content,
   );
 
   const drawRange = () => {
     const words = t();
     title.textContent = words.stats;
+    fill(wrapped, icon('gift'), h('span', { class: 'label' }, words.wrapped));
     // The row of choices named for screen readers, as the menu's are.
     range.setAttribute('aria-label', words.statsRange);
     fill(

@@ -38,6 +38,8 @@ const reads = [
   '/guilds/local/stats?days=30',
   '/guilds/local/stats?days=365',
   '/status',
+  // Wrapped over the year of plays, as the panel's page asks for it when it opens.
+  '/guilds/local/wrapped?period=last-12-months',
 ];
 for (const route of reads) {
   const times: number[] = [];
