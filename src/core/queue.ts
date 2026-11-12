@@ -36,6 +36,11 @@ export class QueueService {
     return this.repo.count(guildId);
   }
 
+  /** Whether a track waits in a server's queue (the audio route asks on every request, so the queue is not read). */
+  contains(guildId: string, trackId: number): boolean {
+    return this.repo.has(guildId, trackId);
+  }
+
   /** The current change counter of a server's queue. */
   version(guildId: string): number {
     return this.versions.get(guildId) ?? 0;
@@ -103,9 +108,10 @@ export class QueueService {
       else seen.add(item.track.id);
     }
     if (extra.length === 0) return 0;
-    for (const id of extra) this.repo.remove(guildId, id);
-    this.changed(guildId);
-    return extra.length;
+    // All of them in one transaction with one renumbering (see QueueRepository.removeMany), and one event.
+    const removed = this.repo.removeMany(guildId, extra);
+    if (removed > 0) this.changed(guildId);
+    return removed;
   }
 
   /** Empties a server's queue and returns how many tracks were in it. */

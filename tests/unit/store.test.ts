@@ -169,9 +169,86 @@ describe('QueueRepository', () => {
     assert.equal(store.queue.clear(GUILD), 2);
     assert.equal(store.queue.shift(GUILD), null);
   });
+
+  it('keeps positions 0..n-1 after a removal and a shift from the middle of a long queue, and says what it holds', () => {
+    const store = memoryStore();
+    const tracks = addTracks(store, 6);
+    const items = store.queue.insert(
+      GUILD,
+      tracks.map((track) => track.id),
+      0,
+      null,
+    );
+    // The same tracks in another server: a removal or a shift here must not move them.
+    store.queue.insert(
+      OTHER,
+      tracks.map((track) => track.id),
+      0,
+      null,
+    );
+    assert.equal(store.queue.remove(GUILD, items[2]?.id ?? 0), true);
+    assert.equal(store.queue.shift(GUILD)?.id, items[0]?.id);
+    const left = store.queue.list(GUILD);
+    assert.deepEqual(
+      left.map((item) => [item.id, item.position]),
+      [items[1], items[3], items[4], items[5]].map((item, index) => [item?.id, index]),
+    );
+    assert.deepEqual(
+      store.queue.list(OTHER).map((item) => item.position),
+      [0, 1, 2, 3, 4, 5],
+    );
+    // has() answers from the index, for the track played or removed and for one still waiting.
+    assert.equal(store.queue.has(GUILD, tracks[0]?.id ?? 0), false);
+    assert.equal(store.queue.has(GUILD, tracks[3]?.id ?? 0), true);
+    assert.equal(store.queue.has(OTHER, tracks[0]?.id ?? 0), true);
+  });
+
+  it('removes many items in one go, closing every gap once, and counts only those that were there', () => {
+    const store = memoryStore();
+    const tracks = addTracks(store, 5);
+    const items = store.queue.insert(
+      GUILD,
+      tracks.map((track) => track.id),
+      0,
+      null,
+    );
+    const [i1, i2, i3, i4, i5] = items;
+    assert.ok(i1 && i2 && i3 && i4 && i5);
+    // An ID that is not in the queue (played meanwhile) is no error; it is just not counted.
+    assert.equal(store.queue.removeMany(GUILD, [i2.id, i4.id, 999_999]), 2);
+    assert.deepEqual(
+      store.queue.list(GUILD).map((item) => [item.id, item.position]),
+      [
+        [i1.id, 0],
+        [i3.id, 1],
+        [i5.id, 2],
+      ],
+    );
+    // Another server's items are not touched, and an empty list writes nothing.
+    assert.equal(store.queue.removeMany(OTHER, [i1.id]), 0);
+    assert.equal(store.queue.removeMany(GUILD, []), 0);
+    assert.equal(store.queue.count(GUILD), 3);
+  });
 });
 
 describe('HistoryRepository', () => {
+  it('pages by the order entries were written in, even when the clock went back between two plays', () => {
+    const store = memoryStore();
+    const [a, b, c] = addTracks(store, 3);
+    assert.ok(a && b && c);
+    // The second entry says it started earlier than the first (the clock was set back): by ID it is still newer, so
+    // every entry is on exactly one page.
+    store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: 5000, playedMs: 5000 });
+    store.history.add({ guildId: GUILD, trackId: b.id, addedBy: null, playedAt: 1000, playedMs: 5000 });
+    store.history.add({ guildId: GUILD, trackId: c.id, addedBy: null, playedAt: 9000, playedMs: 5000 });
+    const first = store.history.list(GUILD, 2);
+    const second = store.history.list(GUILD, 2, first.at(-1)?.id);
+    assert.deepEqual(
+      [...first, ...second].map((entry) => entry.track.title),
+      ['Track 3', 'Track 2', 'Track 1'],
+    );
+  });
+
   it('lists newest first and pages back', () => {
     const store = memoryStore();
     const [a, b, c] = addTracks(store, 3);

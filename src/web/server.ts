@@ -284,9 +284,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (!caller) return failure(reply, 'unauthorized', 'log in first');
       const context = await deps.access.context(caller.principal, request.params.guild);
       const id = Number(request.params.track);
+      const valid = Number.isSafeInteger(id) && id > 0;
       const current = options.players.get(context.guildId).snapshot().track;
-      const queued = current?.id === id || options.queue.list(context.guildId).some((item) => item.track.id === id);
-      const track = Number.isInteger(id) && id > 0 && queued ? deps.store.tracks.get(id) : null;
+      // Asked of the index, not by reading the queue: a browser seeking sends a Range request each time.
+      const queued = valid && (current?.id === id || options.queue.contains(context.guildId, id));
+      const track = queued ? deps.store.tracks.get(id) : null;
       if (!track) return failure(reply, 'not-found', 'that track is not playing or queued in this server');
       const key = MediaCache.keyOf(track.source);
       if (!options.cache.has(key)) return failure(reply, 'conflict', 'the track is not prepared yet');

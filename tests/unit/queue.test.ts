@@ -76,6 +76,25 @@ describe('QueueService', () => {
     assert.equal(queue.dedupe(GUILD), 0);
   });
 
+  it('removes 900 duplicates of a thousand-track queue at once, with one event, in a few milliseconds', () => {
+    const { queue, events, tracks } = setup(100);
+    const ids = tracks.map((track) => track.id);
+    // The same hundred tracks ten times over.
+    for (let round = 0; round < 10; round += 1) queue.add(GUILD, ids, 'end', null);
+    const before = events.length;
+    const started = performance.now();
+    assert.equal(queue.dedupe(GUILD), 900);
+    const took = performance.now() - started;
+    assert.equal(events.length, before + 1, 'one change, announced once');
+    assert.deepEqual(
+      queue.list(GUILD).map((item) => item.position),
+      ids.map((_, index) => index),
+    );
+    // Removing them one by one, each with its own renumbering, took most of a second; the bound leaves room for a slow
+    // machine while still failing that.
+    assert.ok(took < 250, `dedupe took ${Math.round(took)} ms`);
+  });
+
   it('shifts the next item out for the player and clears', () => {
     const { queue, tracks } = setup(2);
     queue.add(

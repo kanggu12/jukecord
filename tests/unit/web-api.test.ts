@@ -283,6 +283,11 @@ describe('the HTTP API', () => {
     const url = api(`/guilds/${GUILD}/tracks/${track.id}/audio`);
     // Not queued anywhere yet: not served, whatever the cache holds.
     assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404);
+    // A track "number" that is not one is not looked for at all.
+    for (const odd of ['abc', '0', '1.5', '99999999999999999999']) {
+      const answer = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/tracks/${odd}/audio`), headers: asHost });
+      assert.equal(answer.statusCode, 404, odd);
+    }
     server.queue.add(GUILD, [track.id], 'end', null);
     assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 409);
     const key = MediaCache.keyOf(track.source);

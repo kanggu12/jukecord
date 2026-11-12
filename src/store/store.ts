@@ -362,15 +362,44 @@ export class QueueRepository {
     });
   }
 
+  /** Whether a track is in a server's queue, read without reading the queue itself. */
+  has(guildId: string, trackId: number): boolean {
+    const row = this.store.db
+      .prepare('SELECT 1 AS found FROM queue_items WHERE guild_id = ? AND track_id = ? LIMIT 1')
+      .get(guildId, trackId);
+    return row !== undefined;
+  }
+
   /** Removes one item; false when it is not in that server's queue (already played or removed by someone else). */
   remove(guildId: string, itemId: number): boolean {
     return this.store.transaction(() => {
-      const result = this.store.db
-        .prepare('DELETE FROM queue_items WHERE id = ? AND guild_id = ?')
-        .run(itemId, guildId);
-      if (Number(result.changes) === 0) return false;
-      this.compact(guildId);
+      // RETURNING gives the place it had, so the items after it move up with one statement instead of a renumbering.
+      const row = this.store.db
+        .prepare('DELETE FROM queue_items WHERE id = ? AND guild_id = ? RETURNING position')
+        .get(itemId, guildId) as Row | undefined;
+      if (!row) return false;
+      this.closeGap(guildId, int(row, 'position'));
       return true;
+    });
+  }
+
+  /**
+   * Removes several items in one transaction with one renumbering at the end, and returns how many were there.
+   *
+   * Removing them one by one renumbers the whole queue after each: 900 duplicates of a thousand-track queue took most
+   * of a second, during which no server's music was fed.
+   */
+  removeMany(guildId: string, itemIds: readonly number[]): number {
+    // Nothing asked: nothing written, not even an empty transaction.
+    if (itemIds.length === 0) return 0;
+    return this.store.transaction(() => {
+      const remove = this.store.db.prepare('DELETE FROM queue_items WHERE id = ? AND guild_id = ?');
+      let removed = 0;
+      // Each delete is a lookup by the primary key; one already gone (played meanwhile) changes nothing.
+      for (const id of itemIds) removed += Number(remove.run(id, guildId).changes);
+      // The gaps they left are closed once, for all of them.
+      if (removed > 0) this.compact(guildId);
+      return removed;
     });
   }
 
@@ -411,10 +440,15 @@ export class QueueRepository {
   /** Takes the first item out of the queue (the next to play), or null when the queue is empty. */
   shift(guildId: string): QueueItem | null {
     return this.store.transaction(() => {
-      const first = this.list(guildId)[0];
-      if (!first) return null;
+      // Only the first row is read (the index on guild and position finds it): every track change used to read the
+      // whole queue, a thousand rows with their tracks, to take one.
+      const row = this.store.db
+        .prepare(`${QUEUE_SELECT} WHERE q.guild_id = ? ORDER BY q.position, q.id LIMIT 1`)
+        .get(guildId) as Row | undefined;
+      if (!row) return null;
+      const first = queueItemFrom(row);
       this.store.db.prepare('DELETE FROM queue_items WHERE id = ?').run(first.id);
-      this.compact(guildId);
+      this.closeGap(guildId, first.position);
       return first;
     });
   }
@@ -430,6 +464,14 @@ export class QueueRepository {
   // Rewrites positions to 0..n-1 in the current order, after a removal left a gap.
   private compact(guildId: string): void {
     this.writeOrder(guildId, this.ids(guildId));
+  }
+
+  // Closes the gap one removed item left at `position`: everything after it moves up one place, in one statement.
+  // Positions stay 0..n-1 (every change keeps them so), and the order of the rest does not change.
+  private closeGap(guildId: string, position: number): void {
+    this.store.db
+      .prepare('UPDATE queue_items SET position = position - 1 WHERE guild_id = ? AND position > ?')
+      .run(guildId, position);
   }
 
   // Writes position = index for each ID; rows already in place are left alone.
@@ -499,12 +541,15 @@ export class HistoryRepository {
 
   /** The newest `limit` entries of a server; `beforeId` pages further back. */
   list(guildId: string, limit = 50, beforeId?: number): HistoryEntry[] {
+    // Newest first by ID, the order entries were written in, which is also what the cursor pages by: the index on
+    // (guild, id) gives the page directly. Sorting by the time played needed a sort of every row of the server, and a
+    // clock set back between two plays would have put an entry on two pages or none.
     const rows = this.store.db
       .prepare(
         `SELECT h.id, h.guild_id, h.added_by, h.played_at, h.played_ms, ${TRACK_COLUMNS}
          FROM history h JOIN tracks t ON t.id = h.track_id
          WHERE h.guild_id = ? AND h.id < ?
-         ORDER BY h.played_at DESC, h.id DESC LIMIT ?`,
+         ORDER BY h.id DESC LIMIT ?`,
       )
       // Without a cursor every ID qualifies; MAX_SAFE_INTEGER stands in for "no upper bound".
       .all(guildId, beforeId ?? Number.MAX_SAFE_INTEGER, limit);
