@@ -33,11 +33,12 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
 - **Log** (the host only): jukecord's log, filtered by level and part.
 - **The menu** (your name, top right): theme, language, motion, the server's DJ role (for people who can manage the
   server), API tokens, keyboard shortcuts, logging out.
-- **Autoplay** (the **∞** key beside the queue's title): what plays when the queue runs out. Off; **this server's
-  plays**, a track played here before (the ones played more and liked by more people more often, none of the last 30);
-  or **related to the last track**, from YouTube's mix of it (this server's plays when there is none). Autoplay queues
-  one track when the last one starts; its row says "added by Autoplay", a track you add at the end goes before it,
-  **Stop** ends it until a track starts again, and it waits while a repeat is on.
+- **Autoplay** (the **∞** key beside the queue's title, among the tools behind the key beside **Shuffle** on a narrow
+  window): what plays when the queue runs out. Off; **this server's plays**, a track played here before (the more it
+  was played and the more people liked it, the more often; none of the last 30); or **related to the last track**, from
+  YouTube's mix of it (this server's plays when there is none). Autoplay queues one track when the last one starts; its
+  row says "added by Autoplay", a track you add at the end goes before it, **Stop** ends it until a track starts again,
+  and it waits while a repeat is on.
 - **Saved playlists** (**Load**): load, rename, delete, export (a text file of addresses, an M3U, or jukecord's own
   file, which keeps titles, lengths and pictures), and **Import**: a file of any of those, or a list pasted in (a line
   that is not an address is searched on YouTube; at most a hundred lines are looked up).

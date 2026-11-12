@@ -253,7 +253,7 @@ const EN = {
   autoplayOff: 'Off',
   autoplayOffHint: 'The music stops when the queue runs out',
   autoplayHistory: "This server's plays",
-  autoplayHistoryHint: 'A track played here, the most played and liked more often, none of the last 30',
+  autoplayHistoryHint: 'A track played here: the more played and liked, the more often; none of the last 30',
   autoplayRelated: 'Related to the last track',
   autoplayRelatedHint: "From YouTube's mix of the last track; this server's plays when there is none",
   autoplayRepeat: 'While a repeat is on, the queue does not run out',

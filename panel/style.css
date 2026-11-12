@@ -1780,6 +1780,13 @@ img {
     display: none;
   }
 }
+/* A narrow card (a phone) lists autoplay with the tools behind the queue's tools key (see toolsMore), at the width
+   the rule for the tools uses: beside the title, Shuffle and that key, its key took the head onto a second line. */
+@container (max-width: 560px) {
+  .card-head .autoplay-key {
+    display: none;
+  }
+}
 @media (forced-colors: active) {
   .autoplay-key.on {
     forced-color-adjust: none;

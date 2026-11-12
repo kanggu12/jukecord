@@ -29,8 +29,8 @@ statistics), the shortcuts on a short window (a page zoomed to 200 %), and the l
 The panel with a Discord bot is walked too: a made-up server, its voice channels and people listening in browsers are
 put between the page and the server, which runs browser-only. It also types words in the add field (the search's answer
 is the walk's own, made from the seeded tracks), holds a link from another window over the page, opens the liked list,
-autoplay's choices and a row autoplay queued (from the seeded plays: nothing is fetched), and a playlist's export and
-import. The README's pictures come from the same walk.
+autoplay's choices and a row autoplay queued (from the seeded plays: nothing is fetched), a playlist's export and
+import, and the queue's tools on a phone with autoplay among them. The README's pictures come from the same walk.
 `tests/ui/audit.js` measures each page: text that is clipped (unless marked so, with its whole text as the title) or
 drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with translucent layers
 composited), controls on one row that differ in height or centre, floating layers that cut across other boxes, a sheet,

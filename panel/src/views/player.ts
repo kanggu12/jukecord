@@ -450,7 +450,8 @@ export function queueCard(): HTMLElement {
   const load = tool('folder-open', 'load');
   const clear = tool('trash-2', 'clear');
   clear.classList.add('quiet', 'bad');
-  // Narrow cards (phones): Shuffle keeps its place and the other tools open from this key as a list.
+  // Narrow cards (phones): Shuffle keeps its place and the other tools (and autoplay's key) open from this key as a
+  // list.
   const toolsMore = h(
     'button',
     { class: 'key sm square quiet tools-more', type: 'button', 'data-act': 'queue-tools' },
@@ -887,6 +888,8 @@ export function queueCard(): HTMLElement {
     };
     fill(
       box,
+      // Autoplay's key waits here too on a narrow card (style.css), named with its mode as the key is.
+      choice(autoKey, 'infinity', words.autoplayKey[state.player?.autoplay ?? 'off'] ?? words.autoplay),
       choice(dedupe, 'list-x', words.dedupe),
       choice(save, 'save', words.save),
       choice(load, 'folder-open', words.load),

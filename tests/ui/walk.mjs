@@ -735,7 +735,8 @@ await sweep(
     [1440, 900],
   ],
   async (page) => {
-    await page.click('[data-act="autoplay"]');
+    // Its own key on a wide card, the tools list on a narrow one (phones), as the queue's tools.
+    await tool(page, 'autoplay');
     await page.waitForSelector('.dialog .choice[data-mode="history"]');
   },
 );
@@ -788,6 +789,21 @@ await sweep(
       );
   },
 );
+// The queue's tools behind their key on a phone, autoplay among them with its mode.
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'history' });
+await sweep(
+  'queue-tools',
+  [
+    [360, 780],
+    [390, 844],
+  ],
+  async (page) => {
+    await page.click('[data-act="queue-tools"]');
+    await page.waitForSelector('.dialog [data-tool="autoplay"]');
+  },
+);
+await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
