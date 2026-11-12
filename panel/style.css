@@ -38,8 +38,10 @@
   --line-2: rgba(255, 255, 255, 0.13);
   --hover-tint: rgba(255, 255, 255, 0.055);
   --ink: #eef0f4;
-  --ink-2: #b9bdc9;
-  --ink-3: #9196a5;
+  /* The second and the faint ink, lifted enough to stay readable on glass lit by a bright cover (a white one made the
+     faint ink 3.6:1), and as far apart as before. */
+  --ink-2: #c2c6d1;
+  --ink-3: #a7acba;
   --key: #eef0f4;
   --key-hi: #ffffff;
   --key-ink: #0d0e12;
@@ -440,7 +442,9 @@ img {
   font-weight: 500;
   white-space: nowrap;
   color: var(--tone, var(--ink-2));
-  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
+  /* The tone's tint over the panel's own colour, not over the glass: a bright cover's light behind it took the label
+     under 4.5:1. */
+  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), var(--panel-solid));
 }
 .dot {
   width: 7px;
@@ -1303,8 +1307,14 @@ img {
   justify-content: space-between;
   margin-top: 2px;
   font-size: 12px;
-  color: var(--ink-3);
+  /* The second ink, not the faint one: the disc's glow reaches under the time beside it, and a white cover's glow
+     left the faint ink at 3.4:1 on the dark theme, a black one's at 3.8:1 on the pale theme. A soft halo of the
+     page's own colour round the digits holds the glow back right beside them. */
+  color: var(--ink-2);
   font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 0 2px var(--bg),
+    0 0 6px var(--bg);
 }
 
 /* ---- queue and history rows ------------------------------------------------------------------------------------- */
@@ -1440,7 +1450,8 @@ img {
   font-size: 11px;
   font-weight: 600;
   color: var(--tone, var(--ink-2));
-  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
+  /* As the pill: the tone's tint over the panel's own colour, so a bright cover's light does not show through it. */
+  background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), var(--panel-solid));
 }
 
 /* A row's album: the cover, rounded, with the record peeking out from behind it; under the pointer the record slides
