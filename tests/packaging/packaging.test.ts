@@ -298,6 +298,24 @@ describe('the Helm chart', () => {
     // Secret must hold the token, and its OAuth secret is read only with a client ID to go with it.
     assert.match(rendered, /name: JUKECORD_DISCORD_TOKEN_FILE\n/);
     assert.doesNotMatch(rendered, /secretKeyRef/);
+    // helm test's pod runs where jukecord's may: the same registry login, node selector and tolerations.
+    const placed = execFileSync(
+      'helm',
+      [
+        'template',
+        't',
+        'deploy/helm/jukecord',
+        '--set',
+        'imagePullSecrets[0].name=regcred',
+        '--set',
+        'nodeSelector.pool=music',
+        '--set',
+        'tolerations[0].operator=Exists',
+      ],
+      { encoding: 'utf8' },
+    );
+    const testPod = placed.slice(placed.indexOf('\nkind: Pod\n'));
+    for (const key of ['imagePullSecrets:', 'nodeSelector:', 'tolerations:']) assert.ok(testPod.includes(key), key);
     const existing = execFileSync(
       'helm',
       ['template', 't', 'deploy/helm/jukecord', '--set', 'discord.existingSecret=s'],
