@@ -71,3 +71,16 @@ export interface Playlist {
   /** How many tracks it holds. */
   readonly size: number;
 }
+
+/**
+ * Who added the tracks autoplay queues, in the place of a Discord user ID: a word no Discord ID can be (IDs are
+ * digits), so the queue, the history and the player carry it as they carry a person, and every place that names who
+ * added a track can say "Autoplay" instead.
+ */
+export const AUTOPLAY = 'autoplay';
+
+/** A track someone liked, with when. */
+export interface LikedTrack {
+  readonly track: Track;
+  readonly likedAt: number;
+}

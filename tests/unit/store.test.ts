@@ -316,6 +316,7 @@ describe('PlayerStateRepository and SettingsRepository', () => {
       positionMs: 1235,
       repeat: 'off',
       updatedAt: Date.UTC(2026, 10, 11),
+      autoplay: 'off',
     });
     assert.equal(store.playerState.all().length, 1);
     assert.equal(store.playerState.load(OTHER), null);
