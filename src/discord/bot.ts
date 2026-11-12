@@ -47,6 +47,7 @@ import {
   playlistsCard,
   problem,
   queueCard,
+  soundCard,
   statsCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
@@ -90,6 +91,11 @@ export class Bot implements Directory {
       bus: options.bus,
       // A server's stay setting, read at each change of who is in voice (a lookup by the primary key).
       stays: (guildId) => options.settings.community(guildId).stay,
+      // A server's voice sound, read at each start of a voice stream.
+      sound: (guildId) => {
+        const settings = options.settings.community(guildId);
+        return { volume: settings.volume, preset: settings.sound };
+      },
     });
   }
 
@@ -518,6 +524,15 @@ export class Bot implements Directory {
                   ),
             ],
           });
+          return;
+        }
+        case 'volume':
+        case 'sound': {
+          const sound =
+            interaction.commandName === 'volume'
+              ? actions.volume(context, options.getInteger('percent', true))
+              : actions.sound(context, options.getString('preset', true));
+          await interaction.editReply({ embeds: [soundCard(sound, lang)] });
           return;
         }
         default:

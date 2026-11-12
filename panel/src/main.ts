@@ -16,6 +16,7 @@ import {
   mayControl,
   maySkip,
   NO_VOTES,
+  PLAIN,
   positionNow,
   state,
   t,
@@ -413,6 +414,7 @@ function choose(id: string): void {
     listeners: { people: [], count: 0 },
     history: [],
     votes: NO_VOTES,
+    sound: PLAIN,
   });
   live.show(guild.id);
   void refreshHistory();
@@ -434,6 +436,8 @@ function receive(message: Record<string, unknown>): void {
         listeners: message.listeners as typeof state.listeners,
         // A jukecord from before votes sends none: none open, and Skip is not a vote.
         votes: (message.votes as typeof state.votes | undefined) ?? NO_VOTES,
+        // Nor, before the sound, a sound: the track as it is.
+        sound: (message.sound as typeof state.sound | undefined) ?? PLAIN,
       });
       // A whole state comes after (re)connecting: tracks may have played while this page was away.
       void refreshHistory(0);
@@ -461,6 +465,9 @@ function receive(message: Record<string, unknown>): void {
       return;
     case 'votes':
       update({ votes: message.votes as typeof state.votes });
+      return;
+    case 'sound':
+      update({ sound: message.sound as typeof state.sound });
       return;
   }
 }

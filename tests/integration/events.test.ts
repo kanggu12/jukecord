@@ -134,6 +134,7 @@ describe('live updates', () => {
       'listeners',
       'player',
       'queue',
+      'sound',
       'type',
       'v',
       'voice',
@@ -414,6 +415,26 @@ describe('votes to skip, live', () => {
       assert.deepEqual((await told).votes, { on: true, votes: 1, needed: 2 });
     } finally {
       for (const socket of sockets) socket.close();
+      await server.close();
+    }
+  });
+});
+
+describe('the voice sound, live', () => {
+  it('sends the sound with the state and each change of it to every panel', async () => {
+    const server = await testServer({ listen: true });
+    try {
+      const base = server.url.replace('http://', 'ws://');
+      const panel = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { authorization: `Bearer ${HOST_TOKEN}` });
+      try {
+        assert.deepEqual((await panel.next('state')).sound, { volume: 100, preset: 'off' });
+        const told = panel.next('sound');
+        server.actions.sound({ guildId: GUILD, userId: null, mayControl: true, mayManage: true }, 'bright');
+        assert.deepEqual((await told).sound, { volume: 100, preset: 'bright' });
+      } finally {
+        panel.close();
+      }
+    } finally {
       await server.close();
     }
   });

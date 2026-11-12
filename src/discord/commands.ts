@@ -52,6 +52,8 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   'take-turns': '/turns set',
   'turns-now': '/turns now',
   'person-limit': '/limit',
+  volume: '/volume',
+  sound: '/sound',
 };
 
 // One command: English name and description, Korean name and description.
@@ -388,6 +390,41 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setMinValue(0)
           .setMaxValue(1000),
       ),
+    command(
+      'volume',
+      "The voice channel's volume (browsers keep their own)",
+      '음량',
+      '음성 채널 음량(브라우저는 각자 따로)',
+    ).addIntegerOption((option) =>
+      option
+        .setName('percent')
+        .setDescription('0 to 200 (100 is the track as it is)')
+        .setNameLocalizations({ ko: '퍼센트' })
+        .setDescriptionLocalizations({ ko: '0~200(100은 원래 크기)' })
+        .setRequired(true)
+        .setMinValue(0)
+        .setMaxValue(200),
+    ),
+    command(
+      'sound',
+      "The voice channel's sound (browsers listening apply it too)",
+      '음색',
+      '음성 채널 음색(브라우저로 듣는 사람에게도 적용)',
+    ).addStringOption((option) =>
+      option
+        .setName('preset')
+        .setDescription('How it sounds')
+        .setNameLocalizations({ ko: '종류' })
+        .setDescriptionLocalizations({ ko: '음색 종류' })
+        .setRequired(true)
+        .addChoices(
+          { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+          { name: 'More bass', value: 'bass', name_localizations: { ko: '저음 강조' } },
+          { name: 'Clearer voices', value: 'voices', name_localizations: { ko: '목소리 또렷하게' } },
+          { name: 'Brighter', value: 'bright', name_localizations: { ko: '밝게' } },
+          { name: 'Softer at night', value: 'night', name_localizations: { ko: '밤에 부드럽게' } },
+        ),
+    ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

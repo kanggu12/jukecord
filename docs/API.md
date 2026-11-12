@@ -144,6 +144,8 @@ playlist) so a program does not need to ask again.
 | `voice-channels` The voice channel the bot is in and the ones it could join | `GET /api/v1/guilds/{guild}/voice` | read | `jukecord channels` | `/join` |
 | `join` Join a voice channel (your own when none is named) | `PUT /api/v1/guilds/{guild}/voice` | control | `jukecord join` | `/join` |
 | `leave` Leave the voice channel; the music goes on in the browsers | `DELETE /api/v1/guilds/{guild}/voice` | control | `jukecord leave` | `/leave` |
+| `volume` The voice channel's volume, 0 to 200 percent (each browser keeps its own) | `PUT /api/v1/guilds/{guild}/voice/volume` | control | `jukecord volume` | `/volume` |
+| `sound` The voice channel's sound preset; browsers listening along apply it too | `PUT /api/v1/guilds/{guild}/voice/sound` | control | `jukecord sound` | `/sound` |
 
 ### Server
 
@@ -187,13 +189,15 @@ version (now `1`), and `type`:
 | From jukecord | When                                                                    | Carries                                                                |
 | :------------ | :---------------------------------------------------------------------- | :--------------------------------------------------------------------- |
 | `hello`       | on connecting                                                           | `serverTime`, `you` (the login's name)                                 |
-| `state`       | after `subscribe`                                                       | the server's `player`, `queue`, `voice` and `listeners`                |
+| `state`       | after `subscribe`                                                       | the server's `player`, `queue`, `voice`, `listeners`, `votes`, `sound` |
 | `player`      | every change of the player                                              | `player` (the same shape as `GET .../player`)                          |
 | `queue`       | a change of the queue, at most four times a second                      | `queue`: the whole queue as it is now (as `GET .../queue`)             |
 | `voice`       | joining or leaving voice                                                | `voice` (as `GET .../voice`)                                           |
 | `listeners`   | a browser starts or stops playing along, at most once a second          | `listeners`: `people` (the first twenty) and `count` (every browser)   |
 | `pong`        | answer to `ping`                                                        | `t` (yours) and `serverTime`                                           |
 | `error`       | a refused `subscribe`                                                   | `code` and `message`                                                   |
+| `votes`       | a vote to skip, the end of its track, people coming and going in a vote | `votes`: `on` (Skip without the DJ role is a vote), `votes`, `needed`  |
+| `sound`       | a change of the voice channel's volume or preset                        | `sound`: `volume` (percent) and `preset`, which a browser applies      |
 
 Changes made close together come as one `queue` message with the queue as it is after the last of them, so its `version`
 can jump by more than one: keep the message with the highest `version`, there is nothing to fetch.

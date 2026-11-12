@@ -18,8 +18,8 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   (**Show more** brings the next hundred); search covers all of it.
 - **Add**: paste an address (a video, a playlist, a SoundCloud page ...) or type search words. **Add** puts it at the end
   of the queue; **Play now** plays it at once.
-- **Voice channel**: where the bot is, the channels it may join (with how many people are in each), and who is
-  listening in a browser.
+- **Voice channel**: where the bot is, the channels it may join (with how many people are in each), the voice
+  channel's volume and sound (see [the sound](#the-voice-channels-sound)), and who is listening in a browser.
 - **Recently played**: the history, with a key to add a track again.
 - **Statistics** (top bar): plays per day and per hour of the day, the most played tracks, who added most, and the
   time listened, over 7, 30 or 90 days or a year. Each chart has a table view.
@@ -63,6 +63,16 @@ People who can manage the server (and the host) choose these in the panel's menu
 **Take turns now** (the queue's tools, `/turns now`, `jukecord turns now`) puts the queue as it is in turns once, with
 the setting on or off; it changes the music, so it needs what any change needs (the DJ role where one is set).
 
+## The voice channel's sound
+
+The voice card sets how the voice channel sounds, for whoever may change the music: its **volume**, 0 to 200 % (100 %
+is the track as it is), and a **sound**: more bass, clearer voices, brighter, or softer at night (less low end, gentler
+highs, 4 dB quieter). A browser listening along applies the same sound, so the voice channel and every browser hear
+the same; each browser keeps its own volume. `/volume`, `/sound`, `jukecord volume 80`, `jukecord sound night`, or the
+API. A change is heard within a moment, from the same place in the track. At 100 % with the sound off, the voice
+channel gets each cached track as it is; otherwise jukecord decodes, filters and encodes the stream it sends again
+([why, and what it costs](DECISIONS.md#the-voice-channels-sound-ffmpeg-only-while-it-is-not-plain)).
+
 ## Slash commands
 
 | Command                                      | Does                                                                |
@@ -87,6 +97,7 @@ the setting on or off; it changes the music, so it needs what any change needs (
 | `/voteskip`                                  | Skip without the DJ role is a vote, or not (needs Manage Server)    |
 | `/turns set` `/turns now`                    | take turns, or not (Manage Server); the queue in turns now          |
 | `/limit`                                     | the most tracks one person may have queued (needs Manage Server)    |
+| `/volume` `/sound`                           | the voice channel's volume and sound (browsers apply the sound too) |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after

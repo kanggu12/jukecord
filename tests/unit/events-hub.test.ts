@@ -49,6 +49,8 @@ function hub(
     }),
     // No votes to skip here (tests/integration/events.test.ts has them over a real connection).
     skipVotes: () => ({ on: false, votes: 0, needed: 0 }),
+    // The voice channel's sound: plain.
+    currentSound: () => ({ volume: 100, preset: 'off' }),
   };
   const presenter = { player: (value: unknown) => value, queue: (value: unknown) => value };
   const log = { debug: () => {}, info: () => {} };
@@ -329,6 +331,7 @@ describe('EventHub', () => {
         'listeners',
         'player',
         'queue',
+        'sound',
         'type',
         'v',
         'voice',

@@ -5,10 +5,12 @@
  * one of these actions, and shows the result. That is what keeps them in step: a feature exists when it is an action,
  * and a test checks that every action is reachable from all four (see ACTIONS and tests/unit/parity.test.ts).
  */
+import type { Bus } from '../core/bus.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
 import { plainReason, REASONS } from '../core/reasons.ts';
+import { isPreset, SOUND_PRESETS, type Sound, VOLUME_MAX } from '../core/sound.ts';
 import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
@@ -59,6 +61,8 @@ export const ACTIONS = [
   'take-turns',
   'turns-now',
   'person-limit',
+  'volume',
+  'sound',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -103,6 +107,8 @@ export interface VoiceControl {
   channels(guildId: string, viewer: { userId: string | null; all: boolean }): VoiceChannelInfo[];
   /** The server's stay setting changed: the bot looks again at whether it is alone and counts down to leaving. */
   stayChanged?(guildId: string): void;
+  /** The server's voice volume or preset changed: the voice stream starts again where the track is, with it. */
+  soundChanged?(guildId: string): void;
 }
 
 /** A voice channel, for choosing where the bot goes. */
@@ -191,6 +197,8 @@ export interface ActionsOptions {
   readonly trackMaxMs?: number;
   /** The votes to skip; without them (tests that do not care) Skip needs the DJ role, as it did before votes. */
   readonly votes?: SkipVotes;
+  /** Where a change of a voice channel's sound is announced (the panels apply its preset); absent in some tests. */
+  readonly bus?: Bus;
 }
 
 /** What a skip did: the player after it, and how the vote stands when it was a vote the track did not go by. */
@@ -677,5 +685,43 @@ export class Actions {
       throw new ActionError('invalid', `the limit is 0 (none) to ${max} tracks`);
     this.options.store.settings.setCommunity(context.guildId, { personLimit: tracks });
     return this.settings(context);
+  }
+
+  /**
+   * The voice channel's volume, 0 to 200 percent; each browser keeps its own. A change of the music: it needs what any
+   * change needs (the DJ role where one is set).
+   */
+  volume(context: ActionContext, percent: number): Sound {
+    this.control(context);
+    if (!Number.isInteger(percent) || percent < 0 || percent > VOLUME_MAX)
+      throw new ActionError('invalid', `the volume is 0 to ${VOLUME_MAX} percent`);
+    const before = this.currentSound(context.guildId);
+    this.options.store.settings.setCommunity(context.guildId, { volume: percent });
+    return this.soundChanged(context.guildId, before);
+  }
+
+  /** The voice channel's sound preset, which browsers listening along apply too (see core/sound.ts). */
+  sound(context: ActionContext, preset: string): Sound {
+    this.control(context);
+    if (!isPreset(preset)) throw new ActionError('invalid', `the sound is one of ${SOUND_PRESETS.join(', ')}`);
+    const before = this.currentSound(context.guildId);
+    this.options.store.settings.setCommunity(context.guildId, { sound: preset });
+    return this.soundChanged(context.guildId, before);
+  }
+
+  /** A server's voice sound now: its volume and preset (anyone may look; the panels get it live). */
+  currentSound(guildId: string): Sound {
+    const settings = this.options.store.settings.community(guildId);
+    return { volume: settings.volume, preset: settings.sound };
+  }
+
+  // The sound may have changed: the voice stream takes it where the track is, and the panels hear it (their browsers
+  // apply the preset). The same sound again changes nothing, and starts nothing again.
+  private soundChanged(guildId: string, before: Sound): Sound {
+    const now = this.currentSound(guildId);
+    if (now.volume === before.volume && now.preset === before.preset) return now;
+    this.options.voice?.soundChanged?.(guildId);
+    this.options.bus?.emit('sound', { guildId });
+    return now;
   }
 }

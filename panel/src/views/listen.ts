@@ -12,6 +12,7 @@
 import { api, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
 import type { Live } from '../live.ts';
+import { SoundGraph } from '../sound.ts';
 import { keep, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
 import { act, disc, skipOrVote } from './player.ts';
 
@@ -28,6 +29,9 @@ export function listenBar(live: Live): HTMLElement {
   audio.hidden = true;
   audio.id = 'listen-audio';
   document.body.append(audio);
+  // The voice channel's preset, applied to this element with WebAudio (see sound.ts), and this browser's volume.
+  const sound = new SoundGraph(audio);
+  sound.setVolume(state.volume);
   // Opus in Ogg where the browser plays it; older Safari does not, and gets MP3.
   let format: 'opus' | 'mp3' = audio.canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'mp3';
   let loaded: string | null = null;
@@ -112,7 +116,7 @@ export function listenBar(live: Live): HTMLElement {
       setSync('in-sync');
       return;
     }
-    audio.volume = state.volume;
+    sound.setVolume(state.volume);
     if (audio.paused) {
       audio.play().then(
         () => setSync('in-sync'),
@@ -197,6 +201,8 @@ export function listenBar(live: Live): HTMLElement {
   // Calls play() inside the press, which is what lets Safari play this element from now on. With the music paused it
   // plays muted for a moment and pauses again; align() sets the position and the sound once the file is known.
   const playFromPress = () => {
+    // The press also lets WebAudio make sound, for the voice channel's preset.
+    sound.unlock();
     const playing = state.player?.status === 'playing';
     if (!playing) audio.muted = true;
     audio.play().then(
@@ -325,7 +331,7 @@ export function listenBar(live: Live): HTMLElement {
   };
   slider.oninput = () => {
     const value = Number(slider.value) / 100;
-    audio.volume = value;
+    sound.setVolume(value);
     update({ volume: value });
     keep('volume', String(value));
   };
@@ -334,6 +340,8 @@ export function listenBar(live: Live): HTMLElement {
     describe();
     align();
   });
+  // The voice channel's preset, in this browser too.
+  watch(['sound'], () => sound.setPreset(state.sound.preset));
   watch(
     ['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice', 'votes'],
     draw,

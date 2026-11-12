@@ -34,6 +34,8 @@ export interface BusEvents {
   people: [GuildChanged];
   /** The votes to skip a server's track changed, or whether Skip is a vote there (see app/votes.ts). */
   votes: [GuildChanged];
+  /** A server's voice channel sound changed: its volume or its preset (see core/sound.ts). */
+  sound: [GuildChanged];
 }
 
 /** Hears about a listener that threw: the event, the server it was about, and the error. */

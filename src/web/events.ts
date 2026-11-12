@@ -267,15 +267,31 @@ export class EventHub {
       const room = this.rooms.get(guildId);
       if (room) this.votesSoon(guildId, room);
     };
+    // The voice channel's sound changed (a person's change, held to the rates): small, made once, sent at once.
+    const onSound = ({ guildId }: { guildId: string }) => {
+      const room = this.rooms.get(guildId);
+      if (!room) return;
+      const bytes = json({ type: 'sound', guild: guildId, sound: actions.currentSound(guildId) });
+      this.broadcast(
+        room,
+        outgoing(
+          bytes.length,
+          () => bytes,
+          () => gzip(bytes),
+        ),
+      );
+    };
     bus.on('player', onPlayer);
     bus.on('queue', onQueue);
     bus.on('voice', onVoice);
     bus.on('votes', onVotes);
+    bus.on('sound', onSound);
     this.off.push(
       () => bus.off('player', onPlayer),
       () => bus.off('queue', onQueue),
       () => bus.off('voice', onVoice),
       () => bus.off('votes', onVotes),
+      () => bus.off('sound', onSound),
     );
     this.heartbeat = setInterval(() => this.beat(), HEARTBEAT_MS);
     this.heartbeat.unref();
@@ -492,7 +508,8 @@ export class EventHub {
       `,"type":"state","player":${JSON.stringify(presenter.player(actions.nowPlaying(reader(guildId))))},` +
         `"voice":${JSON.stringify(actions.voiceChannels(viewer(client, guildId)))},` +
         `"listeners":${JSON.stringify(this.listenersOf(room))},` +
-        `"votes":${JSON.stringify(actions.skipVotes(reader(guildId)))}}`,
+        `"votes":${JSON.stringify(actions.skipVotes(reader(guildId)))},` +
+        `"sound":${JSON.stringify(actions.currentSound(guildId))}}`,
     );
     this.write(
       client,

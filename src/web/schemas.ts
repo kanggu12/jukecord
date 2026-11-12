@@ -280,5 +280,14 @@ export const OkSchema = Type.Object({ ok: Type.Literal(true) }, { title: 'Ok' })
 /** How many things a change removed. */
 export const RemovedSchema = Type.Object({ removed: Type.Integer() }, { title: 'Removed' });
 
+/** A voice channel's sound: its volume and its preset (browsers listening along apply the preset). */
+export const SoundSchema = Type.Object(
+  {
+    volume: Type.Integer({ description: "The voice channel's volume, in percent (each browser keeps its own)" }),
+    preset: SoundPresetSchema,
+  },
+  { title: 'Sound' },
+);
+
 /** How many queued tracks a change moved to another place. */
 export const MovedSchema = Type.Object({ moved: Type.Integer() }, { title: 'Moved' });

@@ -121,3 +121,32 @@ the measure is the event loop's delay rather than the processor's use: a busy pr
 up, and the loop's delay is what the voice of every server and every panel feel. Work that can be asked for again in
 a moment (audio, changes) is then turned away at once with 503, which costs almost nothing, instead of being queued
 behind work nobody can see.
+
+## The voice channel's sound: ffmpeg only while it is not plain
+
+The cached file goes to Discord as it is: that costs no processor and loses nothing (see Ogg Opus through to
+Discord). A volume other than 100 % or a sound (more bass, clearer voices, brighter, softer at night) changes the sound
+itself, which has to be decoded, filtered and encoded again. ffmpeg does that, for that server's voice stream only and
+only while its sound is not plain, from the place the track is: the process a seek already starts, with the sound's
+filters added. @discordjs/voice can change a volume itself, but only of sound it decodes and encodes again in the
+process, with an Opus encoder there (a native module, or a slower WebAssembly one), which the image does without.
+
+In the image on two processor cores, a stream with a sound took 16 to 23 ms of processor per second of sound when
+encoded as fast as it goes, and 1.9 to 2.9 % of one core read at the voice channel's pace (the most with the limiter
+above 100 %); a stream from the middle of a track, which a seek has always started, 14.6 ms and 1.7 %; a plain one,
+none (`node tests/perf/sound.ts <folder>`). Opus encoded a second time at 128 kbit/s is not heard.
+
+A change starts the voice stream again where the player's clock is, with the seek's short fade in: the new stream's
+first sound is ready about 20 ms after it starts in the image (0.2 s with an older FFmpeg on a busy machine). Changes
+closer together than 0.4 s (a volume moved step by step) are one, the last. Changing the filters of the ffmpeg
+already running would be heard only after the seconds of sound already encoded and waiting in the pipe.
+
+The sounds are a gain and the Audio EQ Cookbook's shelves and peak, which ffmpeg's `lowshelf`, `highshelf` and
+`equalizer` and the browsers' `BiquadFilterNode` compute with the same formulas, so a browser listening along hears
+the curve the voice channel hears (ffmpeg's is checked against the formulas, within 0.15 dB at seven frequencies, in
+`tests/integration/sound.test.ts`). A compressor for the night sound was left out: ffmpeg's and the browsers'
+compressors work differently, so the two would not sound the same, and the cached tracks' loudness range is held to
+11 LU already. A sound that lifts a band lowers everything first, by the lift less 1 dB, so what it plays stays under
+0 dB (the cached peaks are under -1 dB); above 100 % the voice channel's volume passes a limiter at -1 dB. A browser
+hands its audio to WebAudio only once a sound is on, and keeps it there (an element can be handed over once); its own
+volume then comes after the sound, as the voice channel's volume does.

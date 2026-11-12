@@ -173,3 +173,55 @@ describe('taking turns and the limit per person over the API', () => {
     assert.deepEqual(now.json(), { moved: 0 });
   });
 });
+
+describe('the voice sound over the API', () => {
+  let server: TestServer;
+
+  before(async () => {
+    server = await testServer();
+    server.directory.join(GUILD, ALICE);
+    server.directory.join(GUILD, BOB, { manage: true });
+  });
+  after(() => server.close());
+
+  const inject = (options: InjectOptions) => server.web.app.inject(options);
+  const as = (userId: string) => {
+    const { cookie, csrf } = sessionFor(server, userId);
+    return { cookie, [CSRF_HEADER]: csrf };
+  };
+
+  it('sets the volume and the preset for whoever may change the music, and refuses what is neither', async () => {
+    const volume = await inject({
+      method: 'PUT',
+      url: api(`/guilds/${GUILD}/voice/volume`),
+      headers: as(ALICE),
+      payload: { percent: 80 },
+    });
+    assert.deepEqual(volume.json(), { volume: 80, preset: 'off' });
+    const sound = await inject({
+      method: 'PUT',
+      url: api(`/guilds/${GUILD}/voice/sound`),
+      headers: as(ALICE),
+      payload: { preset: 'voices' },
+    });
+    assert.deepEqual(sound.json(), { volume: 80, preset: 'voices' });
+    const unknown = await inject({
+      method: 'PUT',
+      url: api(`/guilds/${GUILD}/voice/sound`),
+      headers: as(ALICE),
+      payload: { preset: 'nightcore' },
+    });
+    assert.equal(unknown.statusCode, 400);
+    // With a DJ role, Alice (without it) may not; it is a change of the music.
+    server.store.settings.setDjRole(GUILD, DJ_ROLE);
+    const refused = await inject({
+      method: 'PUT',
+      url: api(`/guilds/${GUILD}/voice/volume`),
+      headers: as(ALICE),
+      payload: { percent: 100 },
+    });
+    assert.equal(refused.statusCode, 403);
+    const shown = (await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: as(ALICE) })).json();
+    assert.deepEqual([shown.volume, shown.sound], [80, 'voices']);
+  });
+});

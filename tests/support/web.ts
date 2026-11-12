@@ -212,7 +212,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     applies: (guildId) => actions.voteSkipApplies(guildId),
     listening: (guildId) => new Set([...voice.people(guildId), ...browsers(guildId)]),
   });
-  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now(), votes });
+  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now(), votes, bus });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
   const auth = new Auth({

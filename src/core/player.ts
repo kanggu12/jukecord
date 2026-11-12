@@ -338,6 +338,24 @@ export class Player {
     if (this.status === 'playing') this.scheduleEnd();
   }
 
+  /**
+   * Starts the outputs again where the track is now, because how they make their sound changed (the voice channel's
+   * volume or preset, which an output takes when it starts). The place, the clock and the browsers stay as they are: no
+   * snapshot is sent. Loading or idle, there is nothing to start again: an output takes the sound at its next start.
+   */
+  restartOutputs(): void {
+    if (this.status === 'playing' && this.media) {
+      // A new session: an "ended" from the stream replaced is not taken for the end of the track.
+      this.session += 1;
+      for (const output of this.outputs.keys()) this.startOutput(output);
+      this.scheduleEnd();
+    } else if (this.status === 'paused') {
+      // Paused: the outputs start afresh on resume, with the new sound (their session is an older one then).
+      this.session += 1;
+      for (const output of this.outputs.keys()) output.stop();
+    }
+  }
+
   /** Removes an output (the bot left the channel); the player keeps going for the browsers. */
   detach(output: PlayerOutput): void {
     if (!this.outputs.delete(output)) return;

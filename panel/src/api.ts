@@ -53,6 +53,8 @@ export const PANEL_ACTIONS = [
   'take-turns',
   'turns-now',
   'person-limit',
+  'volume',
+  'sound',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -156,6 +158,11 @@ export interface Player {
 /** A skip's answer: the player after it, and how the vote stands when it was a vote the track did not go by. */
 export interface SkipAnswer extends Player {
   votes: { votes: number; needed: number } | null;
+}
+/** The voice channel's sound: its volume in percent and its preset (sent live; browsers apply the preset). */
+export interface Sound {
+  volume: number;
+  preset: SoundPreset;
 }
 /** How the votes to skip the current track stand (sent live). */
 export interface Votes {
@@ -314,6 +321,8 @@ export const api = {
   'turns-now': (guild: string) => request<{ moved: number }>('POST', `${g(guild)}/queue/turns`),
   'person-limit': (guild: string, tracks: number) =>
     request<Settings>('PUT', `${g(guild)}/settings/person-limit`, { tracks }),
+  volume: (guild: string, percent: number) => request<Sound>('PUT', `${g(guild)}/voice/volume`, { percent }),
+  sound: (guild: string, preset: SoundPreset) => request<Sound>('PUT', `${g(guild)}/voice/sound`, { preset }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

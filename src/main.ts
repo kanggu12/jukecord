@@ -176,6 +176,7 @@ async function main(): Promise<number> {
     queueMax: config.queueMax,
     trackMaxMs: config.media.trackMaxMs,
     votes,
+    bus,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);

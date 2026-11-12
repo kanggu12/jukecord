@@ -7,6 +7,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
+import type { Sound } from '../core/sound.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
 
@@ -298,6 +299,15 @@ export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
     }
   }
   return embed.setDescription(lines.join('\n'));
+}
+
+/** The voice channel's sound after a change: its volume and preset. */
+export function soundCard(sound: Sound, lang: Lang): EmbedBuilder {
+  return note(
+    lang,
+    `Voice volume ${sound.volume}%, sound: ${TEXT.presets.en[sound.preset]}`,
+    `음성 채널 음량 ${sound.volume}%, 음색: ${TEXT.presets.ko[sound.preset]}`,
+  );
 }
 
 /** The DJ role, or that everyone may change the music, and the server's other settings under it. */

@@ -159,6 +159,12 @@ const PRESET_NAMES: Readonly<Record<string, string>> = {
   night: 'softer at night',
 };
 
+// A voice channel's sound: "Voice volume 80%, sound: more bass".
+function showSound(answer: unknown): string {
+  const sound = answer as { volume: number; preset: string };
+  return `Voice volume ${sound.volume}%, sound: ${PRESET_NAMES[sound.preset] ?? sound.preset}`;
+}
+
 function showSettings(answer: unknown): string {
   const settings = answer as {
     djRoleId: string | null;
@@ -607,7 +613,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'take-turns': {
     name: 'turns',
     usage: '<on|off>',
-    summary: 'Take turns: tracks added go in turn, by person',
+    summary: 'Take turns: tracks added go in turn',
     request: (words) => ({ body: { on: onOff(words.args[0]) } }),
     show: (answer) =>
       (answer as { takeTurns: boolean }).takeTurns
@@ -626,7 +632,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'person-limit': {
     name: 'limit',
-    usage: '<tracks per person, 0 for none>',
+    usage: '<tracks, 0 for none>',
     summary: 'The most tracks one person may have queued',
     request: (words) => {
       const text = words.args[0];
@@ -637,6 +643,28 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       const limit = (answer as { personLimit: number }).personLimit;
       return limit === 0 ? 'No limit of tracks per person' : `Each person may have ${limit} tracks in the queue`;
     },
+  },
+  volume: {
+    name: 'volume',
+    usage: '<0-200>',
+    summary: "The voice channel's volume, in percent",
+    request: (words) => {
+      const text = words.args[0];
+      if (!text || !/^\d+$/.test(text) || Number(text) > 200) throw new UsageError('say a volume from 0 to 200');
+      return { body: { percent: Number(text) } };
+    },
+    show: showSound,
+  },
+  sound: {
+    name: 'sound',
+    usage: '<off|bass|voices|bright|night>',
+    summary: "The voice channel's sound, in browsers too",
+    request: (words) => {
+      const preset = words.args[0];
+      if (!preset || !(preset in PRESET_NAMES)) throw new UsageError('sound off, bass, voices, bright or night');
+      return { body: { preset } };
+    },
+    show: showSound,
   },
 };
 

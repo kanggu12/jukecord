@@ -249,6 +249,23 @@ const EN = {
   personLimitHint: 'The most one person may have in the queue',
   noLimit: 'None',
   leftLimit: (n: number) => `${n} left out: your limit in the queue`,
+  voiceVolume: 'Voice volume',
+  soundName: 'Sound',
+  soundHint: 'The voice channel and the browsers listening along hear it',
+  presets: {
+    off: 'Off',
+    bass: 'More bass',
+    voices: 'Clearer voices',
+    bright: 'Brighter',
+    night: 'Softer at night',
+  } as Record<string, string>,
+  presetHints: {
+    off: 'The track as it is',
+    bass: 'The lows up',
+    voices: 'Less boom, more voice',
+    bright: 'The highs up',
+    night: 'Less low end, gentler highs, quieter',
+  } as Record<string, string>,
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -489,6 +506,23 @@ const KO: Strings = {
   personLimitHint: '한 사람이 대기열에 넣을 수 있는 곡 수',
   noLimit: '없음',
   leftLimit: (n: number) => `${n}곡은 한 사람당 곡 수 제한으로 못 넣음`,
+  voiceVolume: '음성 채널 음량',
+  soundName: '음색',
+  soundHint: '음성 채널과 브라우저로 같이 듣는 사람 모두에게 들림',
+  presets: {
+    off: '끄기',
+    bass: '저음 강조',
+    voices: '목소리 또렷하게',
+    bright: '밝게',
+    night: '밤에 부드럽게',
+  },
+  presetHints: {
+    off: '원래 소리 그대로',
+    bass: '낮은 소리를 키움',
+    voices: '웅웅거림을 줄이고 목소리를 키움',
+    bright: '높은 소리를 키움',
+    night: '낮은 소리와 높은 소리를 줄이고 음량을 낮춤',
+  },
 };
 
 /** The languages. */

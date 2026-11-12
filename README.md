@@ -125,6 +125,12 @@ people use most.
   that hangs ends itself and comes back paused where it was.
 - **Small and contained.** One process and one SQLite file. It fetches only from public addresses, keeps its files to
   its own user, and on Kubernetes runs as a read-only, non-root pod behind a NetworkPolicy.
+- **Fair in a crowd.** Where a server has a DJ role, Skip from anyone else is a vote: the track goes when half of the
+  people listening, in the voice channel and in browsers, have voted. People can take turns in the queue, each person
+  can be held to a number of tracks, and the bot can stay in voice all day.
+- **One sound for everyone.** A volume for the voice channel up to 200 % and sounds to choose (more bass, clearer
+  voices, brighter, softer at night). Browsers listening along apply the same sound, so the voice channel and every
+  browser hear the same.
 
 ### Light on a small machine
 
@@ -154,7 +160,7 @@ Each Discord server has one queue and one player, and the player is the clock: i
 The bot sends the voice channel the track from that place, and a browser that listens plays the same file and follows
 the same clock. yt-dlp fetches the tracks, and every connection it makes goes through a proxy inside jukecord that
 reaches only public addresses. ffmpeg evens out the loudness once and keeps the track as Opus, which goes to Discord as
-it is. Discord, the panel, the API and the command all call one list of actions, so the same rules hold whichever is
+it is (or, with a volume or a sound set for the voice channel, through ffmpeg again). Discord, the panel, the API and the command all call one list of actions, so the same rules hold whichever is
 used ([architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md)).
 
 ## Everyday use

@@ -2399,6 +2399,45 @@ kbd {
 .section.settings .line.limit .grow {
   min-width: 160px;
 }
+/* The voice channel's sound in its card: the volume and the preset, a row each, between the channels and who listens
+   in browsers. */
+.sound {
+  border-top: 1px solid var(--line);
+  padding: 4px var(--pad);
+}
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--ink-2);
+}
+.sound-row input[type="range"] {
+  width: 132px;
+  min-width: 0;
+  flex: 0 1 132px;
+  accent-color: var(--ink);
+}
+.sound-row .level {
+  width: 40px;
+  text-align: right;
+  font-size: 12px;
+}
+/* The presets' dialog: each choice says what it does under its name. */
+.dialog-note {
+  margin: 0 0 8px;
+}
+.choice .hint {
+  display: block;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  /* The voice volume takes a finger's height, as the listening bar's does. */
+  .sound-row input[type="range"] {
+    height: 44px;
+  }
+}
+
 /* The queue's tools on a narrow card: Take turns now waits behind the tools key with the others (see the rule for
    them below). */
 @container (max-width: 560px) {

@@ -90,7 +90,9 @@ The resolver turns what was typed into tracks: an address seen before without as
 yt-dlp (one request for a whole playlist). The preparer runs yt-dlp and ffmpeg together through a pipe: yt-dlp fetches
 the best audio, ffmpeg evens the loudness (measured once per track and stored), adds a short fade in and out, and
 writes Ogg Opus. That file is what Discord carries, so voice sends it as it is, and browsers get the same file (or an
-MP3 copy made the first time a browser without Opus asks). The next tracks are prepared while one plays. The cache
+MP3 copy made the first time a browser without Opus asks). A server that set a volume for its voice channel or a sound
+gets that stream decoded, filtered and encoded again by ffmpeg, from the place the track is; browsers apply the same
+sound themselves (`src/core/sound.ts` holds the sounds for both). The next tracks are prepared while one plays. The cache
 keeps the files up to its size limit, removing the least recently played first and never the one playing or the next
 ones.
 

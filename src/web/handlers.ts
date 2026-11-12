@@ -229,4 +229,6 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'take-turns': ({ context, body, deps }) => settingsAnswer(deps.actions.takeTurns(context, body.on)),
   'turns-now': ({ context, deps }) => ({ moved: deps.actions.turnsNow(context) }),
   'person-limit': ({ context, body, deps }) => settingsAnswer(deps.actions.personLimit(context, body.tracks)),
+  volume: ({ context, body, deps }) => ({ ...deps.actions.volume(context, body.percent) }),
+  sound: ({ context, body, deps }) => ({ ...deps.actions.sound(context, body.preset) }),
 };

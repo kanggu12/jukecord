@@ -120,9 +120,10 @@ RUN echo "jukecord: the tools the panel is built with" \
 COPY scripts ./scripts
 COPY panel ./panel
 # The files outside panel/ that the panel's code imports: the refusals and failures in a person's language, which the
-# bot and the panel share, and the reasons they translate. Each lands where it is in the checkout, so the panel's
-# ../../../src/core imports resolve here as they do there (tests/packaging checks that every such import is copied).
-COPY src/core/say.ts src/core/reasons.ts ./src/core/
+# bot and the panel share, the reasons they translate, and the voice channel's sound presets, which the panel applies
+# to its own playing along. Each lands where it is in the checkout, so the panel's ../../../src/core imports resolve
+# here as they do there (tests/packaging checks that every such import is copied).
+COPY src/core/say.ts src/core/reasons.ts src/core/sound.ts ./src/core/
 RUN echo "jukecord: the panel" \
  && node scripts/build-panel.ts
 

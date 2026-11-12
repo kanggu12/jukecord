@@ -5,7 +5,7 @@
  * and a snapshot that arrives twice does not repaint anything.
  */
 import { sayError } from '../../src/core/say.ts';
-import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Status, Voice, Votes } from './api.ts';
+import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Sound, Status, Voice, Votes } from './api.ts';
 import { type Lang, pickLang, type Words, words } from './i18n.ts';
 import type { LiveStatus } from './live.ts';
 
@@ -33,6 +33,8 @@ export interface State {
   volume: number;
   /** How the votes to skip the current track stand in the server shown. */
   votes: Votes;
+  /** The voice channel's sound in the server shown (this browser applies its preset while it listens). */
+  sound: Sound;
 }
 
 type Key = keyof State;
@@ -59,6 +61,9 @@ export function keep(name: string, value: string): void {
 /** No vote to skip: votes off, or none cast (the state before the server's own arrives, and after a switch). */
 export const NO_VOTES: Votes = { on: false, votes: 0, needed: 0 };
 
+/** The plain sound: the track as it is (before the server's own arrives, and after a switch). */
+export const PLAIN: Sound = { volume: 100, preset: 'off' };
+
 const langChoice = (stored('lang') ?? 'auto') as State['langChoice'];
 const volume = Number(stored('volume') ?? '0.6');
 
@@ -81,6 +86,7 @@ export const state: State = {
   listening: false,
   volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6,
   votes: NO_VOTES,
+  sound: PLAIN,
 };
 
 const listeners = new Set<Listener>();

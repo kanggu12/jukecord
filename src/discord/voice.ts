@@ -31,16 +31,21 @@ import {
 } from 'discord.js';
 import { ActionError, type VoiceChannelInfo, type VoiceControl } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
-import { type Clock, systemClock } from '../core/clock.ts';
+import { type Clock, systemClock, type TimerHandle } from '../core/clock.ts';
 import { Countdowns } from '../core/countdowns.ts';
 import type { PlayerOutput, PreparedMedia } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
+import { isPlain, PLAIN_SOUND, type Sound } from '../core/sound.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
 import { childEnv } from '../media/process.ts';
 
 // Below this offset the file is played from its start: the 3 s fade-in at the top covers the difference.
 const FROM_START_MS = 50;
+
+// Changes of a voice channel's sound closer together than this are merged into the last one: each starts ffmpeg again
+// (a volume dragged from the command line or the API sends a few), and the first is heard at once.
+const SOUND_COOLDOWN_MS = 400;
 
 /** The session a resource was started for, carried in its metadata so its end can be matched to the player's. */
 interface Meta {
@@ -75,11 +80,21 @@ export class VoiceOutput implements PlayerOutput {
   // Whether the player wants this output paused. @discordjs/voice ignores a pause while a new stream is still
   // buffering (its first tens of milliseconds); the wish is kept and applied once it plays.
   private wantPaused = false;
+  // The server's sound (volume and preset), read at each start of a stream.
+  private readonly sound: () => Sound;
 
-  constructor(options: { ffmpeg: Ffmpeg; onEnded: (session: number) => void; log: Logger; parts?: VoiceParts }) {
+  constructor(options: {
+    ffmpeg: Ffmpeg;
+    onEnded: (session: number) => void;
+    log: Logger;
+    parts?: VoiceParts;
+    sound?: () => Sound;
+  }) {
     this.ffmpeg = options.ffmpeg;
     this.log = options.log;
     this.parts = options.parts ?? realParts;
+    // Without one (tests that do not care), the cached file as it is.
+    this.sound = options.sound ?? (() => PLAIN_SOUND);
     this.audio = this.parts.createPlayer();
     this.audio.on('stateChange', (before, after) => {
       // A pause asked for while the stream was buffering takes effect now that it plays.
@@ -103,11 +118,18 @@ export class VoiceOutput implements PlayerOutput {
     this.session = session;
     // A start plays; a pause that follows sets the wish again.
     this.wantPaused = false;
-    if (offsetMs < FROM_START_MS) {
+    const sound = this.sound();
+    const fromStart = offsetMs < FROM_START_MS;
+    if (fromStart && isPlain(sound)) {
+      // The plain sound from the top: the cached file as it is, which is what Discord carries.
       this.stream = fs.createReadStream(media.file);
     } else {
-      // ffmpeg cuts from the offset and writes Ogg Opus to its stdout.
-      const child = spawn(this.ffmpeg.program, this.ffmpeg.seekArgs(media.file, offsetMs), {
+      // ffmpeg writes Ogg Opus to its stdout: cut from the offset (a seek), or with the server's sound applied, which it
+      // decodes, filters and encodes again (see DECISIONS.md, the voice's sound).
+      const args = isPlain(sound)
+        ? this.ffmpeg.seekArgs(media.file, offsetMs)
+        : this.ffmpeg.soundArgs(media.file, fromStart ? 0 : offsetMs, sound, !fromStart);
+      const child = spawn(this.ffmpeg.program, args, {
         stdio: ['ignore', 'pipe', 'ignore'],
         // Not the bot's environment: its token stays in this process.
         env: childEnv(),
@@ -117,7 +139,7 @@ export class VoiceOutput implements PlayerOutput {
       // ffmpeg that cannot start at all (missing, or no memory or processes left) must not take the process down:
       // the stream ends, which the player sees as an output that stopped early.
       child.on('error', (error) => {
-        this.log.warn('the voice seek could not start ffmpeg', { error });
+        this.log.warn('the voice stream could not start ffmpeg', { error });
         child.stdout?.destroy();
       });
     }
@@ -180,6 +202,12 @@ export class VoiceManager implements VoiceControl {
   private readonly bus: Bus | null;
   // Whether a server asked the bot to stay in voice when everyone has left (its stay setting).
   private readonly stays: (guildId: string) => boolean;
+  // A server's voice sound (volume and preset), and the clock its changes are spaced on, with when each server's last
+  // change was applied and the one waiting for its turn (see soundChanged).
+  private readonly sound: (guildId: string) => Sound;
+  private readonly clock: Clock;
+  private readonly soundAt = new Map<string, number>();
+  private readonly soundTimers = new Map<string, TimerHandle>();
 
   constructor(options: {
     client: Client;
@@ -190,10 +218,14 @@ export class VoiceManager implements VoiceControl {
     clock?: Clock;
     bus?: Bus;
     stays?: (guildId: string) => boolean;
+    sound?: (guildId: string) => Sound;
   }) {
     this.bus = options.bus ?? null;
     // Without the setting (tests that do not care), the host's time alone decides for every server.
     this.stays = options.stays ?? (() => false);
+    // Without it, every server's voice gets the cached file as it is.
+    this.sound = options.sound ?? (() => PLAIN_SOUND);
+    this.clock = options.clock ?? systemClock;
     this.client = options.client;
     this.players = options.players;
     this.ffmpeg = options.ffmpeg;
@@ -246,6 +278,32 @@ export class VoiceManager implements VoiceControl {
   /** The stay setting of a server changed: whether the bot counts down to leaving is decided again, at once. */
   stayChanged(guildId: string): void {
     this.voiceStateChanged(guildId);
+  }
+
+  /**
+   * A server's voice volume or preset changed: its voice stream starts again where the track is, with the new sound
+   * (the player keeps the place, see Player.restartOutputs). The first change is heard at once; changes that follow
+   * within SOUND_COOLDOWN_MS are merged into the last one, heard when the cooldown ends.
+   */
+  soundChanged(guildId: string): void {
+    // Not in voice: the next stream starts with the new sound by itself.
+    if (!this.joined.has(guildId)) return;
+    const wait = (this.soundAt.get(guildId) ?? Number.NEGATIVE_INFINITY) + SOUND_COOLDOWN_MS - this.clock.now();
+    if (wait <= 0) {
+      this.soundAt.set(guildId, this.clock.now());
+      this.players.get(guildId).restartOutputs();
+      return;
+    }
+    // A change waits already: it reads the sound when it runs, which is this newest one.
+    if (this.soundTimers.has(guildId)) return;
+    this.soundTimers.set(
+      guildId,
+      this.clock.setTimeout(() => {
+        this.soundTimers.delete(guildId);
+        this.soundAt.set(guildId, this.clock.now());
+        if (this.joined.has(guildId)) this.players.get(guildId).restartOutputs();
+      }, wait),
+    );
   }
 
   channel(guildId: string): { channelId: string; name: string } | null {
@@ -359,6 +417,8 @@ export class VoiceManager implements VoiceControl {
       log: this.log,
       // The output says which one it is: an early end restarts only that output (see Player.outputEnded).
       onEnded: (session) => this.players.get(guildId).outputEnded(session, output),
+      // The server's sound as it is at each start of a stream.
+      sound: () => this.sound(guildId),
     });
     connection.subscribe(output.audio);
     // The connection's own account of its states (signalling, the DAVE handshake, reconnects), for debugging.
@@ -413,6 +473,10 @@ export class VoiceManager implements VoiceControl {
     if (!joined) return undefined;
     this.joined.delete(guildId);
     this.idle.disarm(guildId);
+    // A change of sound waiting for its turn has no stream left to change.
+    const waiting = this.soundTimers.get(guildId);
+    if (waiting !== undefined) this.clock.clearTimeout(waiting);
+    this.soundTimers.delete(guildId);
     this.players.get(guildId).detach(joined.output);
     this.bus?.emit('voice', { guildId, channel: null });
     // Nobody listens in voice any more: an open vote to skip counts the browsers alone.

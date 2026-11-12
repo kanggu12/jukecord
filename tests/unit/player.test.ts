@@ -473,3 +473,49 @@ describe('Player plays', () => {
     assert.notEqual(player.playNumber(), third);
   });
 });
+
+describe('Player outputs started again for a new sound', () => {
+  it('starts a playing output again at the place the track is, as a new session, and sends no snapshot', async () => {
+    const context = setup();
+    const { clock, player, snapshots } = context;
+    const output = new FakeOutput();
+    player.attach(output);
+    await startPlaying(context);
+    await clock.advance(42_000);
+    const before = snapshots.length;
+    const session = output.lastSession();
+    player.restartOutputs();
+    const start = output.of('start').at(-1);
+    assert.equal(start?.kind === 'start' ? start.offsetMs : -1, 42_000);
+    assert.notEqual(output.lastSession(), session);
+    assert.equal(snapshots.length, before);
+    // The old stream's end is no end of the track; the new one's is.
+    player.outputEnded(session, output);
+    assert.equal(player.snapshot().status, 'playing');
+    await clock.advance(SONG - 42_000);
+    player.outputEnded(output.lastSession(), output);
+    assert.equal(player.snapshot().track?.title, 'Track 2');
+  });
+
+  it('starts a paused output afresh on resume, and leaves a loading track alone', async () => {
+    const context = setup();
+    const { clock, player, media } = context;
+    const output = new FakeOutput();
+    player.attach(output);
+    await startPlaying(context);
+    await clock.advance(10_000);
+    player.pause();
+    player.restartOutputs();
+    assert.equal(output.calls.at(-1)?.kind, 'stop');
+    player.resume();
+    // Not resumed (its stream was stopped): started again at the paused place.
+    const start = output.calls.at(-1);
+    assert.equal(start?.kind === 'start' ? start.offsetMs : -1, 10_000);
+    // A track still getting ready: nothing to start yet.
+    player.skip();
+    const calls = output.calls.length;
+    player.restartOutputs();
+    assert.equal(output.calls.length, calls);
+    media.finish(SONG);
+  });
+});

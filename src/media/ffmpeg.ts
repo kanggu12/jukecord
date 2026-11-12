@@ -5,6 +5,7 @@
  * playing) and what browsers that play Ogg Opus fetch. Loudness is evened out once, when the file is made.
  */
 import { spawn } from 'node:child_process';
+import { PRESET_STAGES, type Sound } from '../core/sound.ts';
 import { childEnv, lastLines, ProcessError, run, watch } from './process.ts';
 import { parseProgress, type YtDlp, ytdlpFailure } from './ytdlp.ts';
 
@@ -31,6 +32,26 @@ const ENCODE = [
   '-f',
   'ogg',
 ];
+
+/**
+ * The ffmpeg filters that make a voice channel's sound from the cached track: the preset's steps (core/sound.ts) as
+ * ffmpeg's own filters, which compute the same curves as the browsers' (shelves of slope 1, a peak by its Q), then the
+ * volume, and above full volume a limiter that holds the peaks under -1 dB, as the cached file's are, so a louder voice
+ * channel does not clip. Empty for the plain sound.
+ */
+export function soundFilters(sound: Sound): string[] {
+  const filters = PRESET_STAGES[sound.preset].map((stage) => {
+    if (stage.kind === 'gain') return `volume=${stage.db}dB`;
+    // A peak by its Q (ffmpeg's equalizer, WebAudio's peaking).
+    if (stage.kind === 'peaking') return `equalizer=f=${stage.hz}:t=q:w=${stage.q}:g=${stage.db}`;
+    // A shelf of slope 1, the one WebAudio's shelves have.
+    return `${stage.kind}=f=${stage.hz}:g=${stage.db}:t=s:w=1`;
+  });
+  if (sound.volume !== 100) filters.push(`volume=${(sound.volume / 100).toFixed(2)}`);
+  // level=0: the limiter's own levelling, on by default, would raise everything back to 0 dB.
+  if (sound.volume > 100) filters.push('alimiter=limit=0.891:level=0');
+  return filters;
+}
 
 /** What making a cached file measured. */
 export interface EncodeResult {
@@ -187,6 +208,43 @@ export class Ffmpeg {
   /** The ffmpeg program, for the outputs that start their own seek streams. */
   get program(): string {
     return this.binary;
+  }
+
+  /**
+   * Arguments for a stream of `file` from `offsetMs` with a voice channel's sound applied (its volume and preset), as
+   * Ogg Opus on stdout: decoded, filtered and encoded again, which only a sound that is not plain needs. `fadeIn` adds
+   * the seek's short fade, for a stream that starts in the middle of a sound.
+   */
+  soundArgs(file: string, offsetMs: number, sound: Sound, fadeIn: boolean): string[] {
+    const filters = [...(fadeIn ? ['afade=t=in:d=0.12'] : []), ...soundFilters(sound)];
+    return [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-nostdin',
+      // From the start, no seek at all; otherwise in the input, as seekArgs does.
+      ...(offsetMs > 0 ? ['-ss', (offsetMs / 1000).toFixed(3)] : []),
+      '-i',
+      file,
+      '-af',
+      filters.join(','),
+      // The same Opus as the cached file: what Discord expects.
+      '-ar',
+      '48000',
+      '-ac',
+      '2',
+      '-c:a',
+      'libopus',
+      '-b:a',
+      '128k',
+      '-frame_duration',
+      '20',
+      '-application',
+      'audio',
+      '-f',
+      'ogg',
+      'pipe:1',
+    ];
   }
 
   /** Makes an MP3 copy for browsers that cannot play Ogg Opus (Safari's support is incomplete). */

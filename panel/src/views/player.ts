@@ -7,6 +7,7 @@
  */
 
 import { sayFailure } from '../../../src/core/say.ts';
+import { SOUND_PRESETS } from '../../../src/core/sound.ts';
 import { api, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
@@ -1102,14 +1103,26 @@ export function voiceCard(): HTMLElement {
   const top = h('div', { class: 'voice-now' }, icon('radio', 'lg'), where, leave);
   const channels = h('ul', { class: 'channels scroll' });
   const listening = h('div', { class: 'listeners' });
+  // The voice channel's sound: its volume (with a bot only), and its preset, which browsers listening apply too.
+  const volume = h('input', { type: 'range', min: '0', max: '200', step: '5' });
+  const volumeLevel = h('span', { class: 'num level' });
+  const volumeName = h('span', { class: 'grow' });
+  const volumeRow = h('label', { class: 'sound-row' }, icon('volume-2'), volumeName, volume, volumeLevel);
+  const presetName = h('span', { class: 'grow' });
+  const presetKey = h('button', { class: 'key sm', type: 'button', 'aria-haspopup': 'dialog', 'data-act': 'sound' });
+  const presetRow = h('div', { class: 'sound-row' }, icon('audio-lines'), presetName, presetKey);
+  const soundBox = h('div', { class: 'sound' }, volumeRow, presetRow);
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'voice-h' },
     h('div', { class: 'card-head' }, h('h2', { id: 'voice-h' }), pill),
     top,
     channels,
+    soundBox,
     listening,
   );
+  // While the volume is held (dragged, or moved by the keyboard), the slider is not moved back by the live updates.
+  let held = false;
 
   const draw = () => {
     const words = t();
@@ -1172,6 +1185,25 @@ export function voiceCard(): HTMLElement {
         );
       }
     }
+    // The voice channel's sound. The volume is the voice channel's alone (browser-only has none).
+    const sound = state.sound;
+    const control = mayControl();
+    volumeRow.hidden = browserOnly;
+    volumeName.textContent = words.voiceVolume;
+    volume.setAttribute('aria-label', words.voiceVolume);
+    if (!held) volume.value = String(sound.volume);
+    volumeLevel.textContent = `${held ? volume.value : sound.volume}%`;
+    volume.disabled = !control;
+    presetName.textContent = words.soundName;
+    refill(
+      presetKey,
+      `${sound.preset}|${state.lang}`,
+      words.presets[sound.preset] ?? sound.preset,
+      icon('chevron-down'),
+    );
+    // The key names the setting and its value for a screen reader; to the eye the row's words name the setting.
+    presetKey.setAttribute('aria-label', `${words.soundName}: ${words.presets[sound.preset] ?? sound.preset}`);
+    presetKey.disabled = !control;
     // Who listens in browsers.
     const people = state.listeners.people;
     fill(
@@ -1197,9 +1229,73 @@ export function voiceCard(): HTMLElement {
       const voice = await api.leave(id);
       if (state.guild?.id === id) update({ voice });
     });
-  watch(['voice', 'listeners', 'lang', 'status', 'guild', 'me'], draw);
+  // The volume says its number as it moves, and is sent when it is let go (or at each step of the keyboard).
+  volume.onpointerdown = () => {
+    held = true;
+  };
+  volume.oninput = () => {
+    held = true;
+    volumeLevel.textContent = `${volume.value}%`;
+  };
+  volume.onchange = () => {
+    const id = guild();
+    void act(null, async () => {
+      const sound = await api.volume(id, Number(volume.value));
+      if (state.guild?.id === id) update({ sound });
+    }).finally(() => {
+      held = false;
+      draw();
+    });
+  };
+  // Let go without a change (a click on the value it had): the live value shows again.
+  volume.onblur = () => {
+    held = false;
+    draw();
+  };
+  presetKey.onclick = () => soundDialog();
+  watch(['voice', 'listeners', 'lang', 'status', 'guild', 'me', 'sound'], draw);
   draw();
   return card;
+}
+
+// The voice channel's presets, each with what it does: choosing one applies it in voice and in the browsers listening.
+function soundDialog(): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(
+    words.soundName,
+    h('div', null, h('p', { class: 'faint dialog-note' }, words.soundHint), box),
+  );
+  fill(
+    box,
+    ...SOUND_PRESETS.map((preset) => {
+      const button = h(
+        'button',
+        {
+          class: 'choice',
+          type: 'button',
+          'aria-pressed': String(state.sound.preset === preset),
+          dataset: { preset },
+        },
+        h(
+          'span',
+          { class: 'grow' },
+          h('span', null, words.presets[preset] ?? preset),
+          h('span', { class: 'faint hint' }, words.presetHints[preset] ?? ''),
+        ),
+        icon('check', 'check'),
+      );
+      button.onclick = () => {
+        dialog.close();
+        const id = guild();
+        void act(null, async () => {
+          const sound = await api.sound(id, preset);
+          if (state.guild?.id === id) update({ sound });
+        });
+      };
+      return button;
+    }),
+  );
 }
 
 /** What played recently, with a key to add it again. */

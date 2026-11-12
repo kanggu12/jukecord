@@ -649,6 +649,49 @@ await sweep('take-turns', [...NARROW, [1440, 900]], async (page) => {
   await tool(page, 'turns');
   await page.waitForSelector('.toast');
 });
+// The voice channel's sound: the volume and a preset on, in the voice card, and the presets' dialog open over it.
+await api('PUT', '/guilds/local/voice/volume', { percent: 120 });
+await api('PUT', '/guilds/local/voice/sound', { preset: 'night' });
+await sweep(
+  'sound-dialog',
+  FEW,
+  async (page) => {
+    await page.locator('[data-act="sound"]').scrollIntoViewIfNeeded();
+    await page.click('[data-act="sound"]');
+    await page.waitForSelector('.dialog [data-preset]');
+    await page.waitForTimeout(300);
+  },
+  { discord: true },
+);
+// Playing along with a preset on: the browser routes its audio through the preset's filters and still keeps in time.
+if (!ONLY || ONLY.has('listening-sound')) {
+  const { context, page, errors } = await open({ width: 1440, height: 900, theme: 'dark', lang: 'en', motion: 'on' });
+  await page.click('[data-act="listen"]');
+  let synced = false;
+  for (let i = 0; i < 40 && !synced; i += 1) {
+    await page.waitForTimeout(250);
+    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+  }
+  // A preset changed while listening (no press now: the press of Listen let WebAudio run): still in time.
+  await api('PUT', '/guilds/local/voice/sound', { preset: 'bass' });
+  await page.waitForTimeout(2500);
+  const still = await page.evaluate(() =>
+    document.querySelector('.listen .what span')?.textContent?.includes('In time'),
+  );
+  report.push({
+    state: 'listening-sound',
+    theme: 'dark',
+    lang: 'en',
+    width: 1440,
+    findings:
+      synced && still ? [] : [{ kind: 'listen', where: 'listen bar', detail: 'not in sync with a sound preset on' }],
+    errors,
+  });
+  process.stdout.write(`listening with a preset: ${synced && still ? 'in sync' : 'NOT in sync'}\n`);
+  await context.close();
+}
+await api('PUT', '/guilds/local/voice/sound', { preset: 'off' });
+await api('PUT', '/guilds/local/voice/volume', { percent: 100 });
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
