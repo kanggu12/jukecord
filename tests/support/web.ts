@@ -14,6 +14,7 @@ import {
   type RoleInfo,
   type VoiceControl,
 } from '../../src/app/actions.ts';
+import { SkipVotes } from '../../src/app/votes.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
@@ -106,6 +107,16 @@ export class FakeVoice implements VoiceControl {
   channels() {
     return [{ id: '400000000000000001', name: 'Lounge', people: 1 }];
   }
+  /** The servers whose stay setting changed, in order. */
+  readonly stayed: string[] = [];
+  stayChanged(guildId: string): void {
+    this.stayed.push(guildId);
+  }
+  /** Who is in the bot's voice channel, by server (tests set it). */
+  readonly inVoice = new Map<string, string[]>();
+  people(guildId: string): string[] {
+    return this.inVoice.get(guildId) ?? [];
+  }
 }
 
 export interface TestServer {
@@ -128,6 +139,8 @@ export interface TestServer {
   /** The base address once listening (`listen: true`); empty otherwise. */
   readonly url: string;
   close(): Promise<void>;
+  /** The voice side the actions were given (unused in browser-only mode). */
+  readonly voice: FakeVoice;
 }
 
 export interface TestServerOptions {
@@ -207,6 +220,18 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return tracks.map((track) => store.tracks.upsert(track));
     },
   } as unknown as Resolver;
+  const directory = new FakeDirectory();
+  const voice = new FakeVoice();
+  // The votes to skip, counting the fake voice channel and the browsers of the real live updates (once they exist).
+  let browsers: (guildId: string) => readonly string[] = () => [];
+  const votes = new SkipVotes({
+    players,
+    bus,
+    clock,
+    log,
+    applies: (guildId) => actions.voteSkipApplies(guildId),
+    listening: (guildId) => new Set([...voice.people(guildId), ...browsers(guildId)]),
+  });
   const actions = new Actions({
     store,
     queue,
@@ -215,9 +240,9 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     log,
     startedAt: clock.now(),
     lyrics: options.lyrics ?? null,
+    votes,
+    bus,
   });
-  const directory = new FakeDirectory();
-  const voice = new FakeVoice();
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
   const auth = new Auth({
@@ -287,6 +312,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       'the listening link has ended',
     ),
   );
+  browsers = (guildId) => web.hub.listeningPeople(guildId);
   let url = '';
   if (options.listen) url = await web.listen();
   return {
@@ -311,6 +337,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },
+    voice,
   };
 }
 

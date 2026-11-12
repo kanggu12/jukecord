@@ -132,10 +132,10 @@ people use most.
   and the first track. A page under the statistics that saves itself as a picture for a story or a post, and
   `/wrapped`, `jukecord wrapped` and the API.
 - **Looks after itself.** A server nobody hears anywhere pauses after two minutes instead of fetching for nobody;
-  after a restart the bot goes back to its voice channel when people are there; the newest now-playing card in
-  Discord follows the music. An alerts channel of the server's choosing hears about trouble (YouTube refusing jukecord,
-  a restart by its watchdog, a full disk, a track leaving a looping queue, connections turned away), and a backup can
-  be made every day at a time of the host's choosing.
+  after a restart the bot goes back to its voice channel when people are there (or where it was asked to stay); the
+  newest now-playing card in Discord follows the music and the votes to skip. An alerts channel of the server's
+  choosing hears about trouble (YouTube refusing jukecord, a restart by its watchdog, a full disk, a track leaving a
+  looping queue, connections turned away), and a backup can be made every day at a time of the host's choosing.
 - **Lyrics in time.** The words of the track playing, from [LRCLIB](https://lrclib.net), beside the player (a sheet on a
   phone) with the line being sung lit; whoever may change the music picks a line to play from there. Also `/lyrics`,
   `jukecord lyrics` and the API; `JUKECORD_LYRICS=off` turns them off.
@@ -150,6 +150,12 @@ people use most.
 - **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
   `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
   the end of the track.
+- **Fair in a crowd.** Where a server has a DJ role, Skip from anyone else is a vote: the track goes when half of the
+  people listening, in the voice channel and in browsers, have voted. People can take turns in the queue, each person
+  can be held to a number of tracks, and the bot can stay in voice all day.
+- **One sound for everyone.** A volume for the voice channel up to 200 % and sounds to choose (more bass, clearer
+  voices, brighter, softer at night). Browsers listening along apply the same sound, so the voice channel and every
+  browser hear the same.
 
 ### Light on a small machine
 
@@ -179,7 +185,7 @@ Each Discord server has one queue and one player, and the player is the clock: i
 The bot sends the voice channel the track from that place, and a browser that listens plays the same file and follows
 the same clock. yt-dlp fetches the tracks, and every connection it makes goes through a proxy inside jukecord that
 reaches only public addresses. ffmpeg evens out the loudness once and keeps the track as Opus, which goes to Discord as
-it is. Discord, the panel, the API and the command all call one list of actions, so the same rules hold whichever is
+it is (or, with a volume or a sound set for the voice channel, through ffmpeg again). Discord, the panel, the API and the command all call one list of actions, so the same rules hold whichever is
 used ([architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md)).
 
 ## Everyday use

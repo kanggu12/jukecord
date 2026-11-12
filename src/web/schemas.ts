@@ -118,11 +118,26 @@ export const PlayerSchema = Type.Object(
   { title: 'Player' },
 );
 
+/** A skip's answer: the player after it, and how the vote stands when it was a vote the track did not go by. */
+export const SkipSchema = Type.Object(
+  {
+    ...PlayerSchema.properties,
+    votes: Nullable(
+      Type.Object(
+        { votes: Type.Integer(), needed: Type.Integer() },
+        { description: 'The votes to skip that count, and the votes it takes; null when the track went' },
+      ),
+    ),
+  },
+  { title: 'Skip' },
+);
+
 export const AddResultSchema = Type.Object(
   {
     items: Type.Array(QueueItemSchema),
     skippedTooLong: Type.Integer(),
     skippedFull: Type.Integer(),
+    skippedLimit: Type.Integer({ description: "Left out: over the server's limit of tracks per person" }),
   },
   { title: 'AddResult' },
 );
@@ -254,6 +269,15 @@ export const WrappedSchema = Type.Object(
   { title: 'Wrapped' },
 );
 
+/**
+ * A sound preset of the voice channel, which browsers listening along apply too: the presets of core/sound.ts, written
+ * out so that TypeBox keeps each one's literal type (tests/unit/sound.test.ts holds the two lists together).
+ */
+export const SoundPresetSchema = Type.Union(
+  [Type.Literal('off'), Type.Literal('bass'), Type.Literal('voices'), Type.Literal('bright'), Type.Literal('night')],
+  { description: 'off, more bass, clearer voices, brighter, or softer at night' },
+);
+
 export const SettingsSchema = Type.Object(
   {
     djRoleId: Nullable(Type.String()),
@@ -262,6 +286,12 @@ export const SettingsSchema = Type.Object(
     channels: Type.Array(Type.Object({ id: Type.String(), name: Type.String() }), {
       description: 'The text channels the bot may post in',
     }),
+    voteSkip: Type.Boolean({ description: 'Skip from someone without the DJ role is a vote (with a DJ role set)' }),
+    takeTurns: Type.Boolean({ description: "A track added goes in its person's turn, not at the end" }),
+    personLimit: Type.Integer({ description: 'The most tracks one person may have queued; 0 for no limit' }),
+    stay: Type.Boolean({ description: 'The bot stays in voice when everyone has left' }),
+    volume: Type.Integer({ description: "The voice channel's volume, in percent" }),
+    sound: SoundPresetSchema,
   },
   { title: 'Settings' },
 );
@@ -423,3 +453,15 @@ export const ListenLinkCreatedSchema = Type.Object(
   },
   { title: 'ListenLinkCreated' },
 );
+
+/** A voice channel's sound: its volume and its preset (browsers listening along apply the preset). */
+export const SoundSchema = Type.Object(
+  {
+    volume: Type.Integer({ description: "The voice channel's volume, in percent (each browser keeps its own)" }),
+    preset: SoundPresetSchema,
+  },
+  { title: 'Sound' },
+);
+
+/** How many queued tracks a change moved to another place. */
+export const MovedSchema = Type.Object({ moved: Type.Integer() }, { title: 'Moved' });

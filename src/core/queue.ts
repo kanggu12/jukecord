@@ -6,6 +6,7 @@
  */
 import type { QueueRepository } from '../store/store.ts';
 import type { Bus } from './bus.ts';
+import { addInTurns, inTurns, type Playing } from './turns.ts';
 import type { QueueItem } from './types.ts';
 
 /** Where new tracks go: after the last one, right after the one playing, or at a position. */
@@ -134,5 +135,51 @@ export class QueueService {
     const version = this.version(guildId) + 1;
     this.versions.set(guildId, version);
     this.bus.emit('queue', { guildId, version });
+  }
+
+  /**
+   * Adds tracks of one person in turns (see core/turns.ts), one after another: each goes after the last track of the
+   * first round in which the person has none yet. `playing` says whose track plays (their turn under way). Returns the
+   * new items with the places they ended up in; one change for all of them.
+   */
+  addInTurns(guildId: string, trackIds: readonly number[], addedBy: string | null, playing: Playing): QueueItem[] {
+    if (trackIds.length === 0) return [];
+    const before = this.repo.owners(guildId);
+    // In at the end first (one insert), then the whole order written once with each new item in its turn.
+    const items = this.repo.insert(guildId, trackIds, Number.MAX_SAFE_INTEGER, addedBy);
+    const order = addInTurns(
+      before.map((item) => item.addedBy),
+      playing,
+      addedBy,
+      items.length,
+    ).flatMap((index) => {
+      // An item already there by its index, a new one as -(its place among the new ones + 1).
+      const id = index >= 0 ? before[index]?.id : items[-index - 1]?.id;
+      return id === undefined ? [] : [id];
+    });
+    this.repo.reorder(guildId, order);
+    this.changed(guildId);
+    const places = new Map(order.map((id, index) => [id, index]));
+    return items.map((item) => ({ ...item, position: places.get(item.id) ?? item.position }));
+  }
+
+  /** Puts the whole queue in turns once (see core/turns.ts) and returns how many tracks changed place. */
+  takeTurns(guildId: string, playing: Playing): number {
+    const items = this.repo.owners(guildId);
+    const order = inTurns(
+      items.map((item) => item.addedBy),
+      playing,
+    ).flatMap((index) => (items[index] ? [items[index].id] : []));
+    const moved = order.filter((id, index) => items[index]?.id !== id).length;
+    // Already in turns: nothing written, and no change for the panels.
+    if (moved === 0) return 0;
+    this.repo.reorder(guildId, order);
+    this.changed(guildId);
+    return moved;
+  }
+
+  /** How many tracks one person has waiting in a server's queue (null: the host's). */
+  countBy(guildId: string, addedBy: string | null): number {
+    return this.repo.countBy(guildId, addedBy);
   }
 }

@@ -234,10 +234,11 @@ const MADE_UP = {
   ],
 };
 // Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones;
-// `view`, a person who may only look (no DJ role, no Manage Server); `listeners`, the people listening in browsers.
+// `view`, a person who may only look (no DJ role, no Manage Server); `listeners`, the people listening in browsers;
+// `control: false`, a person without the server's DJ role; `votes`, how a vote to skip stands in the state.
 async function asDiscord(
   page,
-  { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false, listeners = MADE_UP.listeners } = {},
+  { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false, listeners = MADE_UP.listeners, control, votes } = {},
 ) {
   await page.route(/\/api\/v1\/(status|me|guilds|guilds\/[^/]+\/settings)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
@@ -255,6 +256,7 @@ async function asDiscord(
                 name: guild,
                 icon: null,
                 ...(view ? { mayControl: false, mayManage: false } : {}),
+                ...(control === false ? { mayControl: false } : {}),
               }));
     await route.fulfill({ response, json });
   });
@@ -273,6 +275,7 @@ async function asDiscord(
         return;
       }
       if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners });
+      if (data.type === 'state' && votes) data.votes = votes;
       if (data.type === 'voice') data.voice = MADE_UP.voice;
       if (data.type === 'listeners') data.listeners = listeners;
       ws.send(JSON.stringify(data));
@@ -1032,6 +1035,77 @@ await sweep(
 );
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
+
+// ---- how people share the music, and the sound -------------------------------------------------------------------
+// A queue and a track playing again (the walk above left the queue empty and the player stopped).
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+// Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
+// count stays on the key when a narrow row shows icons alone).
+await sweep('vote-skip', SIZES, null, { discord: { control: false, votes: { on: true, votes: 1, needed: 2 } } });
+// The menu of someone who manages the server, with the server's settings under the DJ role.
+await sweep(
+  'menu-settings',
+  FEW,
+  async (page) => {
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .settings .switch');
+    await page.waitForTimeout(400);
+  },
+  { discord: true },
+);
+// Take turns now from the queue's tools (its own key on a wide card, the list behind the tools key on a narrow one),
+// and the toast that says what moved.
+await sweep('take-turns', [...NARROW, [1440, 900]], async (page) => {
+  await tool(page, 'turns');
+  await page.waitForSelector('.toast');
+});
+// The voice channel's sound: the volume and a preset on, in the voice card, and the presets' dialog open over it.
+await api('PUT', '/guilds/local/voice/volume', { percent: 120 });
+await api('PUT', '/guilds/local/voice/sound', { preset: 'night' });
+await sweep(
+  'sound-dialog',
+  FEW,
+  async (page) => {
+    await page.locator('[data-act="sound"]').scrollIntoViewIfNeeded();
+    await page.click('[data-act="sound"]');
+    await page.waitForSelector('.dialog [data-preset]');
+    await page.waitForTimeout(300);
+  },
+  { discord: true },
+);
+// Playing along as a sound comes and goes: the plain sound (no WebAudio at all), a sound put on while listening (the
+// press of Listen lets WebAudio run without another), and another: each time the audio still keeps in time.
+if (!ONLY || ONLY.has('listening-sound')) {
+  await api('PUT', '/guilds/local/voice/sound', { preset: 'off' });
+  const { context, page, errors } = await open({ width: 1440, height: 900, theme: 'dark', lang: 'en', motion: 'on' });
+  await page.click('[data-act="listen"]');
+  let synced = false;
+  for (let i = 0; i < 40 && !synced; i += 1) {
+    await page.waitForTimeout(250);
+    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+  }
+  let still = true;
+  for (const preset of ['night', 'bass']) {
+    await api('PUT', '/guilds/local/voice/sound', { preset });
+    await page.waitForTimeout(2500);
+    still &&= await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+  }
+  report.push({
+    state: 'listening-sound',
+    theme: 'dark',
+    lang: 'en',
+    width: 1440,
+    findings:
+      synced && still ? [] : [{ kind: 'listen', where: 'listen bar', detail: 'not in sync with a sound preset on' }],
+    errors,
+  });
+  process.stdout.write(`listening with a preset: ${synced && still ? 'in sync' : 'NOT in sync'}\n`);
+  await context.close();
+}
+await api('PUT', '/guilds/local/voice/sound', { preset: 'off' });
+await api('PUT', '/guilds/local/voice/volume', { percent: 100 });
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

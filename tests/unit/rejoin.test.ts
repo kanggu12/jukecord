@@ -1,6 +1,6 @@
 /**
  * Coming back to voice after a restart: the channel each server's bot is in is kept as it joins, moves and leaves (a
- * stop of jukecord aside), and after the restart the bot goes back where people are.
+ * stop of jukecord aside), and after the restart the bot goes back where people are, or where it was asked to stay.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -71,6 +71,32 @@ describe('VoiceMemory', () => {
     assert.deepEqual(told, [A]);
     assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
     assert.ok(sink.records.some((record) => record.msg === 'came back to voice after a restart'));
+  });
+
+  it('goes back to an empty channel too where the server asked the bot to stay in voice', async () => {
+    const { store, bus, memory } = setup();
+    store.voiceChannels.remember(A, LOUNGE.channelId);
+    store.voiceChannels.remember(B, STUDIO.channelId);
+    const joined: string[] = [];
+    const told: string[] = [];
+    const back = await memory.rejoin({
+      // Nobody in either channel; A asked the bot to stay (its stay setting), B did not.
+      people: () => 0,
+      stays: (guildId) => guildId === A,
+      inVoice: () => false,
+      join: async (guildId, channelId) => {
+        joined.push(`${guildId} ${channelId}`);
+        bus.emit('voice', { guildId, channel: { channelId, name: 'Lounge' } });
+      },
+      told: async (guildId) => {
+        told.push(guildId);
+      },
+    });
+    // A's bot is back where it would have stayed, and says so; B's empty channel is forgotten as before.
+    assert.equal(back, 1);
+    assert.deepEqual(joined, [`${A} ${LOUNGE.channelId}`]);
+    assert.deepEqual(told, [A]);
+    assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
   });
 
   it('forgets a channel it cannot go back to, and says why in the log', async () => {

@@ -2611,6 +2611,114 @@ kbd {
   background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
 }
 
+/* ---- votes, turns and the sound -------------------------------------------------------------------------------- */
+/* The count of a vote to skip under way, on the Skip key: small, in the key's own ink, beside its word or its icon. */
+.key .votes {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+/* A vote under way makes Skip wider by its count, so the keys give up their words sooner than the now-keys rule below
+   has them do (the widest row of keys with words, Korean while paused by touch, takes 519 px with the count). Skip
+   keeps its count, and the room for it. */
+@container now-keys (max-width: 540px) {
+  .now .keys:has(.votes) .key:has(.label) .label {
+    display: none;
+  }
+  .now .keys:has(.votes) .key:has(.label) {
+    width: var(--control);
+    padding: 0;
+  }
+  .now .keys .key[data-act="skip"]:has(.votes) {
+    width: auto;
+    padding: 0 10px;
+  }
+}
+/* Narrower, the five keys with the count do not fit one row (a phone's card): the main key takes a row of its own and
+   the other four share the next, as on the narrowest cards. */
+@container now-keys (max-width: 400px) {
+  .now .keys:has(.votes) .key.primary {
+    flex: 1 1 100%;
+  }
+  .now .keys:has(.votes) .key:not(.primary) {
+    flex: 1 1 0;
+    width: auto;
+  }
+}
+/* The server's settings in the menu: one line each, apart. The limit's row of choices goes under its words when the
+   sheet is too narrow for both (a phone). */
+.section.settings .line + .line {
+  margin-top: 12px;
+}
+.section.settings .limit {
+  flex-wrap: wrap;
+}
+.section.settings .limit .grow {
+  min-width: 160px;
+}
+/* The voice channel's sound in its card, one row between the channels and who listens in browsers: the volume, which
+   takes the room there is, and the key of the presets. */
+.sound {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 12px 4px var(--pad);
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.sound .volume-part {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sound input[type="range"] {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 64px;
+  accent-color: var(--ink);
+}
+.sound .level {
+  width: 40px;
+  flex: none;
+  text-align: right;
+  font-size: 12px;
+}
+/* Browser-only: the row's word, and the key at the row's end as the channels' keys are. */
+.sound .sound-word {
+  flex: 1;
+  min-width: 0;
+}
+/* The presets' dialog: each choice says what it does under its name. */
+.dialog-note {
+  margin: 0 0 8px;
+}
+.choice .hint {
+  display: block;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  /* The voice volume takes a finger's height, as the listening bar's does. */
+  .sound input[type="range"] {
+    height: 44px;
+  }
+}
+
+/* The queue's tools on a narrow card: Take turns now waits behind the tools key with the others (see the rule for
+   them below). */
+@container (max-width: 560px) {
+  .card-head .tools:has(> .tools-more) > [data-act="turns"] {
+    display: none;
+  }
+}
+
 /* ---- narrower windows ---------------------------------------------------------------------------------------- */
 @media (max-width: 1100px) {
   :root {

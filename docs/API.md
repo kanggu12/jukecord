@@ -101,7 +101,7 @@ playlist) so a program does not need to ask again.
 | :-- | :-- | :-- | :-- | :-- |
 | `now-playing` What is playing and where | `GET /api/v1/guilds/{guild}/player` | read | `jukecord np` | `/np` |
 | `play-now` Play now: what the input finds goes first and the current track is skipped | `POST /api/v1/guilds/{guild}/player/play` | control | `jukecord play` | `/play` |
-| `skip` Skip to the next track | `POST /api/v1/guilds/{guild}/player/skip` | control | `jukecord skip` | `/skip` |
+| `skip` Skip to the next track; without the DJ role where votes are on, a vote (the answer says how it stands) | `POST /api/v1/guilds/{guild}/player/skip` | control | `jukecord skip` | `/skip` |
 | `remove-current` Drop the current track without counting it as played | `POST /api/v1/guilds/{guild}/player/drop` | control | `jukecord drop` | `/drop` |
 | `pause` Pause | `POST /api/v1/guilds/{guild}/player/pause` | control | `jukecord pause` | `/pause` |
 | `resume` Play on: resume what is paused, or start the queue when nothing plays | `POST /api/v1/guilds/{guild}/player/resume` | control | `jukecord resume` | `/resume` |
@@ -123,6 +123,7 @@ playlist) so a program does not need to ask again.
 | `jump` Play a queued track now (the current one is skipped) | `POST /api/v1/guilds/{guild}/queue/{item}/play` | control | `jukecord jump` | `/jump` |
 | `shuffle` Shuffle the queue | `POST /api/v1/guilds/{guild}/queue/shuffle` | control | `jukecord shuffle` | `/shuffle` |
 | `dedupe` Remove later copies of tracks queued twice | `POST /api/v1/guilds/{guild}/queue/dedupe` | control | `jukecord dedupe` | `/dedupe` |
+| `turns-now` Put the queue in turns once: each person's next track in turn | `POST /api/v1/guilds/{guild}/queue/turns` | control | `jukecord turns now` | `/turns now` |
 
 ### History and statistics
 
@@ -149,6 +150,8 @@ playlist) so a program does not need to ask again.
 | `voice-channels` The voice channel the bot is in and the ones it could join | `GET /api/v1/guilds/{guild}/voice` | read | `jukecord channels` | `/join` |
 | `join` Join a voice channel (your own when none is named) | `PUT /api/v1/guilds/{guild}/voice` | control | `jukecord join` | `/join` |
 | `leave` Leave the voice channel; the music goes on in the browsers | `DELETE /api/v1/guilds/{guild}/voice` | control | `jukecord leave` | `/leave` |
+| `volume` The voice channel's volume, 0 to 200 percent (each browser keeps its own) | `PUT /api/v1/guilds/{guild}/voice/volume` | control | `jukecord volume` | `/volume` |
+| `sound` The voice channel's sound preset; browsers listening along apply it too | `PUT /api/v1/guilds/{guild}/voice/sound` | control | `jukecord sound` | `/sound` |
 
 ### Server
 
@@ -161,6 +164,10 @@ playlist) so a program does not need to ask again.
 | `listen-links` The server's listening links that still work: yours, or all of them with Manage Server | `GET /api/v1/guilds/{guild}/listen-links` | control | `jukecord shares` | `/share list` |
 | `listen-link-create` Make a link that lets guests without a Discord account listen along (1, 7 or 30 days); shown once | `POST /api/v1/guilds/{guild}/listen-links` | control | `jukecord share` | `/share create` |
 | `listen-link-revoke` Revoke a listening link: its guests are out at once (its maker, or Manage Server) | `DELETE /api/v1/guilds/{guild}/listen-links/{id}` | control | `jukecord unshare` | `/share revoke` |
+| `stay` Stay in voice when everyone has left (off: leave after the host's time alone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/stay` | admin | `jukecord stay` | `/stay` |
+| `vote-skip` Whether Skip from someone without the DJ role is a vote (on) or refused (off); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/vote-skip` | admin | `jukecord voteskip` | `/voteskip` |
+| `take-turns` Take turns: a track added goes in its person's turn, not at the end; needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/take-turns` | admin | `jukecord turns` | `/turns set` |
+| `person-limit` The most tracks one person may have queued (0: no limit); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/person-limit` | admin | `jukecord limit` | `/limit` |
 
 ### Your login
 

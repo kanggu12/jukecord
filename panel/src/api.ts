@@ -6,6 +6,8 @@
  * shared actions, so a feature cannot exist in Discord or the API and be missing here.
  */
 
+import type { SoundPreset } from '../../src/core/sound.ts';
+
 /** Every action the panel offers, by the shared action names. */
 export const PANEL_ACTIONS = [
   'add',
@@ -54,6 +56,14 @@ export const PANEL_ACTIONS = [
   'listen-link-revoke',
   // The host's login links, made in the Invite dialog for a friend (view or control).
   'login-link',
+  // How a server's people share the music, and how its voice channel sounds.
+  'stay',
+  'vote-skip',
+  'take-turns',
+  'turns-now',
+  'person-limit',
+  'volume',
+  'sound',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -168,10 +178,26 @@ export interface Player {
   /** Whether the player stops when this track ends. */
   stopAfter: boolean;
 }
+/** A skip's answer: the player after it, and how the vote stands when it was a vote the track did not go by. */
+export interface SkipAnswer extends Player {
+  votes: { votes: number; needed: number } | null;
+}
+/** The voice channel's sound: its volume in percent and its preset (sent live; browsers apply the preset). */
+export interface Sound {
+  volume: number;
+  preset: SoundPreset;
+}
+/** How the votes to skip the current track stand (sent live). */
+export interface Votes {
+  on: boolean;
+  votes: number;
+  needed: number;
+}
 export interface AddResult {
   items: QueueItem[];
   skippedTooLong: number;
   skippedFull: number;
+  skippedLimit: number;
 }
 export interface HistoryEntry {
   id: number;
@@ -239,6 +265,12 @@ export interface Settings {
   alertsChannelId: string | null;
   /** The text channels the bot may post in, to choose it from. */
   channels: { id: string; name: string }[];
+  voteSkip: boolean;
+  takeTurns: boolean;
+  personLimit: number;
+  stay: boolean;
+  volume: number;
+  sound: SoundPreset;
 }
 export interface Status {
   version: string;
@@ -307,7 +339,9 @@ export const api = {
   add: (guild: string, input: string, at: 'end' | 'next' = 'end') =>
     request<AddResult>('POST', `${g(guild)}/queue`, { input, at }),
   'play-now': (guild: string, input: string) => request<AddResult>('POST', `${g(guild)}/player/play`, { input }),
-  skip: (guild: string) => request<Player>('POST', `${g(guild)}/player/skip`),
+  // The track it is for, when known: a press that arrives after that track has gone skips nothing more.
+  skip: (guild: string, track?: number) =>
+    request<SkipAnswer>('POST', `${g(guild)}/player/skip${track === undefined ? '' : `?track=${track}`}`),
   'remove-current': (guild: string) => request<Player>('POST', `${g(guild)}/player/drop`),
   pause: (guild: string) => request<Player>('POST', `${g(guild)}/player/pause`),
   resume: (guild: string) => request<Player>('POST', `${g(guild)}/player/resume`),
@@ -369,6 +403,14 @@ export const api = {
   'listen-link-revoke': (guild: string, id: number) => request<unknown>('DELETE', `${g(guild)}/listen-links/${id}`),
   'login-link': (scope: 'read' | 'control') =>
     request<{ url: string; expiresAt: number; scope: string }>('POST', `/login-links?scope=${scope}`),
+  stay: (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/stay`, { on }),
+  'vote-skip': (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/vote-skip`, { on }),
+  'take-turns': (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/take-turns`, { on }),
+  'turns-now': (guild: string) => request<{ moved: number }>('POST', `${g(guild)}/queue/turns`),
+  'person-limit': (guild: string, tracks: number) =>
+    request<Settings>('PUT', `${g(guild)}/settings/person-limit`, { tracks }),
+  volume: (guild: string, percent: number) => request<Sound>('PUT', `${g(guild)}/voice/volume`, { percent }),
+  sound: (guild: string, preset: SoundPreset) => request<Sound>('PUT', `${g(guild)}/voice/sound`, { preset }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

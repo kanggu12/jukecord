@@ -55,6 +55,13 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   'listen-links': '/share list',
   'listen-link-create': '/share create',
   'listen-link-revoke': '/share revoke',
+  stay: '/stay',
+  'vote-skip': '/voteskip',
+  'take-turns': '/turns set',
+  'turns-now': '/turns now',
+  'person-limit': '/limit',
+  volume: '/volume',
+  sound: '/sound',
 };
 
 // One command: English name and description, Korean name and description.
@@ -91,6 +98,20 @@ function playlistName(option: SlashCommandStringOption): SlashCommandStringOptio
     .setRequired(true)
     .setMaxLength(100)
     .setAutocomplete(true);
+}
+
+// "On" or "off", for the settings that are one or the other.
+function modeOption(option: SlashCommandStringOption): SlashCommandStringOption {
+  return option
+    .setName('mode')
+    .setDescription('On or off')
+    .setNameLocalizations({ ko: '방식' })
+    .setDescriptionLocalizations({ ko: '켜기 또는 끄기' })
+    .setRequired(true)
+    .addChoices(
+      { name: 'On', value: 'on', name_localizations: { ko: '켜기' } },
+      { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+    );
 }
 
 /** Every command as Discord wants it registered. */
@@ -432,6 +453,92 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
               .setMinValue(1),
           ),
       ),
+    command(
+      'stay',
+      'Stay in voice when everyone has left, or leave after a while alone',
+      '머물기',
+      '모두 나가도 음성 채널에 남기, 또는 혼자 남으면 잠시 뒤 나가기',
+    )
+      // A server setting: shown to people who can manage the server, as /dj is; Discord also enforces it.
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption(modeOption),
+    command(
+      'voteskip',
+      'Whether Skip from someone without the DJ role is a vote (half of the listeners skip)',
+      '건너뛰기투표',
+      'DJ 역할이 없는 사람의 건너뛰기를 투표로 받기(듣는 사람 절반이 찬성하면 넘어감)',
+    )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption(modeOption),
+    // Shown to everyone: "now" is for whoever may change the music; "set" is refused for those who cannot manage.
+    command('turns', 'Take turns in the queue, by person', '차례', '사람마다 차례대로 대기열에 넣기')
+      .addSubcommand((sub) =>
+        sub
+          .setName('set')
+          .setDescription('Tracks added go in turn, by person (needs Manage Server)')
+          .setNameLocalizations({ ko: '정하기' })
+          .setDescriptionLocalizations({ ko: '넣는 곡을 사람마다 차례대로 배치(서버 관리 권한 필요)' })
+          .addStringOption(modeOption),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('now')
+          .setDescription('Put the queue in turns once')
+          .setNameLocalizations({ ko: '맞추기' })
+          .setDescriptionLocalizations({ ko: '지금 대기열을 한 번 차례대로 맞추기' }),
+      ),
+    command(
+      'limit',
+      'The most tracks one person may have in the queue',
+      '곡수제한',
+      '한 사람이 대기열에 넣을 수 있는 곡 수',
+    )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addIntegerOption((option) =>
+        option
+          .setName('tracks')
+          .setDescription('Tracks per person (0: no limit)')
+          .setNameLocalizations({ ko: '곡수' })
+          .setDescriptionLocalizations({ ko: '한 사람당 곡 수(0: 제한 없음)' })
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(1000),
+      ),
+    command(
+      'volume',
+      "The voice channel's volume (browsers keep their own)",
+      '음량',
+      '음성 채널 음량(브라우저는 각자 따로)',
+    ).addIntegerOption((option) =>
+      option
+        .setName('percent')
+        .setDescription('0 to 200 (100 is the track as it is)')
+        .setNameLocalizations({ ko: '퍼센트' })
+        .setDescriptionLocalizations({ ko: '0~200(100은 원래 크기)' })
+        .setRequired(true)
+        .setMinValue(0)
+        .setMaxValue(200),
+    ),
+    command(
+      'sound',
+      "The voice channel's sound (browsers listening apply it too)",
+      '음색',
+      '음성 채널 음색(브라우저로 듣는 사람에게도 적용)',
+    ).addStringOption((option) =>
+      option
+        .setName('preset')
+        .setDescription('How it sounds')
+        .setNameLocalizations({ ko: '종류' })
+        .setDescriptionLocalizations({ ko: '음색 종류' })
+        .setRequired(true)
+        .addChoices(
+          { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+          { name: 'More bass', value: 'bass', name_localizations: { ko: '저음 강조' } },
+          { name: 'Clearer voices', value: 'voices', name_localizations: { ko: '목소리 또렷하게' } },
+          { name: 'Brighter', value: 'bright', name_localizations: { ko: '밝게' } },
+          { name: 'Softer at night', value: 'night', name_localizations: { ko: '밤에 부드럽게' } },
+        ),
+    ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

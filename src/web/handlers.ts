@@ -77,7 +77,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const result = await deps.actions.playNow(context, body.input);
     return { ...result, items: deps.presenter.items(result.items) };
   },
-  skip: ({ context, deps }) => deps.presenter.player(deps.actions.skip(context)),
+  skip: ({ context, query, deps }) => {
+    const { snapshot, votes } = deps.actions.skip(context, query.track);
+    return { ...deps.presenter.player(snapshot), votes };
+  },
   'remove-current': ({ context, deps }) => deps.presenter.player(deps.actions.removeCurrent(context)),
   pause: ({ context, deps }) => deps.presenter.player(deps.actions.pause(context)),
   resume: ({ context, deps }) => deps.presenter.player(deps.actions.resume(context)),
@@ -250,14 +253,18 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     deps.actions.listenLinkRevoke(context, params.id);
     return OK;
   },
+
+  stay: ({ context, body, deps }) => settingsAnswer(deps.actions.stay(context, body.on)),
+  'vote-skip': ({ context, body, deps }) => settingsAnswer(deps.actions.voteSkip(context, body.on)),
+  'take-turns': ({ context, body, deps }) => settingsAnswer(deps.actions.takeTurns(context, body.on)),
+  'turns-now': ({ context, deps }) => ({ moved: deps.actions.turnsNow(context) }),
+  'person-limit': ({ context, body, deps }) => settingsAnswer(deps.actions.personLimit(context, body.tracks)),
+  volume: ({ context, body, deps }) => ({ ...deps.actions.volume(context, body.percent) }),
+  sound: ({ context, body, deps }) => ({ ...deps.actions.sound(context, body.preset) }),
 };
 
-// A server's settings as the API sends them (the schema's arrays are mutable).
+// A server's settings as the API sends them: every setting (the DJ role, the alerts channel, how people share the
+// music and how the voice channel sounds), with the lists as arrays of their own (the schema's arrays are mutable).
 function settingsAnswer(view: SettingsView) {
-  return {
-    djRoleId: view.djRoleId,
-    roles: [...view.roles],
-    alertsChannelId: view.alertsChannelId,
-    channels: [...view.channels],
-  };
+  return { ...view, roles: [...view.roles], channels: [...view.channels] };
 }

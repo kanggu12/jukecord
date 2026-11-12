@@ -12,9 +12,10 @@
 import { api, coverUrl, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill, setOff } from '../dom.ts';
 import type { Live } from '../live.ts';
-import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
+import { SoundGraph } from '../sound.ts';
+import { keep, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
 import { followMusic } from './light.ts';
-import { act, disc, listenerName } from './player.ts';
+import { act, disc, listenerName, skipOrVote } from './player.ts';
 import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
@@ -30,8 +31,12 @@ export function listenBar(live: Live): HTMLElement {
   audio.hidden = true;
   audio.id = 'listen-audio';
   document.body.append(audio);
-  // The light follows this audio's low end while it plays here (light.ts).
-  followMusic(audio);
+  // The voice channel's preset, applied to this element with WebAudio (see sound.ts), and this browser's volume. When
+  // the browser holds WebAudio back or lets it go again, the bar looks again (see align).
+  const sound = new SoundGraph(audio, () => align());
+  sound.setVolume(state.volume);
+  // The light follows this audio's low end while it plays here (light.ts), from the sound graph once that has it.
+  followMusic(audio, sound);
   // Opus in Ogg where the browser plays it; older Safari does not, and gets MP3.
   let format: 'opus' | 'mp3' = audio.canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'mp3';
   let loaded: string | null = null;
@@ -64,7 +69,7 @@ export function listenBar(live: Live): HTMLElement {
     stop: () => stopListening(),
     fade: (level) => {
       fade = level;
-      audio.volume = state.volume * fade;
+      sound.setVolume(state.volume * fade);
     },
   });
   const bar = h(
@@ -102,6 +107,12 @@ export function listenBar(live: Live): HTMLElement {
       setSync('waiting');
       return;
     }
+    // The sound goes through WebAudio, which the browser holds back now (a locked phone, a call): nothing is heard
+    // until a press of the key, which wakes it.
+    if (sound.held()) {
+      setSync('blocked');
+      return;
+    }
     const url = source(player);
     if (loaded !== url) {
       loaded = url;
@@ -131,7 +142,7 @@ export function listenBar(live: Live): HTMLElement {
       setSync('in-sync');
       return;
     }
-    audio.volume = state.volume * fade;
+    sound.setVolume(state.volume * fade);
     if (audio.paused) {
       audio.play().then(
         () => setSync('in-sync'),
@@ -194,10 +205,16 @@ export function listenBar(live: Live): HTMLElement {
   if (session) {
     // A guest changes nothing for the others: its keys start and stop listening here.
     const guest = () => state.me?.kind === 'guest';
-    session.setActionHandler('play', () => (guest() ? listenOn() : void act(null, () => api.resume(guild()))));
+    // A media key counts as a press: it also wakes WebAudio, where the voice channel's sound goes through it.
+    session.setActionHandler('play', () => {
+      sound.wake();
+      if (guest()) listenOn();
+      else void act(null, () => api.resume(guild()));
+    });
     session.setActionHandler('pause', () => (guest() ? stopListening() : void act(null, () => api.pause(guild()))));
+    // Skip, or a vote to skip where it is one (see skipOrVote); a guest has neither.
     session.setActionHandler('nexttrack', () => {
-      if (!guest()) void act(null, () => api.skip(guild()));
+      if (!guest()) void skipOrVote(null);
     });
   }
   const describe = () => {
@@ -221,6 +238,8 @@ export function listenBar(live: Live): HTMLElement {
   // Calls play() inside the press, which is what lets Safari play this element from now on. With the music paused it
   // plays muted for a moment and pauses again; align() sets the position and the sound once the file is known.
   const playFromPress = () => {
+    // The press also lets WebAudio make sound, for the voice channel's preset.
+    sound.unlock();
     const playing = state.player?.status === 'playing';
     if (!playing) audio.muted = true;
     audio.play().then(
@@ -299,11 +318,18 @@ export function listenBar(live: Live): HTMLElement {
     const queued = (state.queue?.items.length ?? 0) > 0;
     const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
     label(pauseKey, moving ? 'pause' : 'play', pauseWords, false);
-    skipKey.title = words.skip;
-    skipKey.setAttribute('aria-label', words.skip);
+    // Skip, or a vote to skip without the DJ role where Skip is one, named with the count of a vote under way.
+    const votes = state.votes;
+    skipKey.title =
+      votes.on && votes.votes > 0
+        ? words.skipVotes(votes.votes, votes.needed)
+        : votes.on && !mayControl()
+          ? words.voteToSkip
+          : words.skip;
+    skipKey.setAttribute('aria-label', skipKey.title);
     // A key turned off with the focus on it (Skip on the last track) hands it to the other key, or to Listen here.
     setOff(pauseKey, !player || !mayControl() || (!player.track && !queued), toggle);
-    setOff(skipKey, !mayControl() || !player?.track, pauseKey, toggle);
+    setOff(skipKey, !maySkip() || !player?.track, pauseKey, toggle);
     // A guest has neither: it can never press them.
     mini.hidden = state.me?.kind === 'guest';
     // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
@@ -326,7 +352,7 @@ export function listenBar(live: Live): HTMLElement {
     // Paused or idle: play on (or start the queue). Playing or loading: pause.
     void act(pauseKey, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
   };
-  skipKey.onclick = () => void act(skipKey, () => api.skip(guild()));
+  skipKey.onclick = () => void skipOrVote(skipKey);
 
   // Listening here on or off, said to the others and kept for this browser.
   const listen = (on: boolean) => {
@@ -354,7 +380,7 @@ export function listenBar(live: Live): HTMLElement {
   };
   slider.oninput = () => {
     const value = Number(slider.value) / 100;
-    audio.volume = value * fade;
+    sound.setVolume(value * fade);
     update({ volume: value });
     keep('volume', String(value));
   };
@@ -363,7 +389,16 @@ export function listenBar(live: Live): HTMLElement {
     describe();
     align();
   });
-  watch(['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice'], draw);
+  // The voice channel's preset, in this browser too.
+  watch(['sound'], () => sound.setPreset(state.sound.preset));
+  // The page shown again (a phone unlocked): WebAudio is woken where the browser allows it without a press.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sound.wake();
+  });
+  watch(
+    ['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice', 'votes'],
+    draw,
+  );
   // Drift is checked every two seconds while listening.
   window.setInterval(() => {
     if (state.listening) align();

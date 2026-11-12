@@ -6,7 +6,8 @@
  * people's (freeze). When Discord is back after the start, the bot goes back to each kept channel that has people in
  * it, and says so there with the now-playing card (once an hour at most: a crash loop comes back each time): paused,
  * since a restart never plays by itself. A kept channel with nobody in it is forgotten, so the bot does not turn up
- * there later by surprise.
+ * there later by surprise; unless its server asked the bot to stay in voice when everyone has left (the stay
+ * setting): the bot goes back there all the same, since it would have stayed had jukecord not restarted.
  *
  * This file knows nothing of Discord itself: the bot hands it how to count the people in a channel, how to join one
  * and how to say it came back (see Bot), so it is tested without Discord.
@@ -31,6 +32,8 @@ const TELL_EVERY_MS = 3_600_000;
 export interface Rejoining {
   /** How many people (not bots) are in a voice channel now; 0 for a channel gone. */
   people(guildId: string, channelId: string): number;
+  /** Whether a server asked the bot to stay in voice when everyone has left (false when not said). */
+  stays?(guildId: string): boolean;
   /** Whether the server's bot is in a voice channel already (someone called it since the start). */
   inVoice(guildId: string): boolean;
   /** Joins a voice channel; rejects when the bot cannot. */
@@ -68,7 +71,10 @@ export class VoiceMemory {
     this.off = null;
   }
 
-  /** Goes back to each kept channel with people in it (forgetting the others); returns how many it went back to. */
+  /**
+   * Goes back to each kept channel with people in it, or of a server where the bot stays in voice (forgetting the
+   * others); returns how many it went back to.
+   */
   async rejoin(discord: Rejoining): Promise<number> {
     let back = 0;
     // The servers to go back to, in the order they were kept; each one's channel is read again on its turn, since a
@@ -80,7 +86,8 @@ export class VoiceMemory {
       const channelId = this.options.channels.get(guildId);
       // Called and sent away again meanwhile (/join, then /leave): it stays away, as it was told.
       if (channelId === null) continue;
-      if (discord.people(guildId, channelId) === 0) {
+      // A server that asked the bot to stay is gone back to with nobody there: it stays there, as it would have.
+      if (!discord.stays?.(guildId) && discord.people(guildId, channelId) === 0) {
         // Nobody there now: not to be gone back to later, when nobody expects the bot.
         this.options.channels.forget(guildId);
         continue;

@@ -90,10 +90,12 @@ The resolver turns what was typed into tracks: an address seen before without as
 yt-dlp (one request for a whole playlist). The preparer runs yt-dlp and ffmpeg together through a pipe: yt-dlp fetches
 the best audio, ffmpeg evens the loudness (measured once per track and stored), adds a short fade in and out, and
 writes Ogg Opus. That file is what Discord carries, so voice sends it as it is, and browsers get the same file (or an
-MP3 copy made the first time a browser without Opus asks). The next tracks are prepared while one plays. Each track's
-cover is fetched once too, by jukecord itself under the same address rule, and kept beside the audio; the panel shows
-it from jukecord. The cache keeps the files up to its size limit, removing the least recently used first (a cover by
-its own use) and never the one playing or the next ones.
+MP3 copy made the first time a browser without Opus asks). A server that set a volume for its voice channel or a sound
+gets that stream decoded, filtered and encoded again by ffmpeg, from the place the track is; browsers apply the same
+sound themselves (`src/core/sound.ts` holds the sounds for both). The next tracks are prepared while one plays. Each
+track's cover is fetched once too, by jukecord itself under the same address rule, and kept beside the audio; the panel
+shows it from jukecord. The cache keeps the files up to its size limit, removing the least recently used first (a cover
+by its own use) and never the one playing or the next ones.
 
 yt-dlp reaches the internet only through a small proxy inside jukecord (`--proxy` to 127.0.0.1). The proxy resolves
 each name itself, refuses addresses on private networks, and connects to the very address it checked, so a redirect, a

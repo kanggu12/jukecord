@@ -24,8 +24,11 @@ function hub(
   const bus = {
     on: (name: string, fn: (payload: { guildId: string }) => void) => handlers.set(name, fn),
     off: () => {},
-    emit: (name: string, payload: unknown) => {
+    // What the hub says itself (who listens changed, for the votes to skip) is kept for the tests that look.
+    told: [] as { name: string; guildId: string }[],
+    emit(name: string, payload: { guildId: string }) {
       emitted.push({ name, payload });
+      this.told.push({ name, guildId: payload.guildId });
       extra.onEmit?.(name);
     },
   };
@@ -50,6 +53,10 @@ function hub(
       current: null,
       channels: [{ id: context.userId ?? (context.mayManage ? 'host' : 'anyone') }],
     }),
+    // No votes to skip here (tests/integration/events.test.ts has them over a real connection).
+    skipVotes: () => ({ on: false, votes: 0, needed: 0 }),
+    // The voice channel's sound: plain.
+    currentSound: () => ({ volume: 100, preset: 'off' }),
   };
   const presenter = { player: (value: unknown) => value, queue: (value: unknown) => value };
   const log = { debug: () => {}, info: () => {} };
@@ -67,7 +74,7 @@ function hub(
     ...(extra.queueEveryMs !== undefined ? { queueEveryMs: extra.queueEveryMs } : {}),
     ...(extra.listenersEveryMs !== undefined ? { listenersEveryMs: extra.listenersEveryMs } : {}),
   } as unknown as ConstructorParameters<typeof EventHub>[0]);
-  return { events, handlers, queue, emitted };
+  return { events, handlers, queue, emitted, bus };
 }
 
 // A socket that keeps what the hub writes (gzip frames unpacked, as the panel does) and lets a test send it messages.
@@ -327,7 +334,17 @@ describe('EventHub', () => {
       assert.ok(state);
       assert.equal((state.queue as { version: number }).version, 3);
       // The state of a subscribe is whole: the shared queue and this panel's own parts.
-      assert.deepEqual(Object.keys(state).sort(), ['guild', 'listeners', 'player', 'queue', 'type', 'v', 'voice']);
+      assert.deepEqual(Object.keys(state).sort(), [
+        'guild',
+        'listeners',
+        'player',
+        'queue',
+        'sound',
+        'type',
+        'v',
+        'voice',
+        'votes',
+      ]);
     }
     // A change: read again, once.
     queue.version = 4;
@@ -434,6 +451,58 @@ describe('EventHub', () => {
     assert.equal(quick.terminated(), false);
     assert.equal(quick.of('player').length, 1);
     assert.deepEqual(events.counts(), { connections: 1, listening: 0 });
+    events.close();
+  });
+
+  it('names the people listening for the votes to skip, once each, and says when that changes', async () => {
+    const { events, bus } = hub();
+    const host = socket();
+    const tab = socket();
+    const other = socket();
+    events.attach(host.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    events.attach(tab.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    events.attach(other.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await settle(10);
+    // Two tabs of one person and the host: two people. Each change of who listens is said on the bus.
+    for (const browser of [host, tab, other]) browser.say({ type: 'listening', on: true });
+    await settle(5);
+    assert.deepEqual(events.listeningPeople('G').sort(), ['host', 'u1']);
+    assert.equal(bus.told.filter((entry) => entry.name === 'people' && entry.guildId === 'G').length, 3);
+    assert.deepEqual(events.listeningPeople('elsewhere'), []);
+    events.close();
+  });
+
+  it("counts each friend's browser among the people listening for the votes, and no guest of a listening link", async () => {
+    const { events } = hub();
+    const callers = [
+      { principal: { kind: 'user', userId: 'u1' } },
+      { principal: { kind: 'friend', scope: 'read' }, sessionHash: 'f1' },
+      { principal: { kind: 'friend', scope: 'control' }, sessionHash: 'f2' },
+      { principal: { kind: 'guest', linkId: 1, guildId: 'G', expiresAt: Date.now() + 60_000 }, sessionHash: 'g1' },
+    ];
+    const browsers = callers.map(() => socket());
+    for (const [index, browser] of browsers.entries())
+      events.attach(browser.fake as never, callers[index] as never, { guild: 'G' });
+    await settle(10);
+    for (const browser of browsers) browser.say({ type: 'listening', on: true });
+    await settle(5);
+    // The guest listens (the listeners count it); it has no login of the server's and cannot vote, so the votes do
+    // not count it. Two friends are two people, not the host.
+    assert.equal(events.listeners('G').count, 4);
+    assert.deepEqual(events.listeningPeople('G').sort(), ['friend f1', 'friend f2', 'u1']);
+    events.close();
+  });
+
+  it('sends the votes of a server to its panels, a burst of changes as one message', async () => {
+    const { events, handlers } = hub({}, { queueEveryMs: 40 });
+    const panel = socket();
+    events.attach(panel.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await settle(10);
+    // The state had them; then three changes close together.
+    assert.deepEqual(panel.of('state')[0]?.votes, { on: false, votes: 0, needed: 0 });
+    for (let i = 0; i < 3; i += 1) handlers.get('votes')?.({ guildId: 'G' });
+    await settle(100);
+    assert.equal(panel.of('votes').length, 1);
     events.close();
   });
 });

@@ -31,3 +31,16 @@ describe('what a child program sees of jukecord', () => {
     }
   });
 });
+
+describe('a program that cannot start', () => {
+  it('is reported, and a cancel made before it could start signals nothing', async () => {
+    // Cancelled before it starts, as a skipped track's fetch is: the kill runs in the same moment as the spawn, while
+    // the failed process still has a handle and no ID (src/discord/voice.ts shows what signalling one can do).
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await assert.rejects(
+      run('/nonexistent/jukecord-test-program', [], { signal: cancelled.signal }),
+      /was not found|cancelled/,
+    );
+  });
+});

@@ -73,6 +73,7 @@ interface AddJson {
   items: ItemJson[];
   skippedTooLong: number;
   skippedFull: number;
+  skippedLimit?: number;
 }
 
 // The text of the words joined, for inputs typed without quotes ("jukecord add never gonna give you up").
@@ -86,6 +87,12 @@ function rest(words: Words, what: string): string {
 function number(text: string | undefined, what: string): number {
   if (!text || !/^\d+$/.test(text) || Number(text) < 1) throw new UsageError(`say ${what} (1 or more)`);
   return Number(text);
+}
+
+// "on" or "off", for the settings that are one or the other.
+function onOff(text: string | undefined): boolean {
+  if (text !== 'on' && text !== 'off') throw new UsageError('say on or off');
+  return text === 'on';
 }
 
 // An option's number, or the fallback when it was not given.
@@ -142,6 +149,7 @@ function showAdded(answer: unknown): string {
       : [`Added ${added.items.length} tracks`];
   if (added.skippedTooLong > 0) lines.push(`${added.skippedTooLong} left out: longer than the limit`);
   if (added.skippedFull > 0) lines.push(`${added.skippedFull} left out: the queue is full`);
+  if ((added.skippedLimit ?? 0) > 0) lines.push(`${added.skippedLimit} left out: your limit of tracks in the queue`);
   return lines.join('\n');
 }
 
@@ -159,18 +167,47 @@ function showVoice(answer: unknown): string {
   return lines.join('\n');
 }
 
+// The sound presets as the CLI names them.
+const PRESET_NAMES: Readonly<Record<string, string>> = {
+  off: 'off',
+  bass: 'more bass',
+  voices: 'clearer voices',
+  bright: 'brighter',
+  night: 'softer at night',
+};
+
+// A voice channel's sound: "Voice volume 80%, sound: more bass".
+function showSound(answer: unknown): string {
+  const sound = answer as { volume: number; preset: string };
+  return `Voice volume ${sound.volume}%, sound: ${PRESET_NAMES[sound.preset] ?? sound.preset}`;
+}
+
 function showSettings(answer: unknown): string {
   const settings = answer as {
     djRoleId: string | null;
     roles: { id: string; name: string }[];
     alertsChannelId: string | null;
     channels: { id: string; name: string }[];
+    voteSkip: boolean;
+    takeTurns: boolean;
+    personLimit: number;
+    stay: boolean;
+    volume: number;
+    sound: string;
   };
   const role = settings.roles.find((entry) => entry.id === settings.djRoleId);
+  const onOff = (on: boolean) => (on ? 'on' : 'off');
   const lines = [
     settings.djRoleId === null
       ? 'DJ role: none (everyone may change the music)'
       : `DJ role: ${role?.name ?? settings.djRoleId}`,
+    // How people share the music, and the voice channel's sound.
+    `Vote to skip: ${onOff(settings.voteSkip)}`,
+    `Take turns: ${onOff(settings.takeTurns)}`,
+    `Tracks per person: ${settings.personLimit === 0 ? 'no limit' : settings.personLimit}`,
+    `Stay in voice: ${onOff(settings.stay)}`,
+    `Voice volume: ${settings.volume}%`,
+    `Sound: ${PRESET_NAMES[settings.sound] ?? settings.sound}`,
   ];
   // Where jukecord tells the server about trouble, and the channels to choose it from.
   const alerts = settings.channels.find((entry) => entry.id === settings.alertsChannelId);
@@ -294,7 +331,17 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     request: (words) => ({ body: { input: rest(words, 'what to play') } }),
     show: showAdded,
   },
-  skip: { name: 'skip', usage: '', summary: 'Skip to the next track', request: () => ({}), show: showPlayer },
+  skip: {
+    name: 'skip',
+    usage: '',
+    summary: 'Skip to the next track (a vote, without the DJ role where votes are on)',
+    request: () => ({}),
+    show: (answer) => {
+      // A vote the track did not go by: how it stands. Otherwise the next track.
+      const votes = (answer as { votes: { votes: number; needed: number } | null }).votes;
+      return votes ? `Voted to skip: ${votes.votes} of ${votes.needed}` : showPlayer(answer);
+    },
+  },
   'remove-current': {
     name: 'drop',
     usage: '',
@@ -505,7 +552,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   settings: {
     name: 'settings',
     usage: '',
-    summary: "The server's DJ role and roles",
+    summary: "The server's DJ role, roles and settings",
     request: () => ({}),
     show: showSettings,
   },
@@ -775,6 +822,83 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'Revoke a listening link (its guests are out at once)',
     request: (words) => ({ params: { id: number(words.args[0], 'the link ID (see jukecord shares)') } }),
     show: showOk,
+  },
+
+  stay: {
+    name: 'stay',
+    usage: '<on|off>',
+    summary: 'Stay in voice when everyone has left',
+    request: (words) => ({ body: { on: onOff(words.args[0]) } }),
+    show: (answer) =>
+      (answer as { stay: boolean }).stay
+        ? 'Stays in voice when everyone has left'
+        : 'Leaves voice after the time alone the host set',
+  },
+  'vote-skip': {
+    name: 'voteskip',
+    usage: '<on|off>',
+    summary: 'Whether Skip without the DJ role is a vote',
+    request: (words) => ({ body: { on: onOff(words.args[0]) } }),
+    show: (answer) =>
+      (answer as { voteSkip: boolean }).voteSkip
+        ? 'Skip from someone without the DJ role is a vote'
+        : 'Skip needs the DJ role',
+  },
+  'take-turns': {
+    name: 'turns',
+    usage: '<on|off>',
+    summary: 'Take turns: tracks added go in turn',
+    request: (words) => ({ body: { on: onOff(words.args[0]) } }),
+    show: (answer) =>
+      (answer as { takeTurns: boolean }).takeTurns
+        ? "Tracks added go in their person's turn"
+        : 'Tracks added go at the end',
+  },
+  'turns-now': {
+    name: 'turns now',
+    usage: '',
+    summary: 'Put the queue in turns, once',
+    request: () => ({}),
+    show: (answer) => {
+      const moved = (answer as { moved: number }).moved;
+      return moved === 0 ? 'The queue takes turns already' : `Moved ${moved} ${moved === 1 ? 'track' : 'tracks'}`;
+    },
+  },
+  'person-limit': {
+    name: 'limit',
+    usage: '<tracks, 0 for none>',
+    summary: 'The most tracks one person may have queued',
+    request: (words) => {
+      const text = words.args[0];
+      if (!text || !/^\d+$/.test(text)) throw new UsageError('say how many tracks (0 for no limit)');
+      return { body: { tracks: Number(text) } };
+    },
+    show: (answer) => {
+      const limit = (answer as { personLimit: number }).personLimit;
+      return limit === 0 ? 'No limit of tracks per person' : `Each person may have ${limit} tracks in the queue`;
+    },
+  },
+  volume: {
+    name: 'volume',
+    usage: '<0-200>',
+    summary: "The voice channel's volume, in percent",
+    request: (words) => {
+      const text = words.args[0];
+      if (!text || !/^\d+$/.test(text) || Number(text) > 200) throw new UsageError('say a volume from 0 to 200');
+      return { body: { percent: Number(text) } };
+    },
+    show: showSound,
+  },
+  sound: {
+    name: 'sound',
+    usage: '<off|bass|voices|bright|night>',
+    summary: "The voice channel's sound, in browsers too",
+    request: (words) => {
+      const preset = words.args[0];
+      if (!preset || !(preset in PRESET_NAMES)) throw new UsageError('sound off, bass, voices, bright or night');
+      return { body: { preset } };
+    },
+    show: showSound,
   },
 };
 

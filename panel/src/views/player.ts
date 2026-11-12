@@ -7,11 +7,12 @@
  */
 
 import { sayFailure, sayNotice, translate } from '../../../src/core/say.ts';
+import { SOUND_PRESETS } from '../../../src/core/sound.ts';
 import { ApiError, api, coverUrl, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
-import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
+import { liveWhy, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
 import { lightGlow } from './light.ts';
@@ -108,6 +109,19 @@ export async function act<T>(button: HTMLButtonElement | null, run: () => Promis
 // The server shown (the panel only draws cards once one is chosen).
 function guild(): string {
   return state.guild?.id ?? '';
+}
+
+/**
+ * Presses Skip: the track goes, or (without the DJ role, where Skip is a vote) the vote is cast and a toast says how it
+ * stands. Returns whether the track went, as far as this answer says (undefined when refused).
+ */
+export async function skipOrVote(button: HTMLButtonElement | null): Promise<boolean | undefined> {
+  // The track shown now: pressed together with others, the press does not go on to the next one.
+  const track = state.player?.track?.id;
+  const answer = await act(button, () => api.skip(guild(), track));
+  if (!answer) return undefined;
+  if (answer.votes) toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'pause', 'skip-forward');
+  return answer.votes === null;
 }
 
 // "added by Alice" / "added by the host".
@@ -306,9 +320,22 @@ export function nowCard(live: Live): HTMLElement {
     const addField = document.getElementById('add-input');
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
     setOff(pause, !player || !control || (!track && !queued), addField);
-    refill(skip, words.skip, icon('skip-forward'), h('span', { class: 'label' }, words.skip));
-    skip.title = words.skip;
-    setOff(skip, !control || !track, pause, addField);
+    // Skip, or a vote to skip for someone without the DJ role where Skip is one. A vote under way puts its count on
+    // the key, beside the word, where it stays when a narrow row of keys shows their icons alone.
+    const votes = state.votes;
+    const counting = votes.on && votes.votes > 0 && Boolean(track);
+    const count = counting ? words.votesCount(votes.votes, votes.needed) : '';
+    refill(
+      skip,
+      `${words.skip}|${count}`,
+      icon('skip-forward'),
+      h('span', { class: 'label' }, words.skip),
+      counting ? h('span', { class: 'votes num', 'aria-hidden': 'true' }, count) : null,
+    );
+    const voting = !control && votes.on;
+    skip.title = counting ? words.skipVotes(votes.votes, votes.needed) : voting ? words.voteToSkip : words.skip;
+    skip.setAttribute('aria-label', skip.title);
+    setOff(skip, !maySkip() || !track, pause, addField);
     refill(stop, words.stop, icon('square'), h('span', { class: 'label' }, words.stop));
     stop.title = words.stop;
     setOff(stop, !control || !track, pause, addField);
@@ -403,13 +430,14 @@ export function nowCard(live: Live): HTMLElement {
     // track sliding out would come back before the first skip's answer.
     if (skip.classList.contains('busy')) return;
     // The track slides out to the right while the next one is asked for. The card does not wait for the answer to come
-    // back: a slow one (seconds, while jukecord is busy) would leave it empty all that time.
-    if (moving()) {
+    // back: a slow one (seconds, while jukecord is busy) would leave it empty all that time. A vote does not move it:
+    // the track stays until the votes are enough.
+    if (moving() && mayControl()) {
       body.classList.add('leaving');
       window.clearTimeout(skipTimer);
       skipTimer = window.setTimeout(() => body.classList.remove('leaving'), 900);
     }
-    void act(skip, () => api.skip(guild())).finally(() => {
+    void skipOrVote(skip).finally(() => {
       // Nothing came to replace it (the end of the queue, a refusal): the card shows what it has again.
       window.setTimeout(() => body.classList.remove('leaving'), 400);
     });
@@ -422,7 +450,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'status'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'status', 'votes'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {
@@ -446,6 +474,8 @@ export function queueCard(): HTMLElement {
   const tool = (name: Parameters<typeof icon>[0], act: string) =>
     h('button', { class: 'key sm', type: 'button', 'data-act': act }, icon(name), h('span', { class: 'label' }));
   const shuffle = tool('shuffle', 'shuffle');
+  // Puts the queue in turns, by person, once (beside Shuffle, the other key that reorders the whole queue).
+  const turns = tool('users', 'turns');
   const dedupe = tool('list-x', 'dedupe');
   const save = tool('save', 'save');
   const load = tool('folder-open', 'load');
@@ -459,7 +489,7 @@ export function queueCard(): HTMLElement {
   );
   const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
   // The queue's tools: none for a guest, who can change nothing.
-  const tools = h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear, toolsMore);
+  const tools = h('div', { class: 'tools' }, shuffle, turns, dedupe, save, load, clear, toolsMore);
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
@@ -715,6 +745,7 @@ export function queueCard(): HTMLElement {
     tools.hidden = state.me?.kind === 'guest';
     for (const [button, label] of [
       [shuffle, words.shuffle],
+      [turns, words.takeTurnsKey],
       [dedupe, words.dedupe],
       [save, words.save],
       [load, words.load],
@@ -723,6 +754,10 @@ export function queueCard(): HTMLElement {
       (button.querySelector('.label') as HTMLElement).textContent = label;
       button.title = label;
     }
+    // Take turns says on its key what it does in a word or two (one more word would push the tools onto a second
+    // line of a laptop's card), and in whole to the pointer and to screen readers.
+    turns.title = words.takeTurnsNow;
+    turns.setAttribute('aria-label', words.takeTurnsNow);
     toolsMore.title = words.queueTools;
     toolsMore.setAttribute('aria-label', words.queueTools);
     // Open for everyone: Load is in it on a phone, and anyone may look at the saved playlists (the tools in it keep
@@ -732,6 +767,7 @@ export function queueCard(): HTMLElement {
     // queue's search, or the add field: the list may be empty now.
     const addField = document.getElementById('add-input');
     setOff(shuffle, !control || items.length < 2, search, addField);
+    setOff(turns, !control || items.length < 2, search, addField);
     setOff(dedupe, !control || items.length < 2, search, addField);
     setOff(clear, !control || items.length === 0, search, addField);
     setOff(save, !control || (items.length === 0 && !state.player?.track), search, addField);
@@ -870,6 +906,11 @@ export function queueCard(): HTMLElement {
     search.focus();
   };
   shuffle.onclick = () => void act(shuffle, () => api.shuffle(guild()));
+  turns.onclick = () =>
+    void act(turns, async () => {
+      const result = await api['turns-now'](guild());
+      toast(t().tookTurns(result.moved));
+    });
   dedupe.onclick = () =>
     void act(dedupe, async () => {
       const result = await api.dedupe(guild());
@@ -901,6 +942,7 @@ export function queueCard(): HTMLElement {
     };
     fill(
       box,
+      choice(turns, 'users', words.takeTurnsNow),
       choice(dedupe, 'list-x', words.dedupe),
       choice(save, 'save', words.save),
       choice(load, 'folder-open', words.load),
@@ -1146,12 +1188,15 @@ async function playlistsDialog(): Promise<void> {
 }
 
 // What an add did, as a toast: how many went in and what was left out.
-function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: number }): void {
+function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: number; skippedLimit?: number }): void {
   const words = t();
   const parts = [words.added(result.items.length)];
   if (result.skippedTooLong > 0) parts.push(words.leftLong(result.skippedTooLong));
   if (result.skippedFull > 0) parts.push(words.leftFull(result.skippedFull));
-  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull > 0 ? 'pause' : 'play');
+  // A jukecord from before the limit per person says nothing of it.
+  const limited = result.skippedLimit ?? 0;
+  if (limited > 0) parts.push(words.leftLimit(limited));
+  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + limited > 0 ? 'pause' : 'play');
 }
 
 // An add's refusal as the add card says it: "Could not add:" and jukecord's reason in the panel's language, in the middle
@@ -1271,14 +1316,27 @@ export function voiceCard(): HTMLElement {
     h('span', { class: 'label' }),
   );
   invite.onclick = () => inviteDialog();
+  // The voice channel's sound on one row, so the card grows by no more than a row: its volume (with a bot only), and
+  // its preset, which browsers listening apply too, on a key that opens the presets (named in short on the key, in
+  // whole in its title and for screen readers).
+  const volume = h('input', { type: 'range', min: '0', max: '200', step: '5' });
+  const volumeLevel = h('span', { class: 'num level' });
+  const volumePart = h('label', { class: 'volume-part' }, icon('volume-2'), volume, volumeLevel);
+  // Browser-only has no voice volume: the row says what the key is for instead.
+  const soundWord = h('span', { class: 'sound-word' });
+  const presetKey = h('button', { class: 'key sm', type: 'button', 'aria-haspopup': 'dialog', 'data-act': 'sound' });
+  const soundBox = h('div', { class: 'sound' }, volumePart, soundWord, presetKey);
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'voice-h' },
     h('div', { class: 'card-head' }, h('h2', { id: 'voice-h' }), pill),
     top,
     channels,
+    soundBox,
     listening,
   );
+  // While the volume is held (dragged, or moved by the keyboard), the slider is not moved back by the live updates.
+  let held = false;
 
   const draw = () => {
     const words = t();
@@ -1344,6 +1402,29 @@ export function voiceCard(): HTMLElement {
         );
       }
     }
+    // The voice channel's sound. The volume is the voice channel's alone (browser-only has none).
+    const sound = state.sound;
+    const control = mayControl();
+    volumePart.hidden = browserOnly;
+    soundWord.hidden = !browserOnly;
+    soundWord.textContent = words.soundName;
+    volume.setAttribute('aria-label', words.voiceVolume);
+    volume.title = words.voiceVolume;
+    if (!held) volume.value = String(sound.volume);
+    volumeLevel.textContent = `${held ? volume.value : sound.volume}%`;
+    volume.disabled = !control;
+    refill(
+      presetKey,
+      `${sound.preset}|${state.lang}`,
+      icon('audio-lines'),
+      words.presetsShort[sound.preset] ?? sound.preset,
+      icon('chevron-down'),
+    );
+    // The key's short word in whole, with what it is for: to a screen reader and on hover.
+    const presetLabel = `${words.soundName}: ${words.presets[sound.preset] ?? sound.preset}`;
+    presetKey.setAttribute('aria-label', presetLabel);
+    presetKey.title = presetLabel;
+    presetKey.disabled = !control;
     // Who listens in browsers.
     const people = state.listeners.people;
     (invite.querySelector('.label') as HTMLElement).textContent = words.invite;
@@ -1374,9 +1455,73 @@ export function voiceCard(): HTMLElement {
       const voice = await api.leave(id);
       if (state.guild?.id === id) update({ voice });
     });
-  watch(['voice', 'listeners', 'lang', 'status', 'guild', 'me'], draw);
+  // The volume says its number as it moves, and is sent when it is let go (or at each step of the keyboard).
+  volume.onpointerdown = () => {
+    held = true;
+  };
+  volume.oninput = () => {
+    held = true;
+    volumeLevel.textContent = `${volume.value}%`;
+  };
+  volume.onchange = () => {
+    const id = guild();
+    void act(null, async () => {
+      const sound = await api.volume(id, Number(volume.value));
+      if (state.guild?.id === id) update({ sound });
+    }).finally(() => {
+      held = false;
+      draw();
+    });
+  };
+  // Let go without a change (a click on the value it had): the live value shows again.
+  volume.onblur = () => {
+    held = false;
+    draw();
+  };
+  presetKey.onclick = () => soundDialog();
+  watch(['voice', 'listeners', 'lang', 'status', 'guild', 'me', 'sound'], draw);
   draw();
   return card;
+}
+
+// The voice channel's presets, each with what it does: choosing one applies it in voice and in the browsers listening.
+function soundDialog(): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(
+    words.soundName,
+    h('div', null, h('p', { class: 'faint dialog-note' }, words.soundHint), box),
+  );
+  fill(
+    box,
+    ...SOUND_PRESETS.map((preset) => {
+      const button = h(
+        'button',
+        {
+          class: 'choice',
+          type: 'button',
+          'aria-pressed': String(state.sound.preset === preset),
+          dataset: { preset },
+        },
+        h(
+          'span',
+          { class: 'grow' },
+          h('span', null, words.presets[preset] ?? preset),
+          h('span', { class: 'faint hint' }, words.presetHints[preset] ?? ''),
+        ),
+        icon('check', 'check'),
+      );
+      button.onclick = () => {
+        dialog.close();
+        const id = guild();
+        void act(null, async () => {
+          const sound = await api.sound(id, preset);
+          if (state.guild?.id === id) update({ sound });
+        });
+      };
+      return button;
+    }),
+  );
 }
 
 /** What played recently, with a key to add it again. */

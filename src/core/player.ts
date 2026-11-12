@@ -201,6 +201,10 @@ export class Player {
   // (attached while paused, or paused through a seek) is started afresh on resume instead of resumed.
   private readonly outputs = new Map<PlayerOutput, number>();
 
+  // Grows by one at the end of every play of a track: a skip, a stop, the end, a failure, and the same track starting
+  // again by repeat. What belongs to one play (the votes to skip it, src/app/votes.ts) ends when it changes.
+  private plays = 0;
+
   constructor(options: PlayerOptions) {
     this.options = options;
     this.guildId = options.guildId;
@@ -218,6 +222,11 @@ export class Player {
     // Never past the end: between the end and the moment the next track starts, the bar stays full.
     const end = this.media?.durationMs ?? Number.POSITIVE_INFINITY;
     return Math.min(this.offsetMs + elapsed, end);
+  }
+
+  /** Which play of a track is current: a number that changes whenever one ends (see `plays`). */
+  playNumber(): number {
+    return this.plays;
   }
 
   /** The state as clients see it. */
@@ -361,6 +370,24 @@ export class Player {
     if (this.status === 'playing') this.scheduleEnd();
   }
 
+  /**
+   * Starts the outputs again where the track is now, because how they make their sound changed (the voice channel's
+   * volume or preset, which an output takes when it starts). The place, the clock and the browsers stay as they are: no
+   * snapshot is sent. Loading or idle, there is nothing to start again: an output takes the sound at its next start.
+   */
+  restartOutputs(): void {
+    if (this.status === 'playing' && this.media) {
+      // A new session: an "ended" from the stream replaced is not taken for the end of the track.
+      this.session += 1;
+      for (const output of this.outputs.keys()) this.startOutput(output);
+      this.scheduleEnd();
+    } else if (this.status === 'paused') {
+      // Paused: the outputs start afresh on resume, with the new sound (their session is an older one then).
+      this.session += 1;
+      for (const output of this.outputs.keys()) output.stop();
+    }
+  }
+
   /** Removes an output (the bot left the channel); the player keeps going for the browsers. */
   detach(output: PlayerOutput): void {
     if (!this.outputs.delete(output)) return;
@@ -498,8 +525,9 @@ export class Player {
       return;
     }
     if (this.repeat === 'track' && current && this.media) {
-      // The same track again from the top: it is still prepared, so nothing is fetched.
+      // The same track again from the top: it is still prepared, so nothing is fetched. It is a new play.
       this.record();
+      this.plays += 1;
       current.startedAt = this.options.clock.now();
       this.offsetMs = 0;
       this.anchor = this.options.clock.steady();
@@ -534,6 +562,8 @@ export class Player {
   private finishCurrent(record: boolean): void {
     const current = this.current;
     if (record) this.record();
+    // The play of the current track (if any) is over.
+    this.plays += 1;
     this.cancelLoad();
     this.cancelEndTimer();
     this.cancelSeek();

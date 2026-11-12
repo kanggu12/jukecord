@@ -12,13 +12,14 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   seek, and the keys: play or pause, skip, stop, repeat (off, the queue, this track) and remove (drops the track
   without counting it as played).
 - **Queue**: drag a track by its handle to move it, or use its keys: play now, play next, remove. Above the list:
-  search, shuffle, remove duplicates, save as a playlist, load a playlist, clear. On a phone or in a narrow window, a
-  track's keys and moves wait behind its **⋯** key, and the queue's tools behind the one beside **Shuffle**. A long
-  queue shows a hundred tracks at a time (**Show more** brings the next hundred); search covers all of it.
+  search, shuffle, take turns now (see [the server's settings](#the-servers-settings)), remove duplicates, save as a
+  playlist, load a playlist, clear. On a phone or in a narrow window, a track's keys and moves wait behind its **⋯**
+  key, and the queue's tools behind the one beside **Shuffle**. A long queue shows a hundred tracks at a time
+  (**Show more** brings the next hundred); search covers all of it.
 - **Add**: paste an address (a video, a playlist, a SoundCloud page ...) or type search words. **Add** puts it at the end
   of the queue; **Play now** plays it at once.
-- **Voice channel**: where the bot is, the channels it may join (with how many people are in each), and who is
-  listening in a browser.
+- **Voice channel**: where the bot is, the channels it may join (with how many people are in each), the voice
+  channel's volume and sound (see [the sound](#the-voice-channels-sound)), and who is listening in a browser.
 - **Recently played**: the history, with a key to add a track again.
 - **Statistics** (top bar): plays per day and per hour of the day, the most played tracks, who added most, and the
   time listened, over 7, 30 or 90 days or a year. Each chart has a table view.
@@ -28,8 +29,8 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   **Save as picture** draws it as a story (1080 by 1920) or a square (1080 by 1080) PNG in the panel's theme and
   language; on a phone, **Share** hands it to the phone. The address names the time: `/stats/wrapped?period=2026-03`.
 - **Log** (the host only): jukecord's log, filtered by level and part.
-- **The menu** (your name, top right): theme, language, motion, the server's DJ role (for people who can manage the
-  server), API tokens, keyboard shortcuts, logging out.
+- **The menu** (your name, top right): theme, language, motion, the server's DJ role, settings and alerts channel (for
+  people who can manage the server), API tokens, keyboard shortcuts, logging out.
 - **Lyrics** (in the playing card's head): the words of the track playing, from LRCLIB, in the right column of a wide
   window and as a sheet on a phone. The line being sung is lit and kept in sight; if you may change the music, choose a
   line to play from there. Words without timings show as they are, and a track LRCLIB does not know says so.
@@ -60,6 +61,12 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 - When a server has a **DJ role**, only members with that role (and people who can manage the server) change the music;
   everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
   role deleted in Discord counts as none: everyone may change the music again until another is set.
+- Where a server has a DJ role, **Skip** from anyone else is a vote. The track goes when half of the people listening
+  have voted (rounded up, at least one): the people in the bot's voice channel and the people listening along in a
+  browser, each once (the host as one, each friend's browser as one; guests of a listening link are not counted). Only
+  they may vote, a vote counts while its person listens, and the votes end with the track. The panel's Skip key and the
+  Skip button of the bot's card say how the vote stands ("1 of 2"). A server can turn votes off (the menu's **Vote to
+  skip**, `/voteskip`, `jukecord voteskip off`); Skip then needs the role too.
 - **Guests** come in with a **listening link**: anyone with the link listens along to its one server in a browser,
   without a Discord account, for 1, 7 or 30 days. A guest sees the player, the queue and the lyrics and has **Listen
   here**; it changes nothing and sees no other server, statistics, history, settings or log. Up to 25 browsers come in
@@ -77,6 +84,31 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
   taken out of the server's looping queue, connections turned away at one of its caps, and a scheduled backup that
   failed. Each kind at most once an hour; the same lines go to jukecord's log. People who can manage the server choose
   it in the panel's menu, with `/alerts set`, or with `jukecord alerts <channel ID>`.
+
+## The server's settings
+
+People who can manage the server (and the host) choose these in the panel's menu, with slash commands or with the
+`jukecord` command; anyone may look (`/dj show`, `jukecord settings`).
+
+| Setting           | Default  | What it does                                                                                                                                                                                                              | Change it with                      |
+| :---------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------- |
+| Vote to skip      | on       | with a DJ role set, Skip from anyone else is a vote (see above)                                                                                                                                                           | `/voteskip`, `jukecord voteskip on` |
+| Take turns        | off      | a track added at the end goes after the last track of the first round in which its person has none yet: people take turns instead of waiting behind one person's long run (the track playing counts as its person's turn) | `/turns set`, `jukecord turns on`   |
+| Tracks per person | no limit | the most tracks one person may have in the queue; what an add brings over it is left out, and the answer says how many (the host has no limit)                                                                            | `/limit`, `jukecord limit 5`        |
+| Stay in voice     | off      | the bot stays in its voice channel when everyone has left                                                                                                                                                                 | `/stay`, `jukecord stay on`         |
+
+**Take turns now** (the queue's tools, `/turns now`, `jukecord turns now`) puts the queue as it is in turns once, with
+the setting on or off; it changes the music, so it needs what any change needs (the DJ role where one is set).
+
+## The voice channel's sound
+
+The voice card sets how the voice channel sounds, for whoever may change the music: its **volume**, 0 to 200 % (100 %
+is the track as it is), and a **sound**: more bass, clearer voices, brighter, or softer at night (less low end, gentler
+highs, 4 dB quieter). A browser listening along applies the same sound, so the voice channel and every browser hear
+the same; each browser keeps its own volume. `/volume`, `/sound`, `jukecord volume 80`, `jukecord sound night`, or the
+API. A change is heard within a moment, from the same place in the track. At 100 % with the sound off, the voice
+channel gets each cached track as it is; otherwise jukecord decodes, filters and encodes the stream it sends again
+([why, and what it costs](DECISIONS.md#the-voice-channels-sound-ffmpeg-only-while-it-is-not-plain)).
 
 ## Slash commands
 
@@ -103,15 +135,22 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/lyrics`                                    | the lyrics of the track playing, to you alone, a page at a time      |
 | `/stop after-track:`                         | True: stop when this track ends; False: play on after it             |
 | `/share create, list, revoke`                | listening links for guests, to you alone                             |
+| `/stay`                                      | stay in voice when everyone has left, or not (needs Manage Server)   |
+| `/voteskip`                                  | Skip without the DJ role is a vote, or not (needs Manage Server)     |
+| `/turns set` `/turns now`                    | take turns, or not (Manage Server); the queue in turns now           |
+| `/limit`                                     | the most tracks one person may have queued (needs Manage Server)     |
+| `/volume` `/sound`                           | the voice channel's volume and sound (browsers apply the sound too)  |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
-five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers. When nobody hears a server anywhere (the bot
-in no voice channel, no browser playing along) for two minutes (`JUKECORD_REST_AFTER`), its player pauses and says so,
-instead of fetching tracks and counting plays for nobody; playing on is a press of play. After a restart (an update,
-a crash) the bot goes back to the voice channel it was in when people are there, and says so in that channel's chat
-with the now-playing card, paused. The newest now-playing card in a server (from `/np`, `/pause` and the like, or a
-press of its keys) is kept current as the music changes, from anywhere, at most once every five seconds.
+five minutes (`JUKECORD_VOICE_IDLE`), unless the server asked it to stay (`/stay`, **Stay in voice** in the panel's
+menu, `jukecord stay on`); the music goes on in the browsers. When nobody hears a server anywhere (the bot in no voice
+channel, no browser playing along) for two minutes (`JUKECORD_REST_AFTER`), its player pauses and says so, instead of
+fetching tracks and counting plays for nobody; playing on is a press of play. After a restart (an update, a crash) the
+bot goes back to the voice channel it was in when people are there (or, where the server asked it to stay, in any
+case), and says so in that channel's chat with the now-playing card, paused. The newest now-playing card in a server
+(from `/np`, `/pause` and the like, or a press of its keys) is kept current as the music changes, from anywhere, and
+its Skip button with the votes to skip, at most once every five seconds.
 
 ## The jukecord command
 

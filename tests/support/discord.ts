@@ -3,6 +3,7 @@
  * really play, and interactions made up the way discord.js hands them to the bot, recording what the bot answers.
  */
 import { Actions } from '../../src/app/actions.ts';
+import { SkipVotes } from '../../src/app/votes.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
@@ -17,8 +18,13 @@ import { memoryStore } from './store.ts';
 export const GUILD = '100000000000000001';
 export const PERSON = '300000000000000001';
 
-/** A bot over real actions and players, with a resolver that answers from a table. */
-export function fakeBot(options: { found?: Record<string, () => Track[]> } = {}) {
+/**
+ * A bot over real actions and players, with a resolver that answers from a table; with `listening`, votes to skip
+ * too, counting the people it names as listening.
+ */
+export function fakeBot(
+  options: { found?: Record<string, () => Track[]>; listening?: (guildId: string) => ReadonlySet<string> } = {},
+) {
   const clock = new FakeClock();
   const store = memoryStore(() => clock.now());
   const bus = new Bus();
@@ -43,7 +49,18 @@ export function fakeBot(options: { found?: Record<string, () => Track[]> } = {})
       return found();
     },
   } as unknown as Resolver;
-  const actions = new Actions({ store, queue, players, resolver, log });
+  const listening = options.listening;
+  const votes = listening
+    ? new SkipVotes({
+        players,
+        bus,
+        clock,
+        log,
+        applies: (guildId) => actions.voteSkipApplies(guildId),
+        listening,
+      })
+    : undefined;
+  const actions = new Actions({ store, queue, players, resolver, log, ...(votes ? { votes, bus } : {}) });
   const bot = new Bot({
     token: 'not used',
     actions,

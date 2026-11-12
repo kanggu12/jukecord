@@ -15,6 +15,7 @@ import { type AlertSink, Alerts, leftLoopAlert, restartedAlert, turnedAwayAlert 
 import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
+import { SkipVotes } from './app/votes.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -195,6 +196,21 @@ async function main(): Promise<number> {
         log: log.child('lyrics'),
       })
     : null;
+  // Who listens in each server, for the votes to skip: the people in the bot's voice channel and the people listening
+  // in browsers, filled in once the bot and the web server below are made.
+  const audience = {
+    voice: (_guildId: string): readonly string[] => [],
+    browsers: (_guildId: string): readonly string[] => [],
+  };
+  const votes = new SkipVotes({
+    players,
+    bus,
+    clock: systemClock,
+    log: log.child('votes'),
+    // Asked when a vote is cast or counted again, long after the actions below exist.
+    applies: (guildId) => actions.voteSkipApplies(guildId),
+    listening: (guildId) => new Set([...audience.voice(guildId), ...audience.browsers(guildId)]),
+  });
   const actions = new Actions({
     store,
     queue,
@@ -205,6 +221,8 @@ async function main(): Promise<number> {
     queueMax: config.queueMax,
     trackMaxMs: config.media.trackMaxMs,
     lyrics,
+    votes,
+    bus,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);
@@ -238,6 +256,7 @@ async function main(): Promise<number> {
   if (lastRun) alerts.raise(restartedAlert(lastRun.stillMs));
   // A disk that runs low is said once (and again once it had room again).
   alerts.watchDisk(config.dataDir);
+  if (bot) audience.voice = (guildId) => bot.voice.people(guildId);
 
   // Logins. Without a public address the panel is reached on this machine, which is also where Discord sends people
   // back to after logging in.
@@ -331,6 +350,7 @@ async function main(): Promise<number> {
       'the listening link has ended',
     ),
   );
+  audience.browsers = (guildId) => web.hub.listeningPeople(guildId);
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;

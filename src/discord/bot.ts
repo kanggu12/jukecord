@@ -58,6 +58,7 @@ import {
   problem,
   queueCard,
   relativePeriod,
+  soundCard,
   statsCard,
   wrappedCard,
 } from './cards.ts';
@@ -116,6 +117,13 @@ export class Bot implements Directory, AlertSink {
       log: options.log,
       idleMs: options.voiceIdleMs,
       bus: options.bus,
+      // A server's stay setting, read at each change of who is in voice (a lookup by the primary key).
+      stays: (guildId) => options.settings.community(guildId).stay,
+      // A server's voice sound, read at each start of a voice stream.
+      sound: (guildId) => {
+        const settings = options.settings.community(guildId);
+        return { volume: settings.volume, preset: settings.sound };
+      },
     });
     this.memory = options.voiceChannels
       ? new VoiceMemory({ bus: options.bus, channels: options.voiceChannels, log: options.log })
@@ -123,13 +131,20 @@ export class Bot implements Directory, AlertSink {
     this.memory?.start();
     this.keeper = new CardKeeper({
       clock: options.clock ?? systemClock,
-      render: (snapshot, lang) => nowCard(snapshot, lang, options.panelUrl),
+      // Drawn as every card is, with the vote to skip under way.
+      render: (snapshot, lang) => this.card(snapshot, lang),
       log: options.log,
       // A server's player as it is now, without making one for a server that has none.
       current: (guildId) => options.players.existing(guildId)?.snapshot() ?? null,
     });
     // Every change of a player draws its server's card again (soon, and only when it shows something else).
     options.bus.on('player', (snapshot) => this.keeper.changed(snapshot));
+    // So does a change of the votes to skip, which comes without one of the player (a vote, a voter who left): the
+    // card's Skip button says how the vote stands.
+    options.bus.on('votes', ({ guildId }) => {
+      const snapshot = options.players.existing(guildId)?.snapshot();
+      if (snapshot) this.keeper.changed(snapshot);
+    });
   }
 
   self(): { id: string; name: string; avatar: string | null } | null {
@@ -344,8 +359,9 @@ export class Bot implements Directory, AlertSink {
     await this.client.destroy();
   }
 
-  // Goes back, after a restart, to the voice channels the bot was in where people are now, and says so in each (see
-  // rejoin.ts): with the now-playing card, paused, so the people there can play on.
+  // Goes back, after a restart, to the voice channels the bot was in where people are now (or where its server asked
+  // it to stay), and says so in each (see rejoin.ts): with the now-playing card, paused, so the people there can play
+  // on.
   private async comeBackToVoice(): Promise<void> {
     if (!this.memory) return;
     const channelOf = (guildId: string, channelId: string) =>
@@ -356,6 +372,8 @@ export class Bot implements Directory, AlertSink {
           const channel = channelOf(guildId, channelId);
           return channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
         },
+        // A server's stay setting: the bot goes back to its channel with nobody in it too.
+        stays: (guildId) => this.options.settings.community(guildId).stay,
         // In voice by the voice manager's own account (a connection it made since the start).
         inVoice: (guildId) => this.voice.channel(guildId) !== null,
         join: (guildId, channelId) => this.voice.join(guildId, channelId, null),
@@ -373,10 +391,9 @@ export class Bot implements Directory, AlertSink {
           if (!channel.permissionsFor(me)?.has(rights)) return;
           // The server's own language: nobody asked, so there is no one person's to answer in.
           const lang = langOf(guild.preferredLocale);
-          const card = nowCard(
+          const card = this.card(
             this.options.actions.nowPlaying({ guildId, userId: null, mayControl: false, mayManage: false }),
             lang,
-            this.options.panelUrl,
           );
           const message = await channel.send({
             embeds: [
@@ -460,9 +477,12 @@ export class Bot implements Directory, AlertSink {
           await this.autoJoin(interaction, context, lang);
           return;
         }
-        case 'skip':
-          await this.replyCard(interaction, actions.skip(context), lang);
+        case 'skip': {
+          // Without the DJ role it may be a vote: the card then says how the vote stands.
+          const { snapshot } = actions.skip(context);
+          await this.replyCard(interaction, snapshot, lang);
           return;
+        }
         case 'drop':
           await this.replyCard(interaction, actions.removeCurrent(context), lang);
           return;
@@ -489,7 +509,7 @@ export class Bot implements Directory, AlertSink {
           // With after-track: when this track ends (True), or not after all (False); the card says which.
           const after = options.getBoolean('after-track');
           if (after !== null) {
-            await interaction.editReply(nowCard(actions.stopAfter(context, after), lang, this.options.panelUrl));
+            await interaction.editReply(this.card(actions.stopAfter(context, after), lang));
             return;
           }
           actions.stop(context);
@@ -645,6 +665,74 @@ export class Bot implements Directory, AlertSink {
           await interaction.editReply({ embeds: [lyricsCard(lyrics, title, options.getInteger('page') ?? 1, lang)] });
           return;
         }
+        case 'stay': {
+          const settings = actions.stay(context, options.getString('mode', true) === 'on');
+          await interaction.editReply({
+            embeds: [
+              settings.stay
+                ? note(lang, 'Stays in voice when everyone has left', '모두 나가도 음성 채널에 남음')
+                : note(lang, 'Leaves voice after a while alone', '혼자 남으면 잠시 뒤 음성 채널에서 나감'),
+            ],
+          });
+          return;
+        }
+        case 'voteskip': {
+          const settings = actions.voteSkip(context, options.getString('mode', true) === 'on');
+          await interaction.editReply({
+            embeds: [
+              settings.voteSkip
+                ? note(lang, 'Skip from someone without the DJ role is a vote', 'DJ 역할이 없으면 건너뛰기가 투표가 됨')
+                : note(lang, 'Skip needs the DJ role', '건너뛰기에 DJ 역할이 필요함'),
+            ],
+          });
+          return;
+        }
+        case 'turns': {
+          if (options.getSubcommand() === 'now') {
+            const moved = actions.turnsNow(context);
+            await interaction.editReply({
+              embeds: [
+                moved === 0
+                  ? note(lang, 'The queue takes turns already', '대기열이 이미 차례대로임')
+                  : note(lang, `Put the queue in turns: ${moved} moved`, `대기열을 차례대로 맞춤: ${moved}곡 옮김`),
+              ],
+            });
+            return;
+          }
+          const settings = actions.takeTurns(context, options.getString('mode', true) === 'on');
+          await interaction.editReply({
+            embeds: [
+              settings.takeTurns
+                ? note(lang, "Tracks added go in their person's turn", '넣는 곡이 사람마다 차례대로 들어감')
+                : note(lang, 'Tracks added go at the end', '넣는 곡이 맨 뒤로 들어감'),
+            ],
+          });
+          return;
+        }
+        case 'limit': {
+          const settings = actions.personLimit(context, options.getInteger('tracks', true));
+          await interaction.editReply({
+            embeds: [
+              settings.personLimit === 0
+                ? note(lang, 'No limit of tracks per person', '한 사람당 곡 수 제한 없음')
+                : note(
+                    lang,
+                    `Each person may have ${settings.personLimit} tracks in the queue`,
+                    `한 사람이 대기열에 ${settings.personLimit}곡까지 넣을 수 있음`,
+                  ),
+            ],
+          });
+          return;
+        }
+        case 'volume':
+        case 'sound': {
+          const sound =
+            interaction.commandName === 'volume'
+              ? actions.volume(context, options.getInteger('percent', true))
+              : actions.sound(context, options.getString('preset', true));
+          await interaction.editReply({ embeds: [soundCard(sound, lang)] });
+          return;
+        }
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
@@ -746,8 +834,10 @@ export class Bot implements Directory, AlertSink {
     if (!context || !interaction.customId.startsWith('jukecord:')) return;
     this.remember(interaction);
     const actions = this.options.actions;
-    // "jukecord:pause:ko": the action, and the language the card was made in (older cards have none: the presser's).
-    const [, action, made] = interaction.customId.split(':');
+    // "jukecord:pause:ko": the action, and the language the card was made in (older cards have none: the presser's);
+    // Skip also carries the track the card showed ("jukecord:skip:ko:42"; older cards none).
+    const [, action, made, shown] = interaction.customId.split(':');
+    const track = shown && /^\d+$/.test(shown) ? Number(shown) : undefined;
     const cardLang: Lang = made === 'ko' || made === 'en' ? made : langOf(interaction.locale);
     try {
       const snapshot =
@@ -755,9 +845,9 @@ export class Bot implements Directory, AlertSink {
           ? actions.pause(context)
           : action === 'resume'
             ? actions.resume(context)
-            : actions.skip(context);
+            : actions.skip(context, track).snapshot;
       // The card itself is updated in place, so the channel does not fill with copies; it is the card people use now,
-      // so it is the one kept current.
+      // so it is the one kept current. Its Skip says how a vote stands.
       await this.updateCard(interaction, snapshot, cardLang);
     } catch (error) {
       // A card out of date (paused since, another track, nothing playing now): its key did nothing because the player
@@ -773,6 +863,12 @@ export class Bot implements Directory, AlertSink {
     }
   }
 
+  // The now-playing card of a snapshot, as every card is drawn (a command's answer, a key's redraw, the card kept
+  // current): with a vote to skip under way, its Skip button and the line under the bar say how the vote stands.
+  private card(snapshot: PlayerSnapshot, lang: Lang): ReturnType<typeof nowCard> {
+    return nowCard(snapshot, lang, this.options.panelUrl, openVotes(this.options.actions, snapshot.guildId));
+  }
+
   // Answers a command with the now-playing card, and keeps that card current from now on (see keeper.ts): the newest
   // card in a server is the one people look at.
   private async replyCard(
@@ -780,7 +876,7 @@ export class Bot implements Directory, AlertSink {
     snapshot: PlayerSnapshot,
     lang: Lang,
   ): Promise<void> {
-    const payload = nowCard(snapshot, lang, this.options.panelUrl);
+    const payload = this.card(snapshot, lang);
     const message = await interaction.editReply(payload);
     this.keeper.keep(
       snapshot.guildId,
@@ -791,7 +887,7 @@ export class Bot implements Directory, AlertSink {
 
   // Draws a card whose key was pressed again, and keeps it current from now on.
   private async updateCard(interaction: ButtonInteraction, snapshot: PlayerSnapshot, lang: Lang): Promise<void> {
-    const payload = nowCard(snapshot, lang, this.options.panelUrl);
+    const payload = this.card(snapshot, lang);
     await interaction.update(payload);
     this.keeper.keep(
       snapshot.guildId,
@@ -839,6 +935,13 @@ export class Bot implements Directory, AlertSink {
       // The interaction expired (15 min) or the channel is gone; nothing left to tell.
     }
   }
+}
+
+// How a vote to skip a server's current track stands, for a card's Skip button, while one is under way (null
+// otherwise). The same for everyone who sees the card: a card in the channel is everyone's.
+function openVotes(actions: Actions, guildId: string): { votes: number; needed: number } | null {
+  const view = actions.skipVotes({ guildId, userId: null, mayControl: false, mayManage: false });
+  return view.on && view.votes > 0 ? { votes: view.votes, needed: view.needed } : null;
 }
 
 // Discord does not say a person's time zone. Korean users are almost all in Korea (UTC+9); everyone else gets the

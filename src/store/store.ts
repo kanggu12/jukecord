@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
+import { isPreset, type SoundPreset } from '../core/sound.ts';
 import type { HistoryEntry, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import { MIGRATIONS } from './schema.ts';
 
@@ -545,6 +546,23 @@ export class QueueRepository {
     ids.forEach((id, index) => {
       update.run(index, id, guildId, index);
     });
+  }
+
+  /** Each item's ID and who added it, in queue order, without the tracks: what taking turns needs to know. */
+  owners(guildId: string): { id: number; addedBy: string | null }[] {
+    return this.store.db
+      .prepare('SELECT id, added_by FROM queue_items WHERE guild_id = ? ORDER BY position, id')
+      .all(guildId)
+      .map((row) => ({ id: int(row as Row, 'id'), addedBy: textOrNull(row as Row, 'added_by') }));
+  }
+
+  /** How many items one person added to a server's queue (null: the host's, and a panel's without a login). */
+  countBy(guildId: string, addedBy: string | null): number {
+    // IS, not =: it matches null too.
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM queue_items WHERE guild_id = ? AND added_by IS ?')
+      .get(guildId, addedBy) as Row;
+    return int(row, 'n');
   }
 }
 
@@ -1155,7 +1173,74 @@ export class SettingsRepository {
       )
       .run(guildId, roleId, this.now());
   }
+
+  /** How a server's people share the music (see CommunitySettings); a server never configured gets the defaults. */
+  community(guildId: string): CommunitySettings {
+    const row = this.store.db
+      .prepare('SELECT vote_skip, take_turns, person_limit, stay, volume, sound FROM guild_settings WHERE guild_id = ?')
+      .get(guildId) as Row | undefined;
+    // No row yet: the same defaults the columns have (see the schema), so a new server and an old one agree.
+    if (!row) return COMMUNITY_DEFAULTS;
+    const sound = text(row, 'sound');
+    return {
+      voteSkip: int(row, 'vote_skip') !== 0,
+      takeTurns: int(row, 'take_turns') !== 0,
+      personLimit: int(row, 'person_limit'),
+      stay: int(row, 'stay') !== 0,
+      volume: int(row, 'volume'),
+      // Read like the repeat mode: a value this version does not know falls back to the plain sound.
+      sound: isPreset(sound) ? sound : 'off',
+    };
+  }
+
+  /** Changes some of a server's community settings, leaving the others as they are. */
+  setCommunity(guildId: string, changes: Partial<CommunitySettings>): void {
+    // The columns come from this table in the code, never from input; the values are bound.
+    const columns: [string, number | string][] = [];
+    if (changes.voteSkip !== undefined) columns.push(['vote_skip', changes.voteSkip ? 1 : 0]);
+    if (changes.takeTurns !== undefined) columns.push(['take_turns', changes.takeTurns ? 1 : 0]);
+    if (changes.personLimit !== undefined) columns.push(['person_limit', changes.personLimit]);
+    if (changes.stay !== undefined) columns.push(['stay', changes.stay ? 1 : 0]);
+    if (changes.volume !== undefined) columns.push(['volume', changes.volume]);
+    if (changes.sound !== undefined) columns.push(['sound', changes.sound]);
+    // Nothing to change: nothing written.
+    if (columns.length === 0) return;
+    const names = columns.map(([name]) => name);
+    this.store.db
+      .prepare(
+        `INSERT INTO guild_settings (guild_id, updated_at, ${names.join(', ')}) VALUES (?, ?, ${names.map(() => '?').join(', ')})
+         ON CONFLICT (guild_id) DO UPDATE SET ${names.map((name) => `${name} = excluded.${name}`).join(', ')},
+           updated_at = excluded.updated_at`,
+      )
+      .run(guildId, this.now(), ...columns.map(([, value]) => value));
+  }
 }
+
+/** How a server's people share the music, and how its voice channel sounds. */
+export interface CommunitySettings {
+  /** Whether Skip from someone without the DJ role counts as a vote to skip (when the server has a DJ role). */
+  readonly voteSkip: boolean;
+  /** Whether a track added goes after the last one of the first round in which its person has no track yet. */
+  readonly takeTurns: boolean;
+  /** The most tracks one person may have in the queue at once; 0 for no limit. */
+  readonly personLimit: number;
+  /** Whether the bot stays in its voice channel when everyone has left it. */
+  readonly stay: boolean;
+  /** The voice channel's volume, in percent (0 to 200). */
+  readonly volume: number;
+  /** The voice channel's sound preset, which browsers listening along apply too. */
+  readonly sound: SoundPreset;
+}
+
+/** A server's community settings before anyone chose them (the columns' own defaults). */
+export const COMMUNITY_DEFAULTS: CommunitySettings = {
+  voteSkip: true,
+  takeTurns: false,
+  personLimit: 0,
+  stay: false,
+  volume: 100,
+  sound: 'off',
+};
 
 /** What jukecord remembers about Discord per server: the fingerprint of the commands it registered there. */
 export class DiscordRepository {

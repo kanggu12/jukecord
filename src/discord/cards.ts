@@ -8,6 +8,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'disc
 import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
+import type { Sound } from '../core/sound.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
 import type { LyricsAnswer } from '../media/lyrics.ts';
 import type { ListenLinkRow } from '../store/store.ts';
@@ -78,6 +79,27 @@ const TEXT = {
   noListenLinks: { en: 'No listening links', ko: '듣기 링크 없음' },
   until: { en: 'until', ko: '만료' },
   guests: { en: 'guests', ko: '손님' },
+  on: { en: 'on', ko: '켬' },
+  off: { en: 'off', ko: '끔' },
+  voteSkip: { en: 'Vote to skip', ko: '건너뛰기 투표' },
+  takeTurns: { en: 'Take turns', ko: '차례대로 넣기' },
+  personLimit: { en: 'Tracks per person', ko: '한 사람당 곡 수' },
+  noLimit: { en: 'no limit', ko: '제한 없음' },
+  stay: { en: 'Stay in voice', ko: '음성 채널에 머물기' },
+  volume: { en: 'Voice volume', ko: '음성 채널 음량' },
+  sound: { en: 'Sound', ko: '음색' },
+  presets: {
+    en: { off: 'off', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
+    ko: { off: '끔', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
+  },
+  skipVotes: {
+    en: (votes: number, needed: number) => `Skip (${votes} of ${needed})`,
+    ko: (votes: number, needed: number) => `건너뛰기 (${votes}/${needed})`,
+  },
+  votesLine: {
+    en: (votes: number, needed: number) => `Votes to skip: ${votes} of ${needed}`,
+    ko: (votes: number, needed: number) => `건너뛰기 투표: ${needed}표 중 ${votes}표`,
+  },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -134,6 +156,12 @@ export function addedCard(result: AddResult, lang: Lang, playingNow = false): Em
         ? `대기열이 차서 ${result.skippedFull}곡은 추가하지 못함`
         : `${result.skippedFull} did not fit, the queue is full`,
     );
+  if (result.skippedLimit > 0)
+    left.push(
+      lang === 'ko'
+        ? `한 사람당 곡 수 제한으로 ${result.skippedLimit}곡 못 넣음`
+        : `${result.skippedLimit} did not fit, the limit per person`,
+    );
   if (left.length > 0) embed.setFooter({ text: left.join(' · ') });
   return embed;
 }
@@ -146,8 +174,16 @@ function bar(position: number, duration: number | null): string {
   return `\`${'━'.repeat(filled)}${'─'.repeat(cells - filled)}\` ${formatDuration(position)} / ${formatDuration(duration)}`;
 }
 
-/** The current track with a progress bar, and buttons to pause or skip. */
-export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string | null) {
+/**
+ * The current track with a progress bar, and buttons to pause or skip. With a vote to skip it under way, the Skip
+ * button and the line under the bar say how the vote stands.
+ */
+export function nowCard(
+  snapshot: PlayerSnapshot,
+  lang: Lang,
+  panelUrl: string | null,
+  votes: { readonly votes: number; readonly needed: number } | null = null,
+) {
   // What the player did by itself (a track taken out of the loop), in the card's language, on a line of its own.
   const notice = snapshot.notice ? `\n${sayNotice(snapshot.notice, lang)}` : '';
   if (!snapshot.track) {
@@ -173,11 +209,12 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}${notice}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
-  // The repeat mode, when one is on, and a stop asked for after this track, under the bar.
+  // The repeat mode, when one is on, a stop asked for after this track, and a vote to skip under way, under the bar.
   const footer: string[] = [];
   if (snapshot.repeat !== 'off')
     footer.push(snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang]);
   if (snapshot.stopAfter) footer.push(TEXT.stopsAfter[lang]);
+  if (votes) footer.push(TEXT.votesLine[lang](votes.votes, votes.needed));
   if (footer.length > 0) embed.setFooter({ text: footer.join(' · ') });
   // The card's language travels in the buttons, so a press redraws the card in the language it was made in, not the
   // presser's (a card in the channel is everyone's).
@@ -186,7 +223,11 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       .setCustomId(`jukecord:${snapshot.status === 'paused' ? 'resume' : 'pause'}:${lang}`)
       .setLabel(snapshot.status === 'paused' ? TEXT.resume[lang] : TEXT.pause[lang])
       .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`jukecord:skip:${lang}`).setLabel(TEXT.skip[lang]).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      // The track the card shows rides along: a press after it has gone skips nothing more (see Actions.skip).
+      .setCustomId(`jukecord:skip:${lang}:${snapshot.track.id}`)
+      .setLabel(votes ? TEXT.skipVotes[lang](votes.votes, votes.needed) : TEXT.skip[lang])
+      .setStyle(ButtonStyle.Secondary),
   );
   // The panel link only when there is an address people can reach.
   if (panelUrl)
@@ -300,11 +341,30 @@ export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   return embed.setDescription(lines.join('\n'));
 }
 
-/** The DJ role, or that everyone may change the music. */
+/** The voice channel's sound after a change: its volume and preset. */
+export function soundCard(sound: Sound, lang: Lang): EmbedBuilder {
+  return note(
+    lang,
+    `Voice volume ${sound.volume}%, sound: ${TEXT.presets.en[sound.preset]}`,
+    `음성 채널 음량 ${sound.volume}%, 음색: ${TEXT.presets.ko[sound.preset]}`,
+  );
+}
+
+/** The DJ role, or that everyone may change the music, and the server's other settings under it. */
 export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
-  if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
-  return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
+  const role = settings.djRoleId === null ? TEXT.everyone[lang] : `<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`;
+  // How the server's people share the music and how its voice channel sounds, one line each.
+  const onOff = (on: boolean) => (on ? TEXT.on[lang] : TEXT.off[lang]);
+  const lines = [
+    `${TEXT.voteSkip[lang]}: ${onOff(settings.voteSkip)}`,
+    `${TEXT.takeTurns[lang]}: ${onOff(settings.takeTurns)}`,
+    `${TEXT.personLimit[lang]}: ${settings.personLimit === 0 ? TEXT.noLimit[lang] : settings.personLimit}`,
+    `${TEXT.stay[lang]}: ${onOff(settings.stay)}`,
+    `${TEXT.volume[lang]}: ${settings.volume}%`,
+    `${TEXT.sound[lang]}: ${TEXT.presets[lang][settings.sound]}`,
+  ];
+  return embed.setDescription(`${role}\n\n${lines.join('\n')}`);
 }
 
 /**

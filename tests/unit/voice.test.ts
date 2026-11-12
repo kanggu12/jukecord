@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { describe, it } from 'node:test';
 import { type AudioPlayer, AudioPlayerStatus, type AudioResource } from '@discordjs/voice';
+import type { Sound } from '../../src/core/sound.ts';
 import { VoiceOutput, type VoiceParts } from '../../src/discord/voice.ts';
 import { createLogger } from '../../src/log.ts';
 import { Ffmpeg } from '../../src/media/ffmpeg.ts';
@@ -139,6 +140,76 @@ describe('VoiceOutput pauses and broken starts', () => {
       output.start(media, 30_000, 2);
       await new Promise((resolve) => setTimeout(resolve, 100));
       output.stop();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('VoiceOutput and the sound of the voice channel', () => {
+  // An ffmpeg that is never there (nothing runs) and remembers which arguments the output asked it for.
+  function recording() {
+    const asked: string[] = [];
+    const ffmpeg = new Ffmpeg('/nonexistent/ffmpeg');
+    const seek = ffmpeg.seekArgs.bind(ffmpeg);
+    const sound = ffmpeg.soundArgs.bind(ffmpeg);
+    ffmpeg.seekArgs = (...args) => {
+      asked.push('seek');
+      return seek(...args);
+    };
+    ffmpeg.soundArgs = (...args) => {
+      asked.push(`sound ${args[1]} ${args[3]}`);
+      return sound(...args);
+    };
+    return { ffmpeg, asked };
+  }
+
+  it('sends the cached file as it is for the plain sound, and has ffmpeg make any other sound, from the top too', async () => {
+    const { audio, media, cleanup } = setup();
+    try {
+      const { ffmpeg, asked } = recording();
+      let current = { volume: 100, preset: 'off' } as Sound;
+      const output = new VoiceOutput({
+        ffmpeg,
+        log: createLogger({ level: 'error', sinks: [] }),
+        onEnded: () => {},
+        parts: {
+          createPlayer: () => audio as unknown as AudioPlayer,
+          createResource: (_stream: Readable, session: number) =>
+            ({ metadata: { session } }) as AudioResource<{ session: number }>,
+        },
+        sound: () => current,
+      });
+      output.start(media, 0, 1);
+      output.start(media, 30_000, 2);
+      current = { volume: 100, preset: 'bass' };
+      output.start(media, 0, 3);
+      output.start(media, 30_000, 4);
+      // Plain from the top: no ffmpeg. Plain from the middle: the seek. A sound: ffmpeg's sound, faded in mid-track.
+      assert.deepEqual(asked, ['seek', 'sound 0 false', 'sound 30000 true']);
+      // The stream says which sound it has, until it stops.
+      assert.deepEqual(output.streamSound(), { volume: 100, preset: 'bass' });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      output.stop();
+      assert.equal(output.streamSound(), null);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('VoiceOutput replaced the moment its ffmpeg failed to start', () => {
+  // Killing the handle of a process that never started ended this very test process with SIGKILL (Node 24.11).
+  it('stops without signalling a process that never started (that would end jukecord itself)', () => {
+    const { output, media, cleanup } = setup();
+    try {
+      (output as unknown as { ffmpeg: Ffmpeg }).ffmpeg = new Ffmpeg('/nonexistent/ffmpeg');
+      // A seek, then at once another start and a stop: the first ffmpeg's error is still on its way.
+      output.start(media, 30_000, 1);
+      output.start(media, 60_000, 2);
+      output.stop();
+      // Still here: this test process was not signalled.
+      assert.ok(true);
     } finally {
       cleanup();
     }

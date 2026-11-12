@@ -11,10 +11,14 @@
  * paused or not heard in this browser, or motion is off (the menu's switch, or the system's wish for less motion); the
  * light is then exactly as it is without this.
  *
- * The analyser reads a copy of the element's stream (captureStream): the sound itself never goes through WebAudio, so
- * it plays as it always has, in the background and on a locked phone. A browser without captureStream (Safari; and
- * Firefox, whose mozCaptureStream silences the element it copies) keeps the glow's slow breathing instead.
+ * The analyser reads a copy of the element's stream (captureStream): for the light, the sound itself never goes
+ * through WebAudio, so it plays as it always has, in the background and on a locked phone. Once the voice channel's
+ * sound has the element go through WebAudio (a preset, see sound.ts), the analyser reads the sound there instead, in
+ * the same AudioContext, before this browser's volume as the copy is; the context then stays awake for the sound when
+ * the light rests. A browser without captureStream (Safari; and Firefox, whose mozCaptureStream silences the element
+ * it copies) keeps the glow's slow breathing instead, until such a sound gives it the element's sound to read.
  */
+import { pageAudio, type SoundGraph } from '../sound.ts';
 import { state, watch } from '../state.ts';
 
 // The bins of the analyser that hold the low end: at 48 kHz and 1024 points each bin is 47 Hz wide, so bins 1 to 4
@@ -47,14 +51,21 @@ function moving(): boolean {
   return state.motion && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** Starts following the music of this browser's audio element (once, from the listening bar). */
-export function followMusic(audio: HTMLAudioElement): void {
-  // captureStream reads the element without taking its sound away; without it there is nothing to follow.
+/**
+ * Starts following the music of this browser's audio element (once, from the listening bar), read from the voice
+ * channel's sound graph of the same element once that has it.
+ */
+export function followMusic(audio: HTMLAudioElement, sound: SoundGraph): void {
+  // captureStream reads the element without taking its sound away; without it, only the sound graph has something to
+  // follow (once a preset hands the element over), and without WebAudio nothing does.
   const capture = (audio as HTMLAudioElement & { captureStream?: () => MediaStream }).captureStream;
-  if (typeof capture !== 'function' || typeof AudioContext === 'undefined') return;
+  if (typeof AudioContext === 'undefined') return;
+  const readable = () => sound.routed() || typeof capture === 'function';
   let context: AudioContext | null = null;
   let analyser: AnalyserNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
+  // The copy of the element's stream being read, stopped when another takes its place (each copy is fed until then).
+  let copy: MediaStream | null = null;
   let bins: Uint8Array<ArrayBuffer> | null = null;
   // The timer that reads the low end while the light follows it (0: not following).
   let timer = 0;
@@ -64,11 +75,12 @@ export function followMusic(audio: HTMLAudioElement): void {
   let peak = 0.25;
   let written = -1;
 
-  // The graph, made the first time it is needed (after the Listen key's press, which lets audio start): the copy of
-  // the stream into an analyser, and on into silence, so the browser keeps the analyser fed.
+  // The graph, made the first time it is needed (after the Listen key's press, which lets audio start), in the page's
+  // one context: the sound into an analyser, and on into silence, so the browser keeps the analyser fed.
   const graph = () => {
     if (context) return;
-    context = new AudioContext();
+    context = pageAudio();
+    if (!context) return;
     analyser = context.createAnalyser();
     analyser.fftSize = 1024;
     analyser.smoothingTimeConstant = 0.6;
@@ -78,13 +90,23 @@ export function followMusic(audio: HTMLAudioElement): void {
     analyser.connect(silent).connect(context.destination);
   };
 
-  // The element's stream as it is now: a new track (or a new place in it) is a new stream, read afresh.
+  // The element's sound as it is now: from the sound graph once the element is WebAudio's (while the light follows:
+  // the context runs for the sound then, and an analyser fed at rest would work for nothing), else a copy of its
+  // stream (a new track, or a new place in it, is a new stream, read afresh).
   const connect = () => {
     if (!context || !analyser) return;
     source?.disconnect();
     source = null;
+    for (const track of copy?.getTracks() ?? []) track.stop();
+    copy = null;
+    if (sound.routed()) {
+      if (timer) sound.tap(analyser);
+      return;
+    }
+    if (typeof capture !== 'function') return;
     const stream = capture.call(audio);
     if (stream.getAudioTracks().length === 0) return;
+    copy = stream;
     source = context.createMediaStreamSource(stream);
     source.connect(analyser);
   };
@@ -125,6 +147,7 @@ export function followMusic(audio: HTMLAudioElement): void {
   // Whether the light follows the music now, and starts or stops it to match.
   const follow = () => {
     const on =
+      readable() &&
       state.listening &&
       state.player?.status === 'playing' &&
       !audio.paused &&
@@ -132,17 +155,31 @@ export function followMusic(audio: HTMLAudioElement): void {
       moving();
     if (on && !timer) {
       graph();
+      timer = window.setInterval(tick, STEP_MS);
       if (!source) connect();
       void context?.resume();
-      timer = window.setInterval(tick, STEP_MS);
     } else if (!on && timer) {
       window.clearInterval(timer);
       timer = 0;
       rest();
-      // The audio graph sleeps too: nothing is computed while nothing moves.
-      void context?.suspend();
+      if (analyser) sound.untap(analyser);
+      // The audio graph sleeps too, nothing computed while nothing moves; unless the sound itself goes through it (a
+      // preset), which plays on. Handed over while it was falling asleep: woken again for the sound.
+      if (context && !sound.routed()) {
+        const sleeping = context;
+        void sleeping.suspend().then(() => {
+          if (sound.routed()) void sleeping.resume();
+        });
+      }
     }
   };
+
+  // The element handed to the sound graph: read there from now on (the copy let go). A browser without captureStream
+  // has had nothing to follow until now, and starts.
+  sound.whenRouted(() => {
+    connect();
+    follow();
+  });
 
   // A new file, or the element playing again after a pause or a seek: its stream is read afresh.
   audio.addEventListener('playing', () => {

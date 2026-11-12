@@ -203,6 +203,8 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     ),
   );
   const dj = h('div', { class: 'section', hidden: true });
+  // How the server's people share the music (its switches), under the DJ role they go with, for the same people.
+  const share = h('div', { class: 'section settings', hidden: true });
   // The alerts channel, under the DJ role, for the same people.
   const alerts = h('div', { class: 'section', hidden: true });
   const tokens = h('div', { class: 'section' });
@@ -240,22 +242,24 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   pages.hidden = guest;
   shortcuts.hidden = guest;
   fill(end, mayInvite() ? invite : null, shortcuts, out);
-  fill(body, who, pages, look, dj, alerts, tokens, end);
+  fill(body, who, pages, look, dj, share, alerts, tokens, end);
   // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
   // which runs in the same turn).
   if (focusLanguage) {
     queueMicrotask(() => language.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus());
   }
 
-  // The DJ role, for people who can manage the server (and only with Discord: browser-only has no roles).
+  // The DJ role, how the server's people share the music and the alerts channel, for people who can manage the server
+  // (and only with Discord: browser-only has no roles, the host alone and no voice channel).
   const guild = state.guild;
-  if (guild?.mayManage && state.status?.mode === 'discord') void drawSettings(dj, alerts, guild.id);
+  if (guild?.mayManage && state.status?.mode === 'discord') void drawSettings(dj, share, alerts, guild.id);
   void drawTokens(tokens);
 }
 
-// The server's settings, read once for both of their sections (a failure is said once, not once per section), and
-// read again after a choice in either.
-async function drawSettings(dj: HTMLElement, alerts: HTMLElement, guild: string): Promise<void> {
+// The server's settings, read once for all three of their sections (a failure is said once, not once per section),
+// and read again after a choice of the DJ role or the alerts channel. The switches keep their own state as they are
+// pressed (see switchLine), and are drawn again with the rest.
+async function drawSettings(dj: HTMLElement, share: HTMLElement, alerts: HTMLElement, guild: string): Promise<void> {
   let settings: Settings;
   try {
     settings = await api.settings(guild);
@@ -265,8 +269,9 @@ async function drawSettings(dj: HTMLElement, alerts: HTMLElement, guild: string)
   }
   // Switched to another server meanwhile: its own sections are drawn by its own menu.
   if (state.guild?.id !== guild) return;
-  const again = () => void drawSettings(dj, alerts, guild);
+  const again = () => void drawSettings(dj, share, alerts, guild);
   keepingChoice(dj, () => drawDj(dj, guild, settings, again));
+  drawShare(share, guild, settings);
   keepingChoice(alerts, () => drawAlerts(alerts, guild, settings, again));
 }
 
@@ -354,6 +359,76 @@ function drawAlerts(box: HTMLElement, guild: string, settings: Settings, again: 
     h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.alertsHint),
     option(null, words.alertsOff),
     ...settings.channels.map((channel) => option(channel.id, channel.name)),
+  );
+}
+
+// A setting that is on or off: its name and what it does, and its switch, saved at each press. A refusal puts the
+// switch back and says why.
+function switchLine(name: string, hint: string, on: boolean, save: (on: boolean) => Promise<unknown>): HTMLElement {
+  const toggle = h('button', {
+    class: 'switch',
+    type: 'button',
+    role: 'switch',
+    'aria-checked': String(on),
+    'aria-label': name,
+  });
+  toggle.onclick = async () => {
+    const next = toggle.getAttribute('aria-checked') !== 'true';
+    // Shown at once; not made busy (a disabled switch would drop the keyboard focus).
+    toggle.setAttribute('aria-checked', String(next));
+    if ((await act(null, () => save(next))) === undefined) toggle.setAttribute('aria-checked', String(!next));
+  };
+  return h(
+    'div',
+    { class: 'line' },
+    h('div', { class: 'grow' }, h('div', null, name), h('div', { class: 'faint' }, hint)),
+    toggle,
+  );
+}
+
+// The limit of tracks one person may have queued: a few choices in a row (none, 1, 2, 3, 5, 10), and the limit set by
+// other means (the command line, say) among them when it is none of those. Saved at each press; a refusal puts the
+// choice back and says why.
+function limitLine(current: number, save: (tracks: number) => Promise<unknown>): HTMLElement {
+  const words = t();
+  // The words a choice shows.
+  const label = (tracks: number) => (tracks === 0 ? words.noLimit : String(tracks));
+  const choices = [...new Set([0, 1, 2, 3, 5, 10, current])].sort((a, b) => a - b);
+  let chosen = current;
+  const row = segmented(
+    choices.map((tracks) => [String(tracks), label(tracks)] as [string, string]),
+    String(current),
+    async (value) => {
+      const before = chosen;
+      chosen = Number(value);
+      if ((await act(null, () => save(chosen))) !== undefined) return;
+      // Refused: the choice in use goes back to the one saved.
+      chosen = before;
+      for (const button of row.children)
+        button.setAttribute('aria-pressed', String(button.textContent === label(before)));
+    },
+    words.personLimit,
+  );
+  return h(
+    'div',
+    { class: 'line limit' },
+    h('div', { class: 'grow' }, h('div', null, words.personLimit), h('div', { class: 'faint' }, words.personLimitHint)),
+    row,
+  );
+}
+
+// How the server's people share the music: each setting saved as it is changed, for people who can manage the server.
+function drawShare(box: HTMLElement, guild: string, settings: Settings): void {
+  const words = t();
+  box.hidden = false;
+  fill(
+    box,
+    h('h3', null, words.serverSettings),
+    // Votes first, under the DJ role they go with; the queue's two rules next; staying in voice last.
+    switchLine(words.voteSkip, words.voteSkipHint, settings.voteSkip, (on) => api['vote-skip'](guild, on)),
+    switchLine(words.takeTurns, words.takeTurnsHint, settings.takeTurns, (on) => api['take-turns'](guild, on)),
+    limitLine(settings.personLimit, (tracks) => api['person-limit'](guild, tracks)),
+    switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
   );
 }
 

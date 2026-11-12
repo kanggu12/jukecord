@@ -94,7 +94,7 @@ from Discord.
 
 **Can people see servers they are not in?**
 No. A login sees only the servers it shares with the bot. Where a server has a DJ role, only its DJs and the people who
-can manage the server change the music; everyone else can look and listen.
+can manage the server change the music; everyone else can look and listen, and vote to skip while they listen.
 
 ## The project
 

@@ -9,7 +9,20 @@ import { ApiError, api, coverUrl, joinListen, type Player, setCsrf, whenLoggedOu
 import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
-import { collect, keep, liveWhy, mayControl, positionNow, state, t, update, watch } from './state.ts';
+import {
+  collect,
+  keep,
+  liveWhy,
+  mayControl,
+  maySkip,
+  NO_VOTES,
+  PLAIN,
+  positionNow,
+  state,
+  t,
+  update,
+  watch,
+} from './state.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { guestCard } from './views/guest.ts';
 import { lightField } from './views/light.ts';
@@ -17,7 +30,7 @@ import { listenBar } from './views/listen.ts';
 import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
-import { act, addCard, historyCard, nowCard, queueCard, voiceCard } from './views/player.ts';
+import { act, addCard, historyCard, nowCard, queueCard, skipOrVote, voiceCard } from './views/player.ts';
 import { addPage } from './views/shared.ts';
 import { wrappedPage } from './views/wrapped.ts';
 
@@ -476,7 +489,16 @@ function choose(id: string): void {
   // An open sheet (the menu with the old server's DJ role) belongs to the server it was opened for.
   closeSheets();
   everOpen = false;
-  update({ guild, player: null, queue: null, voice: null, listeners: { people: [], count: 0 }, history: [] });
+  update({
+    guild,
+    player: null,
+    queue: null,
+    voice: null,
+    listeners: { people: [], count: 0 },
+    history: [],
+    votes: NO_VOTES,
+    sound: PLAIN,
+  });
   live.show(guild.id);
   void refreshHistory();
 }
@@ -495,6 +517,10 @@ function receive(message: Record<string, unknown>): void {
         queue: message.queue as typeof state.queue,
         voice: message.voice as typeof state.voice,
         listeners: message.listeners as typeof state.listeners,
+        // A jukecord from before votes sends none: none open, and Skip is not a vote.
+        votes: (message.votes as typeof state.votes | undefined) ?? NO_VOTES,
+        // Nor, before the sound, a sound: the track as it is.
+        sound: (message.sound as typeof state.sound | undefined) ?? PLAIN,
       });
       // A whole state comes after (re)connecting: tracks may have played while this page was away.
       void refreshHistory(0);
@@ -519,6 +545,12 @@ function receive(message: Record<string, unknown>): void {
       return;
     case 'listeners':
       update({ listeners: message.listeners as typeof state.listeners });
+      return;
+    case 'votes':
+      update({ votes: message.votes as typeof state.votes });
+      return;
+    case 'sound':
+      update({ sound: message.sound as typeof state.sound });
       return;
   }
 }
@@ -573,6 +605,13 @@ function shortcuts(): void {
       (document.getElementById('add-input') as HTMLInputElement | null)?.focus();
       return;
     }
+    // N is Skip (read by its place too, see typed above), which someone without the DJ role may press as a vote where
+    // Skip is one.
+    if ((typed === 'n' || typed === 'N') && maySkip() && player?.track) {
+      event.preventDefault();
+      void skipOrVote(null);
+      return;
+    }
     if (!mayControl() || !player?.track) return;
     // Space on a key the keyboard reached presses that key (as everywhere); on a key last clicked with the mouse it
     // plays or pauses, rather than pressing Skip or Shuffle again.
@@ -584,9 +623,6 @@ function shortcuts(): void {
       event.preventDefault();
       const step = event.key === 'ArrowRight' ? 10_000 : -10_000;
       void act(null, () => api.seek(guild, Math.max(0, positionNow(player, live.now()) + step)));
-    } else if (typed === 'n' || typed === 'N') {
-      event.preventDefault();
-      void act(null, () => api.skip(guild));
     }
   });
 }
