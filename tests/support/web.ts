@@ -135,6 +135,13 @@ export interface TestServerOptions {
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
   readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
   readonly behind?: () => boolean;
+  /** Shorter request timeouts and a lower connection cap (to test them). */
+  readonly timeouts?: {
+    readonly requestMs?: number;
+    readonly headersMs?: number;
+    readonly checkEveryMs?: number;
+    readonly maxConnections?: number;
+  };
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -210,6 +217,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     ...(options.rates ? { rates: options.rates } : {}),
     // Never behind unless a test says so: a busy test machine must not make changes fail at random.
     behind: options.behind ?? (() => false),
+    ...(options.timeouts ? { timeouts: options.timeouts } : {}),
     ready: () => true,
     discordReady: () => !options.browserOnly,
     deps: {

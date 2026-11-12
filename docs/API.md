@@ -70,6 +70,10 @@ are not limited. While jukecord has fallen behind (its event loop more than 0.2 
 and changes are answered with `503` (`busy`) and `Retry-After`, until it has caught up. The host (its command line and
 the browsers it logged in with a link) is held to neither.
 
+A request must arrive whole within 30 s, its headers within 15 s; a slower one is answered `408` and its connection
+closed. Sending an answer has no time limit (audio to a slow line takes as long as it takes), nor has a WebSocket. At
+most 4096 connections are open at once; one more is closed as it arrives.
+
 ## Servers
 
 Operations on a server name it in the path: `/guilds/{guild}/...`, where `{guild}` is the Discord server's ID (turn on

@@ -55,6 +55,13 @@ export interface WebServerOptions {
   readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
   /** Whether jukecord has fallen behind and sheds what can wait (tests set it; by default the event loop says). */
   readonly behind?: () => boolean;
+  /** How long a request may take to arrive, and how many connections there may be (tests shorten and lower them). */
+  readonly timeouts?: {
+    readonly requestMs?: number;
+    readonly headersMs?: number;
+    readonly checkEveryMs?: number;
+    readonly maxConnections?: number;
+  };
 }
 
 export interface WebServer {
@@ -135,16 +142,30 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const hops = options.trustProxy;
   const trustProxy =
     typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : (hops as boolean | string);
+  const timeouts = options.timeouts ?? {};
   const app = Fastify({
     logger: false,
     trustProxy,
     // Requests are small JSON; a megabyte body is a mistake or an attack.
     bodyLimit: 64 * 1024,
+    // A request must have arrived whole within 30 s, its headers within 15 s, or it is answered 408 and its connection
+    // closed: a client that sends slowly (or never finishes) held its connection and its memory for good before. Only
+    // the request is timed: sending the answer is not (audio to a phone on a slow line takes as long as it takes),
+    // nor is a WebSocket once upgraded (tests/integration/server-limits.test.ts shows both).
+    requestTimeout: timeouts.requestMs ?? 30_000,
+    http: {
+      headersTimeout: timeouts.headersMs ?? 15_000,
+      // How often Node looks for requests over their time; the default (30 s) would let one run a minute.
+      connectionsCheckingInterval: timeouts.checkEveryMs ?? 5_000,
+    },
     ajv: {
       // Unknown body fields are dropped (the schemas say additionalProperties: false); query strings become numbers.
       customOptions: { removeAdditional: true, coerceTypes: 'array', useDefaults: true, allErrors: false },
     },
   });
+  // At most this many connections at once, of every kind (requests, audio, WebSockets): one more is closed as it
+  // arrives. Live connections have their own, lower cap (see events.ts), so the rest always has room.
+  app.server.maxConnections = timeouts.maxConnections ?? 4096;
   const hub = new EventHub({
     bus: options.bus,
     actions: deps.actions,
