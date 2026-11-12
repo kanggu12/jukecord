@@ -15,10 +15,11 @@ fullnameOverride: ""
 
 discord:
   # A Secret of yours with the key token (the pod does not start without it) and, for logging in with Discord,
-  # clientSecret (read when clientId is set). When set, the two values below are not used. Either way the chart mounts
-  # them as files that jukecord reads, not as variables, which yt-dlp and ffmpeg would inherit.
+  # clientSecret (read when clientId is set). The chart refuses it together with token or clientSecret below. Either
+  # way the chart mounts them as files that jukecord reads, not as variables, which yt-dlp and ffmpeg would inherit.
   existingSecret: ""
-  # The bot's token. Without one (and without existingSecret) jukecord runs browser-only.
+  # The bot's token. Without one (and without existingSecret) jukecord runs browser-only. The release's values (helm
+  # get values) then hold it too, which is why existingSecret is the better place.
   token: ""
   # The application's ID, for logging in with Discord.
   clientId: ""
@@ -29,11 +30,18 @@ discord:
 publicUrl: ""
 
 # Settings passed to jukecord as they are (JUKECORD_*; see docs/README.md), as strings: quote numbers and IDs, which
-# YAML would otherwise turn into floats. JUKECORD_HOST, JUKECORD_PORT and JUKECORD_DATA_DIR are the chart's. Example:
+# YAML would otherwise turn into floats. JUKECORD_HOST, JUKECORD_PORT, JUKECORD_DATA_DIR and the two *_FILE secrets
+# are the chart's, and the token and the OAuth secret go in discord above (the schema refuses them here). Example:
 #   JUKECORD_CACHE_MAX: 4GiB
 #   JUKECORD_QUEUE_MAX: "2000"
 #   JUKECORD_LOG_LEVEL: debug
 env: {}
+
+# More variables, written as Kubernetes writes them (name with value, or valueFrom a ConfigMap), for what env cannot
+# say: NODE_OPTIONS, TZ, HTTPS_PROXY. The names refused in env are refused here too. Example:
+#   - name: TZ
+#     value: Europe/Berlin
+extraEnv: []
 
 service:
   type: ClusterIP

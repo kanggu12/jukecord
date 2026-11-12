@@ -63,7 +63,24 @@ an ID it is not read at all (a file that is not there would stop jukecord at sta
 */}}
 {{- define "jukecord.readsClientSecret" -}}
 {{- if .Values.discord.existingSecret -}}
-{{- if or .Values.discord.clientId (hasKey .Values.env "JUKECORD_DISCORD_CLIENT_ID") -}}true{{- end -}}
+{{- if or .Values.discord.clientId (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID")) -}}true{{- end -}}
 {{- else if .Values.discord.clientSecret -}}true
+{{- end -}}
+{{- end -}}
+
+{{/* Whether env or extraEnv sets a variable, so the chart does not set it a second time: (list . "NAME"). */}}
+{{- define "jukecord.userSets" -}}
+{{- $root := index . 0 -}}
+{{- $name := index . 1 -}}
+{{- if hasKey $root.Values.env $name -}}true
+{{- else -}}
+{{- range $root.Values.extraEnv -}}{{- if eq .name $name -}}true{{- end -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Values that cannot work together, refused with a message that says what to change. */}}
+{{- define "jukecord.validate" -}}
+{{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}
+{{- fail "discord.existingSecret is set together with discord.token or discord.clientSecret, which would be ignored. Put the token and the OAuth secret in the Secret named by existingSecret and leave those two empty, or leave existingSecret empty to have the chart make the Secret from them." -}}
 {{- end -}}
 {{- end -}}

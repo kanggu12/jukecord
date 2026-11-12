@@ -250,6 +250,18 @@ describe('the Helm chart', () => {
     assert.throws(() =>
       execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', '--set', 'replica=2'], { stdio: 'pipe' }),
     );
+    // A secret in env, a name the chart sets in extraEnv, and a token beside an existing Secret are refused too.
+    for (const values of [
+      ['--set', 'env.JUKECORD_DISCORD_TOKEN=x'],
+      ['--set', 'extraEnv[0].name=JUKECORD_DISCORD_TOKEN_FILE', '--set', 'extraEnv[0].value=/x'],
+      ['--set', 'discord.existingSecret=s', '--set', 'discord.token=x'],
+    ]) {
+      assert.throws(
+        () => execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', ...values], { stdio: 'pipe' }),
+        Error,
+        values.join(' '),
+      );
+    }
     if (fs.existsSync('/usr/local/bin/kubeconform') || have('kubeconform')) {
       const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-chart-')), 'chart.yaml');
       fs.writeFileSync(file, rendered);

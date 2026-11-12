@@ -30,12 +30,50 @@
     "publicUrl": { "type": "string", "pattern": "^(|https?://[^\\s/]+(/.*)?)$" },
     "env": {
       "type": "object",
-      "description": "JUKECORD_* settings passed as they are, as strings (quote numbers and IDs); the port, the listening address and the data directory belong to the chart",
+      "description": "JUKECORD_* settings passed as they are, as strings (quote numbers and IDs); the port, the listening address, the data directory and the secret files belong to the chart, and the token and the OAuth secret go in discord",
       "propertyNames": {
         "pattern": "^JUKECORD_[A-Z_]+$",
-        "not": { "enum": ["JUKECORD_HOST", "JUKECORD_PORT", "JUKECORD_DATA_DIR"] }
+        "not": {
+          "enum": [
+            "JUKECORD_HOST",
+            "JUKECORD_PORT",
+            "JUKECORD_DATA_DIR",
+            "JUKECORD_DISCORD_TOKEN",
+            "JUKECORD_DISCORD_CLIENT_SECRET",
+            "JUKECORD_DISCORD_TOKEN_FILE",
+            "JUKECORD_DISCORD_CLIENT_SECRET_FILE"
+          ]
+        }
       },
       "additionalProperties": { "type": ["string", "boolean"] }
+    },
+    "extraEnv": {
+      "type": "array",
+      "description": "More variables as Kubernetes EnvVar objects (NODE_OPTIONS, TZ, HTTPS_PROXY, or a value from a ConfigMap); the names refused in env are refused here too",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "not": {
+              "enum": [
+                "JUKECORD_HOST",
+                "JUKECORD_PORT",
+                "JUKECORD_DATA_DIR",
+                "JUKECORD_DISCORD_TOKEN",
+                "JUKECORD_DISCORD_CLIENT_SECRET",
+                "JUKECORD_DISCORD_TOKEN_FILE",
+                "JUKECORD_DISCORD_CLIENT_SECRET_FILE"
+              ]
+            }
+          },
+          "value": { "type": "string" },
+          "valueFrom": { "type": "object" }
+        }
+      }
     },
     "service": {
       "type": "object",
