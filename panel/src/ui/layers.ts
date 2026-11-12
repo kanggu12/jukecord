@@ -73,15 +73,18 @@ function handOver(from: HTMLElement): void {
 
 /** Shows an error from an action as a toast, in the panel's language. */
 export function problem(error: unknown): void {
-  // jukecord's refusals come in short English; the same table as the bot's turns them into the person's language.
-  // A request that never reached jukecord (the browser's own "Failed to fetch") says so in the panel's words.
-  const message =
-    error instanceof ApiError
-      ? sayError(error.message, state.lang)
-      : error instanceof TypeError
-        ? t().networkFailed
-        : sayError(error instanceof Error ? error.message : String(error), state.lang);
-  toast(message, 'bad', 'circle-alert');
+  toast(messageOf(error), 'bad', 'circle-alert');
+}
+
+/**
+ * A refusal or a failure as people read it: jukecord's refusals come in short English, which the same table as the
+ * bot's turns into the person's language; a request that never reached jukecord (the browser's own "Failed to
+ * fetch") says so in the panel's words.
+ */
+export function messageOf(error: unknown): string {
+  if (error instanceof ApiError) return sayError(error.message, state.lang);
+  if (error instanceof TypeError) return t().networkFailed;
+  return sayError(error instanceof Error ? error.message : String(error), state.lang);
 }
 
 // The open layers (the sheet and dialogs over it), newest last. Escape closes the newest only, and Tab stays inside it:
@@ -318,8 +321,14 @@ function dialog<T>(
     off = push(box, () => finish(cancel));
     scrim.onclick = () => finish(cancel);
     document.body.append(scrim, box);
-    // The input, else the first choice of a list, else the first key (Cancel, in a question).
-    queueMicrotask(() => (box.querySelector('input, .choice, .key') as HTMLElement | null)?.focus());
+    // The input, else the first choice of a list, else the first key (Cancel, in a question): the first one that can
+    // take the focus (a list's first choice can be off: the queue's tools for someone who may only look), or the focus
+    // stayed on the key under the shade, and Enter opened the dialog again.
+    queueMicrotask(() =>
+      (
+        box.querySelector('input:not(:disabled), .choice:not(:disabled), .key:not(:disabled)') as HTMLElement | null
+      )?.focus(),
+    );
   });
 }
 

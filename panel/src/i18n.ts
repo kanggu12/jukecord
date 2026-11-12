@@ -173,7 +173,7 @@ const EN = {
   tileTracks: 'Different tracks',
   tilePeople: 'People who added',
   perDay: 'Plays per day',
-  perHour: 'Plays by hour of day',
+  perHour: 'Plays by hour of day (your time)',
   perWeek: 'Plays per week',
   table: 'Table',
   tableHint: 'Show as a table',
@@ -235,6 +235,14 @@ const EN = {
   alerts: 'Alerts channel',
   alertsHint: 'Where jukecord tells this server about trouble: YouTube refusing it, a restart, a full disk',
   alertsOff: 'Nowhere',
+  // An add that did not go through, under the field (the reason after it, in the panel's language).
+  couldNotAdd: (reason: string) => `Could not add: ${reason}`,
+  // The empty queue: what to add, and where.
+  queueEmptyHint: 'Add a link (YouTube, SoundCloud and more) or the name of a song above',
+  // The queue search's clear key.
+  clearSearch: 'Clear the search',
+  // Why the playlists' keys are off for someone who may only look.
+  playlistsLookOnly: 'Only the DJ role can load or change playlists in this server',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -405,7 +413,7 @@ const KO: Strings = {
   tileTracks: '곡 수',
   tilePeople: '추가한 사람',
   perDay: '일별 재생',
-  perHour: '시간대별 재생',
+  perHour: '시간대별 재생(내 시간 기준)',
   perWeek: '주별 재생',
   table: '표',
   tableHint: '표로 보기',
@@ -461,6 +469,10 @@ const KO: Strings = {
   alerts: '알림 채널',
   alertsHint: 'jukecord가 이 서버에 문제를 알릴 채널: YouTube 차단, 다시 시작, 디스크 부족 등',
   alertsOff: '알리지 않음',
+  couldNotAdd: (reason: string) => `추가하지 못함: ${reason}`,
+  queueEmptyHint: '위에서 링크(유튜브, 사운드클라우드 등)나 노래 제목으로 추가하세요',
+  clearSearch: '검색어 지우기',
+  playlistsLookOnly: '이 서버에서는 DJ 역할이 있는 사람만 플레이리스트를 불러오거나 바꿀 수 있음',
 };
 
 /** The languages. */

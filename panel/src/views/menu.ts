@@ -221,15 +221,13 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
 
   // The DJ role, for people who can manage the server (and only with Discord: browser-only has no roles).
   const guild = state.guild;
-  if (guild?.mayManage && state.status?.mode === 'discord') {
-    void drawDj(dj, guild.id);
-    void drawAlerts(alerts, guild.id);
-  }
+  if (guild?.mayManage && state.status?.mode === 'discord') void drawSettings(dj, alerts, guild.id);
   void drawTokens(tokens);
 }
 
-// The DJ role choice: everyone, or one role.
-async function drawDj(box: HTMLElement, guild: string): Promise<void> {
+// The server's settings, read once for both of their sections (a failure is said once, not once per section), and
+// read again after a choice in either.
+async function drawSettings(dj: HTMLElement, alerts: HTMLElement, guild: string): Promise<void> {
   let settings: Settings;
   try {
     settings = await api.settings(guild);
@@ -237,17 +235,42 @@ async function drawDj(box: HTMLElement, guild: string): Promise<void> {
     problem(error);
     return;
   }
+  // Switched to another server meanwhile: its own sections are drawn by its own menu.
+  if (state.guild?.id !== guild) return;
+  const again = () => void drawSettings(dj, alerts, guild);
+  keepingChoice(dj, () => drawDj(dj, guild, settings, again));
+  keepingChoice(alerts, () => drawAlerts(alerts, guild, settings, again));
+}
+
+// Draws a section of choices again and gives the keyboard's focus back to the same choice (by its data-choice): the
+// choice pressed is replaced by the drawing, and the focus fell to the page, the next Tab starting at the sheet's top.
+function keepingChoice(box: HTMLElement, draw: () => void): void {
+  const focused = document.activeElement instanceof HTMLElement && box.contains(document.activeElement);
+  const choice = focused ? (document.activeElement as HTMLElement).dataset.choice : undefined;
+  draw();
+  if (choice === undefined) return;
+  box.querySelector<HTMLElement>(`[data-choice="${CSS.escape(choice)}"]`)?.focus({ preventScroll: true });
+}
+
+// The DJ role choice: everyone, or one role.
+function drawDj(box: HTMLElement, guild: string, settings: Settings, again: () => void): void {
   const words = t();
   const choose = (roleId: string | null) => async () => {
     // A list left from another server (the server was switched meanwhile) changes nothing.
     if (state.guild?.id !== guild) return;
     const saved = await act(null, () => api['dj-role'](guild, roleId));
-    if (saved && state.guild?.id === guild) void drawDj(box, guild);
+    if (saved && state.guild?.id === guild) again();
   };
   const option = (id: string | null, name: string, color: number) => {
     const button = h(
       'button',
-      { class: 'choice', type: 'button', 'aria-pressed': String(settings.djRoleId === id) },
+      // data-choice: the choice found again after a drawing (keepingChoice); "" for everyone.
+      {
+        class: 'choice',
+        type: 'button',
+        'aria-pressed': String(settings.djRoleId === id),
+        dataset: { choice: id ?? '' },
+      },
       id
         ? h('span', {
             class: 'swatch',
@@ -271,25 +294,24 @@ async function drawDj(box: HTMLElement, guild: string): Promise<void> {
 }
 
 // The alerts channel: nowhere, or one of the text channels the bot may post in.
-async function drawAlerts(box: HTMLElement, guild: string): Promise<void> {
-  let settings: Settings;
-  try {
-    settings = await api.settings(guild);
-  } catch (error) {
-    problem(error);
-    return;
-  }
+function drawAlerts(box: HTMLElement, guild: string, settings: Settings, again: () => void): void {
   const words = t();
   const choose = (channelId: string | null) => async () => {
     // A list left from another server (the server was switched meanwhile) changes nothing.
     if (state.guild?.id !== guild) return;
     const saved = await act(null, () => api['alerts-channel'](guild, channelId));
-    if (saved && state.guild?.id === guild) void drawAlerts(box, guild);
+    if (saved && state.guild?.id === guild) again();
   };
   const option = (id: string | null, name: string) => {
     const button = h(
       'button',
-      { class: 'choice', type: 'button', 'aria-pressed': String(settings.alertsChannelId === id) },
+      // data-choice: the choice found again after a drawing (keepingChoice); "" for nowhere.
+      {
+        class: 'choice',
+        type: 'button',
+        'aria-pressed': String(settings.alertsChannelId === id),
+        dataset: { choice: id ?? '' },
+      },
       icon(id ? 'hash' : 'bell-off'),
       h('span', { class: 'grow' }, name),
       icon('check', 'check'),

@@ -47,6 +47,23 @@ export function fill(parent: Element, ...children: Child[]): void {
 }
 
 /**
+ * Turns a key off (or on again) by what it can do now. A disabled key cannot hold the keyboard's focus, which then fell
+ * to the page (Stop pressed by the keyboard, Skip on the last track, Clear): a key turned off while it has the focus
+ * hands it to the first of `instead` that can take it (on the page, not disabled).
+ */
+export function setOff(key: HTMLButtonElement, off: boolean, ...instead: (HTMLElement | null | undefined)[]): void {
+  // Whether this change takes the focus away from the key (not one it lost already).
+  const losing = off && !key.disabled && document.activeElement === key;
+  key.disabled = off;
+  if (!losing) return;
+  const next = instead.find(
+    (element): element is HTMLElement =>
+      element instanceof HTMLElement && !(element as HTMLButtonElement).disabled && element.getClientRects().length > 0,
+  );
+  next?.focus({ preventScroll: true });
+}
+
+/**
  * Runs `rebuild`, which replaces the rows of `list`, and gives the keyboard focus back to the same key of the same row:
  * the row is found by its data-id and the key by its data-key. A key that is no longer there (Play next on the row
  * that became first) or is hidden falls back to the row's link, never to a neighbouring key that does something else.

@@ -174,7 +174,9 @@ function frame(): void {
     'main',
     { class: 'main' },
     playerTitle,
-    h('div', { class: 'col' }, nowCard(live), queueCard(), addCard()),
+    // Adding comes right under what plays, above the queue: at the bottom of the queue it was a screen down on short
+    // windows and phones, and far from "add a track" on an empty queue.
+    h('div', { class: 'col' }, nowCard(live), addCard(), queueCard()),
     h('div', { class: 'col' }, voiceCard(), historyCard()),
   );
   // The cards rise into place once, when the panel opens; coming back from another page they are simply there.
@@ -473,13 +475,17 @@ function shortcuts(): void {
       return;
     const guild = state.guild?.id;
     const player = state.player;
-    if (event.key === '?') {
+    // The character the key types; in an input mode that types no Latin letters (Hangul reports "ㅜ" for N, or
+    // "Process"), the one its place types on a US keyboard instead. Only then: on Dvorak or Colemak the place of N types
+    // another letter (B, K), which must not skip the track for the whole server.
+    const typed = /^[\x20-\x7e]$/.test(event.key) ? event.key : placed(event.code, event.shiftKey);
+    if (typed === '?') {
       event.preventDefault();
       shortcutsDialog();
       return;
     }
     if (!guild || routeOf(location.pathname) !== 'player') return;
-    if (event.key === '/') {
+    if (typed === '/') {
       event.preventDefault();
       (document.getElementById('add-input') as HTMLInputElement | null)?.focus();
       return;
@@ -495,11 +501,19 @@ function shortcuts(): void {
       event.preventDefault();
       const step = event.key === 'ArrowRight' ? 10_000 : -10_000;
       void act(null, () => api.seek(guild, Math.max(0, positionNow(player, live.now()) + step)));
-    } else if (event.key === 'n' || event.key === 'N') {
+    } else if (typed === 'n' || typed === 'N') {
       event.preventDefault();
       void act(null, () => api.skip(guild));
     }
   });
+}
+
+// What a key types on a US keyboard, by its place (event.code), for the shortcuts' keys: N, / and ?. Hangul input
+// types / and ? as they are; N is the one it changes, but all three are here for any other input mode that does.
+function placed(code: string, shift: boolean): string | null {
+  if (code === 'KeyN') return shift ? 'N' : 'n';
+  if (code === 'Slash') return shift ? '?' : '/';
+  return null;
 }
 
 void boot();

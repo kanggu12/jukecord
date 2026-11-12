@@ -283,6 +283,20 @@ window.__audit = () => {
         strip.top <= bar.bottom + 0.5 &&
         strip.left <= 0.5 &&
         strip.right >= document.documentElement.clientWidth - 0.5;
+      // With a sheet open on a narrow window the strip hangs at the bottom of the window instead, right above the
+      // listening bar and as wide as the window: under the bar it covered the sheet's first row and close key.
+      const listen = document.querySelector('.listen')?.getBoundingClientRect();
+      const above =
+        strip &&
+        listen &&
+        document.querySelector('.sheet') &&
+        Math.abs(strip.bottom - listen.top) <= 1.5 &&
+        strip.left <= 0.5 &&
+        strip.right >= document.documentElement.clientWidth - 0.5;
+      if (above) {
+        if (a.top < strip.top - 0.5 || a.bottom > strip.bottom + 0.5) add('crossing', layer, 'outside its strip');
+        continue;
+      }
       const bottom = hanging ? strip.bottom : bar.bottom;
       if (a.top < bar.top - 0.5 || a.bottom > bottom + 0.5) add('crossing', layer, 'outside the top bar');
       continue;

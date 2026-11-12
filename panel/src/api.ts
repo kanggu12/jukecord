@@ -98,7 +98,15 @@ export async function request<T>(method: string, path: string, body?: unknown): 
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const text = await response.text();
-  const json = text ? (JSON.parse(text) as unknown) : null;
+  let json: unknown = null;
+  try {
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // Not jukecord's answer: a reverse proxy's or an Ingress's own page (an HTML 502 while jukecord restarts). Said
+    // in the panel's words with the status, where the parser's own error was shown before ("Unexpected token '<'").
+    if (response.status === 401) onLoggedOut();
+    throw new ApiError('no-answer', `jukecord did not answer (${response.status})`, response.status);
+  }
   if (!response.ok) {
     const error = (json as { error?: { code?: string; message?: string } } | null)?.error;
     if (response.status === 401) onLoggedOut();

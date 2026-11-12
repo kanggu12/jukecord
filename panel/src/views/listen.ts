@@ -10,7 +10,7 @@
  * a moment when the music is paused); the position is set once the file is known.
  */
 import { api, type Player } from '../api.ts';
-import { avatarUrl, face, fill, h, icon, refill } from '../dom.ts';
+import { avatarUrl, face, fill, h, icon, refill, setOff } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { act, disc } from './player.ts';
@@ -276,8 +276,9 @@ export function listenBar(live: Live): HTMLElement {
     label(pauseKey, moving ? 'pause' : 'play', pauseWords, false);
     skipKey.title = words.skip;
     skipKey.setAttribute('aria-label', words.skip);
-    pauseKey.disabled = !player || !mayControl() || (!player.track && !queued);
-    skipKey.disabled = !mayControl() || !player?.track;
+    // A key turned off with the focus on it (Skip on the last track) hands it to the other key, or to Listen here.
+    setOff(pauseKey, !player || !mayControl() || (!player.track && !queued), toggle);
+    setOff(skipKey, !mayControl() || !player?.track, pauseKey, toggle);
     // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
     bar.classList.toggle('idle', !player?.track);
     // Who else listens: the faces built again only when the people change (their pictures would load again).
