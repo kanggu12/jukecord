@@ -87,8 +87,18 @@ describe('documents', () => {
 describe('the image', () => {
   const dockerfile = read('deploy/docker/Dockerfile');
 
-  it('pins its base by digest and yt-dlp by version and checksum', () => {
-    assert.match(dockerfile, /^ARG NODE_IMAGE=node:26-[a-z-]+@sha256:[0-9a-f]{64}$/m);
+  it('pins its base by digest in FROM lines, where Dependabot reads it, and yt-dlp by version and checksum', () => {
+    // The base stage and the panel's stage (built for the build machine's processor) name the same image.
+    const bases = [...dockerfile.matchAll(/^FROM (?:--platform=\$BUILDPLATFORM )?(node:\S+) AS (\w+)$/gm)];
+    assert.deepEqual(
+      bases.map((match) => match[2]),
+      ['base', 'panel'],
+    );
+    assert.match(bases[0]?.[1] ?? '', /^node:26-[a-z-]+@sha256:[0-9a-f]{64}$/);
+    assert.equal(bases[1]?.[1], bases[0]?.[1], 'the panel stage builds on another base');
+    // Every other stage starts from the base stage, so one line sets the base for all of them.
+    for (const match of dockerfile.matchAll(/^FROM (?!node:|--platform)(\S+) AS \w+$/gm))
+      assert.equal(match[1], 'base');
     assert.match(dockerfile, /^ARG YTDLP_VERSION=\d{4}\.\d{2}\.\d{2}$/m);
     assert.match(dockerfile, /^ARG YTDLP_SHA256_AMD64=[0-9a-f]{64}$/m);
     assert.match(dockerfile, /^ARG YTDLP_SHA256_ARM64=[0-9a-f]{64}$/m);
@@ -214,6 +224,19 @@ describe('workflows and scripts', () => {
   it('has its shell scripts executable', () => {
     for (const file of ['jukecord', 'deploy/kind/check.sh', 'tests/ui/run.sh', '.github/badges.sh']) {
       assert.ok(fs.statSync(file).mode & 0o100, `${file} is not executable`);
+    }
+  });
+
+  it('watches every pin for a newer release: yt-dlp and FFmpeg weekly, the rest through Dependabot', () => {
+    assert.match(read('.github/workflows/ytdlp-release.yml'), /ARG YTDLP_VERSION=/);
+    assert.match(read('.github/workflows/ffmpeg-release.yml'), /ARG FFMPEG_VERSION=/);
+    const dependabot = read('.github/dependabot.yml');
+    for (const [ecosystem, directory] of [
+      ['github-actions', '/'],
+      ['docker', '/deploy/docker'],
+      ['npm', '/'],
+    ]) {
+      assert.match(dependabot, new RegExp(`- package-ecosystem: ${ecosystem}\\n {4}directory: ${directory}\\n`));
     }
   });
 });

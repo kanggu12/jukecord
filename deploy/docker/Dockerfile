@@ -10,14 +10,17 @@
 
 # Node 26 is the current LTS (from 2026-10-28) and Debian 13 (trixie) the current stable release. Pinned by the
 # multi-platform index digest, so a rebuild gets the same base on both architectures until it is bumped on purpose.
+# Written out here and in the panel's stage, not through an ARG: Dependabot reads only FROM lines when it proposes a
+# newer digest (.github/dependabot.yml).
 # Debian (glibc), not Alpine: musl's resolver has failed lookups in Kubernetes clusters, which the Helm chart targets.
-ARG NODE_IMAGE=node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
+FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS base
 
 # ---- yt-dlp ---------------------------------------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS ytdlp
+FROM base AS ytdlp
 # Set by buildx for each platform of a multi-platform build.
 ARG TARGETARCH
-# Bump all three together; the sums are the release's SHA2-256SUMS lines for the two .zip assets.
+# Bump all three together; the sums are the release's SHA2-256SUMS lines for the two .zip assets. A weekly check
+# (.github/workflows/ytdlp-release.yml) fails when a newer release is out.
 ARG YTDLP_VERSION=2026.10.26
 ARG YTDLP_SHA256_AMD64=f34053415136e55073dd64ba5326d161ecc23ce0e98c081d8752867b37809450
 ARG YTDLP_SHA256_ARM64=74708e707e8fa8177c8347e58152337edf320149cd7b225defd453f7cde47822
@@ -48,7 +51,7 @@ RUN set -eu; \
 # MP3 and PCM, and every outside library but the four below are left out. Debian's package brings the libraries of
 # every codec and device it supports (about 450 MB); this is a single program of a few dozen MB. No GPL parts:
 # LGPL-3.0-or-later (version 3 for OpenSSL's licence).
-FROM ${NODE_IMAGE} AS ffmpeg
+FROM base AS ffmpeg
 # Bump both together. The sum is of the release's .tar.xz, whose signature was checked against FFmpeg's release
 # signing key (FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8, https://ffmpeg.org/ffmpeg-devel.asc) when pinned.
 ARG FFMPEG_VERSION=7.1.5
@@ -84,7 +87,7 @@ RUN set -eu; \
     /opt/ffmpeg/bin/ffmpeg -hide_banner -protocols | grep -qx '  https'
 
 # ---- npm packages ---------------------------------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS deps
+FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Runtime packages only; install scripts off, since nothing jukecord uses needs one (native parts come prebuilt).
@@ -93,8 +96,9 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && mkdir -p node_mod
 
 # ---- the panel ------------------------------------------------------------------------------------------------------
 # Built once on the machine doing the build (it is plain JavaScript and CSS, the same for every architecture), with
-# the development packages (esbuild) that the image itself does not carry.
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS panel
+# the development packages (esbuild) that the image itself does not carry. The same base as above, for the machine's
+# own processor.
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS panel
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
@@ -103,7 +107,7 @@ COPY panel ./panel
 RUN node scripts/build-panel.ts
 
 # ---- the image ------------------------------------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS runtime
+FROM base AS runtime
 # Labels the registries and scanners read; the version and revision are passed by the release workflow.
 ARG VERSION=dev
 ARG REVISION=unknown

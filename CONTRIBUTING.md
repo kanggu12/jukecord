@@ -44,7 +44,22 @@ The image builds FFmpeg from its release source (the `ffmpeg` stage of `deploy/d
 move to a newer release, check the `.tar.xz` against its signature with FFmpeg's release key
 (https://ffmpeg.org/ffmpeg-devel.asc), set `FFMPEG_VERSION` and `FFMPEG_SHA256`, and build: the stage fails when the
 Opus or MP3 encoder or https is missing, and CI runs jukecord's three FFmpeg commands in the image. A weekly check
-(`ffmpeg-release.yml`) fails when a newer release of the pinned line (7.1) is out; that is the reminder to bump it.
+(`ffmpeg-release.yml`) fails when a newer release of the pinned line (7.1) is out; that is the reminder to bump it. A
+newer line (8.0 after 7.1) only adds a notice to that check's run: moving to it is a choice, with its own testing.
+
+## yt-dlp
+
+The image carries yt-dlp's official one-folder build of one release (the `ytdlp` stage of
+`deploy/docker/Dockerfile`), checked against the release's `SHA2-256SUMS`. To move to a newer release, set
+`YTDLP_VERSION` and the two sums, the lines for `yt-dlp_linux.zip` and `yt-dlp_linux_aarch64.zip` in that release's
+`SHA2-256SUMS`, and build. A weekly check (`ytdlp-release.yml`) fails when a newer release is out and prints those two
+lines. Sites change often, so an old yt-dlp soon stops finding tracks: bump it within the week.
+
+## Dependabot
+
+Once a week Dependabot proposes newer versions of the actions the workflows use, a newer digest of the Node base image
+(the `FROM` lines of the Dockerfile) and newer npm packages, each kind in one pull request; a new major version of an
+npm package comes on its own, and the next major version of Node is not proposed (moving to the next LTS is a decision).
 
 ## Versions and releases
 

@@ -1,7 +1,8 @@
 # Once a week: whether a newer FFmpeg release of the same line (7.1) is out than the one the image builds. FFmpeg reads
 # media from any site, so its fixes matter, and nothing else would say so: the image builds FFmpeg from a pinned
 # release instead of taking Debian's package. The check fails (red on the Actions page, and a notice to the repository's
-# owner) until FFMPEG_VERSION and FFMPEG_SHA256 are bumped (CONTRIBUTING.md, "FFmpeg").
+# owner) until FFMPEG_VERSION and FFMPEG_SHA256 are bumped (CONTRIBUTING.md, "FFmpeg"). A newer line (8.0 after 7.1)
+# only adds a notice to the run: moving to it is a choice to make, not a fix to take.
 name: ffmpeg-release
 
 on:
@@ -22,10 +23,18 @@ jobs:
         run: |
           pinned=$(sed -n 's/^ARG FFMPEG_VERSION=//p' deploy/docker/Dockerfile)
           line=${pinned%.*}
-          newest=$(curl -fsSL --retry 3 --max-time 60 https://ffmpeg.org/releases/ |
-            grep -oE "ffmpeg-${line//./\\.}(\.[0-9]+)?\.tar\.xz" | sed 's/^ffmpeg-//; s/\.tar\.xz$//' | sort -uV | tail -n 1)
-          echo "pinned: $pinned; newest of $line: ${newest:-none found}"
+          # Every release on the download page, oldest first.
+          releases=$(curl -fsSL --retry 3 --max-time 60 https://ffmpeg.org/releases/ |
+            grep -oE 'ffmpeg-[0-9]+(\.[0-9]+)+\.tar\.xz' | sed 's/^ffmpeg-//; s/\.tar\.xz$//' | sort -uV)
+          newest=$(printf '%s\n' "$releases" | grep -E "^${line//./\\.}(\.[0-9]+)?$" | tail -n 1)
+          # The newest release of any line, and its line (9.0 for 9.0.2).
+          latest=$(printf '%s\n' "$releases" | tail -n 1)
+          latest_line=$(printf '%s' "$latest" | cut -d. -f1-2)
+          echo "pinned: $pinned; newest of $line: ${newest:-none found}; newest of all: ${latest:-none found}"
           test -n "$newest"
+          if [ "$latest_line" != "$line" ] && [ "$(printf '%s\n%s\n' "$line" "$latest_line" | sort -V | tail -n 1)" = "$latest_line" ]; then
+            echo "::notice::FFmpeg $latest is out, of a newer line than $line, which the image builds; moving to it is a choice to make (CONTRIBUTING.md, FFmpeg)"
+          fi
           if [ "$newest" != "$pinned" ]; then
             echo "::error::FFmpeg $newest is out; the image builds $pinned (bump it: CONTRIBUTING.md, FFmpeg)"
             exit 1

@@ -1,0 +1,39 @@
+# Once a week: whether a newer yt-dlp release is out than the one the image carries. Sites change what yt-dlp has to
+# understand every few weeks, and an old yt-dlp stops finding tracks on them; nothing else would say so, since the
+# image pins one release by version and checksum (and Dependabot does not follow release files). The check fails (red
+# on the Actions page, and a notice to the repository's owner) until YTDLP_VERSION and its two sums are bumped
+# (CONTRIBUTING.md, "yt-dlp"); it prints the new release's sums for that.
+name: ytdlp-release
+
+on:
+  schedule:
+    - cron: "29 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: The newest yt-dlp release, against the pinned one
+        env:
+          # GitHub's API with this run's own token, which may ask more often than an anonymous caller.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(sed -n 's/^ARG YTDLP_VERSION=//p' deploy/docker/Dockerfile)
+          # The latest release is yt-dlp's stable one (its nightly builds are published from another repository).
+          newest=$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)
+          echo "pinned: ${pinned:-none found}; newest: ${newest:-none found}"
+          test -n "$pinned" && test -n "$newest"
+          # Versions are dates (2026.10.26), so the later one sorts last.
+          if [ "$newest" != "$pinned" ] && [ "$(printf '%s\n%s\n' "$pinned" "$newest" | sort -V | tail -n 1)" = "$newest" ]; then
+            echo "The new release's sums for YTDLP_SHA256_AMD64 and YTDLP_SHA256_ARM64:"
+            curl -fsSL --retry 3 --max-time 60 "https://github.com/yt-dlp/yt-dlp/releases/download/$newest/SHA2-256SUMS" |
+              grep -E ' yt-dlp_linux(_aarch64)?\.zip$' || true
+            echo "::error::yt-dlp $newest is out; the image carries $pinned (bump it: CONTRIBUTING.md, yt-dlp)"
+            exit 1
+          fi

@@ -1,0 +1,38 @@
+# Dependabot proposes newer versions once a week, in as few pull requests as it can: one for the actions the workflows
+# use, one for the Node base image's digest, and one for the npm packages (a new major version of a package, which can
+# break things, comes in a pull request of its own). Each pull request runs ci.yml, which builds and starts the image.
+# yt-dlp and FFmpeg are release files, not packages Dependabot knows: ytdlp-release.yml and ffmpeg-release.yml watch
+# those.
+version: 2
+updates:
+  # The actions in .github/workflows, by version tag or by commit (then with the version in a comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The FROM lines of deploy/docker/Dockerfile: a newer digest of node:26-trixie-slim (Node's and Debian's fixes).
+  - package-ecosystem: docker
+    directory: /deploy/docker
+    schedule:
+      interval: weekly
+    # The next major version of Node is a decision (the next LTS, with the tests run on it), not an update to take.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+    groups:
+      base-image:
+        patterns: ["*"]
+
+  # package.json and package-lock.json: the packages jukecord runs and the tools it is built and checked with.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
