@@ -34,6 +34,8 @@ The front door's other commands:
 | `./jukecord <command>`             | the [jukecord command](README.md#the-jukecord-command): `np`, `add`, `token create` ...                  |
 
 To use a released image instead of building one, set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.1.1` in `.env`.
+`gh attestation verify oci://ghcr.io/kanggu12/jukecord:0.1.1 --repo kanggu12/jukecord` checks that GitHub signed it as
+built by this repository's release workflow (the chart's `.tgz` from the release page is checked the same way).
 
 ### A second copy on the same machine
 

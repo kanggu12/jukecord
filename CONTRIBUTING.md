@@ -60,6 +60,8 @@ lines. Sites change often, so an old yt-dlp soon stops finding tracks: bump it w
 Once a week Dependabot proposes newer versions of the actions the workflows use, a newer digest of the Node base image
 (the `FROM` lines of the Dockerfile) and newer npm packages, each kind in one pull request; a new major version of an
 npm package comes on its own, and the next major version of Node is not proposed (moving to the next LTS is a decision).
+The two outside actions that run where a job's token may write, `softprops/action-gh-release` and `azure/setup-helm`,
+are pinned by commit with the release beside it in a comment; Dependabot moves both together.
 
 ## Versions and releases
 

@@ -365,15 +365,33 @@ describe('workflows and scripts', () => {
   it('pins every action to a release, and runs only scripts that exist', () => {
     for (const file of workflows) {
       const text = read(file);
-      for (const match of text.matchAll(/uses: ([^\s]+)/g)) {
+      for (const match of text.matchAll(/uses: ([^\s]+)(?: # (v\d+(?:\.\d+)*))?/g)) {
         const action = match[1] ?? '';
         if (action.startsWith('./')) assert.ok(fs.existsSync(action), `${file} uses ${action}, which is not there`);
+        // By commit, with the release it is beside it (Dependabot moves both), or by a release's tag.
+        else if (/@[0-9a-f]{40}$/.test(action)) assert.ok(match[2], `${file} pins ${action} without its version`);
         else assert.match(action, /@v\d+(\.\d+)*$/, `${file} uses ${action} without a release`);
       }
       for (const match of text.matchAll(/(?:^|\s)((?:deploy|tests|scripts)\/[\w./-]+\.(?:sh|ts|mjs))/gm)) {
         assert.ok(fs.existsSync(match[1] ?? ''), `${file} runs ${match[1]}, which is not there`);
       }
     }
+  });
+
+  it('pins by commit the outside actions that run with a token that may write, and checks before it publishes', () => {
+    for (const file of workflows) {
+      for (const match of read(file).matchAll(/uses: ((?:softprops\/action-gh-release|azure\/setup-helm)@\S+)/g)) {
+        assert.match(match[1] ?? '', /@[0-9a-f]{40}$/, `${file} uses ${match[1]} by a tag that can move`);
+      }
+    }
+    const release = read('.github/workflows/release.yml');
+    assert.match(release, /helm lint --strict /);
+    assert.match(release, /generate_release_notes: false/);
+    assert.match(read('.github/workflows/chart-e2e.yml'), /^ {2}pull_request:$/m);
+    assert.match(
+      read('.github/workflows/ci.yml'),
+      /docker run -d --name smoke --read-only --cap-drop ALL --security-opt no-new-privileges /,
+    );
   });
 
   it('has its shell scripts executable', () => {

@@ -155,7 +155,9 @@ jobs:
           subject-name: ghcr.io/${{ steps.v.outputs.owner }}/jukecord
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
-      - uses: azure/setup-helm@v5
+      # By commit, as is the release action below: both run where this job's token may write the release and the
+      # packages. Dependabot moves the commit and the version beside it together.
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v3.16.4
       - name: The Helm chart, pointing at this release's image
@@ -163,7 +165,7 @@ jobs:
           # values.yaml names the image this workflow publishes, so the chart in the checkout installs as it is; a fork
           # that releases under another owner changes it there, and this stops a chart that points elsewhere.
           test "$(sed -n 's/^  repository: //p' deploy/helm/jukecord/values.yaml)" = "ghcr.io/${{ steps.v.outputs.owner }}/jukecord"
-          helm lint deploy/helm/jukecord
+          helm lint --strict deploy/helm/jukecord
           helm package deploy/helm/jukecord --version "${{ steps.v.outputs.version }}" \
             --app-version "${{ steps.v.outputs.version }}" --destination dist
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -179,12 +181,13 @@ jobs:
           name: release-notes
           path: dist
       - name: GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           name: ${{ github.ref_name }}
           prerelease: ${{ steps.v.outputs.pre == 'true' }}
           body_path: dist/release-notes.md
-          generate_release_notes: true
+          # The notes are the version's CHANGELOG.md section alone, not followed by GitHub's list of pull requests.
+          generate_release_notes: false
           files: |
             dist/jukecord-${{ steps.v.outputs.version }}.tgz
             dist/SHA256SUMS

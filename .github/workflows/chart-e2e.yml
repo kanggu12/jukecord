@@ -1,11 +1,20 @@
 # The Helm chart on a throwaway kind cluster with the image built from this commit (deploy/kind/check.sh): helm test,
 # the jukecord command in the pod, data kept across a new pod, and the NetworkPolicy applied. It runs when the chart,
-# the image or the code inside it changes, by hand, and from release.yml before anything is published.
+# the image or the code inside it changes, on main and in pull requests (before such a change is merged, not after),
+# by hand, and from release.yml before anything is published.
 name: chart-e2e
 
 on:
   push:
     branches: [main]
+    paths:
+      - "deploy/**"
+      - "src/**"
+      - "panel/**"
+      - "package*.json"
+      - ".github/workflows/chart-e2e.yml"
+  # The same paths as above.
+  pull_request:
     paths:
       - "deploy/**"
       - "src/**"
@@ -37,7 +46,8 @@ jobs:
           load: true
           tags: jukecord:e2e
           cache-from: type=gha,scope=linux/amd64
-      - uses: azure/setup-helm@v5
+      # By commit, as in release.yml, where it runs with a token that may write.
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v3.16.4
       - name: kind, checked against its release's checksum
