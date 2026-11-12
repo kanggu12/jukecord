@@ -145,6 +145,31 @@ describe('Player repeat and a track that keeps failing', () => {
     assert.ok(snapshots.every((snapshot) => snapshot.notice === null));
   });
 
+  it('takes a track out of the loop when the others were fetched ahead of their turn (the prefetch, the usual case)', async () => {
+    const { clock, queue, media, player } = setup(3);
+    player.setRepeat('queue');
+    player.play();
+    // Tracks 1 and 2 come from the cache, where the prefetcher put them from their site meanwhile (it tells the player,
+    // see Prefetcher); Track 3 fails on its own (a 403), pass after pass.
+    for (let step = 0; step < 12; step += 1) {
+      const call = media.last();
+      if (call.track.title === 'Track 3') {
+        call.reject(new Error('ERROR: [youtube] abc: Unable to download webpage: HTTP Error 403: Forbidden'));
+        await flush();
+      } else {
+        player.fetchedAhead();
+        media.finish(SONG, step > 0);
+        await flush();
+        await clock.advance(SONG);
+      }
+    }
+    // The site works (the others were fetched from it), the track does not: out of the loop on its second failure.
+    assert.deepEqual(
+      [player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)].sort(),
+      ['Track 1', 'Track 2'],
+    );
+  });
+
   it('says that a track was taken out of the loop, until a person changes the player', async () => {
     const { clock, queue, media, player } = setup(2);
     player.setRepeat('queue');

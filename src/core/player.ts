@@ -593,6 +593,15 @@ export class Player {
     );
   }
 
+  /**
+   * A track of this server was fetched from its site ahead of its turn (the prefetcher): the site works, as when the
+   * player fetches one itself. The prefetched track reaches the player from the cache later, which shows nothing; not
+   * counted, a looping queue's track that failed on its own was fetched again on every pass, never taken out.
+   */
+  fetchedAhead(): void {
+    this.readyCount += 1;
+  }
+
   // The current track is ready: start it (or hold it paused) at the place asked for.
   private ready(media: PreparedMedia): void {
     this.cancelLoad();

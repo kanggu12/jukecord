@@ -158,8 +158,11 @@ export class Prefetcher {
       plan.fetching = key;
       try {
         // Ahead of time: it takes its turn among every server's fetches, after any track somebody waits for.
-        await this.options.media.prepare(next, abort.signal, undefined, 'ahead');
+        const media = await this.options.media.prepare(next, abort.signal, undefined, 'ahead');
         done.add(key);
+        // Fetched from its site just now (not found in the cache meanwhile): the server's player counts it as proof that
+        // the site works, as one it fetched itself (see Player.fetchedAhead).
+        if (!media.fromCache) this.options.players.existing(guildId)?.fetchedAhead();
       } catch (error) {
         if (abort.signal.aborted) return;
         plan.failed.set(key, clock.steady());
