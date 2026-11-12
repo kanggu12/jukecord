@@ -14,6 +14,8 @@ import { PRESET_STAGES, type SoundPreset, type SoundStage } from '../../src/core
 
 export class SoundGraph {
   private readonly audio: HTMLAudioElement;
+  // Told when the browser starts or stops letting WebAudio make sound (a phone locked or unlocked, a call).
+  private readonly changed: () => void;
   // Made in the first press of the Listen key, where the browser allows it to run.
   private context: AudioContext | null = null;
   // The element as WebAudio's source, and this browser's volume at the end; null until a preset first needs them.
@@ -24,20 +26,36 @@ export class SoundGraph {
   private preset: SoundPreset = 'off';
   private volume = 1;
 
-  constructor(audio: HTMLAudioElement) {
+  constructor(audio: HTMLAudioElement, changed: () => void = () => {}) {
     this.audio = audio;
+    this.changed = changed;
   }
 
   /** In the press of the Listen key: makes the context, or wakes it, while the browser allows it. */
   unlock(): void {
     // Browsers without WebAudio play the track as it is.
     if (typeof AudioContext === 'undefined') return;
-    this.context ??= new AudioContext();
+    if (!this.context) {
+      this.context = new AudioContext();
+      // A phone suspends WebAudio when it locks or takes a call, where a plain element would play on: the listening
+      // bar then asks for a press of Listen, which wakes it (see held).
+      this.context.onstatechange = () => this.changed();
+    }
+    this.wake();
+  }
+
+  /** Wakes the context made earlier, where the browser allows it without a press (the page shown again, a media key). */
+  wake(): void {
     // Running once the browser says so: then a preset on (now or later) can be applied.
-    this.context.resume().then(
+    this.context?.resume().then(
       () => this.apply(),
       () => {},
     );
+  }
+
+  /** Whether this browser's sound goes through WebAudio and the browser holds that back now: nothing is heard. */
+  held(): boolean {
+    return this.source !== null && this.context?.state !== 'running';
   }
 
   /** The voice channel's preset, from the server: applied at once where the context runs, else at the next press. */

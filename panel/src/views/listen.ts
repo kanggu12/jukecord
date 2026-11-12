@@ -29,8 +29,9 @@ export function listenBar(live: Live): HTMLElement {
   audio.hidden = true;
   audio.id = 'listen-audio';
   document.body.append(audio);
-  // The voice channel's preset, applied to this element with WebAudio (see sound.ts), and this browser's volume.
-  const sound = new SoundGraph(audio);
+  // The voice channel's preset, applied to this element with WebAudio (see sound.ts), and this browser's volume. When
+  // the browser holds WebAudio back or lets it go again, the bar looks again (see align).
+  const sound = new SoundGraph(audio, () => align());
   sound.setVolume(state.volume);
   // Opus in Ogg where the browser plays it; older Safari does not, and gets MP3.
   let format: 'opus' | 'mp3' = audio.canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'mp3';
@@ -85,6 +86,12 @@ export function listenBar(live: Live): HTMLElement {
     if (!player?.track || player.status === 'idle' || player.status === 'loading') {
       audio.pause();
       setSync('waiting');
+      return;
+    }
+    // The sound goes through WebAudio, which the browser holds back now (a locked phone, a call): nothing is heard
+    // until a press of the key, which wakes it.
+    if (sound.held()) {
+      setSync('blocked');
       return;
     }
     const url = source(player);
@@ -177,7 +184,11 @@ export function listenBar(live: Live): HTMLElement {
   const session = 'mediaSession' in navigator ? navigator.mediaSession : null;
   const guild = () => state.guild?.id ?? '';
   if (session) {
-    session.setActionHandler('play', () => void act(null, () => api.resume(guild())));
+    // A media key counts as a press: it also wakes WebAudio, where the voice channel's sound goes through it.
+    session.setActionHandler('play', () => {
+      sound.wake();
+      void act(null, () => api.resume(guild()));
+    });
     session.setActionHandler('pause', () => void act(null, () => api.pause(guild())));
     // Skip, or a vote to skip where it is one (see skipOrVote).
     session.setActionHandler('nexttrack', () => void skipOrVote(null));
@@ -342,6 +353,10 @@ export function listenBar(live: Live): HTMLElement {
   });
   // The voice channel's preset, in this browser too.
   watch(['sound'], () => sound.setPreset(state.sound.preset));
+  // The page shown again (a phone unlocked): WebAudio is woken where the browser allows it without a press.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sound.wake();
+  });
   watch(
     ['player', 'listeners', 'lang', 'listening', 'volume', 'me', 'guild', 'status', 'queue', 'voice', 'votes'],
     draw,
