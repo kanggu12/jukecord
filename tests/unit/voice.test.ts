@@ -144,3 +144,21 @@ describe('VoiceOutput pauses and broken starts', () => {
     }
   });
 });
+
+describe('VoiceOutput replaced the moment its ffmpeg failed to start', () => {
+  // Killing the handle of a process that never started ended this very test process with SIGKILL (Node 24.11).
+  it('stops without signalling a process that never started (that would end jukecord itself)', () => {
+    const { output, media, cleanup } = setup();
+    try {
+      (output as unknown as { ffmpeg: Ffmpeg }).ffmpeg = new Ffmpeg('/nonexistent/ffmpeg');
+      // A seek, then at once another start and a stop: the first ffmpeg's error is still on its way.
+      output.start(media, 30_000, 1);
+      output.start(media, 60_000, 2);
+      output.stop();
+      // Still here: this test process was not signalled.
+      assert.ok(true);
+    } finally {
+      cleanup();
+    }
+  });
+});

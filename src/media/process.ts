@@ -107,7 +107,8 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
         if (child.pid === undefined) throw new Error('no pid');
         process.kill(-child.pid, 'SIGKILL');
       } catch {
-        if (child.exitCode === null) child.kill('SIGKILL');
+        // A process that never started has no ID, and killing its handle can end jukecord itself (see VoiceOutput).
+        if (child.pid !== undefined && child.exitCode === null) child.kill('SIGKILL');
       }
     };
     // Abort and time limit both end in a kill; the reason decides the error message.

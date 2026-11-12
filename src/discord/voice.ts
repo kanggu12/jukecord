@@ -146,7 +146,10 @@ export class VoiceOutput implements PlayerOutput {
 
   // Closes what fed the previous resource: the file handle or the ffmpeg process.
   private release(): void {
-    this.process?.kill('SIGKILL');
+    // Only a process that started has an ID to kill. One that could not start (no such program, no processes left)
+    // still has a handle until its error is told, a moment later, and killing that handle ended jukecord's own process
+    // (Node 24, a stream replaced at once: tests/unit/voice.test.ts).
+    if (this.process?.pid !== undefined) this.process.kill('SIGKILL');
     this.process = null;
     this.stream?.destroy();
     this.stream = null;
