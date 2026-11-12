@@ -199,6 +199,10 @@ export class EventHub {
   // Open connections per login and per address, for the caps.
   private readonly perLogin = new Map<string, number>();
   private readonly perAddress = new Map<string, number>();
+  // Connections refused since the log last said so, and when that was: a crowd knocking again and again is told in
+  // the log once a minute, not once per knock.
+  private refused = 0;
+  private refusedToldAt = Number.NEGATIVE_INFINITY;
   private readonly heartbeat: NodeJS.Timeout;
   // The bus listeners, kept to remove them on close.
   private readonly off: (() => void)[] = [];
@@ -272,13 +276,20 @@ export class EventHub {
             ? 'too many live connections from this address; close a tab or two'
             : null;
     if (refusal) {
-      // 1013: try again later. Said in the log too, with a hint for the usual cause of the per-address one.
-      this.options.log.info('refused a live connection', {
-        reason: refusal,
-        ...(address !== null && refusal.includes('address')
-          ? { hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY so each browser has its own address' }
-          : {}),
-      });
+      // 1013: try again later. Said in the log too, at most once a minute with how many there were, and with a hint
+      // for the usual cause of the per-address one.
+      this.refused += 1;
+      if (Date.now() - this.refusedToldAt >= 60_000) {
+        this.options.log.info('refused live connections', {
+          count: this.refused,
+          last: refusal,
+          ...(address !== null && refusal.includes('address')
+            ? { hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY so each browser has its own address' }
+            : {}),
+        });
+        this.refused = 0;
+        this.refusedToldAt = Date.now();
+      }
       socket.close(1013, refusal);
       return false;
     }

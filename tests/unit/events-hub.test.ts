@@ -303,7 +303,8 @@ describe('EventHub', () => {
   });
 
   it('names the first twenty listeners, counts every browser, and tells a crowd at most once a second', async () => {
-    const { events } = hub({}, { listenersEveryMs: 200 });
+    // The interval as jukecord has it: thirty presses fit well inside a second even on a slow machine.
+    const { events } = hub({}, { listenersEveryMs: 1000 });
     const watcher = socket();
     events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     const people = Array.from({ length: 30 }, () => socket());
@@ -318,7 +319,7 @@ describe('EventHub', () => {
       browser.say({ type: 'listening', on: true });
       await settle(2);
     }
-    await settle(300);
+    await settle(1100);
     const told = watcher.of('listeners').map((message) => message.listeners as { people: unknown[]; count: number });
     // The first press is told at once and the rest together, instead of thirty messages that each name everyone.
     assert.ok(told.length <= 3, `${told.length} listener messages`);

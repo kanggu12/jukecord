@@ -293,6 +293,9 @@ describe('live connections are capped', () => {
         code: 1013,
         reason: 'jukecord has as many live connections as it allows',
       });
+      // Three refusals, one line in the log (a crowd knocking again and again must not fill it).
+      const told = server.logs.records.filter((record) => record.msg === 'refused live connections');
+      assert.equal(told.length, 1);
       // A tab closed frees its place.
       const [tab] = sockets;
       tab?.close();
