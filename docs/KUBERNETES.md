@@ -232,8 +232,9 @@ policy controller is on (it is by default in current k3s).
 ## Testing the chart
 
 `deploy/kind/check.sh` builds nothing itself: give it an image built from your checkout, and it installs the chart on a
-throwaway kind cluster, runs `helm test`, checks the jukecord command and the API, that the data survives a new pod, and
-that the NetworkPolicy keeps the pod away from another pod's port, then deletes the cluster.
+throwaway kind cluster, runs `helm test`, checks the jukecord command and the API, that the data survives a new pod,
+that the NetworkPolicy keeps the pod away from another pod's port while it still reaches the internet (it fetches
+example.com), and that an uninstall keeps the volume for a reinstall, then deletes the cluster.
 
 ```bash
 docker build -f deploy/docker/Dockerfile -t jukecord:dev .

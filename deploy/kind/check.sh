@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The Helm chart on a throwaway kind cluster, with an image built from this checkout: what only a running cluster
 # shows. It installs the chart (browser-only: no bot token), runs `helm test`, checks the panel and the jukecord
-# command through the cluster, that the data survives a new pod, and that the NetworkPolicy keeps the pod away from
-# the cluster's private networks. The cluster is deleted at the end, whatever happened.
+# command through the cluster, that the data survives a new pod, that the NetworkPolicy keeps the pod away from the
+# cluster's private networks while names resolve and the internet stays in reach, and that an uninstall keeps the
+# volume for a reinstall to pick up. The cluster is deleted at the end, whatever happened.
 #
 #   deploy/kind/check.sh [image]        (default jukecord:dev; build it with docker build -f deploy/docker/Dockerfile)
 #
@@ -78,5 +79,34 @@ if [ "$rc" != 3 ]; then
   exit 1
 fi
 echo "jukecord's pod does not: blocked, as it should be"
+
+say "the NetworkPolicy: names resolve and the internet is in reach"
+# What the policy must let through, or the tracks and Discord would be out of reach as well: a name looked up through
+# the cluster's DNS and a public address fetched (example.com, kept for examples by IANA). Tried a few times: a policy
+# takes a moment to apply and a network a moment to answer. A policy that shut everything out would pass the check
+# above and fail here.
+out="fetch('https://example.com/',{signal:AbortSignal.timeout(8000)}).then(r=>process.exit(r.status<500?0:1),()=>process.exit(3))"
+reached=1
+for _ in 1 2 3; do
+  if kubectl -n "$namespace" exec "deploy/$release" -- node -e "$out"; then
+    reached=0
+    break
+  fi
+  sleep 3
+done
+if [ "$reached" != 0 ]; then
+  echo "jukecord's pod cannot fetch https://example.com: the policy (or the cluster's own network) shuts the internet out" >&2
+  exit 1
+fi
+echo "jukecord's pod reaches https://example.com"
+
+say "an uninstall keeps the volume, and a reinstall picks it up"
+helm uninstall "$release" --namespace "$namespace" --wait
+kubectl -n "$namespace" get pvc
+helm install "$release" deploy/helm/jukecord --namespace "$namespace" \
+  --set image.repository="$repository" --set image.tag="$tag" --set image.pullPolicy=Never \
+  --set persistence.size=1Gi --wait --timeout 180s >/dev/null
+kubectl -n "$namespace" exec "deploy/$release" -- jukecord token list | grep -q e2e
+echo "the token made before the uninstall is still there"
 
 say "all good"
