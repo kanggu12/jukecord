@@ -21,6 +21,15 @@ All notable changes to jukecord are documented here. The format is based on
   counter; every server then came back paused. A look that itself comes late now starts the count again.
 - What Discord said about a person in a server is reused for a minute and then dropped; it was kept until the next
   start, one entry for every person who had opened the panel, in every server.
+- A track that failed on every pass of a looping queue was fetched again on every pass, for as long as the loop ran.
+  It now gets one more pass, and leaves the loop when it fails again while other tracks play.
+- The reasons a track could not be got: an age-restricted video was taken for YouTube's bot check (and kept in a
+  looping queue), YouTube's bot check itself read as "it could not be downloaded", and a video for Premium members,
+  one locked by DRM, a page withheld for legal reasons (451) and a file too large were kept in a looping queue to be
+  fetched again. A premiere or a live stream still to come now says that it has not started yet.
+- The live hub, the rate limits and the bot's "listening to" line timed their waits by the system clock: set back (by
+  hand, or by NTP after a machine slept), it stopped queue changes reaching open panels, and a login waited out the
+  difference on 429s. They time by a clock that only goes forward.
 
 ## [0.2.0] - 2026-11-12
 

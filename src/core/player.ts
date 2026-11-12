@@ -153,6 +153,10 @@ export class Player {
   // should put them back (one already back in a looping queue, or gone from it for good, is not put back twice). A
   // person's action (play, skip, stop ...) starts the count again.
   private failedInRow: { track: Track; addedBy: string | null; putBack: boolean }[] = [];
+  // The tracks of a looping queue that failed on their last pass and went back for one more (see failed): by track
+  // id, how many tracks had got ready when it failed. Tracks got ready so far, counted for that.
+  private failedLastPass = new Map<number, number>();
+  private readyCount = 0;
   // Restarts of outputs that ended early, counted per session (see outputEnded).
   private earlySession = -1;
   private earlyRestarts = 0;
@@ -372,6 +376,8 @@ export class Player {
   setRepeat(mode: RepeatMode): boolean {
     if (mode === this.repeat) return false;
     this.repeat = mode;
+    // The failures of an earlier loop do not count against a later one.
+    this.failedLastPass.clear();
     this.emit();
     return true;
   }
@@ -519,8 +525,11 @@ export class Player {
   private ready(media: PreparedMedia): void {
     this.cancelLoad();
     this.media = media;
-    // A track got ready: the count of failures in a row starts again.
+    // A track got ready: the count of failures in a row starts again, and a failure of this one on an earlier pass of
+    // a looping queue is forgotten.
     this.failedInRow = [];
+    this.readyCount += 1;
+    if (this.current) this.failedLastPass.delete(this.current.track.id);
     // A restored position past the end of the file (the file changed) starts from the top instead.
     this.offsetMs = this.startAtMs < media.durationMs ? this.startAtMs : 0;
     this.error = null;
@@ -553,10 +562,27 @@ export class Player {
     this.error = `${track.title}: ${plainReason(reason)}`;
     const addedBy = this.current?.addedBy ?? null;
     // A looping queue keeps a track that failed once (a network blip, a site's bad minute): it goes back to the end,
-    // as a finished one would. Only a failure that will not change (removed, private, not playable) takes it out of
-    // the loop for good. Either way a stop below has nothing more to put back for it.
+    // as a finished one would. A failure that will not change (removed, private, not playable) takes it out of the
+    // loop for good, and so does a second failure of the same track on its next pass while other tracks got ready
+    // meanwhile: the site works, but not for this one, and it would otherwise be fetched again on every pass for as
+    // long as the loop runs. When nothing got ready in between, the trouble is the network or the site, which the
+    // count of failures in a row below is for. Either way a stop below has nothing more to put back for it.
     const looping = this.repeat === 'queue';
-    if (looping && !permanentFailure(reason)) this.options.queue.add(this.guildId, [track.id], 'end', addedBy);
+    if (looping) {
+      const permanent = permanentFailure(reason);
+      const before = this.failedLastPass.get(track.id);
+      if (!permanent && (before === undefined || before === this.readyCount)) {
+        this.options.queue.add(this.guildId, [track.id], 'end', addedBy);
+        this.failedLastPass.set(track.id, this.readyCount);
+      } else {
+        this.failedLastPass.delete(track.id);
+        this.options.log.info('took a track out of the looping queue', {
+          guild: this.guildId,
+          track: track.url,
+          why: permanent ? 'it will not work' : 'it failed on two passes in a row',
+        });
+      }
+    }
     this.failedInRow.push({ track, addedBy, putBack: !looping });
     // Three in a row, or a queue that ran out on failures (one or two tracks during an outage), stops the player
     // instead of moving on: moving on would leave an empty queue and lose the tracks that failed.
@@ -570,6 +596,7 @@ export class Player {
       // order, for when it works again.
       const failed = this.failedInRow.filter((entry) => entry.putBack);
       this.failedInRow = [];
+      this.failedLastPass.clear();
       for (const entry of [...failed].reverse())
         this.options.queue.add(this.guildId, [entry.track.id], 'next', entry.addedBy);
       this.finishCurrent(false);

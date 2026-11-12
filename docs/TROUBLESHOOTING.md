@@ -18,9 +18,16 @@ message comes back.
 
 ## A track does not play
 
-The error under the title says why (the site's own message, from yt-dlp). Common ones: the video is private or
-deleted, it is only available in other countries, or it is longer than `JUKECORD_TRACK_MAX`. A failure that looks
+The error under the title says why, in a few words: the video is unavailable (private, deleted, age-restricted, for
+members only, or not in this country), it has not started yet (a premiere, a live stream to come), there is nothing
+to play at that address, or the site answered with an error. The site's own message, from yt-dlp, is in the log
+(`./jukecord logs`). A track longer than `JUKECORD_TRACK_MAX` is refused when it is added. A failure that looks
 passing (a 5xx answer, a timeout) is tried once more by itself.
+
+A looping queue (repeat: the queue) keeps a track that failed for its next pass, and lets it go when it fails again
+on that pass while other tracks play, or at once when the failure will not change (removed, private, nothing to
+play). Three tracks in a row that fail stop the player and leave the queue as it was: then the network or the site
+is the cause, not the tracks.
 
 ## The bot does not join or is silent
 

@@ -84,6 +84,62 @@ describe('Player repeat', () => {
   });
 });
 
+describe('Player repeat and a track that keeps failing', () => {
+  it('gives a track of a looping queue one more pass after a failure, and takes it out after a second', async () => {
+    const { clock, queue, media, player } = setup(2);
+    player.setRepeat('queue');
+    player.play();
+    // Pass after pass: Track 1 never comes (a site that refuses it for now), Track 2 plays to its end.
+    const fetches: string[] = [];
+    for (let pass = 0; pass < 4 && media.calls.length < 20; pass += 1) {
+      for (let step = 0; step < 2; step += 1) {
+        const call = media.last();
+        fetches.push(call.track.title);
+        if (call.track.title === 'Track 1') {
+          call.reject(new Error('HTTP Error 503: Service Unavailable'));
+          await flush();
+        } else {
+          media.finish(SONG);
+          await flush();
+          await clock.advance(SONG);
+        }
+        if (player.snapshot().status === 'idle') break;
+      }
+    }
+    // Fetched twice (the first pass and the one more), then out of the loop: Track 2 goes on alone.
+    assert.equal(fetches.filter((title) => title === 'Track 1').length, 2, fetches.join(', '));
+    media.finish(SONG);
+    await flush();
+    assert.equal(player.snapshot().status, 'playing');
+    assert.deepEqual(
+      [player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)],
+      ['Track 2'],
+    );
+  });
+
+  it('keeps a track in the loop that failed once and then played', async () => {
+    const { clock, queue, media, player } = setup(2);
+    player.setRepeat('queue');
+    player.play();
+    // Track 1 fails once, Track 2 plays, Track 1 plays on its next pass, Track 2 plays, and Track 1 fails once more.
+    media.last().reject(new Error('HTTP Error 503: Service Unavailable'));
+    await flush();
+    for (let step = 0; step < 3; step += 1) {
+      media.finish(SONG);
+      await flush();
+      await clock.advance(SONG);
+    }
+    assert.equal(media.last().track.title, 'Track 1');
+    media.last().reject(new Error('HTTP Error 503: Service Unavailable'));
+    await flush();
+    // It had played since its first failure, so this is a first failure again: it stays for one more pass.
+    assert.deepEqual(
+      [player.snapshot().track?.title, ...queue.list(GUILD).map((item) => item.track.title)],
+      ['Track 2', 'Track 1'],
+    );
+  });
+});
+
 describe('Player loading progress', () => {
   it('shows how much is downloaded while loading, at most four times a second, and nothing once playing', async () => {
     const { clock, media, player, snapshots } = setup(1);
