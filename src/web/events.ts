@@ -67,10 +67,19 @@ export interface LiveLimits {
   readonly perLogin: number;
   /** From one address (an IPv6 address by its /56, as the login limiter counts). */
   readonly perAddress: number;
+  /**
+   * How long the connections that hold a cap's places have to answer a ping after a new one was turned away for it,
+   * before the ones that did not are closed (tests shorten it).
+   */
+  readonly probeMs?: number;
 }
 
 /** The limits unless the settings say otherwise: a thousand in all, ten tabs per login, twenty per address. */
 export const DEFAULT_LIVE_LIMITS: LiveLimits = { total: 1000, perLogin: 10, perAddress: 20 };
+
+// How long a probed connection has to answer (see LiveLimits.probeMs): a pong comes back in a fraction of a second
+// from a browser that is there, even on a slow phone line.
+const PROBE_MS = 5000;
 
 // One open connection.
 interface Client {
@@ -89,6 +98,8 @@ interface Client {
   listening: boolean;
   // Set by every pong; cleared by every ping. Still clear at the next ping means the browser is gone.
   alive: boolean;
+  // When the last pong came (on the steady clock; at first, when it connected), for the probes at a cap.
+  pongAt: number;
   // Counts subscribes: one that finishes after a newer one began is dropped, so the last server asked for wins.
   asking: number;
   // The newest queue version it has, so a combined queue message is not sent to a panel whose state already had it.
@@ -205,6 +216,8 @@ export class EventHub {
   // the log once a minute, not once per knock.
   private refused = 0;
   private refusedToldAt = Number.NEGATIVE_INFINITY;
+  // The probes under way, by the cap they are for (see probe), so a crowd knocking again does not ping again.
+  private readonly probing = new Map<string, NodeJS.Timeout>();
   private readonly heartbeat: NodeJS.Timeout;
   // The bus listeners, kept to remove them on close.
   private readonly off: (() => void)[] = [];
@@ -293,6 +306,16 @@ export class EventHub {
         this.refusedToldAt = steadyNow();
       }
       socket.close(1013, refusal);
+      // The places may be held by tabs whose browser is gone without a goodbye (the network lost), which the
+      // heartbeat finds only within a minute: those that hold this cap's places are pinged now, and the ones that do
+      // not answer are let go, so that the panel's next try, a little later, gets in.
+      if (refusal.includes('login')) {
+        this.probe(`login ${login}`, (other) => other.login === login);
+      } else if (refusal.includes('address')) {
+        this.probe(`address ${address}`, (other) => other.address === address);
+      } else {
+        this.probe('all', () => true);
+      }
       return false;
     }
     const person = principal.kind === 'user' ? this.options.users.get(principal.userId) : null;
@@ -311,6 +334,7 @@ export class EventHub {
       guild: null,
       listening: false,
       alive: true,
+      pongAt: steadyNow(),
       asking: 0,
       queueVersion: -1,
     };
@@ -319,6 +343,7 @@ export class EventHub {
     if (address !== null) this.perAddress.set(address, (this.perAddress.get(address) ?? 0) + 1);
     socket.on('pong', () => {
       client.alive = true;
+      client.pongAt = steadyNow();
     });
     socket.on('message', (data) => void this.onMessage(client, String(data)));
     socket.on('close', () => this.drop(client));
@@ -326,6 +351,31 @@ export class EventHub {
     this.send(client, { type: 'hello', serverTime: this.now(), you: who });
     if (options.guild) void this.subscribe(client, options.guild);
     return true;
+  }
+
+  // Pings the connections that match, unless they were pinged for the same cap within the last probe, and closes the
+  // ones that have not answered when the probe's time is up. The heartbeat's own marks are left alone.
+  private probe(key: string, holds: (client: Client) => boolean): void {
+    if (this.probing.has(key)) return;
+    const started = steadyNow();
+    const probed = [...this.clients].filter(holds);
+    for (const client of probed) {
+      try {
+        client.socket.ping();
+      } catch {
+        // A socket that cannot take a ping is as good as gone: it is closed below with the others that did not answer.
+      }
+    }
+    const timer = setTimeout(() => {
+      this.probing.delete(key);
+      for (const client of probed) {
+        if (!this.clients.has(client) || client.pongAt >= started) continue;
+        client.socket.terminate();
+        this.drop(client);
+      }
+    }, this.limits.probeMs ?? PROBE_MS);
+    timer.unref();
+    this.probing.set(key, timer);
   }
 
   /** The people listening in a browser to a server (the first twenty), and how many browsers that is. */
@@ -360,6 +410,8 @@ export class EventHub {
     this.clients.clear();
     this.perLogin.clear();
     this.perAddress.clear();
+    for (const timer of this.probing.values()) clearTimeout(timer);
+    this.probing.clear();
   }
 
   // One message from a browser. Anything unexpected is ignored: a panel from a newer version may say more.

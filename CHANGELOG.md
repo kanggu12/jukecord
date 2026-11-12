@@ -38,6 +38,10 @@ All notable changes to jukecord are documented here. The format is based on
 - Reads were not limited, and the heavier ones (a year of statistics, 20 ms each) sent in a burst by one member held
   the event loop until the watchdog ended jukecord. Reads are now held to thirty a second with sixty at once, per login
   and per address; a panel reads a handful when it opens and gets the rest over its live connection.
+- Tabs whose browser was gone without a goodbye (the network lost, a laptop shut) held their login's places until
+  the heartbeat found them, up to a minute, so the same browser coming back was told to close a tab or two. A
+  connection turned away at a cap now has the ones holding that cap's places pinged, and those that do not answer
+  within five seconds are let go: the panel's next try gets in.
 - A stop waited for any audio answer still under way, which lasts as long as a browser takes to read it, and so ran
   into its ten seconds and ended without leaving voice or closing the database. What is still under way two seconds
   into the stop is now cut.

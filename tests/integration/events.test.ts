@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import net from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { EVENTS_VERSION } from '../../src/web/events.ts';
 import {
@@ -258,7 +259,61 @@ describe('live connections from an address that failed to log in too often', () 
   });
 });
 
+// A live connection whose browser is gone without a goodbye (the network lost, a laptop shut): the upgrade is made,
+// and then nothing more is read or answered, pings included. Resolves once the upgrade is through.
+function silentTab(url: string, cookie: string): Promise<net.Socket> {
+  const { hostname, port } = new URL(url);
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(Number(port), hostname, () => {
+      socket.write(
+        'GET /api/v1/events HTTP/1.1\r\n' +
+          `Host: ${hostname}:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+          `Sec-WebSocket-Key: ${crypto.randomBytes(16).toString('base64')}\r\nSec-WebSocket-Version: 13\r\n` +
+          `Cookie: ${cookie}\r\nOrigin: ${url}\r\n\r\n`,
+      );
+    });
+    socket.once('data', (data) => {
+      if (!data.toString('latin1').startsWith('HTTP/1.1 101')) reject(new Error(data.toString('latin1')));
+      // From here on it is silent.
+      socket.pause();
+      resolve(socket);
+    });
+    socket.on('error', () => {});
+  });
+}
+
 describe('live connections are capped', () => {
+  it('make room for a tab of a login whose other tabs are gone without a goodbye, within moments', async () => {
+    const server = await testServer({ listen: true, live: { perLogin: 2, probeMs: 300 } });
+    const silent: net.Socket[] = [];
+    const sockets: Socket[] = [];
+    try {
+      server.directory.join(GUILD, ALICE);
+      const alice = sessionFor(server, ALICE);
+      // Two tabs whose browser lost the network: they still hold the login's two places.
+      silent.push(await silentTab(server.url, alice.cookie), await silentTab(server.url, alice.cookie));
+      const base = `${server.url.replace('http://', 'ws://')}/api/v1/events`;
+      const open = () => {
+        const socket = new Socket(base, { cookie: alice.cookie, origin: server.url });
+        sockets.push(socket);
+        return socket;
+      };
+      // The browser comes back: its new tab is over the cap for now, and that wakes the two up with a ping.
+      assert.deepEqual(await open().closed, {
+        code: 1013,
+        reason: 'too many live connections for this login; close a tab or two',
+      });
+      // They do not answer, so they are let go; the next try, as the panel makes it by itself, gets in.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await open().next('hello');
+      assert.equal(server.web.hub.counts().connections, 1);
+    } finally {
+      for (const socket of sockets) socket.close();
+      for (const socket of silent) socket.destroy();
+      await server.close();
+    }
+  });
+
   it('in all, per login and per address, closing the one over a cap with 1013 and why; the host counts in all only', async () => {
     const server = await testServer({ listen: true, live: { total: 4, perLogin: 2, perAddress: 3 } });
     const sockets: Socket[] = [];
