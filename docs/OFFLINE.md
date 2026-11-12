@@ -1,6 +1,7 @@
 # jukecord without the internet
 
-jukecord runs without a network connection, with fewer things working:
+For hosts whose machine or cluster cannot reach the internet: what still works, and how to bring the image, the chart
+and the data in.
 
 | Works                                                  | Needs the internet                                             |
 | :----------------------------------------------------- | :------------------------------------------------------------- |
@@ -9,13 +10,12 @@ jukecord runs without a network connection, with fewer things working:
 | the queue, history, playlists and statistics           | thumbnails and avatars (they come from the sites)              |
 | the host's login links                                 | checking for a newer yt-dlp (`doctor` says it could not check) |
 
-Without a bot token jukecord runs browser-only, which needs no Discord at all; that is also how its tests run.
+Without a bot token jukecord runs browser-only and needs no Discord at all, which is also how its tests run.
 
 ## Building the image without the internet
 
-The image build downloads the Node base image, FFmpeg's source and the libraries it is built with, the npm packages
-and yt-dlp's release. To run it on a
-machine without access, build on one with access and move the image, with a copy of this repository:
+The build downloads the Node base image, FFmpeg's source and the libraries it is built with, the npm packages and
+yt-dlp's release. Build on a machine with access, and carry the image over with a copy of this repository:
 
 ```bash
 docker build -f deploy/docker/Dockerfile -t jukecord:local .
@@ -25,11 +25,11 @@ gunzip -c jukecord.tar.gz | docker load
 ./jukecord up
 ```
 
-`compose.yaml` uses `jukecord:local` by default, so `./jukecord up` uses the loaded image without building.
+`compose.yaml` uses `jukecord:local` by default, so `./jukecord up` runs the loaded image without building.
 
-A released image works the same way: `docker pull ghcr.io/kanggu12/jukecord:0.3.0` on the machine with access, save
-and load it as above, and set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.3.0` in `.env`. The image is built for amd64
-and arm64; to carry it to a machine of the other kind, pull it with `--platform linux/arm64` (or `linux/amd64`).
+A released image works the same way: `docker pull ghcr.io/kanggu12/jukecord:0.3.0` where there is access, save and
+load it as above, and set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.3.0` in `.env`. The image is built for amd64 and
+arm64; for a machine of the other kind, pull it with `--platform linux/arm64` (or `linux/amd64`).
 
 ## On Kubernetes without the internet
 
@@ -50,6 +50,5 @@ helm install jukecord ./jukecord-0.3.0.tgz -n jukecord --create-namespace \
 
 ## Moving the data
 
-The data is one folder (`/data` in the container, the `jukecord_jukecord-data` volume with Compose).
-`./jukecord backup` makes a copy of the database to move; the cache can be left behind (tracks are fetched again when
-played).
+The data is one folder: `/data` in the container, the `jukecord_jukecord-data` volume with Compose. `./jukecord backup`
+makes a copy of the database to carry; the cache can stay behind, since tracks are fetched again when played.

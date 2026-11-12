@@ -1,92 +1,97 @@
 # Troubleshooting
 
-Start with `./jukecord doctor` (or `jukecord doctor` inside the pod): it checks the data directory, the database,
-ffmpeg, yt-dlp, the cache, Discord and the login, and says which part fails.
+For the host, when something does not work. Start with `./jukecord doctor` (inside a pod, `jukecord doctor`): it
+checks the data directory, the database, ffmpeg, yt-dlp, the cache, Discord and the login, and says which part fails.
 
 ## "Sign in to confirm you're not a bot"
 
-YouTube asks machines it distrusts (often servers and VPNs) to sign in. Give yt-dlp the cookies of a browser that is
+YouTube asks machines it distrusts, often servers and VPNs, to sign in. Give yt-dlp the cookies of a browser that is
 signed in to YouTube:
 
 1. In that browser, export the cookies for youtube.com in Netscape format (a "cookies.txt" export extension does it).
-2. Put the file where jukecord can read it. With Compose, copy it into the volume (Docker gives the copy the source's
-   permissions, so make it readable first): `chmod 644 cookies.txt && docker compose cp cookies.txt jukecord:/data/cookies.txt`.
-3. Set `JUKECORD_YTDLP_COOKIES=/data/cookies.txt` in `.env` and `./jukecord up`.
+2. With Compose, copy the file into the volume. Docker gives the copy the file's own permissions, so make it readable
+   first:
 
-jukecord gives yt-dlp a private copy, so the file itself is never changed. Cookies expire; export them again when the
+   ```bash
+   chmod 644 cookies.txt && docker compose cp cookies.txt jukecord:/data/cookies.txt
+   ```
+
+3. Set `JUKECORD_YTDLP_COOKIES=/data/cookies.txt` in `.env`, then run `./jukecord up`.
+
+jukecord gives yt-dlp a private copy, so the file itself never changes. Cookies expire: export them again when the
 message comes back.
 
 ## A track does not play
 
-The error under the title says why, in a few words: the video is unavailable (private, deleted, age-restricted, for
-members only, or not in this country), it has not started yet (a premiere, a live stream to come), there is nothing
-to play at that address, or the site answered with an error. The site's own message, from yt-dlp, is in the log
-(`./jukecord logs`). A track longer than `JUKECORD_TRACK_MAX` is refused when it is added. A failure that looks
-passing (a 5xx answer, a timeout) is tried once more by itself.
+The error under the title says why: the video is unavailable (private, deleted, age-restricted, for members only, or
+not in this country), it has not started yet (a premiere, a live stream to come), there is nothing to play at that
+address, or the site answered with an error. The site's own message, from yt-dlp, is in `./jukecord logs`.
 
-A looping queue (repeat: the queue) keeps a track that failed for its next pass, and lets it go when it fails again
-on that pass while other tracks play, or at once when the failure will not change (removed, private, nothing to
-play). Three tracks in a row that fail stop the player and leave the queue as it was: then the network or the site
-is the cause, not the tracks.
+- A failure that looks passing (a 5xx answer, a timeout) is tried once more by itself.
+- A track longer than `JUKECORD_TRACK_MAX` is refused when it is added.
+- A looping queue keeps a failed track for its next pass, and lets it go when it fails again there, or at once when
+  the failure will not change (removed, private, nothing to play).
+- Three tracks in a row that fail stop the player and leave the queue as it was: the network or the site is then the
+  cause.
 
 ## The bot does not join or is silent
 
-- It needs the **View Channels**, **Connect** and **Speak** permissions in that channel; jukecord says so when one is
+- It needs the **View Channels**, **Connect** and **Speak** permissions in that channel; jukecord says which one is
   missing.
-- Voice uses UDP to Discord's voice servers. A firewall or a NetworkPolicy that allows only TCP 443 out lets the bot
-  log in and join, but no sound arrives. The chart's policy allows the internet on every port.
+- Voice uses UDP to Discord's voice servers. A firewall or a NetworkPolicy that lets only TCP 443 out lets the bot log
+  in and join, but no sound arrives. The chart's policy allows the internet on every port.
 - `JUKECORD_LOG_LEVEL=debug` logs how much sound went out at the end of each track (`voice stream ended ... sentMs`).
 
 ## "Listen here" stays silent
 
-Browsers play sound only after a click on the page; press **Listen here** again if the bar says the browser held the
-sound back. Safari versions without Ogg Opus get the MP3 copy automatically.
+Browsers play sound only after a click on the page: press **Listen here** again if the bar says the browser held the
+sound back. Safari versions without Ogg Opus get an MP3 copy by themselves.
+
+## Logging in with Discord fails
+
+- **A `redirect_uri` error**: **Redirects** must hold exactly `<JUKECORD_PUBLIC_URL>/auth/callback`, or
+  `http://localhost:<JUKECORD_PORT>/auth/callback` without a public address.
+- **"You are not in a server that jukecord is in"**: the bot must be in a server you are a member of.
+- **Behind a reverse proxy**: set `JUKECORD_PUBLIC_URL` to the proxy's address, and `JUKECORD_TRUST_PROXY=1`.
 
 ## "Too many live connections"
 
 The panel says why jukecord turned its live connection away, and tries again by itself a little later.
 
-- "from this address": every browser seems to come from one address, which is what a reverse proxy looks like when
-  jukecord is not told about it. Set `JUKECORD_TRUST_PROXY` (`1` for one proxy in front) so each browser counts as
-  itself; twenty connections per address are allowed.
-- "for this login": one browser (or one API token) has ten live connections open already; close a few of its tabs.
-- "jukecord has as many live connections as it allows": `JUKECORD_LIVE_MAX` (1000 by default) are open. A machine
-  that can take more can be given a higher one.
-
-## "jukecord cannot reach the internet"
-
-Adding or playing a track says so when the machine jukecord runs on reaches no site: no name server answers, there is
-no route out, or a proxy refuses the connection. `./jukecord doctor` checks yt-dlp's release on GitHub, which fails the
-same way; once the network is back, adding works again (a track that failed in a looping queue stays in it).
+- **"from this address"**: every browser seems to come from one address, which is how a reverse proxy looks when
+  jukecord is not told about it. Set `JUKECORD_TRUST_PROXY` (`1` for one proxy) so each browser counts as itself;
+  twenty connections per address are allowed.
+- **"for this login"**: one browser or API token has ten live connections open; close a few of its tabs.
+- **"jukecord has as many live connections as it allows"**: `JUKECORD_LIVE_MAX` (1000) are open. A machine that can
+  take more can be given a higher one.
 
 ## "Turned connections away from one address at its cap"
 
 jukecord takes at most 256 connections from one address. The address in the log line is where they came from: a
 reverse proxy on the same machine, or Docker's bridge (`172.17.0.1`, how a client of the host looks inside the
 container), carries every browser on one address. With `JUKECORD_TRUST_PROXY` set, each browser counts by its own
-address for the rates and the live connections, and the proxy's address may have 3840 (all but a sixteenth of the
-4096 jukecord takes: the rest stay for health checks and other clients).
+address for the rates and the live connections, and the proxy's address may have 3840: all but a sixteenth of the 4096
+jukecord takes, the rest staying free for health checks and other clients.
 
-## Logging in with Discord fails
+## "jukecord cannot reach the internet"
 
-- `redirect_uri` errors: the address in **Redirects** must be exactly `<JUKECORD_PUBLIC_URL>/auth/callback` (or
-  `http://localhost:<JUKECORD_PORT>/auth/callback` without a public address).
-- "You are not in a server that jukecord is in": the bot must be in a server you are a member of.
-- Behind a reverse proxy, set `JUKECORD_PUBLIC_URL` to the proxy's address and `JUKECORD_TRUST_PROXY=1`.
+Adding or playing a track says so when the machine reaches no site: no name server answers, there is no route out, or
+a proxy refuses the connection. `./jukecord doctor` fails the same way on yt-dlp's release on GitHub. Once the network
+is back, adding works again; a track that failed in a looping queue stays in it.
 
 ## jukecord does not start
 
-It prints every settings problem at once and exits with code 2. Another message to look for: "the database is at schema
-N, newer than this jukecord knows": a newer jukecord wrote it; run the newer version or restore a backup.
+It prints every settings problem at once and exits with code 2. "the database is at schema N, newer than this jukecord
+knows" means a newer jukecord wrote it: run the newer version, or restore a backup.
 
 ## jukecord started again by itself
 
-`the main thread has not answered for 30 s; ending the process so that it is started again` in `./jukecord logs -f`
-(the console), and `the watchdog ended the last run` in `./jukecord logs` once it is back, mean jukecord was stuck and
-ended itself, so that Docker's restart policy (or Kubernetes) would start it again: Docker restarts a container that
-exits, not one that hangs. Every server comes back paused where it was, and a server with an alerts channel is told.
-The lines before it say what it was doing; please put them in an issue.
+`the main thread has not answered for 30 s; ending the process so that it is started again` in `./jukecord logs -f`,
+and `the watchdog ended the last run` in `./jukecord logs` once it is back, mean jukecord was stuck and ended itself, so
+that Docker's restart policy or Kubernetes would start it again: Docker restarts a container that exits, not one that
+hangs. Every server comes back paused where it was, and a server with an alerts channel is told. The lines before it
+say what it was doing; please put them in an issue.
 
 ## The port is taken
 
-Set another one: `JUKECORD_PORT=8796` in `.env`, then `./jukecord up`.
+Set another in `.env`, for example `JUKECORD_PORT=8796`, then run `./jukecord up`.
