@@ -156,6 +156,8 @@ export function statsPage(): HTMLElement {
   const drawRange = () => {
     const words = t();
     title.textContent = words.stats;
+    // The row of choices named for screen readers, as the menu's are.
+    range.setAttribute('aria-label', words.statsRange);
     fill(
       range,
       ...(
@@ -451,6 +453,8 @@ export function logsPage(): HTMLElement {
     const words = t();
     title.textContent = words.logs;
     list.setAttribute('aria-label', words.logs);
+    // The row of choices named for screen readers, as the menu's are.
+    levels.setAttribute('aria-label', words.logLevel);
     fill(
       levels,
       ...(

@@ -3,7 +3,7 @@
  * browser's choices (theme, language, motion), the server's DJ role, API tokens, the shortcuts and logging out.
  */
 import { api, logOut, type Settings, type Token } from '../api.ts';
-import { avatarUrl, face, fill, guildIconUrl, h, icon } from '../dom.ts';
+import { avatarUrl, face, fill, guildIconUrl, h, icon, keepingFocus } from '../dom.ts';
 import { pickLang } from '../i18n.ts';
 import { keep, state, t, update } from '../state.ts';
 import { confirmDialog, problem, sheet, showDialog } from '../ui/layers.ts';
@@ -40,9 +40,14 @@ export function serversSheet(choose: (id: string) => void): void {
   );
 }
 
-// A row of choices where one is on (theme, language).
-function segmented<T extends string>(options: [T, string][], current: T, choose: (value: T) => void): HTMLElement {
-  const box = h('div', { class: 'seg', role: 'group' });
+// A row of choices where one is on (theme, language), named for screen readers (two of them have an "Auto").
+function segmented<T extends string>(
+  options: [T, string][],
+  current: T,
+  choose: (value: T) => void,
+  name: string,
+): HTMLElement {
+  const box = h('div', { class: 'seg', role: 'group', 'aria-label': name });
   for (const [value, label] of options) {
     const button = h('button', { type: 'button', 'aria-pressed': String(value === current) }, label);
     button.onclick = () => {
@@ -71,7 +76,7 @@ export interface MenuHooks {
   closed(): void;
 }
 
-export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks): void {
+export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, focusLanguage = false): void {
   const words = t();
   const { body, close } = sheet({ label: words.menu, ...(hooks ? { onClose: hooks.closed } : {}) });
   hooks?.opened();
@@ -111,6 +116,24 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks): 
       return button;
     }),
   );
+  const language = segmented(
+    [
+      ['auto', words.languageAuto],
+      ['en', 'English'],
+      ['ko', '한국어'],
+    ],
+    state.langChoice,
+    (choice) => {
+      keep('lang', choice);
+      update({ langChoice: choice, lang: pickLang(choice === 'auto' ? null : choice) });
+      applyLook();
+      // The menu's own words follow at once (the key stays shown as holding it open), and the keyboard stays on the
+      // language just chosen.
+      close();
+      menuSheet(navigate, hooks, true);
+    },
+    words.language,
+  );
   const look = h(
     'div',
     { class: 'section' },
@@ -127,24 +150,10 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks): 
         keep('theme', theme);
         applyLook();
       },
+      words.theme,
     ),
     h('h3', { style: 'margin-top:14px' }, words.language),
-    segmented(
-      [
-        ['auto', words.languageAuto],
-        ['en', 'English'],
-        ['ko', '한국어'],
-      ],
-      state.langChoice,
-      (choice) => {
-        keep('lang', choice);
-        update({ langChoice: choice, lang: pickLang(choice === 'auto' ? null : choice) });
-        applyLook();
-        // The menu's own words follow at once (the key stays shown as holding it open).
-        close();
-        menuSheet(navigate, hooks);
-      },
-    ),
+    language,
     h(
       'div',
       { class: 'line', style: 'margin-top:10px' },
@@ -189,6 +198,11 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks): 
   };
   fill(end, shortcuts, out);
   fill(body, who, pages, look, dj, tokens, end);
+  // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
+  // which runs in the same turn).
+  if (focusLanguage) {
+    queueMicrotask(() => language.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus());
+  }
 
   // The DJ role, for people who can manage the server (and only with Discord: browser-only has no roles).
   const guild = state.guild;
@@ -252,21 +266,36 @@ async function drawTokens(box: HTMLElement): Promise<void> {
     problem(error);
     return;
   }
+  // The field and the key are made anew at each drawing: their data-key lets the focus find them again.
   const name = h('input', {
     type: 'text',
     maxlength: '100',
     placeholder: words.tokenName,
     'aria-label': words.tokenName,
+    dataset: { key: 'token-name' },
   });
   let scope: Token['scope'] = 'control';
-  const make = h('button', { class: 'key', type: 'button' }, icon('plus'), words.create);
+  const make = h(
+    'button',
+    { class: 'key', type: 'button', dataset: { key: 'token-create' } },
+    icon('plus'),
+    words.create,
+  );
+  // A token being made: a second press meanwhile makes nothing more. The key is not disabled for it (a disabled key
+  // drops the keyboard focus, and the focus is to come back to this key when the token's dialog closes).
+  let making = false;
   make.onclick = async () => {
     const label = name.value.trim();
     if (!label) {
       name.focus();
       return;
     }
-    const created = await act(make, () => api['token-create'](label, scope));
+    if (making) return;
+    making = true;
+    make.setAttribute('aria-disabled', 'true');
+    const created = await act(null, () => api['token-create'](label, scope));
+    making = false;
+    make.removeAttribute('aria-disabled');
     if (!created) return;
     const secret = h('div', { class: 'secret' }, created.token);
     // The result of Copy, said in the dialog itself (a message in the top bar would sit under the dialog's shade).
@@ -297,6 +326,28 @@ async function drawTokens(box: HTMLElement): Promise<void> {
     );
     void drawTokens(box);
   };
+  // Drawn again after a token is made or revoked: the focus stays on the same key, or (its token revoked) moves to the
+  // Revoke of the token now in its place, or to the name field when none is left.
+  keepingFocus(
+    box,
+    () =>
+      fillTokens(box, list, name, make, scope, (value) => {
+        scope = value;
+      }),
+    () => name,
+  );
+}
+
+// The tokens' section: the list, then the form for a new one.
+function fillTokens(
+  box: HTMLElement,
+  list: Token[],
+  name: HTMLInputElement,
+  make: HTMLButtonElement,
+  scope: Token['scope'],
+  setScope: (value: Token['scope']) => void,
+): void {
+  const words = t();
   fill(
     box,
     h('h3', null, words.tokens),
@@ -304,7 +355,17 @@ async function drawTokens(box: HTMLElement): Promise<void> {
     ...(list.length === 0
       ? [h('div', { class: 'faint', style: 'padding:6px 0' }, words.noTokens)]
       : list.map((token) => {
-          const revoke = h('button', { class: 'key sm quiet bad', type: 'button' }, words.revoke);
+          const revoke = h(
+            'button',
+            {
+              class: 'key sm quiet bad',
+              type: 'button',
+              dataset: { key: 'revoke' },
+              // Which token, for screen readers: the key's word alone would not say.
+              'aria-label': `${words.revoke}: ${token.name}`,
+            },
+            words.revoke,
+          );
           revoke.onclick = async () => {
             const ok = await confirmDialog({
               title: words.revokeTitle(token.name),
@@ -312,14 +373,15 @@ async function drawTokens(box: HTMLElement): Promise<void> {
               ok: words.revoke,
               danger: true,
             });
-            if (ok && (await act(revoke, () => api['token-revoke'](token.id))) !== undefined) void drawTokens(box);
+            // Not made busy: a disabled key drops the keyboard focus, which the drawing after must pass on.
+            if (ok && (await act(null, () => api['token-revoke'](token.id))) !== undefined) void drawTokens(box);
           };
           const scopeName = { read: words.scopeRead, control: words.scopeControl, admin: words.scopeAdmin }[
             token.scope
           ];
           return h(
             'div',
-            { class: 'line' },
+            { class: 'line', dataset: { id: String(token.id) } },
             icon('key-round'),
             h(
               'div',
@@ -351,9 +413,8 @@ async function drawTokens(box: HTMLElement): Promise<void> {
             ['admin', words.scopeAdmin],
           ],
           scope,
-          (value) => {
-            scope = value;
-          },
+          setScope,
+          words.tokenAccess,
         ),
         h('span', { class: 'grow' }),
         make,

@@ -868,6 +868,8 @@ async function playlistsDialog(): Promise<void> {
   const words = t();
   const box = h('ul', { class: 'list', style: 'padding: 0' });
   const dialog = showDialog(words.playlists, box);
+  // The dialog's Close key: where the keyboard goes when no playlist is left to stand on.
+  const closeKey = () => box.closest('.dialog')?.querySelector<HTMLElement>('.dialog-keys .key') ?? null;
   const draw = async () => {
     let playlists: Awaited<ReturnType<typeof api.playlists>>;
     try {
@@ -876,72 +878,98 @@ async function playlistsDialog(): Promise<void> {
       problem(error);
       return;
     }
-    if (playlists.length === 0) {
-      fill(box, h('li', { class: 'empty' }, icon('list-music'), words.noPlaylists));
-      return;
-    }
-    fill(
+    // Drawn again after a rename or a deletion: the focus stays on the same key of the same playlist (found by its
+    // number, which a rename keeps), or moves to the playlist now in a deleted one's place.
+    keepingFocus(
       box,
-      ...playlists.map((playlist) => {
-        const loadKey = h('button', { class: 'key sm', type: 'button' }, icon('list-plus'), words.load);
-        const renameKey = h(
-          'button',
-          { class: 'key sm square quiet', type: 'button', title: words.rename, 'aria-label': words.rename },
-          icon('pencil'),
-        );
-        const deleteKey = h(
-          'button',
-          { class: 'key sm square quiet bad', type: 'button', title: words.delete, 'aria-label': words.delete },
-          icon('trash-2'),
-        );
-        loadKey.onclick = async () => {
-          const result = await act(loadKey, () => api['playlist-load'](guild(), playlist.name));
-          if (result) {
-            added(result);
-            dialog.close();
-          }
-        };
-        renameKey.onclick = async () => {
-          const next = await askDialog({
-            title: words.rename,
-            placeholder: words.newName,
-            value: playlist.name,
-            ok: words.rename,
-          });
-          if (next && next !== playlist.name) {
-            await act(renameKey, () => api['playlist-rename'](guild(), playlist.name, next));
-            void draw();
-          }
-        };
-        deleteKey.onclick = async () => {
-          const ok = await confirmDialog({
-            title: words.deleteTitle(playlist.name),
-            text: words.deleteText,
-            ok: words.delete,
-            danger: true,
-          });
-          if (ok) {
-            await act(deleteKey, () => api['playlist-delete'](guild(), playlist.name));
-            void draw();
-          }
-        };
-        return h(
-          'li',
-          { class: 'channel' },
-          h(
-            'span',
-            { class: 'name' },
-            h('b', null, playlist.name),
-            h('span', { class: 'faint' }, ` · ${words.tracks(playlist.size)}`),
-          ),
-          renameKey,
-          deleteKey,
-          loadKey,
-        );
-      }),
+      () => {
+        if (playlists.length === 0) {
+          fill(box, h('li', { class: 'empty' }, icon('list-music'), words.noPlaylists));
+          return;
+        }
+        fill(box, ...playlists.map((playlist) => playlistRow(playlist)));
+      },
+      closeKey,
+    );
+  };
+  // One playlist: its name and size, and its keys (each with a data-key, so the focus can find it again).
+  const playlistRow = (playlist: { id: number; name: string; size: number }) => {
+    const loadKey = h(
+      'button',
+      { class: 'key sm', type: 'button', dataset: { key: 'load' } },
+      icon('list-plus'),
+      words.load,
+    );
+    const renameKey = h(
+      'button',
+      {
+        class: 'key sm square quiet',
+        type: 'button',
+        title: words.rename,
+        'aria-label': `${words.rename}: ${playlist.name}`,
+        dataset: { key: 'rename' },
+      },
+      icon('pencil'),
+    );
+    const deleteKey = h(
+      'button',
+      {
+        class: 'key sm square quiet bad',
+        type: 'button',
+        title: words.delete,
+        'aria-label': `${words.delete}: ${playlist.name}`,
+        dataset: { key: 'delete' },
+      },
+      icon('trash-2'),
+    );
+    loadKey.onclick = async () => {
+      const result = await act(loadKey, () => api['playlist-load'](guild(), playlist.name));
+      if (result) {
+        added(result);
+        dialog.close();
+      }
+    };
+    renameKey.onclick = async () => {
+      const next = await askDialog({
+        title: words.rename,
+        placeholder: words.newName,
+        value: playlist.name,
+        ok: words.rename,
+      });
+      if (next && next !== playlist.name) {
+        // Not made busy: a disabled key drops the keyboard focus, which the drawing after must keep.
+        if ((await act(null, () => api['playlist-rename'](guild(), playlist.name, next))) !== undefined) {
+          void draw();
+        }
+      }
+    };
+    deleteKey.onclick = async () => {
+      const ok = await confirmDialog({
+        title: words.deleteTitle(playlist.name),
+        text: words.deleteText,
+        ok: words.delete,
+        danger: true,
+      });
+      if (ok && (await act(null, () => api['playlist-delete'](guild(), playlist.name))) !== undefined) void draw();
+    };
+    return h(
+      'li',
+      { class: 'channel', dataset: { id: String(playlist.id) } },
+      h(
+        'span',
+        { class: 'name' },
+        h('b', null, playlist.name),
+        h('span', { class: 'faint' }, ` · ${words.tracks(playlist.size)}`),
+      ),
+      renameKey,
+      deleteKey,
+      loadKey,
     );
   };
   await draw();
+  // The list came after the dialog opened on its Close key: the keyboard starts at the first playlist's Load instead,
+  // unless it has moved on meanwhile.
+  if (document.activeElement === closeKey()) box.querySelector<HTMLElement>('[data-key="load"]')?.focus();
 }
 
 // What an add did, as a toast: how many went in and what was left out.

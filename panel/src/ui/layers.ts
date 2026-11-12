@@ -132,6 +132,25 @@ function push(element: HTMLElement, close: () => void): () => void {
   };
 }
 
+// Gives the keyboard focus back to the element that had it before a layer opened. One drawn again meanwhile (the
+// menu's tokens after one was made, a playlist renamed) is found again by its data-key, within its row's data-id
+// when it has one; with neither, the focus stays where the closing left it.
+function refocus(previous: HTMLElement | null): void {
+  if (!previous) return;
+  if (previous.isConnected) {
+    previous.focus?.();
+    return;
+  }
+  const key = previous.dataset.key;
+  if (!key) return;
+  // The old element's row, read from the detached copy: closest() still walks its old parents.
+  const id = previous.closest<HTMLElement>('[data-id]')?.dataset.id;
+  const selector = id
+    ? `[data-id="${CSS.escape(id)}"] [data-key="${CSS.escape(key)}"]`
+    : `[data-key="${CSS.escape(key)}"]`;
+  document.querySelector<HTMLElement>(selector)?.focus();
+}
+
 // The one open sheet, closed when another opens.
 let closeSheet: (() => void) | null = null;
 
@@ -164,7 +183,7 @@ export function sheet(options: { side?: 'left' | 'right'; label: string; onClose
     scrim.remove();
     panel.remove();
     options.onClose?.();
-    previous?.focus?.();
+    refocus(previous);
   };
   const off = push(panel, close);
   shut.onclick = close;
@@ -203,7 +222,7 @@ function dialog<T>(
       box.remove();
       // A toast said in this dialog goes on where the next one is said (the bar, or the dialog below).
       handOver(box);
-      previous?.focus?.();
+      refocus(previous);
       resolve(value);
     };
     const parts = build(finish);

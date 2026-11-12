@@ -51,9 +51,10 @@ export function fill(parent: Element, ...children: Child[]): void {
  * the row is found by its data-id and the key by its data-key. A key that is no longer there (Play next on the row
  * that became first) or is hidden falls back to the row's link, never to a neighbouring key that does something else.
  * A row that is gone (removed, played) passes the focus to the row that took its place, on its link, which names its
- * track to a screen reader; the last row's goes to the row before it.
+ * track to a screen reader (a row without one, on the same key); the last row's goes to the row before it, and with
+ * no row left, to `empty` when given (the list's own key).
  */
-export function keepingFocus(list: HTMLElement, rebuild: () => void): void {
+export function keepingFocus(list: HTMLElement, rebuild: () => void, empty?: () => HTMLElement | null): void {
   const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const row = focused && list.contains(focused) ? focused.closest<HTMLElement>('[data-id]') : null;
   const id = row?.dataset.id;
@@ -77,7 +78,11 @@ export function keepingFocus(list: HTMLElement, rebuild: () => void): void {
     // none left, the focus has nowhere to go in the list.
     const staying = rows.filter((element) => !element.classList.contains('gone'));
     const instead = staying[Math.min(place, staying.length - 1)];
-    if (instead) shown(instead.querySelector<HTMLElement>('a'))?.focus({ preventScroll: true });
+    const target = instead
+      ? (shown(instead.querySelector<HTMLElement>('a')) ??
+        (key ? shown(instead.querySelector<HTMLElement>(`[data-key="${key}"]`)) : null))
+      : (empty?.() ?? null);
+    target?.focus({ preventScroll: true });
     return;
   }
   const same = key ? shown(again.querySelector<HTMLElement>(`[data-key="${key}"]`)) : null;
