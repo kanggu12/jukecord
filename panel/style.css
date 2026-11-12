@@ -2292,10 +2292,10 @@ kbd {
   }
 }
 /* One column: the page scrolls as a whole; long lists scroll inside their card, so the page keeps a sane length.
-   Narrow windows, and windows too short for two columns: below 680 px of height (820 px by touch, whose keys are
+   Narrow windows, and windows too short for two columns: below 720 px of height (820 px by touch, whose keys are
    taller and whose queue tools take a second line on a tablet held sideways) the queue beside the cards above it
    would show two rows, one or none. */
-@media (max-width: 900px), (max-height: 680px), (pointer: coarse) and (max-height: 820px) {
+@media (max-width: 900px), (max-height: 720px), (pointer: coarse) and (max-height: 820px) {
   .main {
     grid-template-columns: minmax(0, 1fr);
     height: auto;
