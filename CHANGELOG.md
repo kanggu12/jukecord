@@ -35,6 +35,9 @@ All notable changes to jukecord are documented here. The format is based on
   were held for good. At most 256 connections now come from one address (unless `JUKECORD_TRUST_PROXY` says they come
   through a proxy, which is then where to limit them), and a connection on which nothing moves for two minutes is
   closed, as nginx does after one; a browser that paused its audio asks again when it plays on.
+- A stop waited for any audio answer still under way, which lasts as long as a browser takes to read it, and so ran
+  into its ten seconds and ended without leaving voice or closing the database. What is still under way two seconds
+  into the stop is now cut.
 - A client that sent many requests in one go without reading the answers (HTTP pipelining, which no browser does)
   had every one answered and held in memory: a few connections filled the heap and stopped jukecord. More than 16
   answers under way on one connection now close it. The API's description (`/api/v1/openapi.json`, open to anyone)

@@ -160,6 +160,40 @@ describe('the web server times requests, not answers', () => {
   });
 });
 
+describe('the web server stops in time', () => {
+  it('cuts an audio answer still under way instead of waiting for it', async () => {
+    const server = await testServer({ listen: true });
+    const port = Number(new URL(server.url).port);
+    const track = server.store.tracks.upsert(exampleTrack('stopping'));
+    server.queue.add(GUILD, [track.id], 'end', null);
+    const key = MediaCache.keyOf(track.source);
+    const tmp = server.cache.tmpPath(key);
+    fs.writeFileSync(tmp, Buffer.alloc(16 * 1024 ** 2, 9));
+    server.cache.commit(key, tmp, { source: track.source, durationMs: 1000, loudness: null });
+    // A browser in the middle of a track's audio, reading it slowly (a paused <audio>).
+    const request = http.get(
+      {
+        host: '127.0.0.1',
+        port,
+        path: `/api/v1/guilds/${GUILD}/tracks/${track.id}/audio`,
+        headers: { authorization: `Bearer ${HOST_TOKEN}` },
+      },
+      (response) => {
+        response.once('data', () => response.pause());
+        response.on('error', () => {});
+      },
+    );
+    request.on('error', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // jukecord gives its whole stop ten seconds; the web server's part ends within a few.
+    const started = Date.now();
+    await server.close();
+    const took = Date.now() - started;
+    request.destroy();
+    assert.ok(took < 5000, `the web server took ${took} ms to close`);
+  });
+});
+
 describe('the web server caps its connections', () => {
   it('takes at most so many connections from one address, unless it is told they come through a proxy', async () => {
     for (const trustProxy of [false, true]) {

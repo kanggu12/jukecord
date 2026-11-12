@@ -588,7 +588,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       hub.close();
       pressure?.stop();
       stopping.abort();
-      await app.close();
+      // Fastify closes the idle connections and waits for the answers under way. Audio to a browser lasts as long as
+      // the browser takes to read it (a paused <audio> reads nothing for minutes), and jukecord gives its whole stop ten
+      // seconds: what is still under way after two is cut.
+      const cut = setTimeout(() => app.server.closeAllConnections(), 2000);
+      cut.unref();
+      try {
+        await app.close();
+      } finally {
+        clearTimeout(cut);
+      }
     },
   };
 }
