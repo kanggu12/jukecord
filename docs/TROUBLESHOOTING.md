@@ -68,7 +68,7 @@ N, newer than this jukecord knows": a newer jukecord wrote it; run the newer ver
 ## jukecord started again by itself
 
 `the main thread has not answered for 30 s; ending the process so that it is started again` in `./jukecord logs`
-means jukecord was stuck and ended itself, so that Docker (or Kubernetes, or the systemd unit) would start it again:
+means jukecord was stuck and ended itself, so that Docker's restart policy (or Kubernetes) would start it again:
 Docker restarts a container that exits, not one that hangs. Every server comes back paused where it was. The lines
 before it say what it was doing; please put them in an issue.
 

@@ -44,8 +44,8 @@ skipping. Past a limit jukecord says so and the panel tries again by itself.
 
 **What happens when it is overwhelmed, or stops?**
 A jukecord that falls behind answers "busy" to new audio and changes until it has caught up, so the voice channel and
-the open panels come first. One that hangs ends itself after 30 seconds, and Docker, Kubernetes or the systemd unit
-start it again; every server comes back paused where it was, and the panels reconnect by themselves.
+the open panels come first. One that hangs ends itself after 30 seconds, and Docker's restart policy (Compose) or
+Kubernetes starts it again; every server comes back paused where it was, and the panels reconnect by themselves.
 
 **Does the computer have to stay on?**
 Only while people listen. jukecord keeps each queue and the place in the track, and after a restart it comes back

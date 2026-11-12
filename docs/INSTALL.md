@@ -176,5 +176,6 @@ the backup made before the update instead).
 `./jukecord backup` writes a consistent copy while jukecord runs. The media cache is not in it (tracks are fetched
 again when they are played). `./jukecord restore backups/jukecord-<time>.db` stops jukecord, puts the copy back and
 starts it again, also after `./jukecord down`; a relative name counts from the folder the command is typed in. The
-database it replaces stays in the volume as `jukecord.db.before-restore-<time>`, and a file that is not a jukecord
-backup is refused before anything is stopped.
+database it replaces stays in the volume as `jukecord.db.before-restore-<time>`, and a file that is not a whole
+jukecord backup (another file, or a backup cut short) is refused before anything is stopped. `./jukecord backup`
+prints the backup's whole path, which `restore` takes from anywhere.

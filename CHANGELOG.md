@@ -29,6 +29,14 @@ All notable changes to jukecord are documented here. The format is based on
 
 ### Fixed
 
+- `./jukecord restore` took a backup cut short (it has the right first bytes), swapped it in and left jukecord
+  restarting in a loop on "database disk image is malformed". The file is now read whole by the image's SQLite before
+  anything is stopped, and refused with what is wrong with it. `./jukecord backup` prints the backup's whole path,
+  which `restore` takes from any folder (it printed one relative to the checkout, and `restore` reads a relative one
+  from where it is typed). `./jukecord restart` after `./jukecord down` says at once that jukecord is not running,
+  instead of waiting a minute for nothing. A value in `.env` with a comment after it (`# …`) is read without the comment,
+  as Compose reads it.
+
 - The watchdog ended jukecord when the whole process had been stopped for longer than half a minute and was let go
   again (`docker pause`, a laptop asleep), whenever its thread happened to look before the main one had moved its
   counter; every server then came back paused. A look that itself comes late now starts the count again.

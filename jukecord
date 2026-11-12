@@ -87,9 +87,15 @@ inside() {
   compose exec "${tty[@]}" -e "TZ=$(timezone)" "$service" jukecord "$@"
 }
 
-# A setting from .env as Compose reads it: the last line that sets it, without quotes around the value.
+# A setting from .env as Compose reads it: the last line that sets it, without quotes around the value, and without
+# the comment after it (a space and #) when the value has no quotes.
 setting() {
-  sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\\1/"
+  local value
+  value=$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1)
+  case "$value" in
+    \"* | \'*) printf '%s\n' "$value" | sed -e 's/^"\(.*\)"[[:space:]]*\(#.*\)\{0,1\}$/\1/' -e "s/^'\(.*\)'[[:space:]]*\(#.*\)\{0,1\}\$/\\1/" ;;
+    *) printf '%s\n' "$value" | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//' ;;
+  esac
 }
 
 # The image Compose runs: jukecord:local, built from this checkout, unless JUKECORD_IMAGE names a released one.
@@ -188,6 +194,11 @@ case "$command" in
     compose down "${@:2}"
     ;;
   restart)
+    # Only a container that exists can be restarted: after ./jukecord down there is none, and compose would say nothing.
+    if [ -z "$(compose ps -a -q "$service" 2>/dev/null)" ]; then
+      say "jukecord is not running here (./jukecord up)"
+      exit 1
+    fi
     compose restart "$service"
     wait_ready
     ;;
@@ -262,7 +273,8 @@ case "$command" in
     file=$(inside backup --json | sed -n 's/.*"file": *"\([^"]*\)".*/\1/p')
     mkdir -p backups
     compose cp "$service:$file" "backups/$(basename "$file")"
-    printf 'backups/%s\n' "$(basename "$file")"
+    # The whole path: restore takes a relative one from where it is typed, which need not be this folder.
+    printf '%s/backups/%s\n' "$here" "$(basename "$file")"
     ;;
   restore)
     file=${2:-}
@@ -280,6 +292,30 @@ case "$command" in
     # the shell would warn about).
     if [ "$(head -c 15 "$file" | LC_ALL=C tr -d '\000')" != "SQLite format 3" ]; then
       say "$file is not a jukecord backup (not an SQLite database); nothing was changed"
+      exit 2
+    fi
+    # Read whole, before anything is stopped, by the SQLite in the image (Node's), in a container of its own that
+    # touches nothing: a backup cut short has the right first bytes, and swapped in it would leave jukecord unable to
+    # start. The copy goes to that container's /tmp, which goes with it.
+    check='const fs = require("node:fs");
+fs.writeFileSync("/tmp/restore-check.db", fs.readFileSync(0));
+const { DatabaseSync } = require("node:sqlite");
+let verdict;
+try {
+  const db = new DatabaseSync("/tmp/restore-check.db", { readOnly: true });
+  verdict = db.prepare("PRAGMA quick_check").get().quick_check;
+  const tracks = db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?").get("table", "tracks");
+  if (verdict === "ok" && !tracks) verdict = "it has none of jukecord'"'"'s tables";
+  db.close();
+} catch (error) {
+  verdict = error.message;
+}
+if (verdict !== "ok") {
+  console.error(verdict);
+  process.exit(2);
+}'
+    if ! problem=$(compose run --rm --no-deps -T --entrypoint node "$service" --disable-warning=ExperimentalWarning -e "$check" <"$file" 2>&1); then
+      say "$file is not a whole jukecord backup (${problem##*$'\n'}); nothing was changed"
       exit 2
     fi
     stamp=$(date -u +%Y%m%dT%H%M%SZ)

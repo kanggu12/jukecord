@@ -3,7 +3,7 @@
  * blocks), nothing on that thread can notice, and to Docker the process still looks alive: Docker restarts a container
  * that exits, not one that hangs. So a small worker thread watches a counter the main thread moves every second; when
  * the counter has not moved for `limitMs`, the worker writes a line to stderr and ends the process. The restart policy
- * (Compose's, the systemd unit's, Kubernetes') then brings jukecord back, paused where each server was: the players
+ * (Docker's under Compose, Kubernetes') then brings jukecord back, paused where each server was: the players
  * save their state on every change.
  */
 import { Worker } from 'node:worker_threads';
