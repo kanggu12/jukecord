@@ -30,6 +30,10 @@ All notable changes to jukecord are documented here. The format is based on
   looping queue), YouTube's bot check itself read as "it could not be downloaded", and a video for Premium members,
   one locked by DRM, a page withheld for legal reasons (451) and a file too large were kept in a looping queue to be
   fetched again. A premiere or a live stream still to come now says that it has not started yet.
+- A connection whose reader stopped taking the answer (the headers of a long audio answer read, then nothing) was
+  held for good, and enough of them would have taken every place under the cap of 4096 connections, health checks
+  included. A connection on which nothing moves for two minutes is now closed, as nginx does after one; a browser
+  that paused its audio asks again when it plays on.
 - The live hub, the rate limits and the bot's "listening to" line timed their waits by the system clock: set back (by
   hand, or by NTP after a machine slept), it stopped queue changes reaching open panels, and a login waited out the
   difference on 429s. They time by a clock that only goes forward.

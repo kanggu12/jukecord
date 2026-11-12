@@ -33,7 +33,10 @@ describe('the web server times requests, not answers', () => {
   let port = 0;
 
   before(async () => {
-    server = await testServer({ listen: true, timeouts: { requestMs: 400, headersMs: 300, checkEveryMs: 50 } });
+    server = await testServer({
+      listen: true,
+      timeouts: { requestMs: 400, headersMs: 300, checkEveryMs: 50, idleMs: 600 },
+    });
     port = Number(new URL(server.url).port);
   });
   after(() => server.close());
@@ -83,6 +86,39 @@ describe('the web server times requests, not answers', () => {
     });
     assert.equal(received, 4 * 1024 ** 2);
     assert.ok(Date.now() - started > 400, 'the reader was not slow enough to test anything');
+  });
+
+  it('closes an answer whose reader has stopped reading, so stalled readers cannot hold every connection', async () => {
+    // A cached track larger than what the connection's buffers hold.
+    const size = 32 * 1024 ** 2;
+    const track = server.store.tracks.upsert(exampleTrack('stalled-reader'));
+    server.queue.add(GUILD, [track.id], 'end', null);
+    const key = MediaCache.keyOf(track.source);
+    const tmp = server.cache.tmpPath(key);
+    fs.writeFileSync(tmp, Buffer.alloc(size, 7));
+    server.cache.commit(key, tmp, { source: track.source, durationMs: 1000, loudness: null });
+    // The reader takes the first bytes and then nothing for 2 s (the idle limit is 600 ms here), then reads on to the
+    // end of what it is given. A paused reader cannot see the server close until it reads again.
+    const received = await new Promise<number>((resolve) => {
+      let bytes = 0;
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.write(
+          `GET /api/v1/guilds/${GUILD}/tracks/${track.id}/audio HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${HOST_TOKEN}\r\n\r\n`,
+        );
+      });
+      socket.once('data', () => {
+        socket.pause();
+        setTimeout(() => socket.resume(), 2000);
+      });
+      socket.on('data', (chunk: Buffer) => {
+        bytes += chunk.length;
+      });
+      socket.on('error', () => {});
+      socket.on('close', () => resolve(bytes));
+      setTimeout(() => socket.destroy(), 8000).unref();
+    });
+    // Cut off: only what the buffers held when the server closed it, not the whole track.
+    assert.ok(received < size, `${received} bytes came, the whole track is ${size}`);
   });
 
   it('keeps a WebSocket open past the request limit', async () => {

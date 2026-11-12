@@ -55,11 +55,15 @@ export interface WebServerOptions {
   readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
   /** Whether jukecord has fallen behind and sheds what can wait (tests set it; by default the event loop says). */
   readonly behind?: () => boolean;
-  /** How long a request may take to arrive, and how many connections there may be (tests shorten and lower them). */
+  /**
+   * How long a request may take to arrive, how long a connection may stand still, and how many connections there may
+   * be (tests shorten and lower them).
+   */
   readonly timeouts?: {
     readonly requestMs?: number;
     readonly headersMs?: number;
     readonly checkEveryMs?: number;
+    readonly idleMs?: number;
     readonly maxConnections?: number;
   };
 }
@@ -153,6 +157,12 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     // the request is timed: sending the answer is not (audio to a phone on a slow line takes as long as it takes),
     // nor is a WebSocket once upgraded (tests/integration/server-limits.test.ts shows both).
     requestTimeout: timeouts.requestMs ?? 30_000,
+    // A connection on which nothing has moved either way for two minutes is closed: an answer whose reader stopped
+    // taking it (a client that reads the headers of a long audio answer, then nothing) held its connection for good,
+    // and enough of them would take every place under the cap below. A reader that is slow but reads keeps it; a
+    // browser that paused its audio asks again with a Range request when it plays on. A WebSocket is not timed this
+    // way: the ws library clears the timeout when it takes the connection over, and the hub pings it every 30 s.
+    connectionTimeout: timeouts.idleMs ?? 120_000,
     http: {
       headersTimeout: timeouts.headersMs ?? 15_000,
       // How often Node looks for requests over their time; the default (30 s) would let one run a minute.

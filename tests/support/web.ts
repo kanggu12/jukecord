@@ -135,11 +135,12 @@ export interface TestServerOptions {
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
   readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
   readonly behind?: () => boolean;
-  /** Shorter request timeouts and a lower connection cap (to test them). */
+  /** Shorter request and idle timeouts and a lower connection cap (to test them). */
   readonly timeouts?: {
     readonly requestMs?: number;
     readonly headersMs?: number;
     readonly checkEveryMs?: number;
+    readonly idleMs?: number;
     readonly maxConnections?: number;
   };
 }
