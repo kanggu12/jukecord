@@ -261,8 +261,9 @@ describe('the egress guard when a site stops halfway', () => {
       await new Promise((resolve) => socket.once('data', resolve));
       socket.write(first);
       const ms = await Promise.race([closed, new Promise<number>((resolve) => setTimeout(() => resolve(-1), 3000))]);
+      // Closed (-1 is still open after 3 s), and soon: a reset can close it within the millisecond it started in.
       assert.ok(
-        ms > 0 && ms < 2000,
+        ms >= 0 && ms < 2000,
         `${first}: the tunnel was ${ms < 0 ? 'still open after 3 s' : `closed after ${ms} ms`}`,
       );
       socket.destroy();
