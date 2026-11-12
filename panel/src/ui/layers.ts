@@ -19,21 +19,73 @@ export function toast(message: string, tone: Tone = 'load', name: IconName = 'ch
   const box = document.querySelector('.toasts');
   if (!box) return;
   window.clearTimeout(toastTimer);
-  box.replaceChildren(
-    h(
-      'div',
-      { class: `toast tone-${tone}`, role: tone === 'bad' ? 'alert' : 'status' },
-      icon(name),
-      h('span', null, message),
-    ),
-  );
   // Problems stay a little longer: they usually need reading.
-  toastTimer = window.setTimeout(() => box.replaceChildren(), tone === 'bad' ? 6000 : 3500);
+  const lasts = tone === 'bad' ? 6000 : 3500;
+  const element = h(
+    'div',
+    { class: `toast tone-${tone}`, role: tone === 'bad' ? 'alert' : 'status' },
+    icon(name),
+    h('span', null, message),
+  );
+  // The line along its foot runs out in the same time.
+  element.style.setProperty('--toast-ms', `${lasts}ms`);
+  box.replaceChildren(element);
+  toastTimer = window.setTimeout(() => box.replaceChildren(), lasts);
 }
 
 /** Shows an error from an action as a toast. */
 export function problem(error: unknown): void {
   toast(error instanceof Error ? error.message : String(error), 'bad', 'circle-alert');
+}
+
+// The open layers (the sheet and dialogs over it), newest last. Escape closes the newest only, and Tab stays inside it:
+// a rename dialog over the playlists closes alone, and the keyboard never wanders to the page under the scrim.
+const layers: { element: HTMLElement; close: () => void }[] = [];
+
+/** Whether a sheet or a dialog is open (the player's shortcuts wait while one is). */
+export function layerOpen(): boolean {
+  return layers.length > 0;
+}
+
+// What the keyboard can reach in a layer: enabled, and shown (a section hidden at this width is skipped).
+function reachable(root: HTMLElement): HTMLElement[] {
+  return [
+    ...root.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])'),
+  ].filter((element) => !element.hasAttribute('disabled') && element.getClientRects().length > 0);
+}
+
+document.addEventListener('keydown', (event) => {
+  const top = layers.at(-1);
+  if (!top) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    top.close();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const keys = reachable(top.element);
+  const first = keys[0];
+  const last = keys.at(-1);
+  // From the last key forward, or the first backward, round to the other end; from outside the layer, into it.
+  const inside = top.element.contains(document.activeElement);
+  if (
+    !inside ||
+    (event.shiftKey && document.activeElement === first) ||
+    (!event.shiftKey && document.activeElement === last)
+  ) {
+    event.preventDefault();
+    (event.shiftKey ? last : first)?.focus();
+  }
+});
+
+// Puts a layer on top; returns the function that takes it off again.
+function push(element: HTMLElement, close: () => void): () => void {
+  const entry = { element, close };
+  layers.push(entry);
+  return () => {
+    const index = layers.indexOf(entry);
+    if (index >= 0) layers.splice(index, 1);
+  };
 }
 
 // The one open sheet, closed when another opens.
@@ -47,31 +99,37 @@ export function sheet(options: { side?: 'left' | 'right'; label: string; onClose
   closeSheet?.();
   const scrim = h('div', { class: 'scrim' });
   const body = h('div', { class: 'sheet-body scroll' });
+  // A close key of its own: on a phone the sheet covers the whole width, and there is no scrim left to tap.
+  const shut = h(
+    'button',
+    { class: 'key sm square quiet sheet-close', type: 'button', title: t().close, 'aria-label': t().close },
+    icon('x'),
+  );
   // A div: the dialog role is not allowed on an aside.
   const panel = h(
     'div',
     { class: `sheet ${options.side === 'left' ? 'left' : ''}`.trim(), role: 'dialog', 'aria-label': options.label },
+    shut,
     body,
   );
   const previous = document.activeElement as HTMLElement | null;
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') close();
-  };
   const close = () => {
     if (closeSheet !== close) return;
     closeSheet = null;
+    off();
     scrim.remove();
     panel.remove();
-    document.removeEventListener('keydown', onKey);
     options.onClose?.();
     previous?.focus?.();
   };
+  const off = push(panel, close);
+  shut.onclick = close;
   scrim.onclick = close;
-  document.addEventListener('keydown', onKey);
   document.body.append(scrim, panel);
   closeSheet = close;
-  // The first thing to press gets the focus, so the keyboard continues inside the sheet.
-  queueMicrotask(() => (panel.querySelector('button, input, a') as HTMLElement | null)?.focus());
+  // The first thing to press that is shown gets the focus (the close key comes last), so the keyboard continues
+  // inside the sheet.
+  queueMicrotask(() => (reachable(body)[0] ?? shut).focus());
   return { body, close };
 }
 
@@ -89,12 +147,13 @@ function dialog<T>(
     const previous = document.activeElement as HTMLElement | null;
     const scrim = h('div', { class: 'scrim full' });
     let done = false;
+    let off = () => {};
     const finish = (value: T) => {
       if (done) return;
       done = true;
+      off();
       scrim.remove();
       box.remove();
-      document.removeEventListener('keydown', onKey);
       previous?.focus?.();
       resolve(value);
     };
@@ -107,28 +166,11 @@ function dialog<T>(
       parts.content ? h('div', { class: 'dialog-content scroll' }, parts.content) : null,
       h('div', { class: 'dialog-keys' }, ...parts.keys),
     );
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') finish(cancel);
-      // Tab stays inside the dialog.
-      if (event.key === 'Tab') {
-        const focusable = [...box.querySelectorAll<HTMLElement>('button, input, a[href]')].filter(
-          (el) => !el.hasAttribute('disabled'),
-        );
-        const first = focusable[0];
-        const last = focusable.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-    };
+    off = push(box, () => finish(cancel));
     scrim.onclick = () => finish(cancel);
-    document.addEventListener('keydown', onKey);
     document.body.append(scrim, box);
-    queueMicrotask(() => (box.querySelector('input, .key.primary, .key.danger, .key') as HTMLElement | null)?.focus());
+    // The input, else the first choice of a list, else the first key (Cancel, in a question).
+    queueMicrotask(() => (box.querySelector('input, .choice, .key') as HTMLElement | null)?.focus());
   });
 }
 

@@ -12,7 +12,8 @@ import { act, ago } from './player.ts';
 /** The servers this login can open, in a dialog; picking one switches the panel to it. */
 export function serversSheet(choose: (id: string) => void): void {
   const words = t();
-  const list = h('div', { role: 'menu' });
+  // A list of keys, the current server marked: arrow keys are not promised, so no menu role either.
+  const list = h('div', { class: 'menu-list' });
   const dialog = showDialog(words.servers, list);
   fill(
     list,
@@ -23,8 +24,7 @@ export function serversSheet(choose: (id: string) => void): void {
         {
           class: 'choice',
           type: 'button',
-          role: 'menuitemradio',
-          'aria-checked': String(guild.id === state.guild?.id),
+          'aria-current': guild.id === state.guild?.id ? 'true' : 'false',
         },
         h('span', { class: 'guild-icon' }, iconUrl ? h('img', { src: iconUrl, alt: '' }) : guild.name.slice(0, 1)),
         h('span', { class: 'grow' }, guild.name),
@@ -65,9 +65,16 @@ export function applyLook(): void {
 }
 
 /** The menu. */
-export function menuSheet(navigate: (path: string) => void, onClose?: () => void): void {
+/** What the menu tells the key that opens it: that it opened, and that it closed. */
+export interface MenuHooks {
+  opened(): void;
+  closed(): void;
+}
+
+export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks): void {
   const words = t();
-  const { body, close } = sheet({ label: words.menu, ...(onClose ? { onClose } : {}) });
+  const { body, close } = sheet({ label: words.menu, ...(hooks ? { onClose: hooks.closed } : {}) });
+  hooks?.opened();
   const me = state.me;
   if (!me) return;
   // The host has no Discord name: one line, "Host" in the panel's language. A Discord login: the name, and how.
@@ -133,9 +140,9 @@ export function menuSheet(navigate: (path: string) => void, onClose?: () => void
         keep('lang', choice);
         update({ langChoice: choice, lang: pickLang(choice === 'auto' ? null : choice) });
         applyLook();
-        // The menu's own words follow at once.
+        // The menu's own words follow at once (the key stays shown as holding it open).
         close();
-        menuSheet(navigate);
+        menuSheet(navigate, hooks);
       },
     ),
     h(
@@ -208,7 +215,7 @@ async function drawDj(box: HTMLElement, guild: string): Promise<void> {
   const option = (id: string | null, name: string, color: number) => {
     const button = h(
       'button',
-      { class: 'choice', type: 'button', role: 'menuitemradio', 'aria-checked': String(settings.djRoleId === id) },
+      { class: 'choice', type: 'button', 'aria-pressed': String(settings.djRoleId === id) },
       id
         ? h('span', {
             class: 'swatch',

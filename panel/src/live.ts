@@ -2,8 +2,8 @@
  * The live connection: a WebSocket to /api/v1/events that delivers every change of the server shown, and the clock
  * exchange that lets this browser play the same second as the voice channel.
  *
- * It reconnects by itself (1 s, then doubling up to 10 s) and subscribes again after each reconnect, so a laptop
- * waking up or jukecord restarting needs nothing from the person. A jukecord that has just started may not know its
+ * It reconnects by itself (about 1 s, then doubling up to about 10 s, each wait spread at random) and subscribes again
+ * after each reconnect, so a laptop waking up or jukecord restarting needs nothing from the person. A jukecord that has just started may not know its
  * Discord servers yet and answers "unavailable"; the subscription is then asked again the same way, and the
  * connection counts as open only once the server's state has arrived. The server's clock is the one that counts: the
  * difference to this browser's clock is measured with pings and the fastest round trip of the last few wins, because
@@ -159,7 +159,9 @@ export class Live {
         this.handlers.ended(event.code);
         return;
       }
-      this.retryTimer = window.setTimeout(() => this.connect(), this.retry);
+      // Each panel waits a different share of the delay (half to one and a half times it): after a restart of jukecord
+      // a crowd of panels comes back spread over the seconds, not all in the same instant.
+      this.retryTimer = window.setTimeout(() => this.connect(), this.retry * (0.5 + Math.random()));
       this.retry = Math.min(10_000, this.retry * 2);
     };
   }

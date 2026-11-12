@@ -97,6 +97,11 @@ export function icon(name: IconName, extra = ''): SVGSVGElement {
 }
 
 /** m:ss, or h:mm:ss from an hour up. */
+/** An address as a CSS url(): quotes, backslashes and line breaks escaped, so it cannot end the string early. */
+export function cssUrl(address: string): string {
+  return `url("${address.replace(/["\\\n]/g, (c) => encodeURIComponent(c))}")`;
+}
+
 export function clock(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(total / 3600);
@@ -119,7 +124,8 @@ export function guildIconUrl(id: string, hash: string | null, size = 64): string
 export function face(name: string, url: string | null, extra = ''): HTMLElement {
   const box = h('span', { class: `avatar ${extra}`.trim(), title: name }, initials(name));
   if (url) {
-    const img = h('img', { src: url, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+    // Not lazy: the picture is not in the page until it has loaded, and a lazy picture outside the page never loads.
+    const img = h('img', { src: url, alt: '', referrerpolicy: 'no-referrer' });
     img.onerror = () => img.remove();
     img.onload = () => box.replaceChildren(img);
   }

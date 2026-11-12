@@ -513,7 +513,7 @@ export function loginPage(status: Status | null, error: string | null): HTMLElem
       status?.login.discord
         ? h(
             'a',
-            { class: 'key primary', href: `/auth/login?next=${encodeURIComponent(next)}`, style: 'height:40px' },
+            { class: 'key primary login-key', href: `/auth/login?next=${encodeURIComponent(next)}` },
             icon('log-in'),
             words.loginDiscord,
           )

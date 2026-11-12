@@ -6,7 +6,7 @@
  * The progress bar moves on a 4-per-second timer only while something plays; nothing moves while idle or paused.
  */
 import { api, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
-import { avatarUrl, clock, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
+import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
 import { mayControl, positionNow, state, t, update, watch } from '../state.ts';
@@ -24,6 +24,56 @@ export function disc(size: 'lg' | 'sm', track: Track | null, mode: 'playing' | '
     h('div', { class: 'spinner' }, h('div', { class: 'label' }, picture)),
     h('div', { class: 'hole' }),
   );
+}
+
+/** A row's album: the cover in its case, and the disc half out of it with the cover again on its label. */
+export function album(track: Track): HTMLElement {
+  const picture = track.thumbnail
+    ? h('img', { src: track.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' })
+    : null;
+  const vinyl = h('div', { class: 'vinyl' });
+  const box = h('div', { class: 'case' }, picture ?? h('span', { class: 'note' }, icon('music-2')));
+  if (picture) {
+    // The label shows the same picture once it has loaded; a picture that fails leaves the case's note.
+    picture.onload = () => vinyl.style.setProperty('--cover', cssUrl(picture.currentSrc || picture.src));
+    picture.onerror = () => {
+      picture.remove();
+      box.append(h('span', { class: 'note' }, icon('music-2')));
+    };
+  }
+  return h('div', { class: 'album', 'aria-hidden': 'true' }, box, vinyl);
+}
+
+/** Whether the panel moves: the menu's motion setting, and the system's own wish for less motion. */
+export function moving(): boolean {
+  return state.motion && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Plays a one-off animation on an element (a class its CSS animates), and takes the class away when it ends. */
+export function flash(element: HTMLElement, name: string): void {
+  if (!moving()) return;
+  element.classList.remove(name);
+  // Reading the layout restarts the animation when the class was there already.
+  void element.offsetWidth;
+  element.classList.add(name);
+  const done = (event: Event) => {
+    // Only the element's own animation ends it, not one of a row inside it.
+    if (event.target !== element) return;
+    element.classList.remove(name);
+    element.removeEventListener('animationend', done);
+  };
+  element.addEventListener('animationend', done);
+}
+
+/** Runs an action after a short leaving animation of the element it removes (at once with motion off). */
+export function leaving(element: HTMLElement, run: () => Promise<unknown>): void {
+  if (!moving()) {
+    void run();
+    return;
+  }
+  element.classList.add('leaving');
+  // Refused or failed, the element is still there (no redraw replaced it): it comes back.
+  window.setTimeout(() => void run().finally(() => element.classList.remove('leaving')), 200);
 }
 
 // The disc's mode from the player's status.
@@ -69,7 +119,7 @@ export function ago(at: number): string {
 /** What plays now. */
 export function nowCard(live: Live): HTMLElement {
   const pill = h('span', { class: 'pill tone-idle' });
-  const art = h('div');
+  const art = h('div', { class: 'art' });
   const title = h('h3', { class: 'title' });
   const meta = h('div', { class: 'meta' });
   const error = h('div', { class: 'error', role: 'status' });
@@ -111,6 +161,14 @@ export function nowCard(live: Live): HTMLElement {
     const trackId = player?.track?.id ?? null;
     if (trackId !== drawnTrack || mode !== drawnMode) {
       fill(art, disc('lg', player?.track ?? null, mode));
+      // The glow behind the disc takes the cover's colours.
+      const cover = player?.track?.thumbnail;
+      art.style.setProperty('--cover', cover ? cssUrl(cover) : 'none');
+      // Another track (not the first drawing): it comes in from below.
+      if (drawnTrack !== undefined && trackId !== drawnTrack && trackId !== null) {
+        body.classList.remove('leaving');
+        flash(body, 'enter');
+      }
       drawnTrack = trackId;
       drawnMode = mode;
     }
@@ -190,7 +248,7 @@ export function nowCard(live: Live): HTMLElement {
     repeat.setAttribute('aria-label', repeatLabel);
     repeat.disabled = !control;
     bar.setAttribute('aria-disabled', String(!control || !track || status === 'loading'));
-    bar.setAttribute('aria-label', words.nowPlaying);
+    bar.setAttribute('aria-label', words.seekLabel);
     tick();
   };
 
@@ -265,7 +323,14 @@ export function nowCard(live: Live): HTMLElement {
     // Paused or idle: play on (or start the queue). Playing or loading: pause.
     void act(pause, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
   };
-  skip.onclick = () => void act(skip, () => api.skip(guild()));
+  skip.onclick = () => {
+    // The track slides out to the right while the next one is asked for.
+    if (moving()) body.classList.add('leaving');
+    void act(skip, () => api.skip(guild())).finally(() => {
+      // Nothing came to replace it (the end of the queue, a refusal): the card shows what it has again.
+      window.setTimeout(() => body.classList.remove('leaving'), 400);
+    });
+  };
   stop.onclick = () => void act(stop, () => api.stop(guild()));
   drop.onclick = () => void act(drop, () => api['remove-current'](guild()));
   repeat.onclick = () => {
@@ -324,6 +389,8 @@ export function queueCard(): HTMLElement {
 
   // Dragging a row by its grip: which item, and where it would land.
   let dragged: QueueItem | null = null;
+  // The items drawn last time (null before the first state), so a row that is new can slide in.
+  let drawnIds: Set<number> | null = null;
 
   const row = (item: QueueItem, control: boolean): HTMLElement => {
     const words = t();
@@ -375,7 +442,7 @@ export function queueCard(): HTMLElement {
     );
     jump.onclick = () => void act(jump, () => api.jump(guild(), item.id));
     next.onclick = () => void act(next, () => api.move(guild(), item.id, 0));
-    remove.onclick = () => void act(remove, () => api.remove(guild(), item.id));
+    remove.onclick = () => leaving(element, () => act(remove, () => api.remove(guild(), item.id)));
     more.onclick = () => trackMenu(item.id);
     // The first row is next already: its Play next holds the column without being a key.
     if (item.position === 0) {
@@ -390,7 +457,7 @@ export function queueCard(): HTMLElement {
       { class: `row ${item.position === 0 ? 'next' : ''}`.trim(), dataset: { id: String(item.id) } },
       grip,
       h('span', { class: 'pos' }, item.position + 1),
-      disc('sm', item.track, 'idle'),
+      album(item.track),
       h(
         'div',
         { class: 'text' },
@@ -498,6 +565,12 @@ export function queueCard(): HTMLElement {
         )
       : items;
     const scroll = list.scrollTop;
+    // Where each row stands now, to glide it from there to its new place after the redraw.
+    const before = new Map<string, number>();
+    if (moving()) {
+      for (const element of list.querySelectorAll<HTMLElement>('li.row'))
+        before.set(element.dataset.id ?? '', element.offsetTop);
+    }
     // After the redraw (a move with Alt+arrow, a track added by someone else) the same key of the same row gets the
     // keyboard focus back.
     keepingFocus(list, () => {
@@ -510,7 +583,12 @@ export function queueCard(): HTMLElement {
         fill(list, h('li', { class: 'empty' }, icon('search'), words.noMatch));
       } else {
         const rows = document.createDocumentFragment();
-        for (const item of shown.slice(0, shownLimit)) rows.append(row(item, control));
+        for (const item of shown.slice(0, shownLimit)) {
+          const element = row(item, control);
+          // Added since the last drawing (by anyone): it slides in. Not on the first drawing, nor in a search.
+          if (drawnIds && !query && !drawnIds.has(item.id) && moving()) element.classList.add('enter');
+          rows.append(element);
+        }
         // The rest waits behind one key, which draws the next hundred.
         const left = shown.length - shownLimit;
         if (left > 0) {
@@ -528,6 +606,18 @@ export function queueCard(): HTMLElement {
       }
     });
     list.scrollTop = scroll;
+    // Each row that was there before glides from its old place (at most a few hundred rows are drawn).
+    if (before.size > 0 && !query) {
+      for (const element of list.querySelectorAll<HTMLElement>('li.row')) {
+        const from = before.get(element.dataset.id ?? '');
+        if (from === undefined || from === element.offsetTop) continue;
+        element.animate([{ transform: `translateY(${from - element.offsetTop}px)` }, { transform: 'none' }], {
+          duration: 320,
+          easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        });
+      }
+    }
+    if (state.queue) drawnIds = new Set(items.map((item) => item.id));
   };
 
   search.oninput = draw;
@@ -577,7 +667,8 @@ export function queueCard(): HTMLElement {
       ok: words.clear,
       danger: true,
     });
-    if (ok) void act(clear, () => api.clear(guild()));
+    // The rows sweep out to the right, then the queue is cleared.
+    if (ok) leaving(list, () => act(clear, () => api.clear(guild())));
   };
   save.onclick = async () => {
     const words = t();
@@ -745,18 +836,25 @@ export function addCard(): HTMLElement {
   const form = h('form', { class: 'add' }, field, add, now);
   const card = h('section', { class: 'card', 'aria-label': 'add' }, form);
 
+  // The key whose lookup is running: its words and its busy state stay while the card redraws for other reasons.
+  let busy: HTMLButtonElement | null = null;
   const draw = () => {
     const words = t();
     input.placeholder = words.addPlaceholder;
     input.setAttribute('aria-label', words.addPlaceholder);
     card.setAttribute('aria-label', words.add);
-    fill(add, icon('list-plus'), words.add);
-    fill(now, icon('play'), words.playNow);
+    if (busy !== add) fill(add, icon('list-plus'), words.add);
+    if (busy !== now) fill(now, icon('play'), words.playNow);
     const control = mayControl();
     input.disabled = !control;
-    add.disabled = !control;
-    now.disabled = !control;
+    add.disabled = !control || busy !== null;
+    now.disabled = !control || busy !== null;
     field.title = control ? '' : words.lookOnlyHint;
+    // Nothing playing and nothing waiting: the card glows to say where music comes from.
+    card.classList.toggle(
+      'invite',
+      control && Boolean(state.player) && !state.player?.track && (state.queue?.items.length ?? 0) === 0,
+    );
   };
   // Both keys look the input up; while that runs (a playlist can take seconds) the keys say so.
   const submit = async (button: HTMLButtonElement, playNow: boolean) => {
@@ -765,9 +863,12 @@ export function addCard(): HTMLElement {
       input.focus();
       return;
     }
+    busy = button;
     fill(button, icon('loader-circle', 'spin'), t().adding);
+    draw();
     const result = await act(button, () => (playNow ? api['play-now'](guild(), text) : api.add(guild(), text)));
     // The key gets its own words back.
+    busy = null;
     draw();
     if (result) {
       input.value = '';
@@ -779,7 +880,7 @@ export function addCard(): HTMLElement {
     void submit(add, false);
   };
   now.onclick = () => void submit(now, true);
-  watch(['lang', 'guild', 'me'], draw);
+  watch(['lang', 'guild', 'me', 'player', 'queue'], draw);
   draw();
   return card;
 }
@@ -808,6 +909,7 @@ export function voiceCard(): HTMLElement {
     const browserOnly = state.status?.mode === 'browser-only';
     const current = voice?.current ?? null;
     pill.className = `pill ${current ? 'tone-play' : 'tone-idle'}`;
+    top.classList.toggle('joined', Boolean(current) && !browserOnly);
     // Browser-only is said once, in the top bar; here the card explains it.
     pill.hidden = browserOnly;
     fill(pill, h('span', { class: 'dot' }), current ? words.connected : words.notInVoice);
@@ -922,7 +1024,7 @@ export function historyCard(): HTMLElement {
     return h(
       'li',
       { class: 'row', dataset: { id: `${entry.playedAt}-${entry.track.id}` } },
-      disc('sm', entry.track, 'idle'),
+      album(entry.track),
       h(
         'div',
         { class: 'text' },

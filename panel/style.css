@@ -1,9 +1,11 @@
 /*
- * jukecord's panel. Flat glass: panels are near-opaque sheets with a hairline edge, a 1px light along the top and
- * one soft shadow; corners are 2px except on things that are round by nature (the disc, avatars, dots, switches).
- * Surfaces are neutral grey; colour is kept for meaning: the state of the player and the connection, what a key
- * does (the main key, removing), and the bars of the statistics. The rainbow means one thing, "playing now": the
- * disc's rim and the progress bar's knob, and they turn white when paused.
+ * jukecord's panel. Frosted glass over the music: the field behind the cards takes its light from the cover of the
+ * track playing, blurred far out of shape, and rests near grey when nothing plays. The cards are glass over it, with a
+ * bright line along their top edge and a long soft shadow; keys are smaller glass, inputs are sunk into it, and the rows
+ * of a list are bare until the pointer or the keyboard is on them. Sheets and dialogs are nearly opaque, for reading.
+ * Colour means something: the music's own (the field, the glow behind the disc), the state of the player and the
+ * connection, and removing. The rainbow means "playing now": it rims the turning disc and runs along the progress bar;
+ * paused, it rests white.
  */
 
 /* The font in pieces by character range: a page fetches only the pieces for the characters it shows (an English page
@@ -13,35 +15,45 @@
 /* ---- tokens: dark (the default) ----------------------------------------------------------------------------- */
 :root {
   color-scheme: dark;
-  --bg: #161719;
-  --bg-top: #1a1b1e;
-  --panel: rgba(31, 32, 35, 0.94);
-  --panel-solid: #1f2023;
-  --raised: #27282c;
-  --raised-2: #2f3035;
-  --sunk: #131416;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-2: rgba(255, 255, 255, 0.15);
-  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 20px 44px -26px rgba(0, 0, 0, 0.9);
-  --ink: #e3e4e5;
-  --ink-2: #b9bbbf;
-  --ink-3: #9a9da3;
-  --key: #ececed;
+  --bg: #0d0e12;
+  --bg-top: #111318;
+  --pool-a: rgba(120, 130, 165, 0.1);
+  --pool-b: rgba(150, 120, 175, 0.07);
+  --pool-c: rgba(110, 140, 175, 0.06);
+  --ambient: 0.32;
+  --ambient-tone: saturate(1.5) brightness(0.6);
+  --panel: rgba(30, 32, 39, 0.55);
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 42%);
+  --panel-solid: rgba(22, 23, 29, 0.96);
+  --edge: rgba(255, 255, 255, 0.085);
+  --glass: blur(24px) saturate(160%);
+  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.18);
+  --raised: rgba(255, 255, 255, 0.06);
+  --raised-2: rgba(255, 255, 255, 0.1);
+  --sunk: rgba(0, 0, 0, 0.28);
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.13);
+  --hover-tint: rgba(255, 255, 255, 0.055);
+  --ink: #eef0f4;
+  --ink-2: #b9bdc9;
+  --ink-3: #9196a5;
+  --key: #eef0f4;
   --key-hi: #ffffff;
-  --key-ink: #161719;
+  --key-ink: #0d0e12;
   --play: oklch(0.79 0.15 152);
   --load: oklch(0.79 0.12 244);
   --pause: oklch(0.83 0.13 82);
   --bad: oklch(0.74 0.15 24);
-  --bad-key: oklch(0.56 0.17 25);
-  --bad-key-hi: oklch(0.6 0.17 25);
+  --bad-key: oklch(0.58 0.19 25);
+  --bad-key-hi: oklch(0.63 0.19 25);
   --soft: 16%;
-  --scrim: rgba(0, 0, 0, 0.62);
-  --focus: oklch(0.8 0.11 244);
+  --scrim: rgba(3, 4, 8, 0.66);
+  --focus: #8ea4ff;
   --groove: rgba(255, 255, 255, 0.045);
-  --disc: #101113;
+  --disc: #0b0c10;
   --series: #3987e5;
+  --rest: #f4f4f5;
   /* The mark's colours: the same rainbow on the arch, the disc's rim and the progress bar. */
   --rainbow: #ff6f61, #ffb84d, #4fcf86, #4aa3ff, #a77bff, #ff6f61;
 }
@@ -49,68 +61,86 @@
 /* ---- tokens: light -------------------------------------------------------------------------------------------- */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #fafafa;
-  --bg-top: #ffffff;
-  --panel: rgba(255, 255, 255, 0.95);
-  --panel-solid: #ffffff;
-  --raised: #f3f3f3;
-  --raised-2: #ebebeb;
-  --sunk: #ffffff;
-  --line: #ebebeb;
-  --line-2: #d4d4d4;
+  --bg: #eef0f4;
+  --bg-top: #f6f7f9;
+  --pool-a: rgba(140, 150, 190, 0.14);
+  --pool-b: rgba(190, 160, 205, 0.1);
+  --pool-c: rgba(150, 180, 215, 0.1);
+  --ambient: 0.28;
+  --ambient-tone: saturate(1.3) brightness(1.1);
+  --panel: rgba(255, 255, 255, 0.62);
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
+  --panel-solid: rgba(255, 255, 255, 0.97);
+  --edge: rgba(255, 255, 255, 0.75);
   --rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -22px rgba(0, 0, 0, 0.22);
-  --ink: #171717;
-  --ink-2: #4d4d4d;
-  --ink-3: #666666;
-  --key: #171717;
-  --key-hi: #333333;
+  --shadow: 0 20px 48px -24px rgba(30, 35, 60, 0.28), 0 1px 3px rgba(30, 35, 60, 0.06);
+  --raised: rgba(255, 255, 255, 0.7);
+  --raised-2: rgba(255, 255, 255, 0.95);
+  --sunk: rgba(225, 229, 238, 0.7);
+  --line: rgba(20, 25, 45, 0.08);
+  --line-2: rgba(20, 25, 45, 0.14);
+  --hover-tint: rgba(20, 25, 45, 0.05);
+  --ink: #14161d;
+  --ink-2: #464b5c;
+  --ink-3: #5b6174;
+  --key: #16181f;
+  --key-hi: #2a2d36;
   --key-ink: #ffffff;
-  --play: oklch(0.5 0.13 152);
-  --load: oklch(0.5 0.13 250);
-  --pause: oklch(0.5 0.12 70);
-  --bad: oklch(0.52 0.18 25);
-  --bad-key: oklch(0.55 0.19 25);
-  --bad-key-hi: oklch(0.5 0.19 25);
+  --play: oklch(0.46 0.13 152);
+  --load: oklch(0.46 0.13 250);
+  --pause: oklch(0.47 0.12 70);
+  --bad: oklch(0.5 0.18 25);
+  --bad-key: oklch(0.5 0.19 25);
+  --bad-key-hi: oklch(0.46 0.19 25);
   --soft: 11%;
-  --scrim: rgba(10, 10, 10, 0.58);
+  --scrim: rgba(10, 12, 20, 0.58);
   --focus: oklch(0.55 0.15 250);
   --groove: rgba(255, 255, 255, 0.06);
-  --disc: #1c1d20;
+  --disc: #16181f;
   --series: #2a78d6;
+  --rest: #aab0c0;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
-    --bg: #fafafa;
-    --bg-top: #ffffff;
-    --panel: rgba(255, 255, 255, 0.95);
-    --panel-solid: #ffffff;
-    --raised: #f3f3f3;
-    --raised-2: #ebebeb;
-    --sunk: #ffffff;
-    --line: #ebebeb;
-    --line-2: #d4d4d4;
+    --bg: #eef0f4;
+    --bg-top: #f6f7f9;
+    --pool-a: rgba(140, 150, 190, 0.14);
+    --pool-b: rgba(190, 160, 205, 0.1);
+    --pool-c: rgba(150, 180, 215, 0.1);
+    --ambient: 0.28;
+    --ambient-tone: saturate(1.3) brightness(1.1);
+    --panel: rgba(255, 255, 255, 0.62);
+    --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 45%);
+    --panel-solid: rgba(255, 255, 255, 0.97);
+    --edge: rgba(255, 255, 255, 0.75);
     --rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -22px rgba(0, 0, 0, 0.22);
-    --ink: #171717;
-    --ink-2: #4d4d4d;
-    --ink-3: #666666;
-    --key: #171717;
-    --key-hi: #333333;
+    --shadow: 0 20px 48px -24px rgba(30, 35, 60, 0.28), 0 1px 3px rgba(30, 35, 60, 0.06);
+    --raised: rgba(255, 255, 255, 0.7);
+    --raised-2: rgba(255, 255, 255, 0.95);
+    --sunk: rgba(225, 229, 238, 0.7);
+    --line: rgba(20, 25, 45, 0.08);
+    --line-2: rgba(20, 25, 45, 0.14);
+    --hover-tint: rgba(20, 25, 45, 0.05);
+    --ink: #14161d;
+    --ink-2: #464b5c;
+    --ink-3: #5b6174;
+    --key: #16181f;
+    --key-hi: #2a2d36;
     --key-ink: #ffffff;
-    --play: oklch(0.5 0.13 152);
-    --load: oklch(0.5 0.13 250);
-    --pause: oklch(0.5 0.12 70);
-    --bad: oklch(0.52 0.18 25);
-    --bad-key: oklch(0.55 0.19 25);
-    --bad-key-hi: oklch(0.5 0.19 25);
+    --play: oklch(0.46 0.13 152);
+    --load: oklch(0.46 0.13 250);
+    --pause: oklch(0.47 0.12 70);
+    --bad: oklch(0.5 0.18 25);
+    --bad-key: oklch(0.5 0.19 25);
+    --bad-key-hi: oklch(0.46 0.19 25);
     --soft: 11%;
-    --scrim: rgba(10, 10, 10, 0.58);
+    --scrim: rgba(10, 12, 20, 0.58);
     --focus: oklch(0.55 0.15 250);
     --groove: rgba(255, 255, 255, 0.06);
-    --disc: #1c1d20;
+    --disc: #16181f;
     --series: #2a78d6;
+    --rest: #aab0c0;
   }
 }
 
@@ -119,7 +149,13 @@
   --font:
     "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
     "Malgun Gothic", "Noto Sans KR", sans-serif;
-  --r: 2px;
+  /* Corners: keys and inputs; small labels; rows; cards, sheets and dialogs. */
+  --r: 10px;
+  --r-sm: 6px;
+  --r-row: 12px;
+  --r-card: 18px;
+  /* Movement that settles like a spring: quick out, soft landing. */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --bar-h: 52px;
   --listen-h: 56px;
   --control: 32px;
@@ -151,13 +187,45 @@ html {
 body {
   margin: 0;
   background: var(--bg);
-  background-image: linear-gradient(180deg, var(--bg-top), var(--bg) 320px);
+  /* Three soft pools of light, fixed to the window: what the glass of the cards shows, blurred. */
+  background-image:
+    radial-gradient(ellipse 80vw 60vh at 15% 20%, var(--pool-a) 0%, transparent 65%),
+    radial-gradient(ellipse 60vw 55vh at 88% 78%, var(--pool-b) 0%, transparent 60%),
+    radial-gradient(ellipse 50vw 45vh at 55% 5%, var(--pool-c) 0%, transparent 55%),
+    linear-gradient(180deg, var(--bg-top), var(--bg) 320px);
   background-attachment: fixed;
   color: var(--ink);
   font: 400 13px / 1.45 var(--font);
   font-feature-settings: "ss06";
   -webkit-font-smoothing: antialiased;
   overflow-wrap: anywhere;
+}
+/* The light behind the glass: the cover of the track playing, blurred far out of shape and toned for the theme
+   (dimmed on the dark field, brightened on the pale one), fading in and out as tracks change. Two layers take turns.
+   Each is drawn at a tenth of the window and scaled up: blurring a small picture costs far less than a large one. */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ambient > div {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10vw;
+  height: 10vh;
+  margin: -5vh 0 0 -5vw;
+  background: center / cover no-repeat;
+  filter: blur(1.1vw) var(--ambient-tone);
+  transform: scale(12);
+  opacity: 0;
+  transition: opacity 1.4s ease;
+  will-change: opacity;
+}
+.ambient > div.on {
+  opacity: var(--ambient);
 }
 /* Korean breaks between words, not inside them ("컴퓨/터"); a long address with no spaces still breaks (above). */
 :root:lang(ko) body {
@@ -229,11 +297,26 @@ img {
   scrollbar-color: var(--line-2) transparent;
   overscroll-behavior: contain;
 }
+/* Browsers that draw the scrollbar themselves: a thin rounded thumb of glass. */
+.scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 6px;
+}
 
 /* ---- the frame: bar, main, listening bar ------------------------------------------------------------------- */
 .app {
   min-height: 100dvh;
   display: grid;
+  /* One column that may be narrower than what is in it (a long title, a toast): without it, the column grows to the
+     longest line and the page becomes wider than a phone. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--bar-h) 1fr var(--listen-h);
 }
 /* The bar holds its parts as they are, with no box round any of them (a box in the bar is a box in a box): the version
@@ -249,10 +332,11 @@ img {
   gap: 12px;
   padding: 0 16px;
   height: var(--bar-h);
-  background: color-mix(in oklch, var(--bg) 88%, transparent);
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  background: color-mix(in oklch, var(--bg) 62%, transparent);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 24px -18px rgba(0, 0, 0, 0.6);
 }
 /* The mark, the name in heavy tight letters, and the version beside them. */
 .brand {
@@ -334,9 +418,9 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: var(--r);
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -348,20 +432,8 @@ img {
   height: 7px;
   border-radius: 50%;
   background: var(--tone, var(--ink-3));
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--tone, var(--ink-3)) 22%, transparent);
+  box-shadow: 0 0 6px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 70%, transparent);
   flex: none;
-}
-/* In the bar the connection is a lamp and its word: no tint behind it, the lamp lit in its colour. */
-.bar > .pill {
-  background: none;
-  padding: 0 4px;
-  color: var(--ink-2);
-}
-.bar > .pill.tone-bad {
-  color: var(--tone);
-}
-.bar > .pill .dot {
-  box-shadow: 0 0 7px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 60%, transparent);
 }
 .tone-play {
   --tone: var(--play);
@@ -463,21 +535,43 @@ img {
   max-width: 100%;
 }
 .toast {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 8px;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 12px;
   min-width: 0;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--r);
-  background: color-mix(in oklch, var(--panel-solid) 72%, transparent);
-  backdrop-filter: blur(10px) saturate(170%);
-  -webkit-backdrop-filter: blur(10px) saturate(170%);
-  box-shadow: var(--rim);
+  background: var(--panel-solid);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow:
+    var(--rim),
+    0 8px 20px -10px rgba(0, 0, 0, 0.5);
   color: var(--ink);
   font-weight: 500;
-  animation: toast-in 180ms ease-out;
+  animation: toast-in 220ms ease-out;
+}
+/* The time the toast has left, running out along its foot. */
+.toast::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--tone, var(--load));
+  opacity: 0.55;
+  transform-origin: left;
+  animation: toast-time var(--toast-ms, 3500ms) linear forwards;
+}
+@keyframes toast-time {
+  to {
+    transform: scaleX(0);
+  }
 }
 .toast .icon {
   color: var(--tone, var(--ink-2));
@@ -517,13 +611,21 @@ img {
 .card {
   /* Cards answer to their own width (the queue's tools lose their words when the card is narrow). */
   container-type: inline-size;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  box-shadow: var(--rim), var(--shadow);
+  position: relative;
+  isolation: isolate;
+  /* The glass: a sheen falling from the top edge over a tinted, blurred view of the field behind. */
+  background: var(--sheen), var(--panel);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow), var(--rim);
   min-width: 0;
   display: flex;
   flex-direction: column;
+  transition:
+    border-color 0.6s ease,
+    box-shadow 0.6s ease;
 }
 .card.fill {
   flex: 1;
@@ -542,17 +644,27 @@ img {
 }
 .card-head h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
 }
+/* Korean has no capitals, and spaced syllables read apart. */
+:where(:root:lang(ko)) .card-head h2 {
+  letter-spacing: 0.02em;
+}
 .card-head .count {
   color: var(--ink-3);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  /* The count is words and numbers, not a label: no capitals, no spacing. */
+  letter-spacing: 0;
+  text-transform: none;
 }
 .card-head .head-search {
   flex: 0 1 220px;
@@ -587,61 +699,84 @@ img {
 }
 
 /* ---- keys ----------------------------------------------------------------------------------------------------- */
+/* A key is a small piece of glass, lit along its top edge; pressed, it gives a little. The main key is solid: the
+   brightest thing on the card. */
 .key {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   height: var(--control);
-  padding: 0 12px;
+  padding: 0 14px;
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--raised);
+  box-shadow:
+    var(--rim),
+    0 1px 2px rgba(0, 0, 0, 0.12);
   color: var(--ink);
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
   flex: none;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s var(--ease);
 }
 .key:hover {
   background: var(--raised-2);
+  border-color: color-mix(in oklch, var(--ink) 20%, transparent);
 }
-.key:active {
-  background: var(--line-2);
+.key:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .key.primary {
-  background: var(--key);
-  border-color: var(--key);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--key-hi) 100%, transparent), var(--key));
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 6px 16px -8px rgba(0, 0, 0, 0.55);
   color: var(--key-ink);
+  font-weight: 600;
 }
 .key.primary:hover {
   background: var(--key-hi);
-  border-color: var(--key-hi);
+  border-color: transparent;
 }
 .key.danger {
   background: var(--bad-key);
-  border-color: var(--bad-key);
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 6px 16px -8px rgba(0, 0, 0, 0.5);
   color: #fff;
+  font-weight: 600;
 }
 .key.danger:hover {
   background: var(--bad-key-hi);
+  border-color: transparent;
 }
 .key.quiet {
   background: none;
   border-color: transparent;
+  box-shadow: none;
   color: var(--ink-2);
 }
 .key.quiet:hover {
-  background: var(--raised);
+  background: var(--hover-tint);
+  border-color: transparent;
   color: var(--ink);
 }
 .key.quiet.bad:hover {
   color: var(--bad);
+  background: color-mix(in oklch, var(--bad) 12%, transparent);
 }
 .key.sm {
   height: var(--control-sm);
-  padding: 0 8px;
+  padding: 0 10px;
 }
 .key.square {
   width: var(--control);
@@ -651,8 +786,8 @@ img {
   width: var(--control-sm);
 }
 .key[aria-pressed="true"] {
-  background: color-mix(in oklch, var(--load) var(--soft), var(--raised));
-  border-color: color-mix(in oklch, var(--load) 45%, transparent);
+  background: color-mix(in oklch, var(--load) 16%, transparent);
+  border-color: color-mix(in oklch, var(--load) 40%, transparent);
   color: var(--ink);
 }
 .key:disabled,
@@ -675,24 +810,31 @@ img {
   align-items: center;
   gap: 8px;
   height: var(--control);
-  padding: 0 10px;
+  padding: 0 12px;
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--sunk);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
   min-width: 0;
   flex: 1;
   color: var(--ink-3);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 .field:hover {
-  border-color: color-mix(in oklch, var(--ink) 30%, transparent);
+  border-color: color-mix(in oklch, var(--ink) 28%, transparent);
 }
 .field:focus-within {
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.18),
+    0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent),
+    0 0 14px color-mix(in oklch, var(--focus) 25%, transparent);
 }
 .field input {
   flex: 1;
+  width: 0;
   min-width: 0;
   height: 100%;
   border: 0;
@@ -722,7 +864,9 @@ img {
   gap: 2px;
   border-radius: var(--r);
   background: var(--sunk);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 @media (pointer: coarse) {
   /* Each choice gets the whole 44px. */
@@ -734,7 +878,7 @@ img {
   height: 100%;
   padding: 0 10px;
   border: 0;
-  border-radius: var(--r);
+  border-radius: 8px;
   background: none;
   color: var(--ink-2);
   font-weight: 500;
@@ -747,7 +891,9 @@ img {
 .seg button[aria-pressed="true"] {
   background: var(--raised-2);
   color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  box-shadow:
+    var(--rim),
+    0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 /* On/off switch. */
@@ -807,17 +953,47 @@ img {
       var(--groove) 62.6%,
       transparent 63.4%
     ),
-    conic-gradient(from 30deg, #ffffff10, #ffffff02 25%, #ffffff10 50%, #ffffff02 75%, #ffffff10), var(--disc);
+    conic-gradient(from 30deg, #ffffff10, #ffffff02 25%, #ffffff10 50%, #ffffff02 75%, #ffffff10),
+    radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.09), transparent 55%), var(--disc);
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 10px 28px -14px rgba(0, 0, 0, 0.7);
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 14px 32px -14px rgba(0, 0, 0, 0.75);
+  transition: opacity 0.6s ease;
+}
+/* Nothing playing: the disc rests, a little faded. */
+.disc.idle:not(.sm) {
+  opacity: 0.6;
+}
+/* Behind the big disc, the cover's own colours glow, blurred far out of shape (Apple Music and YouTube Music do this
+   with the art); with no cover there is no glow. */
+.art {
+  position: relative;
+  isolation: isolate;
+}
+.art::before {
+  content: "";
+  position: absolute;
+  inset: 6%;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--cover, none) center / cover;
+  filter: blur(26px) saturate(1.6);
+  opacity: 0;
+  transform: scale(1.15);
+  transition: opacity 0.8s ease;
+}
+.card.playing .art::before {
+  opacity: 0.7;
+}
+.card.paused .art::before {
+  opacity: 0.35;
 }
 .disc .label {
   position: absolute;
   inset: 26%;
   border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(135deg, #3a3b40, #26272b);
+  background: linear-gradient(135deg, #3a3d48, #23252d);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 .disc .label img {
@@ -854,7 +1030,7 @@ img {
   background: conic-gradient(var(--rainbow));
 }
 .disc.paused::before {
-  background: #f4f4f5;
+  background: var(--rest);
 }
 .disc .spinner {
   position: absolute;
@@ -863,7 +1039,7 @@ img {
 }
 .disc.playing .spinner,
 .disc.paused .spinner {
-  animation: spin 18s linear infinite;
+  animation: spin 3s linear infinite;
 }
 .disc.paused .spinner {
   animation-play-state: paused;
@@ -885,6 +1061,12 @@ img {
 }
 
 /* ---- now playing ------------------------------------------------------------------------------------------------ */
+.card.playing {
+  border-color: color-mix(in oklch, var(--ink) 16%, transparent);
+}
+.card.paused {
+  border-color: color-mix(in oklch, var(--pause) 30%, transparent);
+}
 .now {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -894,10 +1076,10 @@ img {
 }
 .now .title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 650;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
 }
 .now .title a {
   text-decoration: none;
@@ -942,6 +1124,7 @@ img {
   cursor: pointer;
   touch-action: none;
 }
+/* The groove the bar runs in, sunk into the glass; under the pointer it grows to show it can be taken. */
 .track::before {
   content: "";
   position: absolute;
@@ -950,7 +1133,11 @@ img {
   top: 6px;
   height: 4px;
   border-radius: 2px;
-  background: var(--raised-2);
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    top 0.15s ease,
+    height 0.15s ease;
 }
 .track .fill {
   position: absolute;
@@ -958,7 +1145,10 @@ img {
   top: 6px;
   height: 4px;
   border-radius: 2px;
-  background: var(--ink-2);
+  background: color-mix(in oklch, var(--ink) 30%, transparent);
+  transition:
+    top 0.15s ease,
+    height 0.15s ease;
 }
 .track .knob {
   position: absolute;
@@ -970,31 +1160,57 @@ img {
   background: var(--ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
+/* Playing: the rainbow runs along the bar and glows, and the knob glows in its colours one after another. */
 .playing .track .fill {
   background: linear-gradient(90deg, var(--rainbow));
   background-size: var(--track-w, 600px) 100%;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.14);
 }
 .playing .track .knob {
   background: conic-gradient(var(--rainbow));
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--ink) 12%, transparent),
+    0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.paused .track .fill {
+  background: color-mix(in oklch, var(--ink) 45%, transparent);
 }
 .paused .track .knob {
-  background: #f4f4f5;
+  background: var(--rest);
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--ink) 10%, transparent),
+    0 1px 4px rgba(0, 0, 0, 0.4);
+}
+/* Under the pointer the groove grows, to show it can be taken. */
+.track:not([aria-disabled="true"]):hover::before,
+.track:not([aria-disabled="true"]):hover .fill {
+  top: 5px;
+  height: 6px;
 }
 .track[aria-disabled="true"] {
   cursor: default;
 }
 .track .tip {
   position: absolute;
-  bottom: 18px;
+  bottom: 20px;
   translate: -50% 0;
-  padding: 2px 6px;
-  border-radius: var(--r);
-  background: var(--panel-solid);
-  border: 1px solid var(--line-2);
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  background: rgba(8, 9, 15, 0.88);
+  color: #fff;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
   white-space: nowrap;
+}
+.track .tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0;
+  border: 4px solid transparent;
+  border-top-color: rgba(8, 9, 15, 0.88);
 }
 .times {
   display: flex;
@@ -1010,20 +1226,31 @@ img {
   list-style: none;
   margin: 0;
   padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
+/* A list that scrolls must not squeeze its rows to fit: each keeps the height of what it holds. */
+.list > * {
+  flex: none;
+}
+/* A row is bare; under the pointer (or the keyboard) a pane of glass comes up behind it. */
 .row {
   display: grid;
-  grid-template-columns: 16px 28px 36px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 28px 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 52px;
+  min-height: 54px;
   padding: 6px 6px 6px 4px;
-  border-radius: var(--r);
+  border-radius: var(--r-row);
   border: 1px solid transparent;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
 }
 .row:hover,
 .row:focus-within {
-  background: var(--raised);
+  background: var(--hover-tint);
   border-color: var(--line);
 }
 .row .grip {
@@ -1100,7 +1327,7 @@ img {
   display: none;
 }
 .row.next {
-  background: color-mix(in oklch, var(--load) 7%, transparent);
+  background: color-mix(in oklch, var(--load) 8%, transparent);
   border-color: color-mix(in oklch, var(--load) 22%, transparent);
 }
 .row.dragging {
@@ -1113,19 +1340,105 @@ img {
   box-shadow: inset 0 -2px 0 var(--focus);
 }
 .history .row {
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  padding-left: 6px;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  padding-left: 8px;
 }
 .badge {
   display: inline-flex;
+  flex: none;
   align-items: center;
   height: 18px;
-  padding: 0 6px;
-  border-radius: var(--r);
+  padding: 0 7px;
+  border-radius: 999px;
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   color: var(--tone, var(--ink-2));
   background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), transparent);
+}
+
+/* A row's album: the cover, rounded, with the record peeking out from behind it; under the pointer the record slides
+   out a little further. */
+.album {
+  position: relative;
+  width: 48px;
+  height: 40px;
+  flex: none;
+}
+.album .case {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--raised-2);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent),
+    0 4px 10px -4px rgba(0, 0, 0, 0.5);
+}
+.album .case img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.album .case .note {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ink-3);
+}
+.album .case .note .icon {
+  width: 15px;
+  height: 15px;
+}
+.album .vinyl {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 40%, rgba(255, 255, 255, 0.05) 41%, transparent 43%),
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.1), transparent 60%), var(--disc);
+  /* A faint edge, so the record reads as one against a dark field too. */
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: translate 0.35s var(--ease);
+}
+/* Its label: the cover again, small, around the hole. */
+.album .vinyl::before {
+  content: "";
+  position: absolute;
+  inset: 11px;
+  border-radius: 50%;
+  background: var(--cover, linear-gradient(135deg, #3a3d48, #23252d)) center / cover;
+}
+.album .vinyl::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--bg);
+}
+.row .album .vinyl {
+  translate: 6px -50%;
+}
+.row:hover .album .vinyl {
+  translate: 12px -50%;
 }
 
 /* ---- add -------------------------------------------------------------------------------------------------------- */
@@ -1140,8 +1453,15 @@ img {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px var(--pad);
-  border-bottom: 1px solid var(--line);
+  margin: 10px 10px 4px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--r-row);
+  border: 1px solid var(--line);
+  background: var(--raised);
+}
+.voice-now.joined {
+  border-color: color-mix(in oklch, var(--play) 28%, transparent);
+  background: color-mix(in oklch, var(--play) 8%, transparent);
 }
 .voice-now .where {
   flex: 1;
@@ -1149,6 +1469,9 @@ img {
 }
 .voice-now .where b {
   font-weight: 600;
+}
+.voice-now.joined .where {
+  color: var(--play);
 }
 .channels {
   list-style: none;
@@ -1162,10 +1485,15 @@ img {
   gap: 10px;
   min-height: 40px;
   padding: 4px 6px 4px 10px;
-  border-radius: var(--r);
+  border-radius: var(--r-row);
+  border: 1px solid transparent;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
 }
 .channel:hover {
-  background: var(--raised);
+  background: var(--hover-tint);
+  border-color: var(--line);
 }
 .channel .name {
   flex: 1;
@@ -1188,7 +1516,7 @@ img {
 }
 .faces .avatar {
   margin-left: -4px;
-  box-shadow: 0 0 0 2px var(--panel-solid);
+  box-shadow: 0 0 0 2px var(--bg);
 }
 .faces .avatar:first-child {
   margin-left: 0;
@@ -1204,10 +1532,51 @@ img {
   gap: 12px;
   height: var(--listen-h);
   padding: 0 16px;
-  background: color-mix(in oklch, var(--bg) 90%, transparent);
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  background: color-mix(in oklch, var(--bg) 62%, transparent);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, 0.6);
+}
+.listen .key[data-act="listen"][aria-pressed="true"] {
+  background: color-mix(in oklch, var(--load) 16%, transparent);
+  border-color: color-mix(in oklch, var(--load) 42%, transparent);
+}
+/* Three bars that dance while the browser listens. */
+.listen .key[data-act="listen"][aria-pressed="true"]::after {
+  content: "";
+  width: 13px;
+  height: 12px;
+  margin-left: 2px;
+  background:
+    linear-gradient(currentColor, currentColor) 0 100% / 3px 40% no-repeat,
+    linear-gradient(currentColor, currentColor) 5px 100% / 3px 90% no-repeat,
+    linear-gradient(currentColor, currentColor) 10px 100% / 3px 60% no-repeat;
+  color: color-mix(in oklch, var(--load) 80%, var(--ink));
+}
+.listen .key[data-act="listen"].sounding[aria-pressed="true"]::after {
+  animation: eq 1.1s ease-in-out infinite;
+}
+@keyframes eq {
+  0%,
+  100% {
+    background-size:
+      3px 40%,
+      3px 90%,
+      3px 60%;
+  }
+  33% {
+    background-size:
+      3px 95%,
+      3px 45%,
+      3px 80%;
+  }
+  66% {
+    background-size:
+      3px 60%,
+      3px 70%,
+      3px 35%;
+  }
 }
 .listen .state {
   flex: 1;
@@ -1285,17 +1654,21 @@ img {
   display: flex;
   flex-direction: column;
   background: var(--panel-solid);
-  border-left: 1px solid var(--line);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-left: 1px solid var(--edge);
+  border-radius: var(--r-card) 0 0 var(--r-card);
   box-shadow:
     var(--rim),
-    -24px 0 48px -32px rgba(0, 0, 0, 0.6);
-  animation: sheet-in 180ms ease-out;
+    -24px 0 48px -24px rgba(0, 0, 0, 0.65);
+  animation: sheet-in 220ms ease-out;
 }
 .sheet.left {
   right: auto;
   left: 0;
   border-left: 0;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--edge);
+  border-radius: 0 var(--r-card) var(--r-card) 0;
   animation-name: sheet-in-left;
 }
 @keyframes sheet-in {
@@ -1319,6 +1692,16 @@ img {
   flex: 1;
   min-height: 0;
   padding: 8px 0 16px;
+}
+/* The sheet's own close key, in its top corner; the first section leaves it room. */
+.sheet-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+}
+.sheet .sheet-body > :first-child {
+  padding-right: 56px;
 }
 .section {
   padding: 12px var(--pad);
@@ -1359,7 +1742,7 @@ img {
 .choice:hover {
   background: var(--raised);
 }
-.choice[aria-checked="true"] {
+.choice:is([aria-checked="true"], [aria-current="true"], [aria-pressed="true"]) {
   border-color: var(--line-2);
   background: var(--raised);
   font-weight: 600;
@@ -1369,7 +1752,7 @@ img {
   color: var(--play);
   visibility: hidden;
 }
-.choice[aria-checked="true"] .check {
+.choice:is([aria-checked="true"], [aria-current="true"], [aria-pressed="true"]) .check {
   visibility: visible;
 }
 .swatch {
@@ -1389,12 +1772,14 @@ img {
   display: flex;
   flex-direction: column;
   background: var(--panel-solid);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-card);
   box-shadow:
     var(--rim),
     0 30px 80px -30px rgba(0, 0, 0, 0.8);
-  animation: dialog-in 160ms ease-out;
+  animation: dialog-in 200ms ease-out;
 }
 @keyframes dialog-in {
   from {
@@ -1645,7 +2030,7 @@ kbd {
 }
 .log {
   display: grid;
-  grid-template-columns: 172px 52px 96px minmax(0, 1fr);
+  grid-template-columns: 172px max-content 96px minmax(0, 1fr);
   gap: 10px;
   padding: 5px var(--pad);
   border-bottom: 1px solid var(--line);
@@ -1804,9 +2189,43 @@ kbd {
     padding: 0;
   }
 }
+/* On a narrow window the bar has no room for a toast: it hangs under the bar as a strip of the bar's own glass, as
+   wide as the window (the content passes under it as under the bar), and its words may take two lines. */
 @media (max-width: 900px) {
-  .sheet {
+  .toasts {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    padding: 6px 12px;
+    background: color-mix(in oklch, var(--bg) 62%, transparent);
+    backdrop-filter: var(--glass);
+    -webkit-backdrop-filter: var(--glass);
+    border-bottom: 1px solid var(--line);
+  }
+  .toasts:empty {
+    display: none;
+  }
+  .toast {
+    flex: 1;
+    height: auto;
+    min-height: 32px;
+    padding: 6px 12px;
+  }
+  .toast span {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+}
+@media (max-width: 900px) {
+  .sheet,
+  .sheet.left {
     width: 100vw;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
   }
   .divider,
   .bar .nav {
@@ -1841,7 +2260,7 @@ kbd {
     display: inline-flex;
   }
   .row {
-    grid-template-columns: 24px 36px minmax(0, 1fr) auto;
+    grid-template-columns: 24px 48px minmax(0, 1fr) auto;
   }
   /* A log record on a narrow window: time, level and component on one line, the message under them. */
   .log {
@@ -1912,6 +2331,93 @@ kbd {
   }
 }
 
+/* ---- moving parts ----------------------------------------------------------------------------------------------- */
+/* Short and soft: things settle into place rather than bounce. The rows' moves (shuffle, drag, removal) glide from
+   their old places, drawn by the panel's code. */
+/* The cards rise into place one after another when the page opens. */
+.col > .card {
+  animation: card-in 0.5s var(--ease) both;
+}
+.col > .card:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.col > .card:nth-child(3) {
+  animation-delay: 0.1s;
+}
+.col + .col > .card {
+  animation-delay: 0.08s;
+}
+.col + .col > .card:nth-child(2) {
+  animation-delay: 0.13s;
+}
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+/* Once risen, the cards stay still when the player page is shown again (an animation restarts when its element
+   comes back from hidden). The card asking for music keeps its breathing. */
+.main.risen .col > .card:not(.invite) {
+  animation: none;
+}
+/* Another track comes in from below; Skip moves the old one out to the right. */
+.now.enter {
+  animation: now-enter 0.45s var(--ease);
+}
+@keyframes now-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.now.leaving {
+  animation: now-leave 0.22s ease forwards;
+}
+@keyframes now-leave {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+/* A row added comes in; a row removed goes out to the right. */
+.row.enter {
+  animation: row-enter 0.35s var(--ease);
+}
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.row.leaving {
+  animation: row-leave 0.2s ease forwards;
+  pointer-events: none;
+}
+@keyframes row-leave {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+/* Cleared: the rows go together. */
+.list.leaving > .row {
+  animation: row-leave 0.22s ease forwards;
+}
+/* Nothing playing and nothing waiting: the card to add music breathes, slowly, in the focus colour. */
+.card.invite {
+  animation: invite 2.8s ease-in-out infinite;
+}
+@keyframes invite {
+  0%,
+  100% {
+    border-color: var(--edge);
+  }
+  50% {
+    border-color: color-mix(in oklch, var(--focus) 55%, transparent);
+  }
+}
+
 /* ---- motion -------------------------------------------------------------------------------------------------------- */
 /* People who ask their system for less motion get none, and the menu can turn it off too. */
 /* biome-ignore-start lint/complexity/noImportantStyles: turning motion off must win over every animation. */
@@ -1934,17 +2440,43 @@ kbd {
 /* ---- touch ------------------------------------------------------------------------------------------------------ */
 /* Last in the file, so they win over the rules above: every control at least 44 by 44 for a finger. */
 @media (pointer: coarse) {
+  /* The switch looks 28 high but takes 44: the colour stays in the middle (content box), the rest is margin to touch. */
   .switch {
     width: 46px;
     height: 28px;
-    border-radius: 14px;
+    box-sizing: content-box;
+    padding: 8px 0;
+    background-clip: content-box;
+    border-radius: 22px;
   }
   .switch::after {
+    top: 10px;
     width: 24px;
     height: 24px;
   }
   .switch[aria-checked="true"]::after {
     transform: translateX(18px);
+  }
+  /* The seek bar and the volume take a finger's height; what they draw stays in the middle. */
+  .track {
+    height: 44px;
+  }
+  .track::before,
+  .track .fill {
+    top: 20px;
+  }
+  .track .knob {
+    top: 16px;
+  }
+  .track .tip {
+    bottom: 34px;
+  }
+  .volume input {
+    height: 44px;
+  }
+  /* The logo is a link home: a finger's height too. */
+  .brand {
+    min-height: 44px;
   }
   .seg button {
     min-width: 44px;

@@ -213,6 +213,8 @@ export function listenBar(live: Live): HTMLElement {
     // Blocked: the key asks for the sound again (listening stays on).
     const retry = state.listening && sync === 'blocked';
     toggle.setAttribute('aria-pressed', String(state.listening && !retry));
+    // The key's bars dance only while sound plays here (in time), and rest while paused or catching up.
+    toggle.classList.toggle('sounding', state.listening && sync === 'in-sync' && player?.status === 'playing');
     label(toggle, 'headphones', state.listening && !retry ? words.stopListening : words.listenHere, true);
     // What plays, with this browser's state under it.
     const message = {

@@ -6,11 +6,11 @@
  * the listening bar alive, so the music in this browser does not stop when someone looks at the statistics.
  */
 import { ApiError, api, type Player, setCsrf, whenLoggedOut } from './api.ts';
-import { avatarUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
+import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
 import { collect, keep, mayControl, positionNow, state, t, update, watch } from './state.ts';
-import { closeSheets, problem, toast } from './ui/layers.ts';
+import { closeSheets, layerOpen, problem, toast } from './ui/layers.ts';
 import { listenBar } from './views/listen.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
@@ -106,6 +106,12 @@ function frame(): void {
     },
   });
 
+  // Whether the live connection has been open once: until then the bar says "Connecting", after that "Reconnecting".
+  let everOpen = false;
+  watch(['live'], () => {
+    if (state.live === 'open') everOpen = true;
+  });
+
   // The bar.
   const version = h('span', { class: 'version' });
   const brand = h(
@@ -149,6 +155,8 @@ function frame(): void {
     h('div', { class: 'col' }, nowCard(live), queueCard(), addCard()),
     h('div', { class: 'col' }, voiceCard(), historyCard()),
   );
+  // The cards rise into place once, when the panel opens; coming back from another page they are simply there.
+  window.setTimeout(() => playerScreen.classList.add('risen'), 1200);
   const page = h('div', { class: 'page-slot', style: 'min-height:0;display:contents' });
   const listen = listenBar(live);
   fill(root, h('div', { class: 'app' }, bar, playerScreen, page, listen));
@@ -208,7 +216,7 @@ function frame(): void {
       state.live === 'refused'
         ? ['bad', words.refused]
         : state.live !== 'open'
-          ? ['pause', words.reconnecting]
+          ? ['pause', everOpen ? words.reconnecting : words.connectingLive]
           : state.status?.mode === 'browser-only'
             ? ['idle', words.browserOnly]
             : state.status && !state.status.discord
@@ -251,17 +259,42 @@ function frame(): void {
         h('span', { class: 'name' }, name),
         icon('menu'),
       );
-    account.setAttribute('aria-label', words.menu);
+    // The name the key shows, then what it opens (a screen reader hears what is on the key).
+    account.setAttribute('aria-label', name ? `${name}, ${words.menu}` : words.menu);
   };
   server.onclick = () => serversSheet(choose);
   // The key says whether its menu is open (screen readers, and the bar shows it held while it is).
   account.setAttribute('aria-haspopup', 'dialog');
   account.setAttribute('aria-expanded', 'false');
+  // The key opens the menu and closes it again (on a phone the menu covers the page, and this key stays above it).
+  const menuHooks = {
+    opened: () => account.setAttribute('aria-expanded', 'true'),
+    closed: () => account.setAttribute('aria-expanded', 'false'),
+  };
   account.onclick = () => {
-    account.setAttribute('aria-expanded', 'true');
-    menuSheet(navigate, () => account.setAttribute('aria-expanded', 'false'));
+    if (account.getAttribute('aria-expanded') === 'true') closeSheets();
+    else menuSheet(navigate, menuHooks);
   };
   watch(['status', 'guild', 'live', 'lang', 'me', 'guilds'], drawBar);
+  // The light behind the glass: the cover of the track playing, in two layers that take turns, so the old cover fades
+  // out while the new one fades in. Nothing playing: the field rests near grey.
+  const ambient = h('div', { class: 'ambient', 'aria-hidden': 'true' }, h('div'), h('div'));
+  document.body.prepend(ambient);
+  let ambientCover: string | null = null;
+  let ambientTop = 0;
+  watch(['player'], () => {
+    const cover = state.player?.track?.thumbnail ?? null;
+    if (cover === ambientCover) return;
+    ambientCover = cover;
+    const layers = [...ambient.children] as HTMLElement[];
+    layers[ambientTop]?.classList.remove('on');
+    if (!cover) return;
+    ambientTop = 1 - ambientTop;
+    const next = layers[ambientTop];
+    if (!next) return;
+    next.style.backgroundImage = cssUrl(cover);
+    next.classList.add('on');
+  });
   // The tab shows what plays; on its own watch, so player snapshots do not redraw the bar.
   watch(['player'], () => {
     document.title = state.player?.track ? `${state.player.track.title} · jukecord` : 'jukecord';
@@ -367,7 +400,14 @@ function shortcuts(): void {
   document.addEventListener('keydown', (event) => {
     const target = event.target as HTMLElement;
     // Typing in a field, or a key with Ctrl/Cmd/Alt, is not a shortcut.
-    if (target.closest('input, textarea, [contenteditable], .dialog') || event.ctrlKey || event.metaKey || event.altKey)
+    // Nor is a key pressed while a sheet or a dialog is open: arrows there move between its choices.
+    if (
+      layerOpen() ||
+      target.closest('input, textarea, [contenteditable], .dialog, .sheet') ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey
+    )
       return;
     const guild = state.guild?.id;
     const player = state.player;
