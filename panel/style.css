@@ -2136,6 +2136,43 @@ kbd {
   padding: 28px 24px 24px;
   gap: 16px;
 }
+/* No music here yet to light the glass, so the mark's own rainbow does: a wide, soft glow behind the card, which
+   breathes slowly (size and strength only). The login card is the one card that blurs what is behind it. */
+.login {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.login::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  width: min(560px, 120vw);
+  height: 340px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: conic-gradient(from 210deg, var(--rainbow));
+  filter: blur(80px);
+  opacity: 0.3;
+  animation: login-glow 9s ease-in-out infinite;
+}
+@keyframes login-glow {
+  0%,
+  100% {
+    opacity: 0.24;
+    scale: 0.96;
+  }
+  50% {
+    opacity: 0.36;
+    scale: 1.06;
+  }
+}
+.login .card {
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+}
 .login .brand {
   gap: 12px;
 }
