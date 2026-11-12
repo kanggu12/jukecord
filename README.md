@@ -125,7 +125,7 @@ people use most.
   that hangs ends itself and comes back paused where it was.
 - **Small and contained.** One process and one SQLite file. It fetches only from public addresses, keeps its files to
   its own user, and on Kubernetes runs as a read-only, non-root pod behind a NetworkPolicy.
-- **Search and pick.** Search words show what YouTube found under the add field as you type (title, channel, length,
+- **Search and pick.** Search words show what YouTube found beside the add field as you type (title, channel, length,
   cover), to play now, next or add; Discord suggests the same under `/play` and `/add`. A link pasted or dropped
   anywhere on the page is added.
 - **Autoplay.** When the queue runs out, a track from the server's own plays (the ones played and liked more, more

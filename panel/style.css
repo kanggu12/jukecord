@@ -1570,7 +1570,7 @@ img {
 /* ---- what a search found -------------------------------------------------------------------------------------- */
 /* Under the add field (over it where the card stands at the foot of a page that does not scroll), in the card itself:
    a solid reading surface, so titles read the same over any light behind the glass. The form keeps its height; the
-   list gives way when the column is short, down to two rows, and scrolls. */
+   list gives way when the column is short, and scrolls. */
 .add-card > .add {
   flex: none;
 }
@@ -1594,7 +1594,7 @@ img {
   scrollbar-color: var(--line-2) transparent;
 }
 /* Over the field, at the foot of a column that does not scroll: the card grows upwards and the field stays put. The
-   queue above keeps three rows in sight, and the list gives way down to two. */
+   queue above keeps three rows in sight on a window taller than 880 px (below), and the list gives way to them. */
 .add-card.found-above {
   min-height: 0;
 }
@@ -1621,23 +1621,26 @@ img {
   min-height: 190px;
   contain: size;
 }
-/* A column too short for both (a laptop's window under 880 px): while the results show, the queue gives the room of
-   its rows to them (its head stays, with its count), and the results take the column down to the field. */
+/* A column too short for both (a laptop's window under 880 px). Nothing found yet (or nothing at all): the line takes
+   what it needs and the queue keeps the rest; giving up its rows for it left one line over an empty box. */
 @media (max-height: 880px) {
-  .col:has(> .add-card.found-above) > .card.fill {
+  .col:has(> .add-card.found-above) > .card.fill > .list {
+    min-height: 0;
+  }
+  /* Any result: the queue keeps its head with its count and gives the room of its rows to the results, which sit on
+     the field (beside them, what was left of the rows was one row or a sliver of one). */
+  .col:has(> .add-card.found-above .result) > .card.fill {
     flex: none;
     min-height: 0;
   }
-  .col:has(> .add-card.found-above) > .card.fill > .list {
+  .col:has(> .add-card.found-above .result) > .card.fill > .list {
     display: none;
   }
-  .add-card.found-above {
+  .add-card.found-above:has(.result) {
     flex: 1 1 auto;
+    justify-content: flex-end;
   }
-  .add-card.found-above .found {
-    flex: 1 1 auto;
-  }
-  .add-card.found-above .found-list {
+  .add-card.found-above:has(.result) .found-list {
     max-height: none;
   }
 }
@@ -1734,7 +1737,7 @@ img {
   padding: 10px 12px;
   color: var(--ink-2);
 }
-/* The keys that pick, for a keyboard; a touch screen has none. */
+/* The keys that pick, for a keyboard; a touch screen has none, and nothing found has nothing to pick. */
 .found-keys {
   margin: 0;
   padding: 6px 12px 8px;
@@ -1746,6 +1749,9 @@ img {
   .found-keys {
     display: none;
   }
+}
+.found-list:empty + .found-keys {
+  display: none;
 }
 /* A link from outside held over the page: the card it goes to is ringed in the focus colour and says so. Over the
    card's breathing ring (which it replaces while it shows), steady. */

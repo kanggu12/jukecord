@@ -18,10 +18,11 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   (**Show more** brings the next hundred); search covers all of it.
 - **Add**: paste an address (a video, a playlist, a SoundCloud page, a Deezer, Spotify or Apple Music link ...) or type
   search words. **Add** puts it at the end of the queue, **Play next** right after the track playing, **Play now**
-  plays it at once. Words show what YouTube found under the field a moment after you stop typing: press a result to
-  add it, or its play now and play next marks; with the keyboard, the arrows choose one and Enter adds it
-  (<kbd>Shift</kbd> <kbd>Enter</kbd> plays it next, <kbd>Ctrl</kbd> <kbd>Enter</kbd> now). A link pasted anywhere on
-  the page, or dropped on it from another window, is added the same way.
+  plays it at once. Words show what YouTube found beside the field (over it at the foot of a window in two columns,
+  under it elsewhere) a moment after you stop typing: press a result to add it, or its play now and play next marks;
+  with the keyboard, the arrows choose one and Enter adds it (<kbd>Shift</kbd> <kbd>Enter</kbd> plays it next,
+  <kbd>Ctrl</kbd> <kbd>Enter</kbd> now). A link pasted anywhere on the page, or dropped on it from another window, is
+  added the same way.
 - **Voice channel**: where the bot is, the channels it may join (with how many people are in each), and who is
   listening in a browser.
 - **Recently played** and **Liked** (two lists in one card): what played, and the tracks you liked, each with keys
