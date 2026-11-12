@@ -112,3 +112,64 @@ describe('votes to skip over the API', () => {
     assert.match(refused.json().error.message, /DJ role/);
   });
 });
+
+describe('taking turns and the limit per person over the API', () => {
+  let server: TestServer;
+
+  before(async () => {
+    server = await testServer({ found: { one: [exampleTrack('t1')], two: [exampleTrack('t2'), exampleTrack('t3')] } });
+    server.directory.join(GUILD, ALICE);
+    server.directory.join(GUILD, BOB, { manage: true });
+  });
+  after(() => server.close());
+
+  const inject = (options: InjectOptions) => server.web.app.inject(options);
+  const as = (userId: string) => {
+    const { cookie, csrf } = sessionFor(server, userId);
+    return { cookie, [CSRF_HEADER]: csrf };
+  };
+
+  it('sets both for people who manage the server, and answers an add with what the limit left out', async () => {
+    for (const [path, payload] of [
+      ['take-turns', { on: true }],
+      ['person-limit', { tracks: 1 }],
+    ] as const) {
+      const refused = await inject({
+        method: 'PUT',
+        url: api(`/guilds/${GUILD}/settings/${path}`),
+        headers: as(ALICE),
+        payload,
+      });
+      assert.equal(refused.statusCode, 403);
+      const set = await inject({
+        method: 'PUT',
+        url: api(`/guilds/${GUILD}/settings/${path}`),
+        headers: as(BOB),
+        payload,
+      });
+      assert.equal(set.statusCode, 200);
+    }
+    const shown = (await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: as(ALICE) })).json();
+    assert.deepEqual([shown.takeTurns, shown.personLimit], [true, 1]);
+    // Over the queue's own size: refused by the schema.
+    const tooMany = await inject({
+      method: 'PUT',
+      url: api(`/guilds/${GUILD}/settings/person-limit`),
+      headers: as(BOB),
+      payload: { tracks: 5000 },
+    });
+    assert.equal(tooMany.statusCode, 400);
+    // Alice's first track plays at once, the second waits, the third is over her limit of one.
+    await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue`), headers: as(ALICE), payload: { input: 'one' } });
+    const added = await inject({
+      method: 'POST',
+      url: api(`/guilds/${GUILD}/queue`),
+      headers: as(ALICE),
+      payload: { input: 'two' },
+    });
+    assert.deepEqual([added.json().items.length, added.json().skippedLimit], [1, 1]);
+    // Putting the queue in turns is a change of the music: Alice may, and nothing needs to move.
+    const now = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/turns`), headers: as(ALICE) });
+    assert.deepEqual(now.json(), { moved: 0 });
+  });
+});

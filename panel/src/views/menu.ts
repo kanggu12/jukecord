@@ -293,6 +293,37 @@ function switchLine(name: string, hint: string, on: boolean, save: (on: boolean)
   );
 }
 
+// The limit of tracks one person may have queued: a few choices in a row (none, 1, 2, 3, 5, 10), and the limit set by
+// other means (the command line, say) among them when it is none of those. Saved at each press; a refusal puts the
+// choice back and says why.
+function limitLine(current: number, save: (tracks: number) => Promise<unknown>): HTMLElement {
+  const words = t();
+  // The words a choice shows.
+  const label = (tracks: number) => (tracks === 0 ? words.noLimit : String(tracks));
+  const choices = [...new Set([0, 1, 2, 3, 5, 10, current])].sort((a, b) => a - b);
+  let chosen = current;
+  const row = segmented(
+    choices.map((tracks) => [String(tracks), label(tracks)] as [string, string]),
+    String(current),
+    async (value) => {
+      const before = chosen;
+      chosen = Number(value);
+      if ((await act(null, () => save(chosen))) !== undefined) return;
+      // Refused: the choice in use goes back to the one saved.
+      chosen = before;
+      for (const button of row.children)
+        button.setAttribute('aria-pressed', String(button.textContent === label(before)));
+    },
+    words.personLimit,
+  );
+  return h(
+    'div',
+    { class: 'line limit' },
+    h('div', { class: 'grow' }, h('div', null, words.personLimit), h('div', { class: 'faint' }, words.personLimitHint)),
+    row,
+  );
+}
+
 // How the server's people share the music: each setting saved as it is changed, for people who can manage the server.
 async function drawShare(box: HTMLElement, guild: string): Promise<void> {
   let settings: Settings;
@@ -309,8 +340,10 @@ async function drawShare(box: HTMLElement, guild: string): Promise<void> {
   fill(
     box,
     h('h3', null, words.serverSettings),
-    // Votes first, under the DJ role they go with; staying in voice last.
+    // Votes first, under the DJ role they go with; the queue's two rules next; staying in voice last.
     switchLine(words.voteSkip, words.voteSkipHint, settings.voteSkip, (on) => api['vote-skip'](guild, on)),
+    switchLine(words.takeTurns, words.takeTurnsHint, settings.takeTurns, (on) => api['take-turns'](guild, on)),
+    limitLine(settings.personLimit, (tracks) => api['person-limit'](guild, tracks)),
     switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
   );
 }

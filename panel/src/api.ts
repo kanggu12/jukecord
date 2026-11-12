@@ -50,6 +50,9 @@ export const PANEL_ACTIONS = [
   // How a server's people share the music, and how its voice channel sounds.
   'stay',
   'vote-skip',
+  'take-turns',
+  'turns-now',
+  'person-limit',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -164,6 +167,7 @@ export interface AddResult {
   items: QueueItem[];
   skippedTooLong: number;
   skippedFull: number;
+  skippedLimit: number;
 }
 export interface HistoryEntry {
   id: number;
@@ -306,6 +310,10 @@ export const api = {
   },
   stay: (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/stay`, { on }),
   'vote-skip': (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/vote-skip`, { on }),
+  'take-turns': (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/take-turns`, { on }),
+  'turns-now': (guild: string) => request<{ moved: number }>('POST', `${g(guild)}/queue/turns`),
+  'person-limit': (guild: string, tracks: number) =>
+    request<Settings>('PUT', `${g(guild)}/settings/person-limit`, { tracks }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

@@ -118,6 +118,7 @@ playlist) so a program does not need to ask again.
 | `jump` Play a queued track now (the current one is skipped) | `POST /api/v1/guilds/{guild}/queue/{item}/play` | control | `jukecord jump` | `/jump` |
 | `shuffle` Shuffle the queue | `POST /api/v1/guilds/{guild}/queue/shuffle` | control | `jukecord shuffle` | `/shuffle` |
 | `dedupe` Remove later copies of tracks queued twice | `POST /api/v1/guilds/{guild}/queue/dedupe` | control | `jukecord dedupe` | `/dedupe` |
+| `turns-now` Put the queue in turns once: each person's next track in turn | `POST /api/v1/guilds/{guild}/queue/turns` | control | `jukecord turns now` | `/turns now` |
 
 ### History and statistics
 
@@ -153,6 +154,8 @@ playlist) so a program does not need to ask again.
 | `status` The version, the mode and whether Discord is connected | `GET /api/v1/status` | anyone | `jukecord status` | `/version` |
 | `stay` Stay in voice when everyone has left (off: leave after the host's time alone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/stay` | admin | `jukecord stay` | `/stay` |
 | `vote-skip` Whether Skip from someone without the DJ role is a vote (on) or refused (off); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/vote-skip` | admin | `jukecord voteskip` | `/voteskip` |
+| `take-turns` Take turns: a track added goes in its person's turn, not at the end; needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/take-turns` | admin | `jukecord turns` | `/turns set` |
+| `person-limit` The most tracks one person may have queued (0: no limit); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/person-limit` | admin | `jukecord limit` | `/limit` |
 
 ### Your login
 

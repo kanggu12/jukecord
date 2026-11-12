@@ -643,6 +643,12 @@ await sweep(
   },
   { discord: true },
 );
+// Take turns now from the queue's tools (its own key on a wide card, the list behind the tools key on a narrow one),
+// and the toast that says what moved.
+await sweep('take-turns', [...NARROW, [1440, 900]], async (page) => {
+  await tool(page, 'turns');
+  await page.waitForSelector('.toast');
+});
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

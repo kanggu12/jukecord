@@ -484,6 +484,23 @@ export class QueueRepository {
       update.run(index, id, guildId, index);
     });
   }
+
+  /** Each item's ID and who added it, in queue order, without the tracks: what taking turns needs to know. */
+  owners(guildId: string): { id: number; addedBy: string | null }[] {
+    return this.store.db
+      .prepare('SELECT id, added_by FROM queue_items WHERE guild_id = ? ORDER BY position, id')
+      .all(guildId)
+      .map((row) => ({ id: int(row as Row, 'id'), addedBy: textOrNull(row as Row, 'added_by') }));
+  }
+
+  /** How many items one person added to a server's queue (null: the host's, and a panel's without a login). */
+  countBy(guildId: string, addedBy: string | null): number {
+    // IS, not =: it matches null too.
+    const row = this.store.db
+      .prepare('SELECT COUNT(*) AS n FROM queue_items WHERE guild_id = ? AND added_by IS ?')
+      .get(guildId, addedBy) as Row;
+    return int(row, 'n');
+  }
 }
 
 // The most history rows kept per server: years of listening for a group of friends, and a bound on the database.

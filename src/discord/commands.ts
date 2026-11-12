@@ -49,6 +49,9 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   status: '/version',
   stay: '/stay',
   'vote-skip': '/voteskip',
+  'take-turns': '/turns set',
+  'turns-now': '/turns now',
+  'person-limit': '/limit',
 };
 
 // One command: English name and description, Korean name and description.
@@ -351,6 +354,40 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
     )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .addStringOption(modeOption),
+    // Shown to everyone: "now" is for whoever may change the music; "set" is refused for those who cannot manage.
+    command('turns', 'Take turns in the queue, by person', '차례', '사람마다 차례대로 대기열에 넣기')
+      .addSubcommand((sub) =>
+        sub
+          .setName('set')
+          .setDescription('Tracks added go in turn, by person (needs Manage Server)')
+          .setNameLocalizations({ ko: '정하기' })
+          .setDescriptionLocalizations({ ko: '넣는 곡을 사람마다 차례대로 배치(서버 관리 권한 필요)' })
+          .addStringOption(modeOption),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('now')
+          .setDescription('Put the queue in turns once')
+          .setNameLocalizations({ ko: '맞추기' })
+          .setDescriptionLocalizations({ ko: '지금 대기열을 한 번 차례대로 맞추기' }),
+      ),
+    command(
+      'limit',
+      'The most tracks one person may have in the queue',
+      '곡수제한',
+      '한 사람이 대기열에 넣을 수 있는 곡 수',
+    )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addIntegerOption((option) =>
+        option
+          .setName('tracks')
+          .setDescription('Tracks per person (0: no limit)')
+          .setNameLocalizations({ ko: '곡수' })
+          .setDescriptionLocalizations({ ko: '한 사람당 곡 수(0: 제한 없음)' })
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(1000),
+      ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

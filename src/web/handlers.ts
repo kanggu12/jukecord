@@ -226,4 +226,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
 
   stay: ({ context, body, deps }) => settingsAnswer(deps.actions.stay(context, body.on)),
   'vote-skip': ({ context, body, deps }) => settingsAnswer(deps.actions.voteSkip(context, body.on)),
+  'take-turns': ({ context, body, deps }) => settingsAnswer(deps.actions.takeTurns(context, body.on)),
+  'turns-now': ({ context, deps }) => ({ moved: deps.actions.turnsNow(context) }),
+  'person-limit': ({ context, body, deps }) => settingsAnswer(deps.actions.personLimit(context, body.tracks)),
 };

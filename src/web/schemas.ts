@@ -92,6 +92,7 @@ export const AddResultSchema = Type.Object(
     items: Type.Array(QueueItemSchema),
     skippedTooLong: Type.Integer(),
     skippedFull: Type.Integer(),
+    skippedLimit: Type.Integer({ description: "Left out: over the server's limit of tracks per person" }),
   },
   { title: 'AddResult' },
 );
@@ -278,3 +279,6 @@ export const OkSchema = Type.Object({ ok: Type.Literal(true) }, { title: 'Ok' })
 
 /** How many things a change removed. */
 export const RemovedSchema = Type.Object({ removed: Type.Integer() }, { title: 'Removed' });
+
+/** How many queued tracks a change moved to another place. */
+export const MovedSchema = Type.Object({ moved: Type.Integer() }, { title: 'Moved' });

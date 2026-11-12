@@ -120,6 +120,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // How a server's people share the music.
   ['only people who can manage the server can change this setting', '서버 관리 권한이 있어야 이 설정을 바꿀 수 있음'],
   ['only people listening can vote to skip', '듣고 있는 사람만 건너뛰기에 투표할 수 있음'],
+  [/^each person may have (\d+) tracks in the queue here$/, '이 서버에서는 한 사람이 대기열에 $1곡까지 넣을 수 있음'],
+  [/^the limit is 0 \(none\) to (\d+) tracks$/, '제한은 0(없음)부터 $1곡까지'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

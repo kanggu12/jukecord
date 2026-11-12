@@ -2388,9 +2388,23 @@ kbd {
     width: auto;
   }
 }
-/* The server's settings in the menu: one line each, apart. */
+/* The server's settings in the menu: one line each, apart. The limit's row of choices goes under its words when the
+   sheet is too narrow for both (a phone). */
 .section.settings .line + .line {
   margin-top: 12px;
+}
+.section.settings .line.limit {
+  flex-wrap: wrap;
+}
+.section.settings .line.limit .grow {
+  min-width: 160px;
+}
+/* The queue's tools on a narrow card: Take turns now waits behind the tools key with the others (see the rule for
+   them below). */
+@container (max-width: 560px) {
+  .card-head .tools:has(> .tools-more) > [data-act="turns"] {
+    display: none;
+  }
 }
 
 /* ---- narrower windows ---------------------------------------------------------------------------------------- */

@@ -239,6 +239,16 @@ const EN = {
   votesCount: (votes: number, needed: number) => `${votes} of ${needed}`,
   skipVotes: (votes: number, needed: number) => `Skip: ${votes} of ${needed} votes`,
   votedToSkip: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
+  takeTurns: 'Take turns',
+  takeTurnsHint: "A track added goes in its person's turn",
+  takeTurnsNow: 'Take turns now',
+  takeTurnsKey: 'Take turns',
+  tookTurns: (n: number) =>
+    n === 0 ? 'The queue takes turns already' : n === 1 ? 'Took turns: 1 track moved' : `Took turns: ${n} tracks moved`,
+  personLimit: 'Tracks per person',
+  personLimitHint: 'The most one person may have in the queue',
+  noLimit: 'None',
+  leftLimit: (n: number) => `${n} left out: your limit in the queue`,
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -470,6 +480,15 @@ const KO: Strings = {
   votesCount: (votes: number, needed: number) => `${votes}/${needed}표`,
   skipVotes: (votes: number, needed: number) => `건너뛰기: ${needed}표 중 ${votes}표`,
   votedToSkip: (votes: number, needed: number) => `건너뛰기에 투표함: ${needed}표 중 ${votes}표`,
+  takeTurns: '차례대로 넣기',
+  takeTurnsHint: '넣는 곡이 그 사람의 차례에 들어감',
+  takeTurnsNow: '지금 차례대로 맞추기',
+  takeTurnsKey: '차례대로',
+  tookTurns: (n: number) => (n === 0 ? '대기열이 이미 차례대로임' : `차례대로 맞춤: ${n}곡 옮김`),
+  personLimit: '한 사람당 곡 수',
+  personLimitHint: '한 사람이 대기열에 넣을 수 있는 곡 수',
+  noLimit: '없음',
+  leftLimit: (n: number) => `${n}곡은 한 사람당 곡 수 제한으로 못 넣음`,
 };
 
 /** The languages. */

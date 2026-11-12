@@ -483,6 +483,43 @@ export class Bot implements Directory {
           });
           return;
         }
+        case 'turns': {
+          if (options.getSubcommand() === 'now') {
+            const moved = actions.turnsNow(context);
+            await interaction.editReply({
+              embeds: [
+                moved === 0
+                  ? note(lang, 'The queue takes turns already', '대기열이 이미 차례대로임')
+                  : note(lang, `Put the queue in turns: ${moved} moved`, `대기열을 차례대로 맞춤: ${moved}곡 옮김`),
+              ],
+            });
+            return;
+          }
+          const settings = actions.takeTurns(context, options.getString('mode', true) === 'on');
+          await interaction.editReply({
+            embeds: [
+              settings.takeTurns
+                ? note(lang, "Tracks added go in their person's turn", '넣는 곡이 사람마다 차례대로 들어감')
+                : note(lang, 'Tracks added go at the end', '넣는 곡이 맨 뒤로 들어감'),
+            ],
+          });
+          return;
+        }
+        case 'limit': {
+          const settings = actions.personLimit(context, options.getInteger('tracks', true));
+          await interaction.editReply({
+            embeds: [
+              settings.personLimit === 0
+                ? note(lang, 'No limit of tracks per person', '한 사람당 곡 수 제한 없음')
+                : note(
+                    lang,
+                    `Each person may have ${settings.personLimit} tracks in the queue`,
+                    `한 사람이 대기열에 ${settings.personLimit}곡까지 넣을 수 있음`,
+                  ),
+            ],
+          });
+          return;
+        }
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({

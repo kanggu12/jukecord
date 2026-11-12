@@ -12,9 +12,10 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
   seek, and the keys: play or pause, skip, stop, repeat (off, the queue, this track) and remove (drops the track
   without counting it as played).
 - **Queue**: drag a track by its handle to move it, or use its keys: play now, play next, remove. Above the list:
-  search, shuffle, remove duplicates, save as a playlist, load a playlist, clear. On a phone or in a narrow window, a
-  track's keys and moves wait behind its **⋯** key, and the queue's tools behind the one beside **Shuffle**. A long
-  queue shows a hundred tracks at a time (**Show more** brings the next hundred); search covers all of it.
+  search, shuffle, take turns now (see [the server's settings](#the-servers-settings)), remove duplicates, save as a
+  playlist, load a playlist, clear. On a phone or in a narrow window, a track's keys and moves wait behind its **⋯**
+  key, and the queue's tools behind the one beside **Shuffle**. A long queue shows a hundred tracks at a time
+  (**Show more** brings the next hundred); search covers all of it.
 - **Add**: paste an address (a video, a playlist, a SoundCloud page ...) or type search words. **Add** puts it at the end
   of the queue; **Play now** plays it at once.
 - **Voice channel**: where the bot is, the channels it may join (with how many people are in each), and who is
@@ -47,6 +48,21 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
   The panel's Skip key and the Skip button of the bot's card say how the vote stands ("1 of 2"). A server can turn
   votes off (the menu's **Vote to skip**, `/voteskip`, `jukecord voteskip off`); Skip then needs the role too.
 
+## The server's settings
+
+People who can manage the server (and the host) choose these in the panel's menu, with slash commands or with the
+`jukecord` command; anyone may look (`/dj show`, `jukecord settings`).
+
+| Setting           | Default  | What it does                                                                                                                                                                                                              | Change it with                      |
+| :---------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------- |
+| Vote to skip      | on       | with a DJ role set, Skip from anyone else is a vote (see above)                                                                                                                                                           | `/voteskip`, `jukecord voteskip on` |
+| Take turns        | off      | a track added at the end goes after the last track of the first round in which its person has none yet: people take turns instead of waiting behind one person's long run (the track playing counts as its person's turn) | `/turns set`, `jukecord turns on`   |
+| Tracks per person | no limit | the most tracks one person may have in the queue; what an add brings over it is left out, and the answer says how many (the host has no limit)                                                                            | `/limit`, `jukecord limit 5`        |
+| Stay in voice     | off      | the bot stays in its voice channel when everyone has left                                                                                                                                                                 | `/stay`, `jukecord stay on`         |
+
+**Take turns now** (the queue's tools, `/turns now`, `jukecord turns now`) puts the queue as it is in turns once, with
+the setting on or off; it changes the music, so it needs what any change needs (the DJ role where one is set).
+
 ## Slash commands
 
 | Command                                      | Does                                                                |
@@ -69,6 +85,8 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/version`                                   | the version                                                         |
 | `/stay`                                      | stay in voice when everyone has left, or not (needs Manage Server)  |
 | `/voteskip`                                  | Skip without the DJ role is a vote, or not (needs Manage Server)    |
+| `/turns set` `/turns now`                    | take turns, or not (Manage Server); the queue in turns now          |
+| `/limit`                                     | the most tracks one person may have queued (needs Manage Server)    |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after

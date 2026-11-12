@@ -56,6 +56,9 @@ export const ACTIONS = [
   'status',
   'stay',
   'vote-skip',
+  'take-turns',
+  'turns-now',
+  'person-limit',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -204,6 +207,8 @@ export interface AddResult {
   readonly skippedTooLong: number;
   /** Tracks that did not fit because the queue reached its limit (JUKECORD_QUEUE_MAX). */
   readonly skippedFull: number;
+  /** Tracks that did not fit because the person reached the server's limit of tracks per person. */
+  readonly skippedLimit: number;
 }
 
 /**
@@ -263,28 +268,46 @@ export class Actions {
     return result;
   }
 
-  // Queues what fits: tracks over the length limit are left out, and the rest up to the queue limit. Nothing fitting
-  // at all is an error, so a person does not see "added" for an add that did nothing.
+  // Queues what fits: tracks over the length limit are left out, the rest up to the queue limit, and then up to the
+  // person's own limit where the server has one. Nothing fitting at all is an error, so a person does not see "added"
+  // for an add that did nothing. Where the server's people take turns, tracks added at the end go in turn.
   private enqueue(context: ActionContext, tracks: readonly Track[], at: InsertAt): AddResult {
     const trackMax = this.options.trackMaxMs ?? 3 * 3_600_000;
     const queueMax = this.options.queueMax ?? 1000;
     // Unknown lengths pass: most such tracks are ordinary songs from sites that do not say.
     const short = tracks.filter((track) => track.durationMs === null || track.durationMs <= trackMax);
     const room = Math.max(0, queueMax - this.options.queue.size(context.guildId));
-    const fitting = short.slice(0, room);
+    const roomy = short.slice(0, room);
+    // A person's own room under the server's limit of tracks per person; the host (no Discord ID) has none.
+    const community = this.options.store.settings.community(context.guildId);
+    const limit = community.personLimit;
+    const own =
+      context.userId !== null && limit > 0
+        ? Math.max(0, limit - this.options.queue.countBy(context.guildId, context.userId))
+        : Number.POSITIVE_INFINITY;
+    const fitting = roomy.slice(0, own);
     const skippedTooLong = tracks.length - short.length;
-    const skippedFull = short.length - fitting.length;
+    const skippedFull = short.length - roomy.length;
+    const skippedLimit = roomy.length - fitting.length;
     if (fitting.length === 0) {
-      if (skippedFull > 0) throw new ActionError('conflict', `the queue is full (${queueMax} tracks)`);
+      if (skippedFull > 0 && roomy.length === 0)
+        throw new ActionError('conflict', `the queue is full (${queueMax} tracks)`);
+      if (skippedLimit > 0) throw new ActionError('conflict', `each person may have ${limit} tracks in the queue here`);
       throw new ActionError('invalid', `longer than the ${Math.round(trackMax / 60_000)} minute limit`);
     }
-    const items = this.options.queue.add(
-      context.guildId,
-      fitting.map((track) => track.id),
-      at,
-      context.userId,
-    );
-    return { items, skippedTooLong, skippedFull };
+    const ids = fitting.map((track) => track.id);
+    // In turns: the track playing counts as its person's turn under way.
+    const snapshot = this.options.players.get(context.guildId).snapshot();
+    const items =
+      at === 'end' && community.takeTurns
+        ? this.options.queue.addInTurns(
+            context.guildId,
+            ids,
+            context.userId,
+            snapshot.track ? { owner: snapshot.addedBy } : null,
+          )
+        : this.options.queue.add(context.guildId, ids, at, context.userId);
+    return { items, skippedTooLong, skippedFull, skippedLimit };
   }
 
   /** Puts what an input finds first and plays it now; the current track is skipped. */
@@ -625,6 +648,34 @@ export class Actions {
     this.options.store.settings.setCommunity(context.guildId, { voteSkip: on });
     // Votes under way end either way, and the panels hear whether Skip is a vote now.
     this.options.votes?.reset(context.guildId);
+    return this.settings(context);
+  }
+
+  /**
+   * Whether people take turns: a track added at the end goes after the last track of the first round in which its
+   * person has none yet (see core/turns.ts). The queue as it is stays; "turns now" puts it in turns. Needs Manage Server.
+   */
+  takeTurns(context: ActionContext, on: boolean): SettingsView {
+    this.manage(context);
+    this.options.store.settings.setCommunity(context.guildId, { takeTurns: on });
+    return this.settings(context);
+  }
+
+  /** Puts the queue in turns once, whatever the setting, and returns how many tracks changed place. */
+  turnsNow(context: ActionContext): number {
+    this.control(context);
+    const snapshot = this.options.players.get(context.guildId).snapshot();
+    return this.options.queue.takeTurns(context.guildId, snapshot.track ? { owner: snapshot.addedBy } : null);
+  }
+
+  /** The most tracks one person may have in the queue at once (0 for no limit). Needs Manage Server. */
+  personLimit(context: ActionContext, tracks: number): SettingsView {
+    this.manage(context);
+    // A whole number up to the queue's own limit: more could never be reached.
+    const max = this.options.queueMax ?? 1000;
+    if (!Number.isInteger(tracks) || tracks < 0 || tracks > max)
+      throw new ActionError('invalid', `the limit is 0 (none) to ${max} tracks`);
+    this.options.store.settings.setCommunity(context.guildId, { personLimit: tracks });
     return this.settings(context);
   }
 }

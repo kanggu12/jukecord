@@ -69,6 +69,7 @@ interface AddJson {
   items: ItemJson[];
   skippedTooLong: number;
   skippedFull: number;
+  skippedLimit?: number;
 }
 
 // The text of the words joined, for inputs typed without quotes ("jukecord add never gonna give you up").
@@ -131,6 +132,7 @@ function showAdded(answer: unknown): string {
       : [`Added ${added.items.length} tracks`];
   if (added.skippedTooLong > 0) lines.push(`${added.skippedTooLong} left out: longer than the limit`);
   if (added.skippedFull > 0) lines.push(`${added.skippedFull} left out: the queue is full`);
+  if ((added.skippedLimit ?? 0) > 0) lines.push(`${added.skippedLimit} left out: your limit of tracks in the queue`);
   return lines.join('\n');
 }
 
@@ -601,6 +603,40 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       (answer as { voteSkip: boolean }).voteSkip
         ? 'Skip from someone without the DJ role is a vote'
         : 'Skip needs the DJ role',
+  },
+  'take-turns': {
+    name: 'turns',
+    usage: '<on|off>',
+    summary: 'Take turns: tracks added go in turn, by person',
+    request: (words) => ({ body: { on: onOff(words.args[0]) } }),
+    show: (answer) =>
+      (answer as { takeTurns: boolean }).takeTurns
+        ? "Tracks added go in their person's turn"
+        : 'Tracks added go at the end',
+  },
+  'turns-now': {
+    name: 'turns now',
+    usage: '',
+    summary: 'Put the queue in turns, once',
+    request: () => ({}),
+    show: (answer) => {
+      const moved = (answer as { moved: number }).moved;
+      return moved === 0 ? 'The queue takes turns already' : `Moved ${moved} ${moved === 1 ? 'track' : 'tracks'}`;
+    },
+  },
+  'person-limit': {
+    name: 'limit',
+    usage: '<tracks per person, 0 for none>',
+    summary: 'The most tracks one person may have queued',
+    request: (words) => {
+      const text = words.args[0];
+      if (!text || !/^\d+$/.test(text)) throw new UsageError('say how many tracks (0 for no limit)');
+      return { body: { tracks: Number(text) } };
+    },
+    show: (answer) => {
+      const limit = (answer as { personLimit: number }).personLimit;
+      return limit === 0 ? 'No limit of tracks per person' : `Each person may have ${limit} tracks in the queue`;
+    },
   },
 };
 

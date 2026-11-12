@@ -388,6 +388,8 @@ export function queueCard(): HTMLElement {
   const tool = (name: Parameters<typeof icon>[0], act: string) =>
     h('button', { class: 'key sm', type: 'button', 'data-act': act }, icon(name), h('span', { class: 'label' }));
   const shuffle = tool('shuffle', 'shuffle');
+  // Puts the queue in turns, by person, once (beside Shuffle, the other key that reorders the whole queue).
+  const turns = tool('users', 'turns');
   const dedupe = tool('list-x', 'dedupe');
   const save = tool('save', 'save');
   const load = tool('folder-open', 'load');
@@ -408,7 +410,7 @@ export function queueCard(): HTMLElement {
       { class: 'card-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
       searchField,
-      h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear, toolsMore),
+      h('div', { class: 'tools' }, shuffle, turns, dedupe, save, load, clear, toolsMore),
     ),
     list,
   );
@@ -647,6 +649,7 @@ export function queueCard(): HTMLElement {
     search.setAttribute('aria-label', words.searchQueue);
     for (const [button, label] of [
       [shuffle, words.shuffle],
+      [turns, words.takeTurnsKey],
       [dedupe, words.dedupe],
       [save, words.save],
       [load, words.load],
@@ -656,10 +659,15 @@ export function queueCard(): HTMLElement {
       button.title = label;
       button.disabled = !control && button !== load;
     }
+    // Take turns says on its key what it does in a word or two (one more word would push the tools onto a second
+    // line of a laptop's card), and in whole to the pointer and to screen readers.
+    turns.title = words.takeTurnsNow;
+    turns.setAttribute('aria-label', words.takeTurnsNow);
     toolsMore.title = words.queueTools;
     toolsMore.setAttribute('aria-label', words.queueTools);
     toolsMore.disabled = !control;
     shuffle.disabled = !control || items.length < 2;
+    turns.disabled = !control || items.length < 2;
     dedupe.disabled = !control || items.length < 2;
     clear.disabled = !control || items.length === 0;
     save.disabled = !control || (items.length === 0 && !state.player?.track);
@@ -776,6 +784,11 @@ export function queueCard(): HTMLElement {
 
   search.oninput = draw;
   shuffle.onclick = () => void act(shuffle, () => api.shuffle(guild()));
+  turns.onclick = () =>
+    void act(turns, async () => {
+      const result = await api['turns-now'](guild());
+      toast(t().tookTurns(result.moved));
+    });
   dedupe.onclick = () =>
     void act(dedupe, async () => {
       const result = await api.dedupe(guild());
@@ -807,6 +820,7 @@ export function queueCard(): HTMLElement {
     };
     fill(
       box,
+      choice(turns, 'users', words.takeTurnsNow),
       choice(dedupe, 'list-x', words.dedupe),
       choice(save, 'save', words.save),
       choice(load, 'folder-open', words.load),
@@ -1007,12 +1021,15 @@ async function playlistsDialog(): Promise<void> {
 }
 
 // What an add did, as a toast: how many went in and what was left out.
-function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: number }): void {
+function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: number; skippedLimit?: number }): void {
   const words = t();
   const parts = [words.added(result.items.length)];
   if (result.skippedTooLong > 0) parts.push(words.leftLong(result.skippedTooLong));
   if (result.skippedFull > 0) parts.push(words.leftFull(result.skippedFull));
-  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull > 0 ? 'pause' : 'play');
+  // A jukecord from before the limit per person says nothing of it.
+  const limited = result.skippedLimit ?? 0;
+  if (limited > 0) parts.push(words.leftLimit(limited));
+  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + limited > 0 ? 'pause' : 'play');
 }
 
 /** Adding: an address or search words, to the end of the queue or to play now. */
