@@ -225,6 +225,17 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
   },
 
+  likes: ({ context, deps }) => deps.actions.likes(context).map((entry) => deps.presenter.liked(entry)),
+  like: ({ context, params, deps }) => deps.presenter.liked(deps.actions.like(context, params.track)),
+  unlike: ({ context, params, deps }) => {
+    deps.actions.unlike(context, params.track);
+    return OK;
+  },
+  'likes-add': ({ context, body, deps }) => {
+    const result = deps.actions.likesAdd(context, body.at ?? 'end');
+    return { ...result, items: deps.presenter.items(result.items) };
+  },
+
   search: async ({ context, query, deps, signal }) => ({
     query: searchWords(query.q),
     results: (await deps.actions.search(context, query.q, query.limit ?? 8, signal)).map((found) => ({

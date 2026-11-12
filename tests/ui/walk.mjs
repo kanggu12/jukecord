@@ -682,6 +682,35 @@ await sweep(
     await page.waitForSelector('.add-card.drop-target');
   },
 );
+// Likes: the playing track's heart, and the liked list beside the history (the walk logs in as the host, whose likes
+// these are).
+// Loading the playlist above started it already; resume refuses when it plays, which is fine.
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+{
+  const playing = await api('GET', '/guilds/local/player');
+  await api('PUT', `/guilds/local/likes/${playing.track.id}`);
+  const liked = new Set([playing.track.id]);
+  for (const entry of await api('GET', '/guilds/local/history?limit=40')) {
+    if (liked.size >= 6 || liked.has(entry.track.id)) continue;
+    await api('PUT', `/guilds/local/likes/${entry.track.id}`);
+    liked.add(entry.track.id);
+  }
+}
+await sweep('liked', DISCOVERY, async (page) => {
+  await page.click('.library-seg [data-view="liked"]');
+  await page.waitForSelector('.history .row .like-key[aria-pressed="true"]');
+});
+// A liked row's keys behind its one key, on a phone.
+await sweep('liked-menu', [[360, 780]], async (page) => {
+  await page.click('.library-seg [data-view="liked"]');
+  await page.locator('.history .row .lib-more:visible').first().click();
+  await page.waitForSelector('.dialog .menu-list .choice');
+});
+await sweep('history-keys', DISCOVERY, async (page) => {
+  await page.click('.library-seg [data-view="history"]');
+  await page.waitForSelector('.history .row');
+});
 await api('DELETE', '/guilds/local/queue');
 
 await browser.close();

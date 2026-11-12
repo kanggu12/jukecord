@@ -5,7 +5,7 @@
  * and a snapshot that arrives twice does not repaint anything.
  */
 import { sayError } from '../../src/core/say.ts';
-import type { Guild, HistoryEntry, Listeners, Me, Player, Queue, Status, Voice } from './api.ts';
+import type { Guild, HistoryEntry, Liked, Listeners, Me, Player, Queue, Status, Voice } from './api.ts';
 import { type Lang, pickLang, type Words, words } from './i18n.ts';
 import type { LiveStatus } from './live.ts';
 
@@ -31,6 +31,8 @@ export interface State {
   /** Whether this browser plays along, and how loud (0 to 1). */
   listening: boolean;
   volume: number;
+  /** The tracks this login liked, newest first; null until they are known. */
+  liked: Liked[] | null;
 }
 
 type Key = keyof State;
@@ -75,6 +77,7 @@ export const state: State = {
   motion: stored('motion') !== 'off',
   listening: false,
   volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6,
+  liked: null,
 };
 
 const listeners = new Set<Listener>();
@@ -149,4 +152,9 @@ export function positionNow(player: Player, serverNow: number): number {
   const moving = player.status === 'playing' ? Math.max(0, serverNow - player.at) : 0;
   const position = player.positionMs + moving;
   return player.durationMs ? Math.min(position, player.durationMs) : position;
+}
+
+/** Whether this login liked a track. */
+export function isLiked(trackId: number): boolean {
+  return state.liked?.some((entry) => entry.track.id === trackId) ?? false;
 }

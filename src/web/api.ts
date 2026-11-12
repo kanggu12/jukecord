@@ -15,6 +15,7 @@ import {
   GuildId,
   GuildSchema,
   HistoryEntrySchema,
+  LikedSchema,
   LogRecordSchema,
   MeSchema,
   Nullable,
@@ -85,6 +86,7 @@ function op<const S extends OperationSpec>(spec: S): S {
 const InGuild = Type.Object({ guild: GuildId });
 const InGuildItem = Type.Object({ guild: GuildId, item: Type.Integer({ minimum: 1, description: 'A queue item ID' }) });
 const InGuildPlaylist = Type.Object({ guild: GuildId, name: Type.String({ minLength: 1, maxLength: 100 }) });
+const InGuildTrack = Type.Object({ guild: GuildId, track: Type.Integer({ minimum: 1, description: 'A track ID' }) });
 
 // What to play: an address or words to search for (the same limit as the slash commands).
 const Input = Type.String({ minLength: 1, maxLength: 500, description: 'An address or words to search for' });
@@ -500,6 +502,45 @@ export const API = {
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, default: 8 })),
     }),
     response: SearchSchema,
+  }),
+
+  // Likes: each login's own, in any server it opens.
+  likes: op({
+    method: 'GET',
+    path: '/guilds/{guild}/likes',
+    summary: 'The tracks you liked, newest first',
+    tag: 'history',
+    access: 'read',
+    params: InGuild,
+    response: Type.Array(LikedSchema),
+  }),
+  like: op({
+    method: 'PUT',
+    path: '/guilds/{guild}/likes/{track}',
+    summary: 'Like a track this server is playing, has queued or played (the DJ role is not needed)',
+    tag: 'history',
+    access: 'control',
+    params: InGuildTrack,
+    response: LikedSchema,
+  }),
+  unlike: op({
+    method: 'DELETE',
+    path: '/guilds/{guild}/likes/{track}',
+    summary: 'Take a like back',
+    tag: 'history',
+    access: 'control',
+    params: InGuildTrack,
+    response: OkSchema,
+  }),
+  'likes-add': op({
+    method: 'POST',
+    path: '/guilds/{guild}/likes/queue',
+    summary: 'Add every track you liked to the queue, newest first',
+    tag: 'history',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object({ at: Type.Optional(At) }, strict),
+    response: AddResultSchema,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

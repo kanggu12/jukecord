@@ -25,6 +25,10 @@ export interface Request {
 /** What a command may ask before building its request: the queue, to turn a number into an item. */
 export interface Lookups {
   queueItemId(position: number): Promise<number>;
+  /** The track playing now (for `like`); a refusal when nothing is. */
+  currentTrackId(): Promise<number>;
+  /** The track at a 1-based number of `jukecord likes` (for `unlike`). */
+  likedTrackId(position: number): Promise<number>;
 }
 
 export interface Command {
@@ -538,6 +542,41 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
     },
+  },
+
+  likes: {
+    name: 'likes',
+    usage: '',
+    summary: 'The tracks you liked, newest first',
+    request: () => ({}),
+    show: (answer) => {
+      const liked = answer as { track: TrackJson }[];
+      if (liked.length === 0) return 'No liked tracks';
+      return liked.map((entry, index) => `${index + 1}. ${trackLine(entry.track, null)}`).join('\n');
+    },
+  },
+  like: {
+    name: 'like',
+    usage: '',
+    summary: 'Like the track playing now',
+    request: async (_words, lookups) => ({ params: { track: await lookups.currentTrackId() } }),
+    show: (answer) => `Liked: ${(answer as { track: TrackJson }).track.title}`,
+  },
+  unlike: {
+    name: 'unlike',
+    usage: '<number>',
+    summary: 'Take back a like (its number in jukecord likes)',
+    request: async (words, lookups) => ({
+      params: { track: await lookups.likedTrackId(number(words.args[0], 'the number')) },
+    }),
+    show: showOk,
+  },
+  'likes-add': {
+    name: 'likes add',
+    usage: '[--next]',
+    summary: 'Add every track you liked to the queue',
+    request: (words) => ({ body: { at: words.flags.has('next') ? 'next' : 'end' } }),
+    show: showAdded,
   },
 
   search: {

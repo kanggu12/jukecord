@@ -7,7 +7,7 @@
  */
 import type { StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
-import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
+import type { HistoryEntry, LikedTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Person, UserRepository } from '../store/store.ts';
 
 /** A track as the API shows it. */
@@ -90,6 +90,10 @@ export class Presenter {
       updatedAt: value.updatedAt,
       size: value.size,
     };
+  }
+
+  liked(entry: LikedTrack) {
+    return { track: track(entry.track), likedAt: entry.likedAt };
   }
 
   stats(view: StatsView) {

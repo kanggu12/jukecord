@@ -7,7 +7,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { AddResult, SettingsView, StatsView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
-import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
+import type { HistoryEntry, LikedTrack, Playlist, QueueItem } from '../core/types.ts';
 import { formatDuration } from '../util/time.ts';
 
 /** The two languages the bot answers in; anything else gets English. */
@@ -57,6 +57,8 @@ const TEXT = {
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿈' },
+  likes: { en: 'Liked', ko: '좋아요 한 곡' },
+  noLikes: { en: 'No liked tracks yet', ko: '아직 좋아요 한 곡 없음' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -264,4 +266,25 @@ export function djCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.djRole[lang]);
   if (settings.djRoleId === null) return embed.setDescription(TEXT.everyone[lang]);
   return embed.setDescription(`<@&${settings.djRoleId}>\n${TEXT.onlyRole[lang]}`);
+}
+
+/** One page of the tracks a person liked (10 per page), newest first, numbered for /likes remove. */
+export function likesCard(entries: readonly LikedTrack[], page: number, lang: Lang): EmbedBuilder {
+  if (entries.length === 0) return new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.noLikes[lang]);
+  const pages = Math.max(1, Math.ceil(entries.length / 10));
+  const current = Math.min(Math.max(1, page), pages);
+  const first = (current - 1) * 10;
+  return new EmbedBuilder()
+    .setColor(COLOUR.neutral)
+    .setTitle(`${TEXT.likes[lang]} (${entries.length})`)
+    .setDescription(
+      entries
+        .slice(first, first + 10)
+        .map(
+          (entry, index) =>
+            `${first + index + 1}. ${line(entry.track.title, entry.track.url, entry.track.durationMs, null, lang)}`,
+        )
+        .join('\n'),
+    )
+    .setFooter({ text: `${TEXT.page[lang]} ${current}/${pages}` });
 }

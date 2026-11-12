@@ -49,6 +49,10 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   status: '/version',
   // Discord's suggestions under /play's and /add's input, as it is typed (see Bot.onAutocomplete).
   search: '/play',
+  likes: '/likes show',
+  like: '/like',
+  unlike: '/likes remove',
+  'likes-add': '/likes add',
 };
 
 // One command: English name and description, Korean name and description.
@@ -321,6 +325,62 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
       ),
     command('version', 'The jukecord version', '버전', 'jukecord 버전'),
+    command(
+      'like',
+      'Like the track playing now (your likes are yours alone)',
+      '좋아요',
+      '지금 곡에 좋아요(내 목록에만 남음)',
+    ),
+    command('likes', 'The tracks you liked', '좋아요목록', '내가 좋아요 한 곡')
+      .addSubcommand((sub) =>
+        sub
+          .setName('show')
+          .setDescription('Show the tracks you liked, newest first')
+          .setNameLocalizations({ ko: '보기' })
+          .setDescriptionLocalizations({ ko: '좋아요 한 곡 보기(최근 것부터)' })
+          .addIntegerOption((option) =>
+            option
+              .setName('page')
+              .setDescription('Page')
+              .setNameLocalizations({ ko: '페이지' })
+              .setDescriptionLocalizations({ ko: '페이지' })
+              .setMinValue(1),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Add every track you liked to the queue')
+          .setNameLocalizations({ ko: '모두넣기' })
+          .setDescriptionLocalizations({ ko: '좋아요 한 곡을 모두 대기열에 넣기' })
+          .addStringOption((option) =>
+            option
+              .setName('where')
+              .setDescription('Where in the queue (default: the end)')
+              .setNameLocalizations({ ko: '위치' })
+              .setDescriptionLocalizations({ ko: '대기열 어디에(기본: 맨 뒤)' })
+              .addChoices(
+                { name: 'At the end', value: 'end', name_localizations: { ko: '맨 뒤' } },
+                { name: 'Next', value: 'next', name_localizations: { ko: '다음 곡으로' } },
+              ),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('Take back a like')
+          .setNameLocalizations({ ko: '빼기' })
+          .setDescriptionLocalizations({ ko: '좋아요 취소' })
+          .addIntegerOption((option) =>
+            option
+              .setName('position')
+              .setDescription('Its number in /likes show')
+              .setNameLocalizations({ ko: '번호' })
+              .setDescriptionLocalizations({ ko: '/좋아요목록 보기 의 번호' })
+              .setRequired(true)
+              .setMinValue(1),
+          ),
+      ),
   ];
   return commands.map((builder) => builder.toJSON());
 }

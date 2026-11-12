@@ -46,6 +46,10 @@ export const PANEL_ACTIONS = [
   'token-revoke',
   'logs',
   'search',
+  'likes',
+  'like',
+  'unlike',
+  'likes-add',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -243,6 +247,11 @@ export interface Found {
   query: string;
   results: SearchResult[];
 }
+/** A track this login liked, with when. */
+export interface Liked {
+  track: Track;
+  likedAt: number;
+}
 
 const g = (guild: string) => `/guilds/${encodeURIComponent(guild)}`;
 
@@ -304,6 +313,11 @@ export const api = {
       undefined,
       signal,
     ),
+  likes: (guild: string) => request<Liked[]>('GET', `${g(guild)}/likes`),
+  like: (guild: string, track: number) => request<Liked>('PUT', `${g(guild)}/likes/${track}`),
+  unlike: (guild: string, track: number) => request<unknown>('DELETE', `${g(guild)}/likes/${track}`),
+  'likes-add': (guild: string, at: 'end' | 'next' = 'end') =>
+    request<AddResult>('POST', `${g(guild)}/likes/queue`, { at }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

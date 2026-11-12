@@ -45,6 +45,8 @@ const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [
     ['dj', 'none'],
   ],
   [['playlist', 'list'], ['playlists']],
+  [['likes', 'show'], ['likes']],
+  [['likes', 'remove'], ['unlike']],
 ];
 
 /** Splits the command line into options and words. "--name value" and "--name=value" both work. */
@@ -260,6 +262,23 @@ export async function run(
         if (!item)
           throw new UsageError(`there is no track number ${position} in the queue (it has ${queue.items.length})`);
         return item.id;
+      },
+      // The track playing now, for liking it.
+      currentTrackId: async () => {
+        const player = (await client.call('now-playing', { params: { guild: await guildOf() } })) as {
+          track: { id: number } | null;
+        };
+        if (!player.track) throw new ApiError('conflict', 'nothing is playing');
+        return player.track.id;
+      },
+      // The liked track at a 1-based number, as `jukecord likes` shows them.
+      likedTrackId: async (position: number) => {
+        const liked = (await client.call('likes', { params: { guild: await guildOf() } })) as {
+          track: { id: number };
+        }[];
+        const entry = liked[position - 1];
+        if (!entry) throw new UsageError(`there is no liked track number ${position} (there are ${liked.length})`);
+        return entry.track.id;
       },
     };
     const request = await command.request({ args: rest, flags: words.flags }, lookups);

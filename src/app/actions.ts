@@ -9,7 +9,7 @@ import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
 import { plainReason, REASONS } from '../core/reasons.ts';
-import type { HistoryEntry, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
+import type { HistoryEntry, LikedTrack, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
@@ -17,7 +17,7 @@ import type { Resolver } from '../media/resolver.ts';
 import type { Search } from '../media/search.ts';
 import { parseInput } from '../media/source.ts';
 import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
-import { StoreError } from '../store/store.ts';
+import { LIKES_MAX, StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 
 /**
@@ -56,6 +56,10 @@ export const ACTIONS = [
   'dj-role',
   'status',
   'search',
+  'likes',
+  'like',
+  'unlike',
+  'likes-add',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -206,6 +210,14 @@ export interface AddResult {
 export function djRoleNow(chosen: string | null, roles: readonly RoleInfo[] | null): string | null {
   if (chosen === null || roles === null) return chosen;
   return roles.some((role) => role.id === chosen) ? chosen : null;
+}
+
+/**
+ * Whose likes an action reads and writes: the Discord user's, or the host's (the host has no Discord ID, and no Discord
+ * ID is the word "host").
+ */
+export function likesOwner(context: ActionContext): string {
+  return context.userId ?? 'host';
 }
 
 /** The repeat modes, for checking input from the panel, the API and the CLI. */
@@ -581,6 +593,57 @@ export class Actions {
       if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
       throw new ActionError('not-found', plainReason(error instanceof Error ? error.message : String(error)));
     }
+  }
+
+  /** The tracks this login liked, newest first (anyone may look at their own). */
+  likes(context: ActionContext): LikedTrack[] {
+    return this.options.store.likes.list(likesOwner(context));
+  }
+
+  /**
+   * Likes a track for this login. A like is personal, so the DJ role is not needed; the track must be one this server
+   * shows (playing, queued, played here or in one of its playlists): a track number from elsewhere would show another
+   * server's music in the list.
+   */
+  like(context: ActionContext, trackId: number): LikedTrack {
+    const store = this.options.store;
+    const track = store.tracks.get(trackId);
+    const here =
+      track !== null &&
+      (this.options.players.existing(context.guildId)?.snapshot().track?.id === trackId ||
+        this.options.queue.contains(context.guildId, trackId) ||
+        store.history.played(context.guildId, trackId) ||
+        store.playlists
+          .list(context.guildId)
+          .some((playlist) => store.playlists.tracks(playlist.id).some((t) => t.id === trackId)));
+    if (!track || !here)
+      throw new ActionError('not-found', 'that track is not playing, queued or played in this server');
+    const owner = likesOwner(context);
+    if (!store.likes.has(owner, trackId) && store.likes.count(owner) >= LIKES_MAX)
+      throw new ActionError('conflict', `your likes are full (${LIKES_MAX} tracks)`);
+    store.likes.add(owner, trackId);
+    const liked = store.likes.list(owner).find((entry) => entry.track.id === trackId);
+    return liked ?? { track, likedAt: Date.now() };
+  }
+
+  /** Takes a like back. */
+  unlike(context: ActionContext, trackId: number): void {
+    if (!this.options.store.likes.remove(likesOwner(context), trackId))
+      throw new ActionError('not-found', 'that track is not in your likes');
+  }
+
+  /** Adds every track this login liked to the queue, newest liked first, and starts playing if nothing was. */
+  likesAdd(context: ActionContext, at: InsertAt = 'end'): AddResult {
+    this.control(context);
+    const liked = this.options.store.likes.list(likesOwner(context));
+    if (liked.length === 0) throw new ActionError('invalid', 'there are no liked tracks to add');
+    const result = this.enqueue(
+      context,
+      liked.map((entry) => entry.track),
+      at,
+    );
+    this.options.players.get(context.guildId).play();
+    return result;
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

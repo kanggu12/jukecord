@@ -42,6 +42,7 @@ import {
   historyCard,
   type Lang,
   langOf,
+  likesCard,
   note,
   nowCard,
   playlistsCard,
@@ -296,10 +297,13 @@ export class Bot implements Directory {
       // Lookups can take seconds; answer "thinking" first so Discord does not time the command out (3 s). Commands
       // that only look something up answer the person alone, so the channel keeps the music, not the questions.
       const sub = interaction.options.getSubcommand(false);
+      // A like and a person's likes are theirs alone, so they are answered to that person too (adding them all to the
+      // queue is everyone's, and said in the channel).
       const lookup =
-        ['version', 'queue'].includes(interaction.commandName) ||
+        ['version', 'queue', 'like'].includes(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
-        (interaction.commandName === 'playlist' && sub === 'list');
+        (interaction.commandName === 'playlist' && sub === 'list') ||
+        (interaction.commandName === 'likes' && sub !== 'add');
       await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
       switch (interaction.commandName) {
         case 'add': {
@@ -457,6 +461,19 @@ export class Bot implements Directory {
           });
           return;
         }
+        case 'like': {
+          const track = actions.nowPlaying(context).track;
+          if (!track) throw new ActionError('conflict', 'nothing is playing');
+          const liked = actions.like(context, track.id);
+          const title = liked.track.title;
+          await interaction.editReply({
+            embeds: [note(lang, `Liked "${title}"`, `좋아요 목록에 넣음: "${title}"`)],
+          });
+          return;
+        }
+        case 'likes':
+          await this.onLikes(interaction, context, lang);
+          return;
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
@@ -507,6 +524,36 @@ export class Bot implements Directory {
         const name = options.getString('name', true);
         actions.playlistDelete(context, name);
         await interaction.editReply({ embeds: [note(lang, `Deleted "${name}"`, `"${name}" 지움`)] });
+        return;
+      }
+    }
+  }
+
+  // A person's likes: the list, all of them into the queue, one taken back.
+  private async onLikes(interaction: ChatInputCommandInteraction, context: ActionContext, lang: Lang): Promise<void> {
+    const actions = this.options.actions;
+    const options = interaction.options;
+    switch (options.getSubcommand()) {
+      case 'show':
+        await interaction.editReply({
+          embeds: [likesCard(actions.likes(context), options.getInteger('page') ?? 1, lang)],
+        });
+        return;
+      case 'add': {
+        const result = actions.likesAdd(context, options.getString('where') === 'next' ? 'next' : 'end');
+        await interaction.editReply({ embeds: [addedCard(result, lang)] });
+        await this.autoJoin(interaction, context, lang);
+        return;
+      }
+      case 'remove': {
+        // The 1-based numbers of /likes show.
+        const entry = actions.likes(context)[options.getInteger('position', true) - 1];
+        if (!entry) throw new ActionError('not-found', 'that track is not in your likes');
+        actions.unlike(context, entry.track.id);
+        const title = entry.track.title;
+        await interaction.editReply({
+          embeds: [note(lang, `Took back the like of "${title}"`, `좋아요 취소함: "${title}"`)],
+        });
         return;
       }
     }

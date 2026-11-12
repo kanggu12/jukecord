@@ -269,3 +269,12 @@ export const SearchSchema = Type.Object(
   },
   { title: 'Search' },
 );
+
+/** A track a login liked, with when. */
+export const LikedSchema = Type.Object(
+  {
+    track: TrackSchema,
+    likedAt: Type.Integer({ description: 'When it was liked, in milliseconds since the epoch' }),
+  },
+  { title: 'Liked' },
+);

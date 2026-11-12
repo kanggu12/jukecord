@@ -19,7 +19,7 @@ import {
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
-import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
+import { isLiked, keep, liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, problem, showDialog, toast } from '../ui/layers.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
@@ -100,6 +100,62 @@ function guild(): string {
   return state.guild?.id ?? '';
 }
 
+/** The tracks this login liked, asked again (when the panel opens, after a reconnection, on another server). */
+export async function refreshLikes(): Promise<void> {
+  const id = guild();
+  if (!id) return;
+  try {
+    const liked = await api.likes(id);
+    if (state.guild?.id === id) update({ liked });
+  } catch {
+    // Kept as they were: the hearts say what was known, and the next refresh tries again.
+  }
+}
+
+/**
+ * Likes a track, or takes the like back: on the page at once (every heart of the track fills or empties), then asked
+ * of jukecord; a refusal puts the hearts back and says why.
+ */
+export async function toggleLike(track: Track): Promise<void> {
+  const before = state.liked ?? [];
+  const liked = before.some((entry) => entry.track.id === track.id);
+  update({
+    liked: liked ? before.filter((entry) => entry.track.id !== track.id) : [{ track, likedAt: Date.now() }, ...before],
+  });
+  try {
+    if (liked) await api.unlike(guild(), track.id);
+    else await api.like(guild(), track.id);
+  } catch (error) {
+    update({ liked: before });
+    problem(error);
+  }
+}
+
+// Whether this login may like (a token that may only look may not).
+function mayLike(): boolean {
+  return Boolean(state.me) && state.me?.scope !== 'read';
+}
+
+// A heart that likes a track (pressed: liked), small for rows.
+function heartKey(track: Track): HTMLButtonElement {
+  const words = t();
+  const heart = h(
+    'button',
+    {
+      class: 'key sm square quiet like-key',
+      type: 'button',
+      title: words.like,
+      'aria-label': words.like,
+      'aria-pressed': String(isLiked(track.id)),
+      dataset: { key: 'like' },
+    },
+    icon('heart'),
+  );
+  heart.disabled = !mayLike();
+  heart.onclick = () => void toggleLike(track);
+  return heart;
+}
+
 // "added by Alice" / "added by the host".
 function addedBy(id: string | null, name: string | null): string {
   return id ? t().addedBy(name ?? id) : t().byHost;
@@ -137,7 +193,14 @@ export function nowCard(live: Live): HTMLElement {
   const drop = h('button', { class: 'key quiet bad', type: 'button', 'data-act': 'drop' });
   const repeat = h('button', { class: 'key square', type: 'button', 'data-act': 'repeat' });
   const keys = h('div', { class: 'keys' }, pause, skip, stop, repeat, drop);
-  const info = h('div', { class: 'info' }, title, meta, error, liveNote, progress, keys);
+  // The heart beside the title: liking is about the track, not the player, so it is not among the keys.
+  const like = h(
+    'button',
+    { class: 'key sm square quiet like-key', type: 'button', 'data-act': 'like' },
+    icon('heart'),
+  );
+  const titleRow = h('div', { class: 'title-row' }, title, like);
+  const info = h('div', { class: 'info' }, titleRow, meta, error, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
   const card = h(
     'section',
@@ -258,6 +321,11 @@ export function nowCard(live: Live): HTMLElement {
     repeat.disabled = !control || !player;
     bar.setAttribute('aria-disabled', String(!control || !track || status === 'loading'));
     bar.setAttribute('aria-label', words.seekLabel);
+    like.hidden = !track;
+    like.title = words.like;
+    like.setAttribute('aria-label', words.like);
+    like.setAttribute('aria-pressed', String(track !== null && isLiked(track.id)));
+    like.disabled = !mayLike();
     tick();
   };
 
@@ -346,6 +414,10 @@ export function nowCard(live: Live): HTMLElement {
     });
   };
   stop.onclick = () => void act(stop, () => api.stop(guild()));
+  like.onclick = () => {
+    const track = state.player?.track;
+    if (track) void toggleLike(track);
+  };
   drop.onclick = () => void act(drop, () => api['remove-current'](guild()));
   repeat.onclick = () => {
     // Off, then the queue, then this track, then off again: the order music players use.
@@ -353,7 +425,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'liked'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {
@@ -541,7 +613,8 @@ export function queueCard(): HTMLElement {
           h('span', null, addedBy(item.addedBy, item.addedByName)),
         ),
       ),
-      control ? h('div', { class: 'acts' }, jump, next, remove, more) : h('div'),
+      // The menu key for everyone (it holds Like); the keys that change the queue for those who may.
+      control ? h('div', { class: 'acts' }, jump, next, remove, more) : h('div', { class: 'acts' }, more),
     );
     if (control) {
       // Only the grip starts a drag, so text in the row can still be selected and links clicked.
@@ -866,17 +939,32 @@ function trackMenu(id: number): void {
     };
     return button;
   };
+  // Like or Unlike: the track's, whoever may change the music.
+  const liked = isLiked(item.track.id);
+  const likeChoice = h(
+    'button',
+    { class: 'choice', type: 'button' },
+    icon('heart'),
+    h('span', { class: 'grow' }, liked ? words.unlike : words.like),
+  );
+  likeChoice.disabled = !mayLike();
+  likeChoice.onclick = () => {
+    dialog.close();
+    void toggleLike(item.track);
+  };
+  const control = mayControl();
   fill(
     box,
-    choice('play', words.playNow, () => api.jump(guild(), id)),
-    item.position > 0 ? choice('arrow-up-to-line', words.playNext, () => api.move(guild(), id, 0)) : null,
-    item.position > 0
+    control ? choice('play', words.playNow, () => api.jump(guild(), id)) : null,
+    control && item.position > 0 ? choice('arrow-up-to-line', words.playNext, () => api.move(guild(), id, 0)) : null,
+    control && item.position > 0
       ? choice('arrow-up', words.moveUp, (position) => api.move(guild(), id, Math.max(0, position - 1)))
       : null,
-    item.position < length - 1
+    control && item.position < length - 1
       ? choice('arrow-down', words.moveDown, (position) => api.move(guild(), id, position + 1))
       : null,
-    choice('x', words.remove, () => api.remove(guild(), id), true),
+    likeChoice,
+    control ? choice('x', words.remove, () => api.remove(guild(), id), true) : null,
   );
 }
 
@@ -1517,68 +1605,179 @@ export function voiceCard(): HTMLElement {
   return card;
 }
 
-/** What played recently, with a key to add it again. */
+// Which list the history card shows: what played lately, or what this login liked (kept in this browser).
+function libraryView(): 'history' | 'liked' {
+  try {
+    return localStorage.getItem('jukecord.library') === 'liked' ? 'liked' : 'history';
+  } catch {
+    return 'history';
+  }
+}
+
+/**
+ * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to play it now,
+ * next or at the end. A narrow card keeps the heart and puts the rest behind one key (see libraryMenu).
+ */
+function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTMLElement {
+  const words = t();
+  const control = mayControl();
+  const key = (name: IconName, label: string, data: string, run: () => Promise<unknown>) => {
+    const button = h(
+      'button',
+      { class: 'key sm square quiet', type: 'button', title: label, 'aria-label': label, dataset: { key: data } },
+      icon(name),
+    );
+    button.disabled = !control;
+    button.onclick = () => void act(button, run);
+    return button;
+  };
+  const now = key('play', words.playNow, 'now', async () => added(await api['play-now'](guild(), track.url)));
+  const next = key('arrow-up-to-line', words.playNext, 'next', async () =>
+    added(await api.add(guild(), track.url, 'next')),
+  );
+  const again = key('list-plus', words.addAgain, 'again', async () => added(await api.add(guild(), track.url)));
+  const more = h(
+    'button',
+    {
+      class: 'key sm square quiet lib-more',
+      type: 'button',
+      title: words.trackMenu,
+      'aria-label': words.trackMenu,
+      dataset: { key: 'more' },
+    },
+    icon('ellipsis'),
+  );
+  more.disabled = !control;
+  more.onclick = () => libraryMenu(track);
+  return h(
+    'li',
+    { class: 'row', dataset: { id } },
+    album(track),
+    h(
+      'div',
+      { class: 'text' },
+      h(
+        'div',
+        { class: 'name' },
+        h('a', { href: track.url, target: '_blank', rel: 'noopener noreferrer' }, track.title),
+      ),
+      h('div', { class: 'sub' }, ...sub),
+    ),
+    h('div', { class: 'acts' }, heartKey(track), now, next, again, more),
+  );
+}
+
+// A history or liked row's keys as a list, on a narrow card: play now, play next, add.
+function libraryMenu(track: Track): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(track.title, box);
+  const choice = (name: IconName, text: string, run: () => Promise<unknown>) => {
+    const button = h('button', { class: 'choice', type: 'button' }, icon(name), h('span', { class: 'grow' }, text));
+    button.onclick = () => {
+      dialog.close();
+      void act(null, run);
+    };
+    return button;
+  };
+  fill(
+    box,
+    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
+    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
+    choice('list-plus', words.addAgain, async () => added(await api.add(guild(), track.url))),
+  );
+}
+
+/** What played recently and what this login liked, one list at a time, with keys to play each again. */
 export function historyCard(): HTMLElement {
   const count = h('span', { class: 'count' });
   const list = h('ol', { class: 'list scroll history' });
+  // The two lists, as a row of two choices; the card's heading names both, for screen readers.
+  let view = libraryView();
+  const choices = h('div', { class: 'seg library-seg', role: 'group' });
+  const heading = h('h2', { id: 'history-h', class: 'sr' });
+  // With the liked tracks shown: all of them into the queue.
+  const addAll = h('button', { class: 'key sm', type: 'button', 'data-act': 'likes-add' });
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'history-h' },
-    h('div', { class: 'card-head' }, h('h2', { id: 'history-h' }, h('span', { class: 'name' }), count)),
+    h('div', { class: 'card-head' }, heading, choices, count, h('div', { class: 'tools' }, addAll)),
     list,
   );
-  const row = (entry: HistoryEntry) => {
+  const drawChoices = () => {
     const words = t();
-    const again = h(
-      'button',
-      {
-        class: 'key sm square quiet',
-        type: 'button',
-        title: words.addAgain,
-        'aria-label': words.addAgain,
-        dataset: { key: 'again' },
-      },
-      icon('list-plus'),
-    );
-    again.disabled = !mayControl();
-    again.onclick = () =>
-      void act(again, async () => {
-        added(await api.add(guild(), entry.track.url));
-      });
-    return h(
-      'li',
-      { class: 'row', dataset: { id: `${entry.playedAt}-${entry.track.id}` } },
-      album(entry.track),
-      h(
-        'div',
-        { class: 'text' },
-        h(
-          'div',
-          { class: 'name' },
-          h('a', { href: entry.track.url, target: '_blank', rel: 'noopener noreferrer' }, entry.track.title),
-        ),
-        h(
-          'div',
-          { class: 'sub' },
-          h('span', { dataset: { at: String(entry.playedAt) } }, ago(entry.playedAt)),
-          entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
-          h('span', null, addedBy(entry.addedBy, entry.addedByName)),
-        ),
-      ),
-      h('div', { class: 'acts' }, again),
+    choices.setAttribute('aria-label', words.listChoice);
+    const likedCount = state.liked?.length ?? 0;
+    fill(
+      choices,
+      ...(
+        [
+          ['history', words.history, null],
+          ['liked', words.liked, likedCount > 0 ? likedCount : null],
+        ] as const
+      ).map(([value, label, number]) => {
+        const button = h(
+          'button',
+          { type: 'button', 'aria-pressed': String(view === value), dataset: { view: value } },
+          label,
+          number === null ? null : h('span', { class: 'seg-count' }, String(number)),
+        );
+        button.onclick = () => {
+          if (view === value) return;
+          view = value;
+          keep('library', value);
+          draw();
+          // The likes asked again when their list is opened: another tab or Discord may have changed them.
+          if (value === 'liked') void refreshLikes();
+        };
+        return button;
+      }),
     );
   };
   const draw = () => {
     const words = t();
-    (card.querySelector('#history-h .name') as HTMLElement).textContent = words.history;
+    heading.textContent = words.library;
     // No count: it would only ever say how many entries were asked for.
     count.textContent = '';
+    drawChoices();
+    fill(addAll, icon('list-plus'), words.addAll);
+    addAll.hidden = view !== 'liked';
+    addAll.disabled = !mayControl() || (state.liked?.length ?? 0) === 0;
     keepingFocus(list, () => {
+      if (view === 'liked') {
+        const liked = state.liked ?? [];
+        if (liked.length === 0) fill(list, h('li', { class: 'empty' }, icon('heart'), words.noLiked));
+        else
+          fill(
+            list,
+            ...liked.map((entry) =>
+              libraryRow(entry.track, `liked-${entry.track.id}`, [
+                entry.track.uploader ? h('span', null, entry.track.uploader) : null,
+                entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
+              ]),
+            ),
+          );
+        return;
+      }
       if (state.history.length === 0) fill(list, h('li', { class: 'empty' }, icon('history'), words.noHistory));
-      else fill(list, ...state.history.map(row));
+      else
+        fill(
+          list,
+          ...state.history.map((entry: HistoryEntry) =>
+            libraryRow(entry.track, `${entry.playedAt}-${entry.track.id}`, [
+              h('span', { dataset: { at: String(entry.playedAt) } }, ago(entry.playedAt)),
+              entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
+              h('span', null, addedBy(entry.addedBy, entry.addedByName)),
+            ]),
+          ),
+        );
     });
   };
-  watch(['history', 'lang', 'me', 'guild'], draw);
+  addAll.onclick = () =>
+    void act(addAll, async () => {
+      added(await api['likes-add'](guild()));
+    });
+  watch(['history', 'lang', 'me', 'guild', 'liked'], draw);
   draw();
   // "3 min ago" keeps up once a minute by changing those words only: rebuilt rows would drop the keyboard focus.
   window.setInterval(() => {

@@ -126,6 +126,10 @@ playlist) so a program does not need to ask again.
 | :-- | :-- | :-- | :-- | :-- |
 | `history` Played tracks, newest first | `GET /api/v1/guilds/{guild}/history` | read | `jukecord history` | `/history` |
 | `stats` Listening figures: plays per day and hour, most played tracks, who added most | `GET /api/v1/guilds/{guild}/stats` | read | `jukecord stats` | `/stats` |
+| `likes` The tracks you liked, newest first | `GET /api/v1/guilds/{guild}/likes` | read | `jukecord likes` | `/likes show` |
+| `like` Like a track this server is playing, has queued or played (the DJ role is not needed) | `PUT /api/v1/guilds/{guild}/likes/{track}` | control | `jukecord like` | `/like` |
+| `unlike` Take a like back | `DELETE /api/v1/guilds/{guild}/likes/{track}` | control | `jukecord unlike` | `/likes remove` |
+| `likes-add` Add every track you liked to the queue, newest first | `POST /api/v1/guilds/{guild}/likes/queue` | control | `jukecord likes add` | `/likes add` |
 
 ### Playlists
 

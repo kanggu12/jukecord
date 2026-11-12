@@ -1763,6 +1763,65 @@ img {
   color: var(--ink-2);
 }
 
+/* ---- likes ------------------------------------------------------------------------------------------------------ */
+/* A heart that likes a track: a line, and filled in the text's own colour once liked (the fill says it; it takes no
+   tint, as other keys that are on do). A contrast theme marks it as it marks every key that is on. */
+.like-key[aria-pressed="true"] {
+  background: none;
+  border-color: transparent;
+  color: var(--ink);
+}
+.like-key[aria-pressed="true"]:hover {
+  background: var(--hover-tint);
+}
+/* The shape is an inner SVG that says fill="none" itself; a rule on it is what overrides that. */
+.key.like-key[aria-pressed="true"] .icon svg {
+  fill: currentColor;
+}
+/* The playing track's title and its heart side by side, the heart at the height of the title's first line. */
+.now .title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.now .title-row .title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* The history card's title: its two lists, as a row of two choices, each with its count. */
+.seg .seg-count {
+  margin-left: 6px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+/* A queued track's menu key, for everyone, at every width: it holds Like (and the moves, for people who may). */
+.queue-list .row .acts > .more-key {
+  display: inline-flex;
+}
+/* History and liked rows: the heart and three keys; on a narrow card the heart and one key for the rest. */
+.history .row .acts > .lib-more {
+  display: none;
+}
+@container card (max-width: 340px) {
+  .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
+    display: none;
+  }
+  .history .row .acts > .lib-more {
+    display: inline-flex;
+  }
+}
+/* By touch the keys are a finger wide, so the row runs out of room sooner. */
+@media (pointer: coarse) {
+  @container card (max-width: 480px) {
+    .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
+      display: none;
+    }
+    .history .row .acts > .lib-more {
+      display: inline-flex;
+    }
+  }
+}
+
 /* ---- voice ------------------------------------------------------------------------------------------------------ */
 .voice-now {
   display: flex;

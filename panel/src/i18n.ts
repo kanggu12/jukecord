@@ -236,6 +236,14 @@ const EN = {
   foundCount: (n: number) => (n === 1 ? '1 found' : `${n} found`),
   foundKeys: 'Enter: add · Shift+Enter: play next · Ctrl+Enter: play now',
   dropHere: 'Drop the link here to add it',
+  // Likes.
+  like: 'Like',
+  unlike: 'Unlike',
+  liked: 'Liked',
+  library: 'Recently played and liked',
+  listChoice: 'List',
+  noLiked: 'No liked tracks yet',
+  addAll: 'Add all',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -464,6 +472,13 @@ const KO: Strings = {
   foundCount: (n: number) => `${n}곡 찾음`,
   foundKeys: 'Enter: 넣기 · Shift+Enter: 다음에 재생 · Ctrl+Enter: 바로 재생',
   dropHere: '링크를 여기에 놓으면 대기열에 들어감',
+  like: '좋아요',
+  unlike: '좋아요 취소',
+  liked: '좋아요',
+  library: '최근 들은 곡과 좋아요',
+  listChoice: '목록',
+  noLiked: '아직 좋아요 한 곡 없음',
+  addAll: '모두 넣기',
 };
 
 /** The languages. */

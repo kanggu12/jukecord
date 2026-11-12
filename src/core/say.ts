@@ -122,6 +122,14 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['nothing to search for', '찾을 말이 없음'],
   ['a search takes words, not an address', '검색어로 주소를 쓸 수 없음'],
   ['too many searches at once; try again in a moment', '한꺼번에 너무 많이 검색함: 잠시 뒤 다시 시도하세요'],
+  // Likes.
+  [
+    'that track is not playing, queued or played in this server',
+    '이 서버에서 재생 중이거나 대기열에 있거나 들은 곡이 아님',
+  ],
+  ['that track is not in your likes', '내 좋아요 목록에 없는 곡'],
+  ['there are no liked tracks to add', '넣을 좋아요 곡 없음'],
+  [/^your likes are full \((\d+) tracks\)$/, '좋아요 목록이 가득 참($1곡)'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */
