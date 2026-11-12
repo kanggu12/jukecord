@@ -392,6 +392,9 @@ export function queueCard(): HTMLElement {
   let dragged: QueueItem | null = null;
   // The items drawn last time (null before the first state), so a row that is new can slide in.
   let drawnIds: Set<number> | null = null;
+  // The search the rows were last drawn for: rows glide only from one unfiltered drawing to the next (the rows of a
+  // search that ends are not where they were drawn, and would glide over each other).
+  let drawnQuery = '';
 
   const row = (item: QueueItem, control: boolean): HTMLElement => {
     const words = t();
@@ -580,11 +583,15 @@ export function queueCard(): HTMLElement {
         )
       : items;
     const scroll = list.scrollTop;
-    // Where each row stands now, to glide it from there to its new place after the redraw.
+    // Rows glide from one unfiltered drawing to the next, with motion on: not while searching, and not on the drawing
+    // that ends a search (its rows were drawn at their filtered places).
+    const glide = moving() && !query && drawnQuery === '';
+    // Where each row stands on the screen now (with any glide still under way), to glide it from there to its new
+    // place after the redraw. Only reads: they take one layout between them.
     const before = new Map<string, number>();
-    if (moving()) {
+    if (glide) {
       for (const element of list.querySelectorAll<HTMLElement>('li.row'))
-        before.set(element.dataset.id ?? '', element.offsetTop);
+        before.set(element.dataset.id ?? '', element.getBoundingClientRect().top);
     }
     // After the redraw (a move with Alt+arrow, a track added by someone else) the same key of the same row gets the
     // keyboard focus back.
@@ -621,18 +628,48 @@ export function queueCard(): HTMLElement {
       }
     });
     list.scrollTop = scroll;
-    // Each row that was there before glides from its old place (at most a few hundred rows are drawn).
-    if (before.size > 0 && !query) {
-      for (const element of list.querySelectorAll<HTMLElement>('li.row')) {
-        const from = before.get(element.dataset.id ?? '');
-        if (from === undefined || from === element.offsetTop) continue;
-        element.animate([{ transform: `translateY(${from - element.offsetTop}px)` }, { transform: 'none' }], {
-          duration: 320,
-          easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-        });
-      }
-    }
+    if (glide && before.size > 0) glideRows(before);
     if (state.queue) drawnIds = new Set(items.map((item) => item.id));
+    drawnQuery = query;
+  };
+
+  // Each row that was drawn before glides from its old place on the screen to its new one. Every position is read
+  // first and every animation started after: an animation started between two reads makes the next read lay the page
+  // out again, once per row (with a thousand queued and a hundred rows drawn, that held a phone still for most of a
+  // second at each track start). Rows out of sight before and after are left alone; a row coming from further away
+  // than the window is tall (a shuffle) fades in where it lands instead of streaking across the list.
+  const glideRows = (before: Map<string, number>) => {
+    // What of the list is seen: its box, inside the window (on a phone the page scrolls, and the list with it).
+    const frame = list.getBoundingClientRect();
+    const top = Math.max(frame.top, 0);
+    const bottom = Math.min(frame.bottom, window.innerHeight);
+    // The reads: where each row that was drawn before stands now, and how tall it is.
+    const moves: { element: HTMLElement; from: number; to: number; height: number }[] = [];
+    for (const element of list.querySelectorAll<HTMLElement>('li.row')) {
+      const from = before.get(element.dataset.id ?? '');
+      // New since the last drawing: it slides in by its own class instead.
+      if (from === undefined) continue;
+      const box = element.getBoundingClientRect();
+      moves.push({ element, from, to: box.top, height: box.height });
+    }
+    // Whether a row standing at `at` shows any of itself in the list's seen part.
+    const seen = (at: number, height: number) => at + height > top && at < bottom;
+    // The writes: the animations, with no read between them.
+    for (const { element, from, to, height } of moves) {
+      const shift = from - to;
+      // Not moved, or out of sight all the way: nothing anyone would see.
+      if (Math.abs(shift) < 0.5 || (!seen(from, height) && !seen(to, height))) continue;
+      if (Math.abs(shift) > window.innerHeight) {
+        // From (or to) further than a window away: it fades in where it lands; leaving for far away, it just goes.
+        if (seen(to, height)) element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'ease-out' });
+        continue;
+      }
+      // From its old place to its new one, settling like the panel's other movements.
+      element.animate([{ transform: `translateY(${shift}px)` }, { transform: 'none' }], {
+        duration: 320,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+      });
+    }
   };
 
   search.oninput = draw;
