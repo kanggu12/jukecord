@@ -5,8 +5,9 @@
  * is cancelled only when every caller has given up on it, so a skipped track that the prefetcher still wants keeps
  * downloading, and a track nobody wants any more stops at once.
  *
- * Across every server, a track somebody waits for starts at once, and tracks fetched ahead of time take turns within a
- * limit (see slots.ts), so a few servers fetching ahead cannot take a small machine over.
+ * Across every server, tracks fetched ahead of time take turns within a limit, and tracks somebody waits for within a
+ * larger one, ahead of them (see slots.ts), so a few servers fetching ahead, or a crowd pressing skip, cannot take a
+ * small machine over.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -39,6 +40,9 @@ interface Job {
   promise: Promise<PreparedMedia>;
   readonly abort: AbortController;
   waiters: number;
+  // Of those, the ones that need it now (a player); when none is left, the fetch stops counting as one somebody waits
+  // for (see Slots), so it does not hold back the next one that somebody does.
+  nowWaiters: number;
   /** Everyone who wants to hear about the download's progress. */
   readonly listeners: Set<(fraction: number) => void>;
   /** Its place among the fetches of every server. */
@@ -113,11 +117,19 @@ export class Media implements MediaPreparer {
     }
     const shared = job;
     shared.waiters += 1;
+    if (priority === 'now') shared.nowWaiters += 1;
     if (onProgress) shared.listeners.add(onProgress);
+    // A caller that needed it now is gone: with only callers ahead of time left, it no longer counts as needed now.
+    const lessNow = (): void => {
+      if (priority !== 'now') return;
+      shared.nowWaiters -= 1;
+      if (shared.nowWaiters === 0 && shared.waiters > 0) shared.ticket.demote();
+    };
     // When this caller gives up, it stops waiting; the download stops only if it was the last one waiting, and then
     // it leaves the list at once, so the next caller for the same track starts afresh instead of joining it.
     const leave = (): void => {
       shared.waiters -= 1;
+      lessNow();
       if (shared.waiters > 0) return;
       shared.abort.abort();
       if (this.jobs.get(key) === shared) this.jobs.delete(key);
@@ -129,7 +141,10 @@ export class Media implements MediaPreparer {
       signal.removeEventListener('abort', leave);
       if (onProgress) shared.listeners.delete(onProgress);
       // A caller that got its answer is no longer waiting either.
-      if (!signal.aborted) shared.waiters -= 1;
+      if (!signal.aborted) {
+        shared.waiters -= 1;
+        lessNow();
+      }
     }
   }
 
@@ -141,7 +156,14 @@ export class Media implements MediaPreparer {
     const listeners = new Set<(fraction: number) => void>();
     const ticket = this.slots.request(priority, abort.signal);
     // The job exists before its work starts, so the work can tell whether the list still points at it when it ends.
-    const job: Job = { promise: Promise.reject(new Error('not started')), abort, waiters: 0, listeners, ticket };
+    const job: Job = {
+      promise: Promise.reject(new Error('not started')),
+      abort,
+      waiters: 0,
+      nowWaiters: 0,
+      listeners,
+      ticket,
+    };
     job.promise.catch(() => {});
     // Progress goes to everyone waiting; a listener that throws must not break the download.
     const report = (fraction: number): void => {

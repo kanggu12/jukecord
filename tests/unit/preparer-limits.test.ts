@@ -68,7 +68,30 @@ function setup() {
   return { store, cache, media, seen };
 }
 
-describe('Media', () => {
+describe('Media under a crowd', () => {
+  it('runs at most four downloads somebody waits for while skips cancel each other, and starts the newest', async () => {
+    const { store, media, seen } = setup();
+    const tracks = addTracks(store, 30);
+    // A crowd pressing skip: each new track's fetch cancels the one before, as the player does.
+    let previous: AbortController | null = null;
+    const loads: Promise<unknown>[] = [];
+    for (const track of tracks) {
+      previous?.abort();
+      const signal = new AbortController();
+      previous = signal;
+      loads.push(media.prepare(track, signal.signal).catch(() => 'cancelled'));
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Never more than four at once, though thirty were asked for; most never started at all.
+    assert.ok(seen.most <= 4, `${seen.most} downloads ran at once`);
+    assert.ok(seen.started < 30, `${seen.started} downloads started`);
+    // The newest one is running (nobody cancelled it).
+    assert.equal(seen.running, 1);
+    previous?.abort();
+    await Promise.all(loads);
+  });
+
   it('gives an MP3 copy the time limit of the track, which grows with its length', async () => {
     const { store, cache, media, seen } = setup();
     const [track] = addTracks(store, 1);
