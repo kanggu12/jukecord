@@ -30,6 +30,7 @@ import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { Buckets, CHANGES, FETCHES, Pressure, type Rate, READS } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
+import { type FieldSchema, misfit } from './schemas.ts';
 
 export interface WebServerOptions {
   readonly host: string;
@@ -144,6 +145,41 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined
     // Settled first: the timer has nothing left to do.
     clearTimeout(timer);
   }
+}
+
+// A request that does not fit its operation's schema, as Fastify reports it: where (the query, the path, the body) and
+// the validator's findings, the first of which is the one that counts.
+interface Unfit {
+  readonly validationContext?: string;
+  readonly validation?: readonly {
+    readonly keyword: string;
+    readonly instancePath: string;
+    readonly params: Record<string, unknown>;
+    readonly message?: string;
+  }[];
+  readonly message: string;
+}
+
+// What such a request is told: the field and what it may be ("level is debug, info, warn or error", "limit is 1 to
+// 200"), read from the operation's own schema. The validator's words named its path, once for every choice.
+function unfit(error: Unfit, request: FastifyRequest): string {
+  const first = error.validation?.[0];
+  if (!first) return error.message;
+  if (first.keyword === 'required') return `${String(first.params.missingProperty)} is missing`;
+  const where = error.validationContext === 'querystring' ? 'querystring' : (error.validationContext ?? 'body');
+  const name = first.instancePath.split('/').find(Boolean) ?? '';
+  const schema = (
+    request.routeOptions.schema as Record<string, { properties?: Record<string, FieldSchema> }> | undefined
+  )?.[where];
+  const field = schema?.properties?.[name];
+  const part = (where === 'querystring' ? request.query : where === 'params' ? request.params : request.body) as
+    | Record<string, unknown>
+    | undefined;
+  const problem = misfit(field, part?.[name]);
+  if (problem) return `${name} ${problem}`;
+  // A pattern (an ID): what the field's description says it is.
+  if (field?.description) return `${name} is ${field.description.charAt(0).toLowerCase()}${field.description.slice(1)}`;
+  return `${name} ${first.message ?? 'is not right'}`;
 }
 
 // The answer for an error, in the one shape every API error has.
@@ -405,7 +441,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (error instanceof ActionError) return failure(reply, error.code, error.message);
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);
     const fastifyError = error as { validation?: unknown; statusCode?: number; message: string };
-    if (fastifyError.validation) return failure(reply, 'invalid', fastifyError.message);
+    if (fastifyError.validation) return failure(reply, 'invalid', unfit(fastifyError as Unfit, request));
     // Fastify's own refusals (bad JSON, body too large, wrong content type) carry a 4xx status.
     if (fastifyError.statusCode && fastifyError.statusCode >= 400 && fastifyError.statusCode < 500) {
       return reply.code(fastifyError.statusCode).send({ error: { code: 'invalid', message: fastifyError.message } });

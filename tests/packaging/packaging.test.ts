@@ -282,6 +282,34 @@ describe('Compose and the front door', () => {
   });
 });
 
+describe('the front door with jukecord not running', () => {
+  it('says a mistyped command is not one, and a real one that jukecord is not running', () => {
+    // A Docker that answers but runs nothing (no container is up), so nothing here reaches a real Docker.
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-docker-'));
+    try {
+      fs.writeFileSync(
+        path.join(bin, 'docker'),
+        '#!/bin/sh\ncase "$1" in info) echo 27.0.0 ;; compose) [ "$2" = version ] && echo v2.30.0 ;; esac\nexit 0\n',
+        { mode: 0o755 },
+      );
+      const front = (word: string) =>
+        spawnSync('bash', ['jukecord', word], {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+        });
+      const mistyped = front('foo');
+      assert.equal(mistyped.status, 2);
+      assert.equal(mistyped.stderr, 'jukecord: there is no command "foo" (./jukecord help)\n');
+      // A command of the jukecord command's own (from the source beside the front door), with nothing running.
+      const real = front('np');
+      assert.equal(real.status, 1);
+      assert.equal(real.stderr, 'jukecord: jukecord is not running here (./jukecord up)\n');
+    } finally {
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
 // The front door's check of a backup before a restore, as bash hands it to node inside the container: the
 // `check='...'` assignment of ./jukecord, evaluated by bash itself (its quoting included).
 function restoreCheck(): string {

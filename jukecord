@@ -389,6 +389,14 @@ mv jukecord.db.restoring jukecord.db'
     fi
     ;;
   *)
+    # A word that is not one of the jukecord command's own (read from the checkout beside this file, so a command added
+    # there is known here too) is a typing mistake, said as one even while jukecord is not running. Options (--json
+    # ...) and a checkout without the source go to the command as they are.
+    if [ -f "$here/src/cli/commands.ts" ] && [ "${1#-}" = "$1" ] &&
+      ! sed -n "s/.*name: '\([a-z]*\).*/\1/p" "$here/src/cli/commands.ts" | grep -qx -- "$1"; then
+      say "there is no command \"$1\" (./jukecord help)"
+      exit 2
+    fi
     inside "$@"
     ;;
 esac

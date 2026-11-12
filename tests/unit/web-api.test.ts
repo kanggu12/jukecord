@@ -104,6 +104,25 @@ describe('the HTTP API', () => {
     assert.equal(missing.json().error.code, 'not-found');
   });
 
+  it("says what a value may be in words, not in the validator's", async () => {
+    const said = async (url: string, payload?: unknown) => {
+      const answer = await inject({
+        method: payload ? 'PUT' : 'GET',
+        url: api(url),
+        headers: asHost,
+        ...(payload ? { payload } : {}),
+      });
+      assert.equal(answer.statusCode, 400, url);
+      return answer.json().error.message;
+    };
+    assert.equal(await said('/logs?level=nonsense'), 'level is debug, info, warn or error');
+    assert.equal(await said(`/guilds/${GUILD}/history?limit=0`), 'limit is 1 to 200');
+    assert.equal(await said(`/guilds/${GUILD}/stats?days=400`), 'days is 1 to 366');
+    assert.equal(await said('/guilds/123/player'), 'guild is a Discord server ID, or "local"');
+    assert.equal(await said(`/guilds/${GUILD}/player/repeat`, { mode: 'sometimes' }), 'mode is off, track or queue');
+    assert.equal(await said(`/guilds/${GUILD}/player/repeat`, { other: 1 }), 'mode is missing');
+  });
+
   it('keeps a read token to looking', async () => {
     const created = await inject({
       method: 'POST',

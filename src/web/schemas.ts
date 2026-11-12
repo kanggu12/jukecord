@@ -12,6 +12,44 @@ export function Nullable<T extends TSchema>(schema: T) {
   return Type.Union([schema, Type.Null()]);
 }
 
+/** The schema of one field of the API, as much of it as misfit reads (TypeBox writes plain JSON Schema). */
+export interface FieldSchema {
+  readonly type?: string;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly maxLength?: number;
+  readonly anyOf?: readonly { readonly const?: unknown }[];
+  readonly description?: string;
+}
+
+// "a, b or c".
+function listed(items: readonly string[]): string {
+  return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} or ${items.at(-1)}`;
+}
+
+/**
+ * What is wrong with a value for a field, as the end of a sentence about it ("is 1 to 200", "is debug, info, warn or
+ * error"), or null when the API takes it.
+ */
+export function misfit(schema: FieldSchema | undefined, value: unknown): string | null {
+  if (!schema) return null;
+  // A choice of fixed values (TypeBox's union of literals).
+  const choices = (schema.anyOf ?? []).flatMap((option) => (option.const === undefined ? [] : [String(option.const)]));
+  if (choices.length > 0) return choices.includes(String(value)) ? null : `is ${listed(choices)}`;
+  if (schema.type === 'integer' || schema.type === 'number') {
+    const number = Number(value);
+    const low = schema.minimum ?? Number.NEGATIVE_INFINITY;
+    const high = schema.maximum ?? Number.POSITIVE_INFINITY;
+    const whole = schema.type === 'number' || Number.isInteger(number);
+    if (Number.isFinite(number) && whole && number >= low && number <= high) return null;
+    if (Number.isFinite(low) && Number.isFinite(high)) return `is ${low} to ${high}`;
+    return Number.isFinite(low) ? `is ${low} or more` : `is ${high} or less`;
+  }
+  if (schema.maxLength !== undefined && String(value).length > schema.maxLength)
+    return `is at most ${schema.maxLength} characters`;
+  return null;
+}
+
 /** A Discord server ID (a snowflake), or "local" for the queue of browser-only mode. */
 export const GuildId = Type.String({ pattern: '^(\\d{17,20}|local)$', description: 'A Discord server ID, or "local"' });
 

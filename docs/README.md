@@ -78,7 +78,7 @@ export JUKECORD_URL=https://music.example.com JUKECORD_TOKEN=jkc_...
 node src/cli/main.ts np
 ```
 
-`jukecord --help` lists every command. A few:
+`jukecord --help` lists every command, and `jukecord help <command>` (or `<command> --help`) shows one. A few:
 
 ```bash
 ./jukecord add never gonna give you up --next
@@ -89,7 +89,8 @@ node src/cli/main.ts np
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it
-is, for scripts. Exit codes: 0 done, 1 refused (the message says why), 2 a typing mistake, 3 jukecord did not answer.
+is, for scripts, and a failure as `{"error":{"code","message"}}` on stderr. Exit codes: 0 done, 1 refused (the message
+says why), 2 a typing mistake, 3 jukecord did not answer, 4 jukecord said to try again later (a rate, a busy moment).
 
 ## Settings
 

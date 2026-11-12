@@ -416,7 +416,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       const status = answer as { version: string; mode: string; discord: boolean; uptimeMs: number };
       const discord =
         status.mode === 'browser-only' ? 'browser-only (no bot)' : status.discord ? 'connected' : 'not connected';
-      return `jukecord ${status.version}\nDiscord: ${discord}\nUp for ${formatDuration(status.uptimeMs)}`;
+      // Past a day, days and hours ("9 d 0 h"); a clock's hours ran to "216:00:00".
+      const day = 86_400_000;
+      const up =
+        status.uptimeMs >= day
+          ? `${Math.floor(status.uptimeMs / day)} d ${Math.floor((status.uptimeMs % day) / 3_600_000)} h`
+          : formatDuration(status.uptimeMs);
+      return `jukecord ${status.version}\nDiscord: ${discord}\nUp for ${up}`;
     },
   },
 
