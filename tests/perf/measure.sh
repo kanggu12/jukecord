@@ -30,8 +30,9 @@ crowd=jukecord-perf-crowd-$$
 cleanup() {
   docker rm -f "$crowd" "$server" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
-  # The folders written from inside containers belong to the image's user; a container removes them.
-  docker run --rm -v "$work:/work" --entrypoint sh "$image" -c 'rm -rf /work/data /work/js' >/dev/null 2>&1 || true
+  # The folders written from inside containers belong to the image's user, so a container of the image empties them,
+  # each mounted itself: the folder above them (mktemp's, 0700) is only this user's, which the image's user cannot enter.
+  docker run --rm -v "$work/data:/data" -v "$work/js:/js" --entrypoint sh "$image" -c 'find /data /js -mindepth 1 -delete' >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT

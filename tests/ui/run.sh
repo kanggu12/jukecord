@@ -23,8 +23,9 @@ server=$name
 cleanup() {
   docker rm -f "$server" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
-  # The data folder belongs to the image's user; a container removes it.
-  docker run --rm --name "$name-clean" -v "$work:/work" --entrypoint sh "$image" -c 'rm -rf /work/data' >/dev/null 2>&1 || true
+  # The data folder's files belong to the image's user, so a container of the image empties it. The folder is mounted
+  # itself: the one above it (mktemp's, 0700) is only this user's, and the image's user cannot enter it.
+  docker run --rm --name "$name-clean" -v "$work/data:/data" --entrypoint sh "$image" -c 'find /data -mindepth 1 -delete' >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
