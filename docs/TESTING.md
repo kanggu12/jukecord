@@ -59,10 +59,11 @@ panels at three changes a second used both cores up and the slowest were cut off
 
 CI builds and runs the image on an arm64 runner. On an amd64 machine the arm64 image runs under QEMU
 (`docker run --privileged --rm tonistiigi/binfmt --install arm64`, removed again with `--uninstall qemu-aarch64`)
-with one setting, `-e NODE_OPTIONS=--disable-wasm-trap-handler`. Without it Node stops while reading jukecord's
-source (`ERR_INTERNAL_ASSERTION: memory access out of bounds`, in the WebAssembly code that strips the types). The
-setting makes Node check WebAssembly memory bounds in code instead of through memory faults, and under QEMU only the
-first works. A real arm64 machine needs nothing.
+with one setting, `-e NODE_OPTIONS=--disable-wasm-trap-handler`. Without it Node can stop in its WebAssembly code
+(`ERR_INTERNAL_ASSERTION: memory access out of bounds`; it was seen in the code that strips the types of a `.ts` file,
+which the tests and the walk's scripts still run, while the image carries JavaScript). The setting makes Node check
+WebAssembly memory bounds in code instead of through memory faults, and under QEMU only the first works. A real arm64
+machine needs nothing.
 
 ## By hand
 
