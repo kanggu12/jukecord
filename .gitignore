@@ -4,6 +4,9 @@ node_modules/
 # What a running jukecord writes: the database, the media cache and the logs
 data/
 
+# Copies of the database that ./jukecord backup takes out of the container: people's history, never committed
+/backups/
+
 # Settings with secrets in them; .env.example is the one that is committed
 .env
 
