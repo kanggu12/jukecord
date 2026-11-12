@@ -1190,6 +1190,27 @@ export class VoiceChannelRepository {
     this.store.db.prepare('DELETE FROM voice_channels WHERE guild_id = ?').run(guildId);
   }
 
+  /** The channel kept for a server, or null when there is none. */
+  get(guildId: string): string | null {
+    const row = this.store.db.prepare('SELECT channel_id FROM voice_channels WHERE guild_id = ?').get(guildId) as
+      | Row
+      | undefined;
+    return row ? text(row, 'channel_id') : null;
+  }
+
+  /** Notes that the bot said in a server's channel that it came back, now. */
+  told(guildId: string): void {
+    this.store.db.prepare('UPDATE voice_channels SET told_at = ? WHERE guild_id = ?').run(this.now(), guildId);
+  }
+
+  /** When the bot last said in a server's channel that it came back (ms since 1970), or null for never. */
+  toldAt(guildId: string): number | null {
+    const row = this.store.db.prepare('SELECT told_at FROM voice_channels WHERE guild_id = ?').get(guildId) as
+      | { told_at: number | bigint | null }
+      | undefined;
+    return row?.told_at == null ? null : Number(row.told_at);
+  }
+
   /** Every channel kept, in the order they were first kept. */
   all(): { readonly guildId: string; readonly channelId: string }[] {
     const rows = this.store.db.prepare('SELECT guild_id, channel_id FROM voice_channels ORDER BY rowid').all() as Row[];

@@ -346,6 +346,8 @@ export class Bot implements Directory, AlertSink {
           const channel = channelOf(guildId, channelId);
           return channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
         },
+        // In voice by the voice manager's own account (a connection it made since the start).
+        inVoice: (guildId) => this.voice.channel(guildId) !== null,
         join: (guildId, channelId) => this.voice.join(guildId, channelId, null),
         told: async (guildId, channelId) => {
           const guild = this.client.guilds.cache.get(guildId);
