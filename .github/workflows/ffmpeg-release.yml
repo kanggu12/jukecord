@@ -22,7 +22,8 @@ jobs:
       - name: The newest release of the pinned line, against the pinned one
         run: |
           pinned=$(sed -n 's/^ARG FFMPEG_VERSION=//p' deploy/docker/Dockerfile)
-          line=${pinned%.*}
+          # The line is the first two numbers: FFmpeg names a line's first release X.Y (9.0), the next ones X.Y.Z.
+          line=$(printf '%s' "$pinned" | cut -d. -f1-2)
           # Every release on the download page, oldest first.
           releases=$(curl -fsSL --retry 3 --max-time 60 https://ffmpeg.org/releases/ |
             grep -oE 'ffmpeg-[0-9]+(\.[0-9]+)+\.tar\.xz' | sed 's/^ffmpeg-//; s/\.tar\.xz$//' | sort -uV)

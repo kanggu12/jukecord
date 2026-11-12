@@ -18,6 +18,11 @@ import path from 'node:path';
 // group is the path without its quotes.
 const RELATIVE = /(\bfrom\s*|\bimport\s*\(?\s*)(['"])(\.{1,2}\/[^'"\n]+)\2/g;
 
+// Any relative .ts path left in quotes or backticks after the renaming: an import the pattern above did not see (a
+// template string, a comment between from and the path) or an address of a module made some other way (new URL(…,
+// import.meta.url) for a worker). The image has no .ts files, so each would fail at run time: the build stops instead.
+const LEFT_OVER = /(['"`])\.{1,2}\/[^'"`\n]*\.ts\1/;
+
 /** What a run did: how many .ts files became .js, and how many of their imports were renamed. */
 export interface Stripped {
   readonly files: number;
@@ -53,6 +58,10 @@ export function stripTree(from: string, to: string): Stripped {
     // The other TypeScript kinds would need their own handling (.mts becomes .mjs, .tsx has to be compiled).
     if (/\.(mts|cts|tsx)$/.test(file)) throw new Error(`${file}: only .ts files are handled`);
     if (!file.endsWith('.ts')) {
+      // A .js beside a .ts of the same name would be written over by the .ts's own.
+      if (file.endsWith('.js') && fs.existsSync(`${file.slice(0, -3)}.ts`)) {
+        throw new Error(`${file}: a .ts of the same name is beside it, and both would be ${path.basename(file)}`);
+      }
       fs.copyFileSync(file, target);
       continue;
     }
@@ -67,6 +76,13 @@ export function stripTree(from: string, to: string): Stripped {
     // The promise in the header: a line of the .js is the same line of the .ts.
     if (code.split('\n').length !== original.split('\n').length) {
       throw new Error(`${file}: the stripped code has a different number of lines`);
+    }
+    const left = LEFT_OVER.exec(code);
+    if (left) {
+      const line = code.slice(0, left.index).split('\n').length;
+      throw new Error(
+        `${file}:${line}: ${left[0]} names a .ts file, which the image does not have; import it with from or import()`,
+      );
     }
     const out = `${target.slice(0, -3)}.js`;
     fs.writeFileSync(out, code);

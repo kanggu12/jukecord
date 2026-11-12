@@ -134,7 +134,7 @@ describe('the source as JavaScript', () => {
         "export * as all from './deep/one.ts';",
         "import fs from 'node:fs';",
         "const later = () => import('./deep/two.ts');",
-        "const data = fs.existsSync('./deep/one.ts') as boolean;",
+        "const data = fs.existsSync('./deep/notes.txt') as boolean;",
         'export const shape: Shape = { one, later, data };',
         '',
       ].join('\n'),
@@ -152,12 +152,12 @@ describe('the source as JavaScript', () => {
     assert.match(a, /^export \{ two \} from '\.\/deep\/two\.js';$/m);
     assert.match(a, /^export \* as all from '\.\/deep\/one\.js';$/m);
     assert.match(a, /import\('\.\/deep\/two\.js'\)/);
-    // A package or a built-in module is not a file of the tree, and a path that is not imported is not renamed.
+    // A package or a built-in module is not a file of the tree, and a path that is not a .ts file is left alone.
     assert.match(a, /^import fs from 'node:fs';$/m);
-    assert.match(a, /existsSync\('\.\/deep\/one\.ts'\)/);
+    assert.match(a, /existsSync\('\.\/deep\/notes\.txt'\)/);
     // The import of a type went with the type.
     assert.doesNotMatch(a, /shape\.(ts|js)/);
-    // Six in a.ts (the type's import is gone before the renaming), one in deep/two.ts.
+    // Five in a.ts (the type's import is gone before the renaming), one in deep/two.ts.
     assert.deepEqual(result, { files: 5, imports: 6 });
     assert.equal(fs.readFileSync(path.join(to, 'deep/notes.txt'), 'utf8'), 'kept as it is\n');
     assert.equal(run(path.join(to, 'a.js')).status, 0);
@@ -180,6 +180,18 @@ describe('the source as JavaScript', () => {
     // Syntax that cannot be stripped.
     const unstrippable = tree({ 'a.ts': 'enum Colour {\n  Red,\n}\nexport const red = Colour.Red;\n' });
     assert.throws(() => stripTree(unstrippable, path.join(scratch(), 'out')));
+    // A relative .ts path the renaming does not reach: a template string, a module's address made another way.
+    for (const text of [
+      'const later = () => import(`./b.ts`);\nexport { later };\n',
+      "const worker = new URL('./b.ts', import.meta.url);\nexport { worker };\n",
+      "import { b } from /* the other one */ './b.ts';\nexport { b };\n",
+    ]) {
+      const hidden = tree({ 'a.ts': text, 'b.ts': 'export const b = 1;\n' });
+      assert.throws(() => stripTree(hidden, path.join(scratch(), 'out')), /names a \.ts file/, text);
+    }
+    // A .js beside a .ts of the same name: one would write over the other.
+    const twins = tree({ 'a.ts': 'export {};\n', 'a.js': 'export {};\n' });
+    assert.throws(() => stripTree(twins, path.join(scratch(), 'out')), /a \.ts of the same name is beside it/);
     // A kind of file it has no rule for.
     const other = tree({ 'a.tsx': 'export {};\n' });
     assert.throws(() => stripTree(other, path.join(scratch(), 'out')), /only \.ts files are handled/);

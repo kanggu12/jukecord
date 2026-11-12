@@ -275,6 +275,9 @@ describe('the HTTP API', () => {
     const proxied = await inject({ method: 'GET', url: '/metrics', headers: { 'x-forwarded-for': '203.0.113.9' } });
     assert.equal(proxied.statusCode, 404);
     assert.equal((await inject({ method: 'GET', url: '/metrics', remoteAddress: '203.0.113.9' })).statusCode, 404);
+    // The standard header a proxy may send instead says the same.
+    const standard = await inject({ method: 'GET', url: '/metrics', headers: { forwarded: 'for=198.51.100.7' } });
+    assert.equal(standard.statusCode, 404);
   });
 
   it('sends security headers, and no caching of API answers', async () => {

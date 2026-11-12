@@ -25,7 +25,13 @@ All notable changes to jukecord are documented here. The format is based on
   of an address the pod does not get.
 - The guides and the chart's values say how many tracks are fetched at once: up to the fetch limit ahead of time and
   twice that for tracks somebody is waiting for.
-- The workflows pin the Docker actions by commit too, as the other outside actions are.
+- The workflows pin the Docker actions by commit too, as the other outside actions are, and give the release's token
+  to helm through the environment instead of writing it into the step's script. The weekly FFmpeg check reads a line's
+  first release (9.0) as that line, and the chart's test runs when the scripts or what goes into the image change.
+- The image build stops when a relative `.ts` path is left in the source as JavaScript (a template string, a
+  module's address made with `new URL`), which the image could not load, and when a `.js` and a `.ts` of one name sit
+  side by side.
+- `/metrics` treats the standard `Forwarded` header as a request through a proxy, as it does `X-Forwarded-For`.
 
 ### Fixed
 

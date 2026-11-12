@@ -603,11 +603,13 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     return reply.code(ready ? 200 : 503).send({ ready, discord: options.discordReady() });
   });
   // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), not for the
-  // internet: a request that came through the reverse proxy (it carries X-Forwarded-For) or from a public address
-  // gets the 404 any unknown path gets, so the version and the counts are not handed to everyone.
+  // internet: a request that came through the reverse proxy (it carries X-Forwarded-For, or the standard Forwarded)
+  // or from a public address gets the 404 any unknown path gets, so the version and the counts are not handed to
+  // everyone.
   app.get('/metrics', async (request, reply) => {
     const peer = request.socket.remoteAddress ?? '';
-    if (request.headers['x-forwarded-for'] !== undefined || !isPrivateAddress(peer)) {
+    const forwarded = request.headers['x-forwarded-for'] !== undefined || request.headers.forwarded !== undefined;
+    if (forwarded || !isPrivateAddress(peer)) {
       return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
     }
     return reply.type('text/plain; version=0.0.4').send(metrics(options, hub, responses, pressure));

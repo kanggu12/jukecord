@@ -161,6 +161,9 @@ jobs:
         with:
           version: v3.16.4
       - name: The Helm chart, pointing at this release's image
+        env:
+          # Through the environment, not written into the script's text.
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # values.yaml names the image this workflow publishes, so the chart in the checkout installs as it is; a fork
           # that releases under another owner changes it there, and this stops a chart that points elsewhere.
@@ -168,7 +171,7 @@ jobs:
           helm lint --strict deploy/helm/jukecord
           helm package deploy/helm/jukecord --version "${{ steps.v.outputs.version }}" \
             --app-version "${{ steps.v.outputs.version }}" --destination dist
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          printf '%s' "$TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm push "dist/jukecord-${{ steps.v.outputs.version }}.tgz" "oci://ghcr.io/${{ steps.v.outputs.owner }}/charts"
       - name: Checksums
         run: (cd dist && sha256sum "jukecord-${{ steps.v.outputs.version }}.tgz" > SHA256SUMS && cat SHA256SUMS)
