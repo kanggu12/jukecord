@@ -88,6 +88,8 @@ export class Bot implements Directory {
       log: options.log,
       idleMs: options.voiceIdleMs,
       bus: options.bus,
+      // A server's stay setting, read at each change of who is in voice (a lookup by the primary key).
+      stays: (guildId) => options.settings.community(guildId).stay,
     });
   }
 
@@ -451,6 +453,17 @@ export class Bot implements Directory {
           const status = actions.status();
           await interaction.editReply({
             embeds: [note(lang, `jukecord ${status.version}`, `jukecord ${status.version}`)],
+          });
+          return;
+        }
+        case 'stay': {
+          const settings = actions.stay(context, options.getString('mode', true) === 'on');
+          await interaction.editReply({
+            embeds: [
+              settings.stay
+                ? note(lang, 'Stays in voice when everyone has left', '모두 나가도 음성 채널에 남음')
+                : note(lang, 'Leaves voice after a while alone', '혼자 남으면 잠시 뒤 음성 채널에서 나감'),
+            ],
           });
           return;
         }

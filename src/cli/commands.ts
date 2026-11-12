@@ -84,6 +84,12 @@ function number(text: string | undefined, what: string): number {
   return Number(text);
 }
 
+// "on" or "off", for the settings that are one or the other.
+function onOff(text: string | undefined): boolean {
+  if (text !== 'on' && text !== 'off') throw new UsageError('say on or off');
+  return text === 'on';
+}
+
 // An option's number, or the fallback when it was not given.
 function option(words: Words, name: string, fallback: number): number {
   const value = words.flags.get(name);
@@ -564,6 +570,17 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
     },
+  },
+
+  stay: {
+    name: 'stay',
+    usage: '<on|off>',
+    summary: 'Stay in voice when everyone has left',
+    request: (words) => ({ body: { on: onOff(words.args[0]) } }),
+    show: (answer) =>
+      (answer as { stay: boolean }).stay
+        ? 'Stays in voice when everyone has left'
+        : 'Leaves voice after the time alone the host set',
   },
 };
 

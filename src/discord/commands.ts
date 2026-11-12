@@ -47,6 +47,7 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   settings: '/dj show',
   'dj-role': '/dj set',
   status: '/version',
+  stay: '/stay',
 };
 
 // One command: English name and description, Korean name and description.
@@ -83,6 +84,20 @@ function playlistName(option: SlashCommandStringOption): SlashCommandStringOptio
     .setRequired(true)
     .setMaxLength(100)
     .setAutocomplete(true);
+}
+
+// "On" or "off", for the settings that are one or the other.
+function modeOption(option: SlashCommandStringOption): SlashCommandStringOption {
+  return option
+    .setName('mode')
+    .setDescription('On or off')
+    .setNameLocalizations({ ko: '방식' })
+    .setDescriptionLocalizations({ ko: '켜기 또는 끄기' })
+    .setRequired(true)
+    .addChoices(
+      { name: 'On', value: 'on', name_localizations: { ko: '켜기' } },
+      { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+    );
 }
 
 /** Every command as Discord wants it registered. */
@@ -318,6 +333,15 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setDescriptionLocalizations({ ko: '다시 누구나 음악을 바꿈' }),
       ),
     command('version', 'The jukecord version', '버전', 'jukecord 버전'),
+    command(
+      'stay',
+      'Stay in voice when everyone has left, or leave after a while alone',
+      '머물기',
+      '모두 나가도 음성 채널에 남기, 또는 혼자 남으면 잠시 뒤 나가기',
+    )
+      // A server setting: shown to people who can manage the server, as /dj is; Discord also enforces it.
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addStringOption(modeOption),
   ];
   return commands.map((builder) => builder.toJSON());
 }

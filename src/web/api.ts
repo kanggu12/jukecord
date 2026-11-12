@@ -485,6 +485,18 @@ export const API = {
     access: 'host',
     response: DoctorSchema,
   }),
+
+  // How a server's people share the music, and how its voice channel sounds.
+  stay: op({
+    method: 'PUT',
+    path: '/guilds/{guild}/settings/stay',
+    summary: "Stay in voice when everyone has left (off: leave after the host's time alone); needs Manage Server",
+    tag: 'server',
+    access: 'admin',
+    params: InGuild,
+    body: Type.Object({ on: Type.Boolean() }, strict),
+    response: SettingsSchema,
+  }),
 } satisfies Record<OperationName, OperationSpec>;
 
 /** The operations in a stable order: the table's own. */

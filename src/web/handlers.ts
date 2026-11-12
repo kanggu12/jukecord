@@ -220,4 +220,6 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const report = await deps.doctor();
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
   },
+
+  stay: ({ context, body, deps }) => settingsAnswer(deps.actions.stay(context, body.on)),
 };

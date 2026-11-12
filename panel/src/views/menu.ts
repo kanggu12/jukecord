@@ -191,6 +191,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     ),
   );
   const dj = h('div', { class: 'section', hidden: true });
+  const share = h('div', { class: 'section', hidden: true });
   const tokens = h('div', { class: 'section' });
   const end = h('div', { class: 'section' });
   // Keyboard shortcuts mean nothing on a touch screen without a keyboard; style.css hides this item there.
@@ -210,7 +211,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     location.assign('/login');
   };
   fill(end, shortcuts, out);
-  fill(body, who, pages, look, dj, tokens, end);
+  fill(body, who, pages, look, dj, share, tokens, end);
   // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
   // which runs in the same turn).
   if (focusLanguage) {
@@ -220,6 +221,9 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   // The DJ role, for people who can manage the server (and only with Discord: browser-only has no roles).
   const guild = state.guild;
   if (guild?.mayManage && state.status?.mode === 'discord') void drawDj(dj, guild.id);
+  // How the server's people share the music: for the same people, and only with Discord too (browser-only has the
+  // host alone, and no voice channel).
+  if (guild?.mayManage && state.status?.mode === 'discord') void drawShare(share, guild.id);
   void drawTokens(tokens);
 }
 
@@ -262,6 +266,50 @@ async function drawDj(box: HTMLElement, guild: string): Promise<void> {
     h('p', { class: 'faint', style: 'margin:0 0 8px' }, words.djHint),
     option(null, words.everyone, 0),
     ...settings.roles.map((role) => option(role.id, role.name, role.color)),
+  );
+}
+
+// A setting that is on or off: its name and what it does, and its switch, saved at each press. A refusal puts the
+// switch back and says why.
+function switchLine(name: string, hint: string, on: boolean, save: (on: boolean) => Promise<unknown>): HTMLElement {
+  const toggle = h('button', {
+    class: 'switch',
+    type: 'button',
+    role: 'switch',
+    'aria-checked': String(on),
+    'aria-label': name,
+  });
+  toggle.onclick = async () => {
+    const next = toggle.getAttribute('aria-checked') !== 'true';
+    // Shown at once; not made busy (a disabled switch would drop the keyboard focus).
+    toggle.setAttribute('aria-checked', String(next));
+    if ((await act(null, () => save(next))) === undefined) toggle.setAttribute('aria-checked', String(!next));
+  };
+  return h(
+    'div',
+    { class: 'line' },
+    h('div', { class: 'grow' }, h('div', null, name), h('div', { class: 'faint' }, hint)),
+    toggle,
+  );
+}
+
+// How the server's people share the music: each setting saved as it is changed, for people who can manage the server.
+async function drawShare(box: HTMLElement, guild: string): Promise<void> {
+  let settings: Settings;
+  try {
+    settings = await api.settings(guild);
+  } catch (error) {
+    problem(error);
+    return;
+  }
+  // The server was switched while jukecord answered: this section belongs to the one left behind.
+  if (state.guild?.id !== guild) return;
+  const words = t();
+  box.hidden = false;
+  fill(
+    box,
+    h('h3', null, words.serverSettings),
+    switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
   );
 }
 

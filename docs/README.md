@@ -23,8 +23,8 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
 - **Statistics** (top bar): plays per day and per hour of the day, the most played tracks, who added most, and the
   time listened, over 7, 30 or 90 days or a year. Each chart has a table view.
 - **Log** (the host only): jukecord's log, filtered by level and part.
-- **The menu** (your name, top right): theme, language, motion, the server's DJ role (for people who can manage the
-  server), API tokens, keyboard shortcuts, logging out.
+- **The menu** (your name, top right): theme, language, motion, the server's DJ role and settings (for people who can
+  manage the server), API tokens, keyboard shortcuts, logging out.
 
 At the bottom, **Listen here** plays the music in this browser, in time with the voice channel; the volume is this
 browser's own. The page title shows what is playing, and the media keys and the lock screen of your computer or phone
@@ -62,10 +62,12 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/stats`                                     | listening figures                                                   |
 | `/dj show, set, clear`                       | the DJ role (needs Manage Server)                                   |
 | `/version`                                   | the version                                                         |
+| `/stay`                                      | stay in voice when everyone has left, or not (needs Manage Server)  |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
-five minutes (`JUKECORD_VOICE_IDLE`); the music goes on in the browsers.
+five minutes (`JUKECORD_VOICE_IDLE`), unless the server asked it to stay (`/stay`, **Stay in voice** in the panel's
+menu, `jukecord stay on`); the music goes on in the browsers.
 
 ## The jukecord command
 

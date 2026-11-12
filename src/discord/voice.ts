@@ -175,6 +175,8 @@ export class VoiceManager implements VoiceControl {
   private readonly idle: Countdowns;
   // Where joining and leaving are announced (the panel shows the channel); absent in tests that do not care.
   private readonly bus: Bus | null;
+  // Whether a server asked the bot to stay in voice when everyone has left (its stay setting).
+  private readonly stays: (guildId: string) => boolean;
 
   constructor(options: {
     client: Client;
@@ -184,8 +186,11 @@ export class VoiceManager implements VoiceControl {
     idleMs: number;
     clock?: Clock;
     bus?: Bus;
+    stays?: (guildId: string) => boolean;
   }) {
     this.bus = options.bus ?? null;
+    // Without the setting (tests that do not care), the host's time alone decides for every server.
+    this.stays = options.stays ?? (() => false);
     this.client = options.client;
     this.players = options.players;
     this.ffmpeg = options.ffmpeg;
@@ -222,10 +227,20 @@ export class VoiceManager implements VoiceControl {
       this.bus?.emit('voice', { guildId, channel: { channelId: now.id, name: now.name } });
     }
     if (this.idleMs === 0) return;
+    // A server that asked the bot to stay keeps it in its channel, whoever is there: no countdown runs.
+    if (this.stays(guildId)) {
+      this.idle.disarm(guildId);
+      return;
+    }
     const channel = this.client.guilds.cache.get(guildId)?.channels.cache.get(joined.channelId);
     const people = channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
     if (people > 0) this.idle.disarm(guildId);
     else this.idle.arm(guildId);
+  }
+
+  /** The stay setting of a server changed: whether the bot counts down to leaving is decided again, at once. */
+  stayChanged(guildId: string): void {
+    this.voiceStateChanged(guildId);
   }
 
   channel(guildId: string): { channelId: string; name: string } | null {

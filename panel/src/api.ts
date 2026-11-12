@@ -47,6 +47,8 @@ export const PANEL_ACTIONS = [
   'token-create',
   'token-revoke',
   'logs',
+  // How a server's people share the music, and how its voice channel sounds.
+  'stay',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -291,6 +293,7 @@ export const api = {
       if (value !== undefined && value !== '') params.set(key, String(value));
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
+  stay: (guild: string, on: boolean) => request<Settings>('PUT', `${g(guild)}/settings/stay`, { on }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

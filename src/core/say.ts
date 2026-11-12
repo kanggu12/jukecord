@@ -117,6 +117,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.nothingFound, '찾은 곡 없음'],
   [REASONS.failed, '받지 못함'],
   [/^the site answered (\d{3})$/, '사이트 응답 코드 $1'],
+  // How a server's people share the music.
+  ['only people who can manage the server can change this setting', '서버 관리 권한이 있어야 이 설정을 바꿀 수 있음'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

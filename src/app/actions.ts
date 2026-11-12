@@ -53,6 +53,7 @@ export const ACTIONS = [
   'settings',
   'dj-role',
   'status',
+  'stay',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -95,6 +96,8 @@ export interface VoiceControl {
    * see, and `all` (the host) every one.
    */
   channels(guildId: string, viewer: { userId: string | null; all: boolean }): VoiceChannelInfo[];
+  /** The server's stay setting changed: the bot looks again at whether it is alone and counts down to leaving. */
+  stayChanged?(guildId: string): void;
 }
 
 /** A voice channel, for choosing where the bot goes. */
@@ -552,5 +555,23 @@ export class Actions {
   private fromStore(error: unknown): unknown {
     if (!(error instanceof StoreError)) return error;
     return new ActionError(/exists/.test(error.message) ? 'conflict' : 'invalid', error.message);
+  }
+
+  // Refuses a change of the server's settings from someone who cannot manage the server.
+  private manage(context: ActionContext): void {
+    if (!context.mayManage)
+      throw new ActionError('forbidden', 'only people who can manage the server can change this setting');
+  }
+
+  /**
+   * Whether the bot stays in its voice channel when everyone has left it; otherwise it leaves after the host's time
+   * alone (JUKECORD_VOICE_IDLE). Needs Manage Server.
+   */
+  stay(context: ActionContext, on: boolean): SettingsView {
+    this.manage(context);
+    this.options.store.settings.setCommunity(context.guildId, { stay: on });
+    // The bot looks again at once: staying stops a countdown under way, and leaving starts one in an empty channel.
+    this.options.voice?.stayChanged?.(context.guildId);
+    return this.settings(context);
   }
 }

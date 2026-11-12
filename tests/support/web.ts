@@ -97,6 +97,11 @@ export class FakeVoice implements VoiceControl {
   channels() {
     return [{ id: '400000000000000001', name: 'Lounge', people: 1 }];
   }
+  /** The servers whose stay setting changed, in order. */
+  readonly stayed: string[] = [];
+  stayChanged(guildId: string): void {
+    this.stayed.push(guildId);
+  }
 }
 
 export interface TestServer {
@@ -116,6 +121,8 @@ export interface TestServer {
   /** The base address once listening (`listen: true`); empty otherwise. */
   readonly url: string;
   close(): Promise<void>;
+  /** The voice side the actions were given (unused in browser-only mode). */
+  readonly voice: FakeVoice;
 }
 
 export interface TestServerOptions {
@@ -260,6 +267,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },
+    voice,
   };
 }
 

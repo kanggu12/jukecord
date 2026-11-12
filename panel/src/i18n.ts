@@ -229,6 +229,10 @@ const EN = {
   startFailed: 'jukecord could not open the panel just now; trying again',
   failed: (message: string) => message,
   reload: 'jukecord was updated: reload the page',
+  // How a server's people share the music.
+  serverSettings: 'Server settings',
+  stay: 'Stay in voice',
+  stayHint: 'The bot stays in its channel when everyone has left',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -451,6 +455,9 @@ const KO: Strings = {
   startFailed: 'jukecord가 지금 패널을 열지 못함: 다시 시도하는 중',
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
+  serverSettings: '서버 설정',
+  stay: '음성 채널에 머물기',
+  stayHint: '모두 나가도 봇이 채널에 남음',
 };
 
 /** The languages. */
