@@ -566,7 +566,11 @@ export function queueCard(): HTMLElement {
       element.onkeydown = (event) => {
         if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
         event.preventDefault();
-        const index = Math.max(0, item.position + (event.key === 'ArrowUp' ? -1 : 1));
+        const up = event.key === 'ArrowUp';
+        // The first row has no place above it and the last none below: nothing to ask for (jukecord would refuse a
+        // place past the end).
+        if (up ? item.position === 0 : item.position >= (state.queue?.items.length ?? 0) - 1) return;
+        const index = item.position + (up ? -1 : 1);
         // Moving past the rows drawn draws the next ones, so the row (and the focus on it) stays in sight.
         if (index >= shownLimit) shownLimit += PAGE;
         void act(null, () => api.move(guild(), item.id, index));
