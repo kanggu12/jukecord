@@ -326,6 +326,8 @@ async function main(): Promise<number> {
       .catch(() => {})
       .then(() => bot?.stop())
       .then(() => egress?.close())
+      // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
+      .then(() => schedule?.idle())
       .finally(() => {
         store.close();
         process.exit(0);

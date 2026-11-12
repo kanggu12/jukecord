@@ -59,16 +59,39 @@ export function listBackups(dir: string): Backup[] {
   );
 }
 
-/** Removes all but the newest `keep` backups (their names sort by time) from the folder. */
-export function pruneBackups(dir: string, keep: number): void {
+// How old a backup's unfinished copy (".partial", see Store.backupAside) must be to be cleared away: one being written
+// now is younger (its file changes as it is written).
+const PARTIAL_STALE_MS = 3_600_000;
+
+/**
+ * Removes all but the newest `keep` backups (their names sort by time) from the folder, and the unfinished copies a
+ * stop in the middle of a backup left behind.
+ */
+export function pruneBackups(dir: string, keep: number, now = Date.now()): void {
   for (const backup of listBackups(dir).slice(Math.max(0, keep))) fs.rmSync(backup.file, { force: true });
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    // No folder: nothing to clear.
+  }
+  for (const name of names) {
+    if (!/^jukecord-.*\.db\.partial$/.test(name)) continue;
+    const file = path.join(dir, name);
+    // Gone meanwhile (another prune), or still being written: left alone.
+    const changed = fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs;
+    if (changed !== undefined && now - changed >= PARTIAL_STALE_MS) fs.rmSync(file, { force: true });
+  }
 }
 
-/** Writes a backup of the database into the folder, named by the time, and keeps the newest `keep`. */
-export function makeBackup(store: Store, dir: string, keep: number, now = new Date()): Backup {
+/**
+ * Writes a backup of the database into the folder, named by the time, and keeps the newest `keep`. The copy is written
+ * beside the main thread (Store.backupAside), which goes on answering meanwhile.
+ */
+export async function makeBackup(store: Store, dir: string, keep: number, now = new Date()): Promise<Backup> {
   // One file per backup, named by the time, so backups sort and none replaces another.
   const file = path.join(dir, `jukecord-${now.toISOString().replace(/[:.]/g, '-')}.db`);
-  store.backup(file);
+  await store.backupAside(file);
   const bytes = fs.statSync(file).size;
   pruneBackups(dir, keep);
   return { file, bytes, at: now.getTime() };
@@ -110,6 +133,8 @@ export class BackupSchedule {
   // The day whose backup is made (or was tried).
   private done: string | null = null;
   private timer: TimerHandle | null = null;
+  // The backup being written now, if one is.
+  private running: Promise<void> | null = null;
 
   constructor(options: BackupScheduleOptions) {
     this.options = options;
@@ -128,21 +153,31 @@ export class BackupSchedule {
     this.timer = null;
   }
 
+  /** Settles once no backup is being written (at once when none is); for a stop that waits for it, and for tests. */
+  async idle(): Promise<void> {
+    await this.running;
+  }
+
   // Makes today's backup when its time has come, then looks again in a minute.
   private look(): void {
     const now = new Date(this.options.clock.now());
     const today = dayOf(now);
-    if (this.done !== today && now.getTime() >= timeOn(now, this.options.at)) {
+    // One at a time: a backup still being written puts off the next look's (only a clock set far ahead could ask).
+    if (this.running === null && this.done !== today && now.getTime() >= timeOn(now, this.options.at)) {
       this.done = today;
-      this.run(now);
+      const running = this.run(now).finally(() => {
+        if (this.running === running) this.running = null;
+      });
+      this.running = running;
     }
     this.timer = this.options.clock.setTimeout(() => this.look(), 60_000);
   }
 
-  private run(now: Date): void {
+  // Writes the day's backup (beside the main thread); a failure is said, never thrown.
+  private async run(now: Date): Promise<void> {
     const { store, dir, keep, log } = this.options;
     try {
-      const made = makeBackup(store, dir, keep, now);
+      const made = await makeBackup(store, dir, keep, now);
       log.info('made the scheduled backup', { file: made.file, bytes: made.bytes, kept: keep });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

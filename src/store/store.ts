@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 import type { HistoryEntry, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import { MIGRATIONS } from './schema.ts';
 
@@ -223,9 +224,61 @@ export class Store {
     this.db.prepare('VACUUM INTO ?').run(target);
   }
 
+  /**
+   * backup(), written by a worker thread with a connection of its own: a copy of a large database takes seconds, and
+   * made here it held the main thread all that time (the voices' audio stood still, the panel waited, and past thirty
+   * seconds the watchdog ended jukecord). The copy is the same consistent snapshot: the database is in WAL mode, where
+   * a reader and this connection's writes do not wait for each other. An in-memory database (the tests') has no file
+   * for another connection to open, and is copied here.
+   */
+  async backupAside(target: string): Promise<void> {
+    if (this.file === ':memory:') return this.backup(target);
+    if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    // Written under another name, and named a backup once whole: jukecord stopped in the middle (the worker ends with
+    // it) leaves a ".partial" file, which no list takes for a backup (app/backups.ts clears it away later).
+    const partial = `${target}.partial`;
+    await vacuumInto(this.file, partial);
+    fs.renameSync(partial, target);
+  }
+
   close(): void {
     if (this.db.isOpen) this.db.close();
   }
+}
+
+// The worker's own code (plain JavaScript, run as it is): a read-only connection to the database file, VACUUM INTO
+// the target, and the outcome posted back. Waits up to five seconds for a lock, as the main connection does.
+const VACUUM_WORKER = `
+const { workerData, parentPort } = require('node:worker_threads');
+const { DatabaseSync } = require('node:sqlite');
+let db = null;
+try {
+  db = new DatabaseSync(workerData.source, { readOnly: true, timeout: 5000 });
+  db.prepare('VACUUM INTO ?').run(workerData.target);
+  parentPort.postMessage({ ok: true });
+} catch (error) {
+  parentPort.postMessage({ ok: false, message: String((error && error.message) || error) });
+} finally {
+  if (db) db.close();
+}
+`;
+
+// Copies the database file `source` into `target` in a worker thread; rejects with the worker's reason.
+function vacuumInto(source: string, target: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(VACUUM_WORKER, { eval: true, workerData: { source, target } });
+    // The worker's answer: done, or why not.
+    worker.once('message', (answer: { ok: boolean; message?: string }) => {
+      if (answer.ok) resolve();
+      else reject(new StoreError(`could not write the backup: ${answer.message ?? 'no reason given'}`));
+    });
+    // A worker that could not start, or ended without an answer (out of memory).
+    worker.once('error', (error) => reject(error));
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new StoreError(`the backup's worker ended with code ${code}`));
+    });
+  });
 }
 
 /** Tracks: one row per distinct source, updated when a later lookup knows more about it. */

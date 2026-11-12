@@ -50,13 +50,18 @@ describe('the daily backup', () => {
     const { clock, store, sink, schedule } = setup('2026-11-11T03:00:00');
     schedule.start();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 0);
-    // 04:30 comes: one backup, and none more that day.
+    // 04:30 comes: one backup (written beside the main thread: waited for), and none more that day.
     await clock.advance(90 * 60_000);
+    await schedule.idle();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
     await clock.advance(10 * 3_600_000);
+    await schedule.idle();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
     // Two days later: three were made, the newest two kept.
-    await clock.advance(2 * 86_400_000);
+    for (let day = 0; day < 2; day += 1) {
+      await clock.advance(86_400_000);
+      await schedule.idle();
+    }
     assert.equal(listBackups(path.join(dir, 'backups')).length, 2);
     assert.equal(sink.records.filter((record) => record.msg === 'made the scheduled backup').length, 3);
     schedule.stop();
@@ -66,6 +71,7 @@ describe('the daily backup', () => {
   it("is made when jukecord starts after the day's time, unless one was made since", async () => {
     const late = setup('2026-11-11T09:00:00');
     late.schedule.start();
+    await late.schedule.idle();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
     late.schedule.stop();
     // Started again the same day: today's is made.
@@ -79,6 +85,7 @@ describe('the daily backup', () => {
     });
     again.start();
     await late.clock.advance(3_600_000);
+    await again.idle();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
     again.stop();
     late.store.close();
@@ -90,10 +97,12 @@ describe('the daily backup', () => {
     fs.writeFileSync(path.join(dir, 'backups'), 'not a folder');
     schedule.start();
     await clock.advance(3_600_000);
+    await schedule.idle();
     assert.equal(sink.records.filter((record) => record.msg === 'the scheduled backup failed').length, 1);
     assert.equal(alerts.length, 1);
     assert.match(alerts[0]?.en ?? '', /^The scheduled backup failed: /);
     await clock.advance(86_400_000);
+    await schedule.idle();
     assert.equal(alerts.length, 2);
     schedule.stop();
     store.close();

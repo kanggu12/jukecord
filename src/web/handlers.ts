@@ -193,9 +193,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const link = deps.auth.createLink();
     return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt };
   },
-  backup: ({ deps }) => {
-    // Named by the time, so backups sort and none replaces another; the newest JUKECORD_BACKUP_KEEP stay.
-    const made = makeBackup(deps.store, deps.backupDir, deps.backupKeep ?? KEEP_BACKUPS);
+  backup: async ({ deps }) => {
+    // Named by the time, so backups sort and none replaces another; the newest JUKECORD_BACKUP_KEEP stay. Written
+    // beside the main thread, which goes on answering meanwhile.
+    const made = await makeBackup(deps.store, deps.backupDir, deps.backupKeep ?? KEEP_BACKUPS);
     return { file: made.file, bytes: made.bytes };
   },
   doctor: async ({ deps }) => {
