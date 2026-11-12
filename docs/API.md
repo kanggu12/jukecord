@@ -68,7 +68,8 @@ and the changes that start fetching a track at once (`skip`, `play-now`, `jump`,
 with five at once. A change over the rate is answered with `429` (`rate-limited`) and `Retry-After` in seconds; reads
 are not limited. While jukecord has fallen behind (its event loop more than 0.2 s late over the last second), audio
 and changes are answered with `503` (`busy`) and `Retry-After`, until it has caught up. The host (its command line and
-the browsers it logged in with a link) is held to neither.
+the browsers it logged in with a link) is held to neither rate, and its changes go through while jukecord is behind;
+its audio waits like everyone's, as sending audio is the work that can wait.
 
 A request must arrive whole within 30 s, its headers within 15 s; a slower one is answered `408` and its connection
 closed. Sending an answer has no time limit (audio to a slow line takes as long as it takes), nor has a WebSocket. At

@@ -121,6 +121,29 @@ describe('the web server times requests, not answers', () => {
     assert.ok(received < size, `${received} bytes came, the whole track is ${size}`);
   });
 
+  it('closes a connection that sends request after request without reading the answers', async () => {
+    // A thousand requests for the API's description in one go (pipelining, which no browser does), nothing read: each
+    // answer would be built and held in memory for a reader that never comes.
+    const answers = await new Promise<number>((resolve) => {
+      let got = '';
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.pause();
+        socket.write('GET /api/v1/openapi.json HTTP/1.1\r\nHost: x\r\n\r\n'.repeat(1000));
+        setTimeout(() => socket.resume(), 300);
+      });
+      socket.on('data', (chunk: Buffer) => {
+        got += chunk.toString('latin1');
+      });
+      socket.on('error', () => {});
+      socket.on('close', () => resolve(got.split('HTTP/1.1 200').length - 1));
+      setTimeout(() => socket.destroy(), 8000).unref();
+    });
+    // Closed after the first few, long before a thousand answers.
+    assert.ok(answers <= 16, `${answers} answers came`);
+    // And an ordinary client on a connection of its own is answered as ever.
+    assert.equal((await fetch(`${server.url}/api/v1/openapi.json`)).status, 200);
+  });
+
   it('keeps a WebSocket open past the request limit', async () => {
     const socket = new WebSocket(`${server.url.replace('http://', 'ws://')}/api/v1/events`, {
       headers: { authorization: `Bearer ${HOST_TOKEN}` },

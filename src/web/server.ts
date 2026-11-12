@@ -7,6 +7,7 @@
  * headers. Nothing here knows about music; that all happens in the handlers and the actions behind them.
  */
 import fs from 'node:fs';
+import type { Socket } from 'node:net';
 import path from 'node:path';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
@@ -104,6 +105,12 @@ const BUSY = 'jukecord is busy; try again in a moment';
 const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 
+// HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
+// do. A client that sends many in one go and reads nothing had each one answered, and each answer held in memory for a
+// reader that never came: a few connections of small requests filled the heap. More than this many answers under way
+// on one connection closes it.
+const PIPELINED_MAX = 16;
+
 // The answer for an error, in the one shape every API error has.
 function failure(reply: FastifyReply, code: string, message: string): FastifyReply {
   return reply.code(STATUS[code] ?? 500).send({ error: { code, message } });
@@ -198,6 +205,22 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
+
+  // Answers under way on each connection (see PIPELINED_MAX). An upgrade to a WebSocket leaves its count at one, and
+  // the connection then carries no more requests.
+  const underWay = new WeakMap<Socket, number>();
+  app.addHook('onRequest', async (request, reply) => {
+    const socket = request.raw.socket;
+    const count = (underWay.get(socket) ?? 0) + 1;
+    if (count > PIPELINED_MAX) {
+      // Nothing is sent: the connection goes, with what it asked for.
+      reply.hijack();
+      socket.destroy();
+      return;
+    }
+    underWay.set(socket, count);
+    reply.raw.once('close', () => underWay.set(socket, (underWay.get(socket) ?? 1) - 1));
+  });
 
   // Responses by status class, for /metrics.
   const responses = new Map<string, number>();
@@ -435,8 +458,13 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     });
   });
 
-  // The OpenAPI document of the API.
-  app.get(`${API_PREFIX}/openapi.json`, async () => openApiDocument(API_PREFIX));
+  // The OpenAPI document of the API, made once: it is the same for every request, and anyone may ask for it (made
+  // afresh it cost 3.5 ms of the event loop and 80 KB each time).
+  let openApi: Buffer | null = null;
+  app.get(`${API_PREFIX}/openapi.json`, async (_request, reply) => {
+    openApi ??= Buffer.from(JSON.stringify(openApiDocument(API_PREFIX)));
+    return reply.type('application/json; charset=utf-8').send(openApi);
+  });
 
   // Logging in with Discord: off to Discord, and back.
   app.get<{ Querystring: { next?: string } }>('/auth/login', async (request, reply) => {

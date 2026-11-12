@@ -34,6 +34,10 @@ All notable changes to jukecord are documented here. The format is based on
   held for good, and enough of them would have taken every place under the cap of 4096 connections, health checks
   included. A connection on which nothing moves for two minutes is now closed, as nginx does after one; a browser
   that paused its audio asks again when it plays on.
+- A client that sent many requests in one go without reading the answers (HTTP pipelining, which no browser does)
+  had every one answered and held in memory: a few connections filled the heap and stopped jukecord. More than 16
+  answers under way on one connection now close it. The API's description (`/api/v1/openapi.json`, open to anyone)
+  is made once instead of for every request.
 - The live hub, the rate limits and the bot's "listening to" line timed their waits by the system clock: set back (by
   hand, or by NTP after a machine slept), it stopped queue changes reaching open panels, and a login waited out the
   difference on 429s. They time by a clock that only goes forward.
