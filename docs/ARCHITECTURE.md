@@ -3,45 +3,12 @@
 One Node process, written in TypeScript and run as it is (Node strips the types; there is no build step for the
 server, and the image carries the source with the types already stripped, line for line). Its parts, from the outside in:
 
-```mermaid
-flowchart LR
-  subgraph ways["Four ways in"]
-    panel["Panel (browser)"]
-    discord["Discord slash commands"]
-    api["HTTP API"]
-    cli["jukecord command"]
-  end
-  subgraph app["The actions (src/app)"]
-    actions["Actions: one function per thing a person can do"]
-    access["Access: who may do it, in which server"]
-  end
-  subgraph core["The music (src/core)"]
-    queue["Queue per server"]
-    player["Player per server: the clock"]
-    bus["Event bus"]
-  end
-  subgraph media["Getting tracks (src/media)"]
-    resolver["Resolver: address or search to tracks"]
-    preparer["Preparer: yt-dlp to ffmpeg to Ogg Opus"]
-    cache["Media cache, with a size limit"]
-  end
-  store[("SQLite (src/store)")]
-  voice["Voice channel (src/discord)"]
-  browsers["Browsers playing along"]
-
-  panel --> api
-  cli --> api
-  api --> access --> actions
-  discord --> actions
-  actions --> queue & player & resolver
-  player --> preparer --> cache
-  player --> voice
-  player --> bus
-  queue --> bus
-  bus -- "WebSocket: every change, made once for all" --> browsers
-  cache -- "audio with Range" --> browsers
-  queue & player & actions --> store
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg">
+    <img alt="jukecord's parts, from the outside in. Four ways in: the panel in a browser and the jukecord command call the HTTP API, whose requests pass Access, which decides who may do it and in which server, on their way to the actions; Discord's slash commands go to the actions directly. The actions, one function per thing a person can do, ask the resolver to turn an address or search words into tracks, and drive each server's queue and player. The player is the clock: it sends the voice channel the music, has the preparer run yt-dlp and ffmpeg into Ogg Opus in the media cache, and with the queue tells the event bus about every change. Browsers playing along get each change over a WebSocket, made once for all of them, and the audio from the cache with Range requests. The queues, the players and the actions keep their state in SQLite. Rainbow lines are the music people hear." src="assets/architecture-light.svg" width="100%">
+  </picture>
+</p>
 
 ## The actions are the product
 
