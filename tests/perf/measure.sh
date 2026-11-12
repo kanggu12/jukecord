@@ -7,8 +7,8 @@
 #   - the live state a panel gets for the full queue, as text and as the gzip frame a browser asks for,
 #   - how long a four-minute track takes to have its loudness evened out and be encoded,
 #   - a crowd: a thousand panels connected at once while the queue changes three times a second for twenty seconds
-#     (tests/perf/crowd.ts, in a container of its own): how many stay connected, how long a change takes to reach
-#     them, and what the server uses meanwhile.
+#     (tests/perf/crowd.ts, in a container of its own, as through a reverse proxy): how many stay connected, how long a
+#     change takes to reach them, and what the server uses meanwhile.
 # Nothing reaches the internet or Discord, and everything it made is removed at the end.
 #
 #   tests/perf/measure.sh [cores] [panels]      (panels 0 leaves the crowd out)
@@ -53,9 +53,11 @@ echo "jukecord $(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json) in $imag
 docker run --rm "${checkout[@]}" -v "$work/js:/js" "$image" "${node[@]}" /app/scripts/strip-types.ts /app/src /js/src >/dev/null
 # A server used every day for a year (tests/perf/seed.ts).
 docker run --rm "${checkout[@]}" "$image" "${node[@]}" /app/tests/perf/seed.ts /data
-# Listening on every address of its container, so the crowd's container reaches it over their private network.
-docker run -d --name "$server" --network "$network" -e JUKECORD_HOST=0.0.0.0 "${image_run[@]}" "$image" \
-  "${node[@]}" src/main.js >/dev/null
+# Listening on every address of its container, so the crowd's container reaches it over their private network. The
+# crowd comes from that one container's address, as panels do through a reverse proxy, so the server is told it is
+# behind one (JUKECORD_TRUST_PROXY): otherwise its share of connections per address (256) would turn the crowd away.
+docker run -d --name "$server" --network "$network" -e JUKECORD_HOST=0.0.0.0 -e JUKECORD_TRUST_PROXY=1 \
+  "${image_run[@]}" "$image" "${node[@]}" src/main.js >/dev/null
 # Ready when the API answers.
 for _ in $(seq 1 30); do
   docker exec "$server" node -e "fetch('http://127.0.0.1:8795/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" &&

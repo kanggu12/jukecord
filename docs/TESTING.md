@@ -35,21 +35,23 @@ with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land 
 `tests/perf/measure.sh` starts a throwaway jukecord with a server used every day for a year (a thousand different
 tracks, all of them queued, 10,000 plays and three playlists: `tests/perf/seed.ts`), under the limits `compose.yaml`
 sets (1 GiB of memory, read-only, no capabilities) and on two processor cores unless told otherwise. Nothing reaches
-the internet or Discord. On two cores of a desktop processor, jukecord 0.2.0 gave:
+the internet or Discord. On two cores of a desktop processor, jukecord 0.2.1 gave:
 
-| What                                                                 | Measured                                                                              |
-| :------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| Memory at rest, and after the reads below                            | 96 MiB, 108 MiB                                                                       |
-| The player, the playlists, the status, recently played (50)          | about 1 ms each (the median of 20)                                                    |
-| The queue, a thousand tracks (328 KiB)                               | 5 ms                                                                                  |
-| Statistics over 30 days, over a year                                 | 2 ms, 19 ms                                                                           |
-| The live state a panel gets for that queue                           | 329 KiB of JSON, sent as 42 KiB (gzip)                                                |
-| A four-minute track, its loudness evened out and encoded             | 3.5 s                                                                                 |
-| A thousand panels connected while the queue changes 3 times a second | all stay connected; a change reaches a panel in 29 ms (the median; the slowest 97 ms) |
-| The server during that crowd                                         | up to 65 % of one core, 127 MiB                                                       |
+| What                                                                 | Measured                                                                               |
+| :------------------------------------------------------------------- | :------------------------------------------------------------------------------------- |
+| Memory at rest, and after the reads below                            | 78 MiB, 93 MiB                                                                         |
+| The player, the playlists, the status, recently played (50)          | about 1 ms each (the median of 20)                                                     |
+| The queue, a thousand tracks (328 KiB)                               | 5 ms                                                                                   |
+| Statistics over 30 days, over a year                                 | 2 ms, 19 ms                                                                            |
+| The live state a panel gets for that queue                           | 329 KiB of JSON, sent as 42 KiB (gzip)                                                 |
+| A four-minute track, its loudness evened out and encoded             | 3.4 s                                                                                  |
+| A thousand panels connected while the queue changes 3 times a second | all stay connected; a change reaches a panel in 29 ms (the median; the slowest 105 ms) |
+| The server during that crowd                                         | up to 71 % of one core, 112 MiB                                                        |
 
-The crowd is `tests/perf/crowd.ts` in a container of its own: each panel asks for gzip frames as a browser does, and
-a change is timed from the request that makes it to the frame that carries it. `tests/perf/measure.sh 2 0` leaves the
+The crowd is `tests/perf/crowd.ts` in a container of its own, so its thousand panels come from one address as they do
+through a reverse proxy (the server is told it is behind one): each panel asks for gzip frames as a browser does, and
+a change is timed from the request that makes it to the frame that carries it. The server runs this checkout's source
+the way the image does, with the types already stripped. `tests/perf/measure.sh 2 0` leaves the
 crowd out; a first number sets the cores. Before 0.2.0, which sends each change once for every panel, two hundred
 panels at three changes a second used both cores up and the slowest were cut off.
 

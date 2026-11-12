@@ -129,9 +129,9 @@ people use most.
 ### Light on a small machine
 
 On two processor cores, with a year of use in it (a thousand tracks queued, 10,000 plays), jukecord rests at about
-100 MB of memory, answers every read the panel makes in about 20 ms or less, and has a four-minute track ready in
-about 3.5 s. A thousand panels open at once see each change of that queue within a tenth of a second, and cost the
-server 127 MiB and two thirds of one core while it changes three times a second
+80 MB of memory, answers every read the panel makes in about 20 ms or less, and has a four-minute track ready in
+about 3.5 s. A thousand panels open at once see each change of that queue within about a tenth of a second, and cost
+the server 112 MiB and under three quarters of one core while it changes three times a second
 ([how it was measured](docs/TESTING.md#measurements)).
 
 <p align="center">
