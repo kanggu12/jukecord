@@ -28,7 +28,7 @@ import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, ty
 import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
-import { Buckets, CHANGES, FETCHES, Pressure, type Rate, READS } from './limits.ts';
+import { Buckets, CHANGES, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
 
 export interface WebServerOptions {
@@ -58,6 +58,7 @@ export interface WebServerOptions {
     readonly changes?: Rate;
     readonly fetches?: Rate;
     readonly reads?: Rate;
+    readonly searches?: Rate;
     readonly now?: () => number;
   };
   /** Whether jukecord has fallen behind and sheds what can wait (tests set it; by default the event loop says). */
@@ -112,6 +113,7 @@ const BUSY = 'jukecord is busy; try again in a moment';
 const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 const TOO_MANY_READS = 'too many requests at once; try again in a moment';
+const TOO_MANY_SEARCHES = 'too many searches at once; try again in a moment';
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
 // do. A client that sends many in one go and reads nothing had each one answered, and each answer held in memory for a
@@ -250,6 +252,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
   const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
   const reads = new Buckets(options.rates?.reads ?? READS, { now: clock });
+  const searches = new Buckets(options.rates?.searches ?? SEARCHES, { now: clock });
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
@@ -433,11 +436,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // login, by its address alone).
         if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
           const keys = [...(caller ? [`login ${loginKey(caller)}`] : []), `address ${addressKey(request.ip)}`];
-          const wait = reads.wait(keys);
-          if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
+          // A search, which starts yt-dlp, is held to its own rate as well (both must have a token, as above).
+          const searching = name === 'search';
+          const forSearch = searching ? searches.wait(keys) : 0;
+          const wait = Math.max(reads.wait(keys), forSearch);
+          if (wait > 0) return later(reply, 'rate-limited', forSearch > 0 ? TOO_MANY_SEARCHES : TOO_MANY_READS, wait);
           reads.take(keys);
+          if (searching) searches.take(keys);
         }
         const params = (request.params ?? {}) as Record<string, unknown>;
+        // Aborted when the caller goes away before its answer is sent (a search whose words were typed over), so the
+        // work it started can stop.
+        const gone = new AbortController();
+        reply.raw.once('close', () => {
+          if (!reply.raw.writableFinished) gone.abort();
+        });
         try {
           const context =
             typeof params.guild === 'string' && caller
@@ -450,6 +463,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             caller,
             context: context as never,
             deps,
+            signal: gone.signal,
           });
         } catch (error) {
           if (error instanceof ActionError || error instanceof StoreError) giveBack?.();

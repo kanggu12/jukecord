@@ -51,6 +51,7 @@ import {
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
 import { sayError } from './errors.ts';
+import { suggestions } from './suggest.ts';
 import { VoiceManager } from './voice.ts';
 
 export interface BotOptions {
@@ -265,7 +266,9 @@ export class Bot implements Directory {
 
   // Who is asking and whether they may change the music: everyone, unless the server set a DJ role (one deleted in
   // Discord since counts as none, see djRoleNow). People who can manage the server always may.
-  private context(interaction: ChatInputCommandInteraction | ButtonInteraction): ActionContext | null {
+  private context(
+    interaction: ChatInputCommandInteraction | ButtonInteraction | AutocompleteInteraction,
+  ): ActionContext | null {
     if (!interaction.inGuild()) return null;
     const role = djRoleNow(
       this.options.settings.get(interaction.guildId).djRoleId,
@@ -532,10 +535,33 @@ export class Bot implements Directory {
     }
   }
 
-  // Playlist names as people type them.
+  // The searches under way for Discord's suggestions, one per person: Discord asks again as the words change, and the
+  // newer question stops the older search, which would only hold a lookup slot the newer one needs.
+  private readonly suggesting = new Map<string, AbortController>();
+
+  // Suggestions as people type: what a search finds for /play's and /add's input, playlist names for the playlists.
   private async onAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
     if (!interaction.inGuild()) return;
-    const typed = interaction.options.getFocused().toLowerCase();
+    const focused = interaction.options.getFocused(true);
+    if (focused.name === 'input') {
+      const context = this.context(interaction);
+      if (!context) return;
+      const person = interaction.user.id;
+      this.suggesting.get(person)?.abort();
+      const mine = new AbortController();
+      this.suggesting.set(person, mine);
+      const choices = await suggestions(
+        focused.value,
+        (words, signal) => this.options.actions.search(context, words, 10, signal),
+        mine.signal,
+      );
+      if (this.suggesting.get(person) === mine) this.suggesting.delete(person);
+      // A newer question from the same person is answered instead; this one's time is over anyway.
+      if (mine.signal.aborted) return;
+      await interaction.respond(choices).catch(() => {});
+      return;
+    }
+    const typed = String(focused.value).toLowerCase();
     const names = this.options.actions
       .playlists({ guildId: interaction.guildId, userId: interaction.user.id, mayControl: false, mayManage: false })
       .map((playlist) => playlist.name)

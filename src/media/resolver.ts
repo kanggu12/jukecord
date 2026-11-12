@@ -5,7 +5,7 @@
  * song instant. Everything else goes through yt-dlp, a few lookups at a time: each one is a process of its own with a
  * Node child for YouTube, and twenty at once would use more memory than a small server has.
  */
-import type { Track } from '../core/types.ts';
+import type { NewTrack, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { TrackRepository } from '../store/store.ts';
 import type { AddressCheck } from './address.ts';
@@ -25,6 +25,11 @@ export interface ResolverOptions {
   readonly perPerson?: number;
   /** How many of those one server may have running (default 3), so one busy server leaves room for the others. */
   readonly perServer?: number;
+  /**
+   * A track found by a recent search, by its canonical address (see Search.recent): picking a search result adds it
+   * from what the search already learned, with nothing fetched now, as an address seen before is.
+   */
+  readonly recent?: (source: string) => NewTrack | null;
 }
 
 export class Resolver {
@@ -53,47 +58,31 @@ export class Resolver {
     if (input.kind === 'url' && !isPlaylistAddress(input.url)) {
       // A single address seen before: answered from the database, with nothing fetched now (playing it later goes
       // through yt-dlp and its address guard like any other track).
-      const known = this.options.tracks.bySource(canonicalSource(input.url));
+      const source = canonicalSource(input.url);
+      const known = this.options.tracks.bySource(source);
       if (known) return [known];
+      // A result of a recent search: stored from what the search learned, the same as a search that adds it would.
+      const found = this.options.recent?.(source);
+      if (found) return [this.options.tracks.upsert(found)];
     }
-    const mine = who ? (this.byPerson.get(who) ?? 0) : 0;
-    const ours = server ? (this.byServer.get(server) ?? 0) : 0;
-    if (
-      this.active >= (this.options.concurrency ?? 4) ||
-      (who && mine >= (this.options.perPerson ?? 2)) ||
-      (server && ours >= (this.options.perServer ?? 3))
-    ) {
-      throw new BusyError('jukecord is looking up other tracks right now; try again in a moment');
-    }
-    // The slot is taken before anything touches the network, the address check's DNS question included.
-    this.active += 1;
-    if (who) this.byPerson.set(who, mine + 1);
-    if (server) this.byServer.set(server, ours + 1);
     let found: Awaited<ReturnType<YtDlp['lookup']>>;
     try {
-      // An address on a private network is refused before yt-dlp starts (address.ts), which says so more plainly
-      // than the guard yt-dlp would meet.
-      if (input.kind === 'url') await this.options.checkAddress?.(input.url);
-      found = await this.options.ytdlp.lookup(input, signal);
-    } catch (error) {
-      // The full text for the log; people get a short reason from the actions (core/reasons.ts).
-      this.options.log.info('a lookup failed', {
-        input: input.kind === 'search' ? `search: ${input.query}` : input.url.href,
-        reason: error instanceof Error ? error.message : String(error),
+      found = await this.run(who, server, async () => {
+        // An address on a private network is refused before yt-dlp starts (address.ts), which says so more plainly
+        // than the guard yt-dlp would meet.
+        if (input.kind === 'url') await this.options.checkAddress?.(input.url);
+        return this.options.ytdlp.lookup(input, signal);
       });
+    } catch (error) {
+      // The full text for the log; people get a short reason from the actions (core/reasons.ts). Slots all taken is
+      // not a failed lookup: nothing was looked up.
+      if (!(error instanceof BusyError)) {
+        this.options.log.info('a lookup failed', {
+          input: input.kind === 'search' ? `search: ${input.query}` : input.url.href,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
-    } finally {
-      this.active -= 1;
-      if (who) {
-        const left = (this.byPerson.get(who) ?? 1) - 1;
-        if (left > 0) this.byPerson.set(who, left);
-        else this.byPerson.delete(who);
-      }
-      if (server) {
-        const left = (this.byServer.get(server) ?? 1) - 1;
-        if (left > 0) this.byServer.set(server, left);
-        else this.byServer.delete(server);
-      }
     }
     // A playlist's entries point wherever the playlist says; each must pass the same check as a typed address.
     const allowed: typeof found = [];
@@ -111,5 +100,41 @@ export class Resolver {
       tracks: tracks.length,
     });
     return tracks;
+  }
+
+  /**
+   * Runs some yt-dlp work in one of the lookup slots: a lookup, a search, a mix for autoplay. `who` is the person
+   * asking (a Discord user ID, counted against the per-person limit; the host and jukecord itself have none) and
+   * `server` the Discord server it is for. All taken: BusyError at once, nothing waits.
+   */
+  async run<T>(who: string | null, server: string | null, work: () => Promise<T>): Promise<T> {
+    const mine = who ? (this.byPerson.get(who) ?? 0) : 0;
+    const ours = server ? (this.byServer.get(server) ?? 0) : 0;
+    if (
+      this.active >= (this.options.concurrency ?? 4) ||
+      (who && mine >= (this.options.perPerson ?? 2)) ||
+      (server && ours >= (this.options.perServer ?? 3))
+    ) {
+      throw new BusyError('jukecord is looking up other tracks right now; try again in a moment');
+    }
+    // The slot is taken before anything touches the network, an address check's DNS question included.
+    this.active += 1;
+    if (who) this.byPerson.set(who, mine + 1);
+    if (server) this.byServer.set(server, ours + 1);
+    try {
+      return await work();
+    } finally {
+      this.active -= 1;
+      if (who) {
+        const left = (this.byPerson.get(who) ?? 1) - 1;
+        if (left > 0) this.byPerson.set(who, left);
+        else this.byPerson.delete(who);
+      }
+      if (server) {
+        const left = (this.byServer.get(server) ?? 1) - 1;
+        if (left > 0) this.byServer.set(server, left);
+        else this.byServer.delete(server);
+      }
+    }
   }
 }

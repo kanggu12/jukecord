@@ -6,8 +6,16 @@
  * The progress bar moves on a 4-per-second timer only while something plays; nothing moves while idle or paused.
  */
 
-import { sayFailure } from '../../../src/core/say.ts';
-import { api, type HistoryEntry, type Player, type QueueItem, type Track } from '../api.ts';
+import { sayError, sayFailure } from '../../../src/core/say.ts';
+import {
+  ApiError,
+  api,
+  type HistoryEntry,
+  type Player,
+  type QueueItem,
+  type SearchResult,
+  type Track,
+} from '../api.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
@@ -990,64 +998,413 @@ function added(result: { items: unknown[]; skippedTooLong: number; skippedFull: 
   toast(parts.join(' · '), result.skippedTooLong + result.skippedFull > 0 ? 'pause' : 'play');
 }
 
-/** Adding: an address or search words, to the end of the queue or to play now. */
+/**
+ * Whether typed text is an address (with or without its scheme) rather than search words, by the rule the server
+ * reads it with (src/media/source.ts, parseInput): an address is added as it is, words are searched.
+ */
+export function looksLikeAddress(text: string): boolean {
+  const trimmed = text.trim();
+  if (/\s/.test(trimmed)) return false;
+  return /^https?:\/\/\S+$/i.test(trimmed) || /^[a-z0-9-]+(\.[a-z0-9-]+)+\/\S*$/i.test(trimmed);
+}
+
+// Where an add puts what it finds: the end of the queue, next, or playing now.
+type Where = 'end' | 'next' | 'now';
+
+/**
+ * Adding: an address or search words, to the end of the queue, next, or to play now. Words show what YouTube found
+ * under the field a moment after typing stops (a list to pick from, with the keyboard or the pointer); a link pasted
+ * or dropped anywhere on the player's page is added as the field would add it.
+ */
 export function addCard(): HTMLElement {
-  const input = h('input', { type: 'text', autocomplete: 'off', enterkeyhint: 'go', id: 'add-input' });
+  // A combobox: the field keeps the keyboard, and the arrows move through the list it controls.
+  const input = h('input', {
+    type: 'text',
+    autocomplete: 'off',
+    enterkeyhint: 'go',
+    id: 'add-input',
+    role: 'combobox',
+    'aria-autocomplete': 'list',
+    'aria-expanded': 'false',
+    'aria-controls': 'add-found',
+    'aria-describedby': 'add-found-keys',
+  });
   const field = h('label', { class: 'field' }, icon('link'), input);
-  const add = h('button', { class: 'key', type: 'submit' });
-  const now = h('button', { class: 'key primary', type: 'button' });
-  const form = h('form', { class: 'add' }, field, add, now);
+  const add = h('button', { class: 'key', type: 'submit', dataset: { at: 'end' } });
+  const next = h('button', { class: 'key', type: 'button', dataset: { at: 'next' } });
+  const now = h('button', { class: 'key primary', type: 'button', dataset: { at: 'now' } });
+  const form = h('form', { class: 'add' }, field, add, next, now);
+  // What a search found: a listbox of results, a line for the state of the search, and the keys that pick.
+  const list = h('ul', { class: 'found-list', id: 'add-found', role: 'listbox' });
+  const searchState = h('p', { class: 'found-state' });
+  const keysHint = h('p', { class: 'found-keys', id: 'add-found-keys' });
+  const found = h('div', { class: 'found', hidden: true }, searchState, list, keysHint);
+  // How many were found, said to screen readers as the list changes.
+  const said = h('p', { class: 'sr', role: 'status' });
   // Why the keys are off for someone who may only look, in words a touch screen shows too (a title it does not).
   const why = h('p', { class: 'look-only', hidden: true });
-  const card = h('section', { class: 'card', 'aria-label': 'add' }, form, why);
+  // While a link brought in from outside is held over the page: where it goes.
+  const dropNote = h('p', { class: 'drop-note', hidden: true }, icon('list-plus'), h('span'));
+  const card = h('section', { class: 'card add-card', 'aria-label': 'add' }, form, found, said, why, dropNote);
 
-  // The key whose lookup is running: its words and its busy state stay while the card redraws for other reasons.
+  // The key whose add is running: its words and its busy state stay while the card redraws for other reasons.
   let busy: HTMLButtonElement | null = null;
+  const keyOf = (where: Where) => (where === 'end' ? add : where === 'next' ? next : now);
   const draw = () => {
     const words = t();
     input.placeholder = words.addPlaceholder;
     input.setAttribute('aria-label', words.addPlaceholder);
     card.setAttribute('aria-label', words.add);
     if (busy !== add) fill(add, icon('list-plus'), words.add);
+    if (busy !== next) fill(next, icon('arrow-up-to-line'), words.playNext);
     if (busy !== now) fill(now, icon('play'), words.playNow);
     const control = mayControl();
     input.disabled = !control;
-    add.disabled = !control || busy !== null;
-    now.disabled = !control || busy !== null;
+    for (const key of [add, next, now]) key.disabled = !control || busy !== null;
     field.title = control ? '' : words.lookOnlyHint;
     why.hidden = control || !state.guild;
     why.textContent = words.lookOnlyHint;
+    list.setAttribute('aria-label', words.foundLabel);
+    keysHint.textContent = words.foundKeys;
     // Nothing playing and nothing waiting: the card glows to say where music comes from.
     card.classList.toggle(
       'invite',
       control && Boolean(state.player) && !state.player?.track && (state.queue?.items.length ?? 0) === 0,
     );
   };
-  // Both keys look the input up; while that runs (a playlist can take seconds) the keys say so.
-  const submit = async (button: HTMLButtonElement, playNow: boolean) => {
+
+  // ---- what a search found -----------------------------------------------------------------------------------
+  // The results shown, the words they are for, the one the arrows are on (-1: none), and what this page found
+  // lately, by the words in lower case (typing back a letter shows the earlier results at once).
+  let results: SearchResult[] = [];
+  let resultsFor = '';
+  let active = -1;
+  const known = new Map<string, SearchResult[]>();
+  // The search under way, the wait after the last key, and whether the list is drawn over the field.
+  let asking: AbortController | null = null;
+  let typing = 0;
+
+  // Words worth searching: two letters or more, not an address, from someone who may add.
+  const searchable = (text: string) => text.length >= 2 && !looksLikeAddress(text) && mayControl();
+
+  const setActive = (index: number) => {
+    active = index;
+    const options = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+    options.forEach((option, at) => {
+      option.setAttribute('aria-selected', String(at === index));
+    });
+    const chosen = options[index];
+    if (chosen) {
+      input.setAttribute('aria-activedescendant', chosen.id);
+      chosen.scrollIntoView({ block: 'nearest' });
+    } else {
+      input.removeAttribute('aria-activedescendant');
+    }
+  };
+
+  const close = () => {
+    found.hidden = true;
+    card.classList.remove('found-above');
+    input.setAttribute('aria-expanded', 'false');
+    setActive(-1);
+  };
+
+  // Opens the list where it is seen without moving the field: over the field when the card stands at the foot of a
+  // page that does not scroll (the two columns, the add card under the queue), under it everywhere else.
+  const open = () => {
+    if (!found.hidden) return;
+    const pageScrolls = document.documentElement.scrollHeight > window.innerHeight + 1;
+    const listen = document.querySelector('.listen')?.getBoundingClientRect().top ?? window.innerHeight;
+    const above = !pageScrolls && card.getBoundingClientRect().bottom > listen - 120;
+    card.classList.toggle('found-above', above);
+    found.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+
+  // One result as an option: its cover, title, channel and length, and the three picks a pointer can press (the
+  // keyboard picks with Enter, Shift+Enter and Ctrl+Enter, which the line under the list says).
+  const option = (result: SearchResult, index: number): HTMLElement => {
+    const words = t();
+    const picture = result.thumbnail
+      ? h('img', { src: result.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' })
+      : null;
+    const cover = h('span', { class: 'cover' }, picture ?? h('span', { class: 'note' }, icon('music-2')));
+    if (picture)
+      picture.onerror = () => {
+        picture.remove();
+        cover.append(h('span', { class: 'note' }, icon('music-2')));
+      };
+    const pick = (where: Where, name: IconName, label: string) =>
+      h('span', { class: 'pick', title: label, dataset: { pick: where } }, icon(name));
+    const sub = [result.uploader, result.durationMs === null ? null : clock(result.durationMs)].filter(Boolean);
+    const element = h(
+      'li',
+      { class: 'result', role: 'option', id: `add-found-${index}`, 'aria-selected': 'false' },
+      cover,
+      h(
+        'span',
+        { class: 'text' },
+        // Two lines at most; the whole title is its title.
+        h('span', { class: 'name', title: result.title, 'data-clip': 'ok' }, result.title),
+        sub.length > 0 ? h('span', { class: 'sub', title: sub.join(' · '), 'data-clip': 'ok' }, sub.join(' · ')) : null,
+      ),
+      // For the pointer only: a screen reader hears the option, and its keys from the field's description.
+      h(
+        'span',
+        { class: 'picks', 'aria-hidden': 'true' },
+        pick('now', 'play', words.playNow),
+        pick('next', 'arrow-up-to-line', words.playNext),
+        pick('end', 'list-plus', words.add),
+      ),
+    );
+    // A press on a pick plays or queues it; anywhere else on the row adds it, as Enter does. The field keeps the
+    // keyboard (a pointer press on the list must not take it away and close the list).
+    element.onpointerdown = (event) => event.preventDefault();
+    element.onclick = (event) => {
+      const where = (event.target as Element).closest<HTMLElement>('[data-pick]')?.dataset.pick as Where | undefined;
+      void submit(where ?? 'end', result.url);
+    };
+    return element;
+  };
+
+  // Draws the results for the words (and the state of the search) and opens the list.
+  const show = (text: string, shown: SearchResult[]) => {
+    const words = t();
+    results = shown;
+    resultsFor = text;
+    fill(list, ...results.map(option));
+    list.removeAttribute('aria-busy');
+    searchState.hidden = results.length > 0;
+    fill(searchState, results.length > 0 ? null : words.foundNone);
+    said.textContent = results.length > 0 ? words.foundCount(results.length) : words.foundNone;
+    setActive(-1);
+    open();
+  };
+
+  // Asks jukecord what YouTube finds for the words; an older question still under way is dropped.
+  const ask = async (text: string) => {
+    asking?.abort();
+    const mine = new AbortController();
+    asking = mine;
+    const words = t();
+    // While it looks: the earlier results stay (marked busy), or a line says it is looking.
+    if (results.length === 0) {
+      fill(searchState, icon('loader-circle', 'spin'), words.searching);
+      searchState.hidden = false;
+      open();
+    } else {
+      list.setAttribute('aria-busy', 'true');
+    }
+    try {
+      const answer = await api.search(guild(), text, 8, mine.signal);
+      known.set(text.toLowerCase(), answer.results);
+      // Only for the words still in the field: typing on asked again already.
+      if (input.value.trim() === text) show(text, answer.results);
+    } catch (error) {
+      if (mine.signal.aborted) return;
+      list.removeAttribute('aria-busy');
+      // Too many searches at once (typing fast): the results shown stay, and the next pause asks again.
+      if (error instanceof ApiError && error.status === 429) return;
+      // Otherwise why, in the list's place (a refusal, every lookup slot taken, YouTube refusing jukecord).
+      const message = error instanceof ApiError ? sayError(error.message, state.lang) : words.networkFailed;
+      results = [];
+      fill(list);
+      fill(searchState, icon('circle-alert'), message);
+      searchState.hidden = false;
+      said.textContent = message;
+      open();
+    } finally {
+      if (asking === mine) asking = null;
+    }
+  };
+
+  input.oninput = () => {
     const text = input.value.trim();
-    if (!text) {
+    window.clearTimeout(typing);
+    if (!searchable(text)) {
+      asking?.abort();
+      results = [];
+      resultsFor = '';
+      close();
+      return;
+    }
+    // Known on this page already: at once. Otherwise a moment after the last key.
+    const seen = known.get(text.toLowerCase());
+    if (seen) {
+      asking?.abort();
+      show(text, seen);
+      return;
+    }
+    typing = window.setTimeout(() => void ask(text), 350);
+  };
+
+  input.onkeydown = (event) => {
+    const options = results.length;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      // Closed with results for these words (after Escape): the arrows open it again.
+      if (found.hidden && options > 0 && resultsFor === input.value.trim()) open();
+      if (found.hidden || options === 0) return;
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      // From none, Down goes to the first and Up to the last; past either end, round to the other.
+      setActive(active < 0 ? (step > 0 ? 0 : options - 1) : (active + step + options) % options);
+    } else if (event.key === 'Escape' && !found.hidden) {
+      // The list closes; the words stay.
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    } else if (event.key === 'Enter') {
+      // Enter adds, Shift+Enter plays next, Ctrl+Enter (Cmd+Enter on a Mac) plays now: the result the arrows are on,
+      // or what is typed.
+      event.preventDefault();
+      const where: Where = event.ctrlKey || event.metaKey ? 'now' : event.shiftKey ? 'next' : 'end';
+      const chosen = !found.hidden ? results[active] : undefined;
+      void submit(where, chosen?.url);
+    }
+  };
+  // Back in the field with results for its words: they show again.
+  input.onfocus = () => {
+    if (results.length > 0 && resultsFor === input.value.trim() && searchable(resultsFor)) open();
+  };
+  // Out of the card (Tab past the keys, a click elsewhere): the list closes. Within it (the keys) it stays.
+  card.addEventListener('focusout', (event) => {
+    const to = event.relatedTarget as Node | null;
+    if (!to || !card.contains(to)) close();
+  });
+
+  // ---- adding --------------------------------------------------------------------------------------------------
+  // What waits for its turn: links pasted or dropped while an add runs (one at a time from this card, in order).
+  const waiting: { where: Where; text: string; fromField: boolean }[] = [];
+  // Every key looks the input up; while that runs (a playlist can take seconds) the key says so. `text` is what to
+  // add: a picked result's address, a dropped link, or (left out) what is typed.
+  const submit = async (where: Where, text?: string, fromField = true): Promise<void> => {
+    const what = (text ?? input.value).trim();
+    if (!what) {
       input.focus();
       return;
     }
+    if (busy) {
+      // A link dropped meanwhile waits its turn; a second press of a key is the first one's.
+      if (!fromField && waiting.length < 10) waiting.push({ where, text: what, fromField });
+      return;
+    }
+    const button = keyOf(where);
     busy = button;
     fill(button, icon('loader-circle', 'spin'), t().adding);
     draw();
-    const result = await act(button, () => (playNow ? api['play-now'](guild(), text) : api.add(guild(), text)));
+    const result = await act(button, () =>
+      where === 'now' ? api['play-now'](guild(), what) : api.add(guild(), what, where),
+    );
     // The key gets its own words back.
     busy = null;
     draw();
     if (result) {
-      input.value = '';
+      // From the field (typed, or a result picked): the field is cleared and the list goes.
+      if (fromField) {
+        input.value = '';
+        results = [];
+        resultsFor = '';
+        close();
+      }
       added(result);
     }
+    const after = waiting.shift();
+    if (after) void submit(after.where, after.text, after.fromField);
   };
   form.onsubmit = (event) => {
     event.preventDefault();
-    void submit(add, false);
+    const chosen = !found.hidden ? results[active] : undefined;
+    void submit('end', chosen?.url);
   };
-  now.onclick = () => void submit(now, true);
+  // Play next and Play now act on the result the arrows are on, when the list is open; else on what is typed.
+  for (const [key, where] of [
+    [next, 'next'],
+    [now, 'now'],
+  ] as const) {
+    key.onclick = () => {
+      const chosen = !found.hidden ? results[active] : undefined;
+      void submit(where, chosen?.url);
+    };
+  }
+
+  // ---- links pasted or dropped anywhere on the player's page -----------------------------------------------
+  // Only on the player's page, with nothing open over it, for someone who may add: the same add, busy state and
+  // refusals as the field's.
+  const welcome = () =>
+    mayControl() && !card.closest('[hidden]') && !document.querySelector('.dialog, .sheet') && Boolean(state.guild);
+  document.addEventListener('paste', (event) => {
+    const target = event.target as HTMLElement | null;
+    // Pasting into a field is typing.
+    if (target?.closest('input, textarea, [contenteditable]') || !welcome()) return;
+    const text = event.clipboardData?.getData('text')?.trim() ?? '';
+    if (!looksLikeAddress(text)) return;
+    event.preventDefault();
+    void submit('end', text, false);
+  });
+  // A drag that started on this page (a queue row, a title link) is the page's own, not a link brought in.
+  let ownDrag = false;
+  document.addEventListener('dragstart', () => {
+    ownDrag = true;
+  });
+  document.addEventListener('dragend', () => {
+    ownDrag = false;
+  });
+  // Something brought in from outside: the add card says where it goes while it is held over the page.
+  let over = 0;
+  const holding = (on: boolean) => {
+    card.classList.toggle('drop-target', on);
+    dropNote.hidden = !on;
+    (dropNote.lastElementChild as HTMLElement).textContent = t().dropHere;
+  };
+  const bringsLink = (event: DragEvent) =>
+    !ownDrag &&
+    [...(event.dataTransfer?.types ?? [])].some((type) => type === 'text/uri-list' || type === 'text/plain');
+  document.addEventListener('dragenter', (event) => {
+    if (!bringsLink(event) || !welcome()) return;
+    over += 1;
+    holding(true);
+  });
+  document.addEventListener('dragleave', (event) => {
+    if (!bringsLink(event)) return;
+    over = Math.max(0, over - 1);
+    if (over === 0) holding(false);
+  });
+  document.addEventListener('dragover', (event) => {
+    if (!bringsLink(event) || !welcome()) return;
+    // Taken here, so the browser does not open the link in place of the panel (and stop the music here).
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  });
+  document.addEventListener('drop', (event) => {
+    if (!bringsLink(event) || !welcome()) return;
+    event.preventDefault();
+    over = 0;
+    holding(false);
+    // The first address of a link list, else the text as it is.
+    const list = event.dataTransfer?.getData('text/uri-list') ?? '';
+    const text =
+      list
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line && !line.startsWith('#')) ??
+      event.dataTransfer?.getData('text/plain')?.trim() ??
+      '';
+    if (looksLikeAddress(text)) void submit('end', text, false);
+  });
+
   watch(['lang', 'guild', 'me', 'player', 'queue'], draw);
+  // Another server: its results are its own to look up.
+  watch(['guild'], () => {
+    asking?.abort();
+    known.clear();
+    results = [];
+    resultsFor = '';
+    close();
+  });
+  watch(['lang'], () => {
+    // The words of the list's state and its count follow the language; the results stay.
+    if (!found.hidden && results.length > 0) show(resultsFor, results);
+  });
   draw();
   return card;
 }

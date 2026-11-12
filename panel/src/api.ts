@@ -45,6 +45,7 @@ export const PANEL_ACTIONS = [
   'token-create',
   'token-revoke',
   'logs',
+  'search',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -85,8 +86,8 @@ export function whenLoggedOut(fn: () => void): void {
   onLoggedOut = fn;
 }
 
-/** Sends a request to /api/v1 and returns the JSON answer. */
-export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** Sends a request to /api/v1 and returns the JSON answer; `signal` drops it (a search typed over). */
+export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { accept: 'application/json' };
   if (method !== 'GET' && csrf) headers['x-jukecord-csrf'] = csrf;
   if (body !== undefined) headers['content-type'] = 'application/json';
@@ -95,6 +96,7 @@ export async function request<T>(method: string, path: string, body?: unknown): 
     headers,
     credentials: 'same-origin',
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(signal ? { signal } : {}),
   });
   const text = await response.text();
   const json = text ? (JSON.parse(text) as unknown) : null;
@@ -229,6 +231,18 @@ export interface LogRecord {
   msg: string;
   fields: Record<string, unknown>;
 }
+/** A track a search found, not added yet: its address adds it. */
+export interface SearchResult {
+  url: string;
+  title: string;
+  uploader: string | null;
+  durationMs: number | null;
+  thumbnail: string | null;
+}
+export interface Found {
+  query: string;
+  results: SearchResult[];
+}
 
 const g = (guild: string) => `/guilds/${encodeURIComponent(guild)}`;
 
@@ -283,6 +297,13 @@ export const api = {
       if (value !== undefined && value !== '') params.set(key, String(value));
     return request<LogRecord[]>('GET', `/logs?${params}`);
   },
+  search: (guild: string, words: string, limit: number, signal?: AbortSignal) =>
+    request<Found>(
+      'GET',
+      `${g(guild)}/search?${new URLSearchParams({ q: words, limit: String(limit) })}`,
+      undefined,
+      signal,
+    ),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

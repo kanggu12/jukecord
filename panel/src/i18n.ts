@@ -229,6 +229,13 @@ const EN = {
   startFailed: 'jukecord could not open the panel just now; trying again',
   failed: (message: string) => message,
   reload: 'jukecord was updated: reload the page',
+  // Search and pick (the add card).
+  foundLabel: 'Found on YouTube',
+  searching: 'Searching YouTube',
+  foundNone: 'Nothing found for these words',
+  foundCount: (n: number) => (n === 1 ? '1 found' : `${n} found`),
+  foundKeys: 'Enter: add · Shift+Enter: play next · Ctrl+Enter: play now',
+  dropHere: 'Drop the link here to add it',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -451,6 +458,12 @@ const KO: Strings = {
   startFailed: 'jukecord가 지금 패널을 열지 못함: 다시 시도하는 중',
   failed: (message: string) => message,
   reload: 'jukecord가 업데이트됨: 새로고침하세요',
+  foundLabel: 'YouTube에서 찾은 곡',
+  searching: 'YouTube에서 찾는 중',
+  foundNone: '이 검색어로 찾은 곡 없음',
+  foundCount: (n: number) => `${n}곡 찾음`,
+  foundKeys: 'Enter: 넣기 · Shift+Enter: 다음에 재생 · Ctrl+Enter: 바로 재생',
+  dropHere: '링크를 여기에 놓으면 대기열에 들어감',
 };
 
 /** The languages. */

@@ -24,6 +24,7 @@ import {
   QueueSchema,
   RemovedSchema,
   ScopeSchema,
+  SearchSchema,
   SettingsSchema,
   Snowflake,
   StatsSchema,
@@ -484,6 +485,21 @@ export const API = {
     tag: 'host',
     access: 'host',
     response: DoctorSchema,
+  }),
+
+  // Discovery: searching, held to a rate of its own (see web/limits.ts).
+  search: op({
+    method: 'GET',
+    path: '/guilds/{guild}/search',
+    summary: 'What YouTube finds for some words, to pick from before adding',
+    tag: 'queue',
+    access: 'control',
+    params: InGuild,
+    query: Type.Object({
+      q: Type.String({ minLength: 1, maxLength: 200, description: 'Words to search for (an address is refused)' }),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, default: 8 })),
+    }),
+    response: SearchSchema,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

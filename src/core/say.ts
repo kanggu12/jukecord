@@ -117,6 +117,11 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.nothingFound, '찾은 곡 없음'],
   [REASONS.failed, '받지 못함'],
   [/^the site answered (\d{3})$/, '사이트 응답 코드 $1'],
+  // Searching (the add field's list, Discord's suggestions, the API).
+  ['searching is not set up here', '여기서는 검색을 쓸 수 없음'],
+  ['nothing to search for', '찾을 말이 없음'],
+  ['a search takes words, not an address', '검색어로 주소를 쓸 수 없음'],
+  ['too many searches at once; try again in a moment', '한꺼번에 너무 많이 검색함: 잠시 뒤 다시 시도하세요'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

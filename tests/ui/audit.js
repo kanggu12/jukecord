@@ -15,7 +15,7 @@
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
- *   that is (the shortcuts' list in a short dialog);
+ *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
  *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track or a
  *   chart's bar in the canvas's own colour (a contrast theme paints every background in its canvas colour);
@@ -335,6 +335,12 @@ window.__audit = () => {
     if (!/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) continue;
     if (element.scrollHeight <= element.clientHeight + 2 && element.scrollWidth <= element.clientWidth + 2) continue;
     if (!shown(element) || element.matches(focusable) || element.querySelector(focusable)) continue;
+    // A listbox that a combobox controls is reached from its field, whose arrow keys move through it (and scroll it).
+    if (
+      element.matches('[role="listbox"][id]') &&
+      document.querySelector(`[role="combobox"][aria-controls="${element.id}"]`)
+    )
+      continue;
     add('unreachable', element, `${element.scrollHeight} high in ${element.clientHeight}, with nothing to stop on`);
   }
 

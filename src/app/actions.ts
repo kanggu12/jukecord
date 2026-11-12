@@ -9,11 +9,13 @@ import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
 import { plainReason, REASONS } from '../core/reasons.ts';
-import type { HistoryEntry, Playlist, QueueItem, Track } from '../core/types.ts';
+import type { HistoryEntry, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { AddressError } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import type { Resolver } from '../media/resolver.ts';
+import type { Search } from '../media/search.ts';
+import { parseInput } from '../media/source.ts';
 import type { HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
@@ -53,6 +55,7 @@ export const ACTIONS = [
   'settings',
   'dj-role',
   'status',
+  'search',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -181,6 +184,8 @@ export interface ActionsOptions {
   readonly queueMax?: number;
   /** The longest track that may be added, in milliseconds (default 3 hours). */
   readonly trackMaxMs?: number;
+  /** Searching YouTube for words, to pick from (absent: searching is refused as not set up). */
+  readonly search?: Search;
 }
 
 /** What an add did: the new queue items, and how many tracks were left out and why. */
@@ -545,6 +550,37 @@ export class Actions {
       discord: this.options.discordReady?.() ?? false,
       uptimeMs: Date.now() - (this.options.startedAt ?? Date.now()),
     };
+  }
+
+  /**
+   * What YouTube finds for some words, to pick from before adding: the add field's list, the API, the command and
+   * Discord's suggestions. Words only: an address is added as it is, with nothing to pick. Only for people who may
+   * change the music (it is the first step of adding), and held to the lookups' shares like an add.
+   */
+  async search(context: ActionContext, words: string, limit = 8, signal?: AbortSignal): Promise<NewTrack[]> {
+    this.control(context);
+    const search = this.options.search;
+    if (!search) throw new ActionError('unavailable', 'searching is not set up here');
+    let input: ReturnType<typeof parseInput>;
+    try {
+      input = parseInput(words);
+    } catch {
+      throw new ActionError('invalid', 'nothing to search for');
+    }
+    if (input.kind === 'url') throw new ActionError('invalid', 'a search takes words, not an address');
+    try {
+      return await search.find(input.query, {
+        limit,
+        who: context.userId,
+        server: context.guildId,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      // The asker went away (the next key was typed): its own abort, as it is.
+      if (signal?.aborted) throw error;
+      if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+      throw new ActionError('not-found', plainReason(error instanceof Error ? error.message : String(error)));
+    }
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

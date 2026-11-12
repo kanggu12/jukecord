@@ -1567,6 +1567,202 @@ img {
   color: var(--ink-3);
 }
 
+/* ---- what a search found -------------------------------------------------------------------------------------- */
+/* Under the add field (over it where the card stands at the foot of a page that does not scroll), in the card itself:
+   a solid reading surface, so titles read the same over any light behind the glass. The form keeps its height; the
+   list gives way when the column is short, down to two rows, and scrolls. */
+.add-card > .add {
+  flex: none;
+}
+.add-card .found {
+  display: flex;
+  flex-direction: column;
+  margin: 0 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  background: var(--panel-solid);
+  box-shadow: var(--rim);
+}
+.found-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: calc(5.5 * 52px + 8px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+/* Over the field, at the foot of a column that does not scroll: the card grows upwards and the field stays put. The
+   queue above keeps three rows in sight, and the list gives way down to two. */
+.add-card.found-above {
+  min-height: 0;
+}
+.add-card.found-above .found {
+  order: -1;
+  margin: 12px 12px 0;
+  /* It gives way inside its own box: whatever it cannot show scrolls, and nothing of it reaches over the form. */
+  min-height: 0;
+  overflow: hidden;
+}
+.add-card.found-above .found-list {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Three rows of the queue, whatever its head takes (a head that wraps is taller): the list's room, not the card's. */
+.col:has(> .add-card.found-above) > .card.fill {
+  min-height: auto;
+}
+.col:has(> .add-card.found-above) > .card.fill > .list {
+  min-height: 190px;
+}
+/* A column too short for both (a laptop's window under 880 px): while the results show, the queue gives the room of
+   its rows to them (its head stays, with its count), and the results take the column down to the field. */
+@media (max-height: 880px) {
+  .col:has(> .add-card.found-above) > .card.fill {
+    flex: none;
+    min-height: 0;
+  }
+  .col:has(> .add-card.found-above) > .card.fill > .list {
+    display: none;
+  }
+  .add-card.found-above {
+    flex: 1 1 auto;
+  }
+  .add-card.found-above .found {
+    flex: 1 1 auto;
+  }
+  .add-card.found-above .found-list {
+    max-height: none;
+  }
+}
+.found-list:empty {
+  display: none;
+}
+/* While the next words are looked up, the results shown fade a little. */
+.found-list[aria-busy="true"] {
+  opacity: 0.6;
+}
+.found-list .result {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.found-list .result:hover {
+  background: var(--hover-tint);
+}
+/* The result the arrow keys are on: the focus ring, drawn inside the row. */
+.found-list .result[aria-selected="true"] {
+  background: var(--hover-tint);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.result .cover {
+  width: 40px;
+  height: 40px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--raised-2);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
+}
+.result .cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.result .cover .note {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ink-3);
+}
+.result .text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Two lines of a title at most; the whole title is the row's tooltip. */
+.result .name {
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/* The channel and the length on one line, cut short when long (the whole is its title). */
+.result .sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result .picks {
+  display: flex;
+  gap: 2px;
+}
+.result .pick {
+  display: grid;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border-radius: var(--r);
+  color: var(--ink-2);
+}
+.result .pick:hover {
+  background: var(--hover-tint);
+  color: var(--ink);
+}
+.found-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--ink-2);
+}
+/* The keys that pick, for a keyboard; a touch screen has none. */
+.found-keys {
+  margin: 0;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+@media (hover: none) and (pointer: coarse) {
+  .found-keys {
+    display: none;
+  }
+}
+/* A link from outside held over the page: the card it goes to is ringed in the focus colour and says so. Over the
+   card's breathing ring (which it replaces while it shows), steady. */
+.card.add-card.drop-target::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px dashed color-mix(in oklch, var(--focus) 70%, transparent);
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 1;
+  animation: none;
+}
+.drop-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--ink-2);
+}
+
 /* ---- voice ------------------------------------------------------------------------------------------------------ */
 .voice-now {
   display: flex;

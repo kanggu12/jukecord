@@ -26,6 +26,7 @@ import { Ffmpeg } from './media/ffmpeg.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
+import { Search } from './media/search.ts';
 import { YtDlp } from './media/ytdlp.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
@@ -144,12 +145,18 @@ async function main(): Promise<number> {
     log: log.child('prefetch'),
     count: config.media.prefetch,
   });
+  // The search is made after the resolver, whose lookup slots it shares; the resolver asks it for picked results.
+  let search: Search | null = null;
+  // One check of addresses for everything that adds a track (a typed address, a playlist's entries, autoplay's picks).
+  const checkAddress = config.media.allowPrivate ? null : publicAddressesOnly();
   const resolver = new Resolver({
     ytdlp,
     tracks: store.tracks,
     log: log.child('lookup'),
-    ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
+    ...(checkAddress ? { checkAddress } : {}),
+    recent: (source) => search?.recent(source) ?? null,
   });
+  search = new Search({ ytdlp, slots: resolver, log: log.child('search') });
   const actions = new Actions({
     store,
     queue,
@@ -159,6 +166,7 @@ async function main(): Promise<number> {
     startedAt: Date.now(),
     queueMax: config.queueMax,
     trackMaxMs: config.media.trackMaxMs,
+    search,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);

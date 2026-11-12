@@ -539,6 +539,27 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       return lines.join('\n');
     },
   },
+
+  search: {
+    name: 'search',
+    usage: '<words> [--limit 8]',
+    summary: 'What YouTube finds, each with the address that adds it',
+    request: (words) => ({ query: { q: rest(words, 'what to search for'), limit: option(words, 'limit', 8) } }),
+    show: (answer) => {
+      const found = answer as {
+        results: { url: string; title: string; uploader: string | null; durationMs: number | null }[];
+      };
+      if (found.results.length === 0) return 'Nothing was found';
+      // "1. Title · Channel · 3:45", the address under it: what `jukecord add` or `jukecord play` takes.
+      return found.results
+        .map((result, index) => {
+          const parts = [result.title, ...(result.uploader ? [result.uploader] : [])];
+          if (result.durationMs !== null) parts.push(formatDuration(result.durationMs));
+          return `${index + 1}. ${parts.join(' · ')}\n   ${result.url}`;
+        })
+        .join('\n');
+    },
+  },
 };
 
 /** Whether an operation's path names a server (and so the command needs one). */

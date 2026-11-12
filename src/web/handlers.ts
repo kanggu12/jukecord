@@ -11,6 +11,7 @@ import type { Static, TSchema } from 'typebox';
 import type { Access } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions, type Directory } from '../app/actions.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import { searchWords } from '../media/search.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
@@ -50,6 +51,8 @@ export interface HandlerInput<S extends OperationSpec> {
   /** What the caller may do in the server named in the path; null for operations not on a server. */
   readonly context: Part<S, 'params'> extends { guild: string } ? ActionContext : null;
   readonly deps: HandlerDeps;
+  /** Aborted when the caller goes away before the answer (a search for words typed over already). */
+  readonly signal: AbortSignal;
 }
 
 export type Handler<S extends OperationSpec> = (
@@ -221,4 +224,15 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const report = await deps.doctor();
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
   },
+
+  search: async ({ context, query, deps, signal }) => ({
+    query: searchWords(query.q),
+    results: (await deps.actions.search(context, query.q, query.limit ?? 8, signal)).map((found) => ({
+      url: found.url,
+      title: found.title,
+      uploader: found.uploader,
+      durationMs: found.durationMs,
+      thumbnail: found.thumbnail,
+    })),
+  }),
 };

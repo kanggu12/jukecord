@@ -249,3 +249,23 @@ export const OkSchema = Type.Object({ ok: Type.Literal(true) }, { title: 'Ok' })
 
 /** How many things a change removed. */
 export const RemovedSchema = Type.Object({ removed: Type.Integer() }, { title: 'Removed' });
+
+/** One thing a search found: a track not added yet, so without an ID (its address adds it). */
+export const SearchResultSchema = Type.Object(
+  {
+    url: Type.String({ description: 'The page of the track: give it to add or play-now' }),
+    title: Type.String(),
+    uploader: Nullable(Type.String()),
+    durationMs: Nullable(Type.Integer()),
+    thumbnail: Nullable(Type.String()),
+  },
+  { title: 'SearchResult' },
+);
+
+export const SearchSchema = Type.Object(
+  {
+    query: Type.String({ description: 'The words searched for, as the search read them' }),
+    results: Type.Array(SearchResultSchema),
+  },
+  { title: 'Search' },
+);

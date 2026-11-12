@@ -47,6 +47,8 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   settings: '/dj show',
   'dj-role': '/dj set',
   status: '/version',
+  // Discord's suggestions under /play's and /add's input, as it is typed (see Bot.onAutocomplete).
+  search: '/play',
 };
 
 // One command: English name and description, Korean name and description.
@@ -62,7 +64,7 @@ function command(name: string, description: string, koName: string, koDescriptio
   );
 }
 
-// The "what to play" option shared by /add and /play.
+// The "what to play" option shared by /add and /play, with what a search finds suggested as the words are typed.
 function inputOption(option: SlashCommandStringOption): SlashCommandStringOption {
   return option
     .setName('input')
@@ -70,7 +72,8 @@ function inputOption(option: SlashCommandStringOption): SlashCommandStringOption
     .setNameLocalizations({ ko: '입력' })
     .setDescriptionLocalizations({ ko: '주소(유튜브, 사운드클라우드, 재생목록 등) 또는 검색어' })
     .setRequired(true)
-    .setMaxLength(500);
+    .setMaxLength(500)
+    .setAutocomplete(true);
 }
 
 // A saved playlist's name, with suggestions as people type.

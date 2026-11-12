@@ -294,4 +294,50 @@ export class YtDlp {
     // Its own process group, so a kill ends what yt-dlp started too (ffmpeg, for sites that stream in pieces).
     return spawn(this.options.binary, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: childEnv() });
   }
+
+  /**
+   * What YouTube finds for some words: up to `limit` tracks in its order, from one flat listing (titles, channels,
+   * lengths and pictures, nothing opened one by one). Live streams are left out, so fewer may come back; finding
+   * nothing is an empty list, not a failure.
+   */
+  async search(words: string, limit: number, signal?: AbortSignal): Promise<NewTrack[]> {
+    const count = Math.max(1, Math.min(20, Math.floor(limit)));
+    const args = [
+      ...this.common(),
+      '-J',
+      '--flat-playlist',
+      '--playlist-end',
+      String(count),
+      `ytsearch${count}:${words}`,
+    ];
+    return this.listing(args, count, signal);
+  }
+
+  /**
+   * YouTube's mix of a video: the tracks it would play after it (the video itself first), at most `limit`, from one
+   * flat listing. Autoplay's "related" picks from it.
+   */
+  async mix(videoId: string, limit: number, signal?: AbortSignal): Promise<NewTrack[]> {
+    const count = Math.max(1, Math.min(50, Math.floor(limit)));
+    // A watch address with the mix's list (RD and the video's ID) is the mix itself: without --no-playlist, yt-dlp
+    // lists the playlist rather than the one video.
+    const page = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&list=RD${encodeURIComponent(videoId)}`;
+    const args = [...this.common(), '-J', '--flat-playlist', '--playlist-end', String(count), page];
+    return this.listing(args, count, signal);
+  }
+
+  // Runs one -J listing and reads its entries into tracks (none is an empty list).
+  private async listing(args: readonly string[], count: number, signal?: AbortSignal): Promise<NewTrack[]> {
+    const result = await runExplained(this.options.binary, args, {
+      timeoutMs: this.options.timeoutMs,
+      ...(signal ? { signal } : {}),
+    });
+    let info: unknown;
+    try {
+      info = JSON.parse(result.stdout);
+    } catch {
+      throw new ProcessError('yt-dlp printed something that is not JSON', result);
+    }
+    return tracksFromInfo(info, count);
+  }
 }

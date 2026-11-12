@@ -617,6 +617,73 @@ await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 await sweep('empty', FEW);
 
+// ---- discovery: search and pick, a link dropped on the page ------------------------------------------------------
+// Phones (upright, by touch), the tablet, a short laptop and a wide one: where the list opens under the field and
+// where it opens over it (the card at the foot of the left column).
+const DISCOVERY = [
+  [360, 780],
+  [390, 844],
+  [744, 1000],
+  [1024, 768],
+  [1440, 900],
+];
+// A made-up search: the seeded tracks as YouTube would list them (title, channel, length, cover), put between the
+// page and jukecord, so no search reaches a site.
+const FOUND = [];
+for (const entry of await api('GET', '/guilds/local/history?limit=60')) {
+  if (FOUND.length >= 8 || FOUND.some((found) => found.url === entry.track.url)) continue;
+  const { url, title, uploader, durationMs, thumbnail } = entry.track;
+  FOUND.push({ url, title, uploader, durationMs, thumbnail });
+}
+async function searchFor(page, words) {
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
+    route.fulfill({ json: { query: new URL(route.request().url()).searchParams.get('q') ?? '', results: FOUND } }),
+  );
+  await page.locator('#add-input').fill(words);
+  await page.waitForSelector('#add-found [role="option"]');
+}
+// The queue as people have it while they look for more.
+await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+await sweep('search', DISCOVERY, async (page) => {
+  await searchFor(page, 'paper boats');
+  // The keyboard on the second result.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+});
+// Nothing found for the words: the list says so.
+await sweep(
+  'search-none',
+  [
+    [360, 780],
+    [1440, 900],
+  ],
+  async (page) => {
+    await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
+      route.fulfill({ json: { query: 'zzz', results: [] } }),
+    );
+    await page.locator('#add-input').fill('nothing like this');
+    await page.waitForSelector('.found-state:not([hidden])');
+  },
+);
+// A link from another window held over the page: the add card says where it goes.
+await sweep(
+  'drop-link',
+  [
+    [390, 844],
+    [1440, 900],
+  ],
+  async (page) => {
+    const held = await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.setData('text/uri-list', 'https://media.example/demo001');
+      return transfer;
+    });
+    await page.dispatchEvent('main', 'dragenter', { dataTransfer: held });
+    await page.waitForSelector('.add-card.drop-target');
+  },
+);
+await api('DELETE', '/guilds/local/queue');
+
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

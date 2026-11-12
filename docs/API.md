@@ -118,6 +118,7 @@ playlist) so a program does not need to ask again.
 | `jump` Play a queued track now (the current one is skipped) | `POST /api/v1/guilds/{guild}/queue/{item}/play` | control | `jukecord jump` | `/jump` |
 | `shuffle` Shuffle the queue | `POST /api/v1/guilds/{guild}/queue/shuffle` | control | `jukecord shuffle` | `/shuffle` |
 | `dedupe` Remove later copies of tracks queued twice | `POST /api/v1/guilds/{guild}/queue/dedupe` | control | `jukecord dedupe` | `/dedupe` |
+| `search` What YouTube finds for some words, to pick from before adding | `GET /api/v1/guilds/{guild}/search` | control | `jukecord search` | `/play` |
 
 ### History and statistics
 

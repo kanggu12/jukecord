@@ -21,6 +21,7 @@ import type { NewTrack } from '../../src/core/types.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
+import { type Search, searchWords } from '../../src/media/search.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
@@ -133,7 +134,12 @@ export interface TestServerOptions {
   /** The caps on live connections (lower than the defaults to test them). */
   readonly live?: Partial<LiveLimits>;
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
-  readonly rates?: { readonly changes?: Rate; readonly fetches?: Rate; readonly now?: () => number };
+  readonly rates?: {
+    readonly changes?: Rate;
+    readonly fetches?: Rate;
+    readonly searches?: Rate;
+    readonly now?: () => number;
+  };
   readonly behind?: () => boolean;
   /** Shorter request and idle timeouts and lower connection caps (to test them). */
   readonly trustProxy?: boolean;
@@ -145,6 +151,8 @@ export interface TestServerOptions {
     readonly maxConnections?: number;
     readonly maxConnectionsPerAddress?: number;
   };
+  /** What a search finds for some words (anything else finds nothing). */
+  readonly searched?: Record<string, NewTrack[]>;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -187,7 +195,15 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return tracks.map((track) => store.tracks.upsert(track));
     },
   } as unknown as Resolver;
-  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now() });
+  // The search answers from its table, as many as asked for, and remembers who asked.
+  const searched = options.searched ?? {};
+  const search = {
+    find: async (words: string, ask: { limit?: number } = {}) =>
+      (searched[searchWords(words)] ?? []).slice(0, ask.limit ?? 8),
+    cached: () => null,
+    recent: () => null,
+  } as unknown as Search;
+  const actions = new Actions({ store, queue, players, resolver, log, startedAt: clock.now(), search });
   const directory = new FakeDirectory();
   const voice = new FakeVoice();
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
