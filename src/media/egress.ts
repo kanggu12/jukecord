@@ -125,13 +125,29 @@ export async function startEgressGuard(options: EgressOptions): Promise<EgressGu
           }
           response.writeHead(answer.statusCode ?? 502, answer.statusMessage, back);
           answer.pipe(response);
+          // The site's answer ended before it was whole (the site went away, or went quiet and was cut off): the answer
+          // to yt-dlp cannot be finished either, so its connection is closed, which tells yt-dlp the body is short.
+          // Ending it normally instead would leave yt-dlp waiting for the rest of a body that never comes.
+          answer.on('close', () => {
+            if (!answer.complete) response.destroy();
+          });
         },
       );
-      upstream.setTimeout(idleMs, () => upstream.destroy());
+      // A quiet site is cut off; the error below then ends the answer to yt-dlp too.
+      upstream.setTimeout(idleMs, () => upstream.destroy(new Error('the site went quiet')));
       upstream.on('error', () => {
-        // The site did not answer: a plain 502, as any proxy would say.
-        if (!response.headersSent) response.writeHead(502);
+        // The site did not answer: a plain 502, as any proxy would say. Once the answer has begun, there is no status
+        // left to give: the connection to yt-dlp is closed instead.
+        if (response.headersSent) {
+          response.destroy();
+          return;
+        }
+        response.writeHead(502);
         response.end();
+      });
+      // yt-dlp gave up (a skip): the request to the site is not needed any more.
+      response.on('close', () => {
+        if (!response.writableFinished) upstream.destroy();
       });
       request.pipe(upstream);
     });
@@ -180,6 +196,11 @@ export async function startEgressGuard(options: EgressOptions): Promise<EgressGu
           upstream.pipe(client);
           client.pipe(upstream);
           client.on('close', () => upstream.destroy());
+          // The site's side closed without ending (it reset, or went quiet and was cut off): yt-dlp's side is closed
+          // too, or it would wait on a tunnel that carries nothing any more. A clean end is passed on by the pipe.
+          upstream.on('close', () => {
+            if (!upstream.readableEnded) client.destroy();
+          });
         });
         upstream.on('error', () => {
           // Not connected yet: the next address. Connected: both ends close.

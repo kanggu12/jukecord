@@ -163,3 +163,97 @@ describe('the egress guard', () => {
     socket.destroy();
   });
 });
+
+describe('the egress guard when a site stops halfway', () => {
+  let guard: EgressGuard;
+  let site: http.Server;
+  let quiet: net.Server;
+  let sitePort = 0;
+  let quietPort = 0;
+  let guardPort = 0;
+
+  before(async () => {
+    // A site that promises 1000 bytes and sends 10, then goes quiet ("/stall") or drops the connection ("/drop").
+    site = http.createServer((request, response) => {
+      response.writeHead(200, { 'content-length': '1000' });
+      response.write('x'.repeat(10));
+      if (request.url === '/drop') setTimeout(() => request.socket.destroy(), 50);
+    });
+    // A server that takes a tunnel's connection and then never says anything, or resets it at once ("reset" first).
+    quiet = net.createServer((socket) => {
+      socket.once('data', (data) => {
+        if (data.toString().startsWith('reset')) socket.resetAndDestroy();
+      });
+    });
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) => quiet.listen(0, '127.0.0.1', resolve));
+    sitePort = (site.address() as net.AddressInfo).port;
+    quietPort = (quiet.address() as net.AddressInfo).port;
+    guard = await startEgressGuard({
+      log: createLogger({ level: 'error', sinks: [] }),
+      lookup: async () => ['127.0.0.1'],
+      allowed: () => true,
+      // A quiet connection is cut off after a fifth of a second here (two minutes in jukecord).
+      idleMs: 200,
+    });
+    guardPort = Number(new URL(guard.url).port);
+  });
+
+  after(async () => {
+    await guard.close();
+    site.closeAllConnections();
+    site.close();
+    quiet.close();
+  });
+
+  // A plain request through the guard; how its answer ended, and after how long.
+  const fetchThrough = (path: string) =>
+    new Promise<{ ended: string; bytes: number; ms: number }>((resolve) => {
+      const started = Date.now();
+      const done = (ended: string, bytes: number) => resolve({ ended, bytes, ms: Date.now() - started });
+      const request = http.request(
+        { host: '127.0.0.1', port: guardPort, path: `http://site.test:${sitePort}${path}` },
+        (response) => {
+          let bytes = 0;
+          response.on('data', (chunk: Buffer) => {
+            bytes += chunk.length;
+          });
+          response.on('end', () => done('end', bytes));
+          response.on('aborted', () => done('aborted', bytes));
+          response.on('error', () => done('error', bytes));
+        },
+      );
+      request.on('error', () => done('request error', 0));
+      request.end();
+      setTimeout(() => done('still waiting', -1), 3000).unref();
+    });
+
+  it('closes the answer to yt-dlp when the site goes quiet or drops in the middle of a body', async () => {
+    for (const path of ['/stall', '/drop']) {
+      const result = await fetchThrough(path);
+      // Cut short, never finished as if whole, and soon: yt-dlp is not left waiting for bytes that never come.
+      assert.notEqual(result.ended, 'still waiting', path);
+      assert.notEqual(result.ended, 'end', path);
+      assert.equal(result.bytes, 10, path);
+      assert.ok(result.ms < 2000, `${path}: ${result.ms} ms`);
+    }
+  });
+
+  it('closes a tunnel when the far side goes quiet or resets', async () => {
+    for (const first of ['hello', 'reset']) {
+      const socket = net.connect(guardPort, '127.0.0.1');
+      const started = Date.now();
+      const closed = new Promise<number>((resolve) => socket.on('close', () => resolve(Date.now() - started)));
+      socket.on('error', () => {});
+      socket.write(`CONNECT public.test:${quietPort} HTTP/1.1\r\nHost: public.test:${quietPort}\r\n\r\n`);
+      await new Promise((resolve) => socket.once('data', resolve));
+      socket.write(first);
+      const ms = await Promise.race([closed, new Promise<number>((resolve) => setTimeout(() => resolve(-1), 3000))]);
+      assert.ok(
+        ms > 0 && ms < 2000,
+        `${first}: the tunnel was ${ms < 0 ? 'still open after 3 s' : `closed after ${ms} ms`}`,
+      );
+      socket.destroy();
+    }
+  });
+});
