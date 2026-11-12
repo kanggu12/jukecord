@@ -3282,3 +3282,322 @@ kbd {
     display: none;
   }
 }
+
+/* ---- listening together: the lyrics ------------------------------------------------------------------------- */
+/* The keys in a card's head beside its title (the playing card's Lyrics): at the head's far end, with their words. */
+.card-head .head-keys {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The right column while the lyrics are open: the lyrics in place of the voice channel and the history. */
+.col.side.lyrics-open > :not(.lyrics-card) {
+  display: none;
+}
+.lyrics {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* The track's title beside the heading, cut short on a narrow card (its whole title is its tooltip). */
+.lyrics .card-head .lyrics-what {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.lyrics .card-head .tools {
+  margin-left: 0;
+}
+/* The lines scroll in their own box, whose content is laid out from it (the line kept in sight is measured so). */
+.lyrics-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 10px 8px;
+}
+/* Room after the last line, so it too can stand a third of the way down when it is sung. */
+.lyrics-body::after {
+  content: "";
+  display: block;
+  height: 40vh;
+}
+.lyrics-body > .empty {
+  /* The empty states sit in the box's upper part, not at its foot below the room above. */
+  padding-top: 40px;
+}
+.lyrics-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* A line: large and bold, as lyrics are read from across a room (large enough to count as large text, whose contrast
+   may be 3:1). The one being sung in the text's own colour, lit; the rest, before and after it, dimmer. Only the
+   colour changes, never the size, so nothing moves when the line does. */
+.lyric {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  text-align: left;
+  font: 700 19px / 1.35 var(--font);
+  letter-spacing: -0.01em;
+  color: color-mix(in oklch, var(--ink) 52%, transparent);
+  transition:
+    color 0.35s ease,
+    background 0.2s ease;
+}
+button.lyric {
+  cursor: pointer;
+}
+button.lyric:hover {
+  background: var(--hover-tint);
+  color: color-mix(in oklch, var(--ink) 75%, transparent);
+}
+.lyric.lit {
+  color: var(--ink);
+  text-shadow: 0 0 22px color-mix(in oklch, var(--ink) 28%, transparent);
+}
+/* A pause between lines, for the eye. */
+.lyric.pause {
+  letter-spacing: 0.3em;
+}
+.lyrics-note {
+  margin: 0 10px 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.lyrics-plain {
+  margin: 0;
+  padding: 4px 10px;
+  white-space: pre-line;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+/* The source, credited under the lines. */
+.lyrics-credit {
+  margin: 0;
+  padding: 8px var(--pad) 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.lyrics .lyrics-credit a {
+  color: var(--ink-2);
+}
+/* In a sheet (a one-column window): the lyrics fill it, the lines scrolling in their own box; the sheet's own close
+   key takes the head's far corner. */
+.sheet-body.lyrics-sheet {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.sheet-body.lyrics-sheet > .lyrics {
+  padding-right: 0;
+}
+.lyrics-sheet .card-head {
+  padding-right: 56px;
+}
+@media (forced-colors: active) {
+  /* The line being sung told by the system's highlight, as colour alone would vanish in a contrast theme. */
+  .lyric.lit {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+@media (pointer: coarse) {
+  /* A line is a finger's height to choose. */
+  button.lyric {
+    min-height: 44px;
+  }
+}
+@media (max-width: 560px) {
+  /* Listening already, with nothing playing: the key shows its icon alone as at any other time, leaving the room to
+     the sleep timer beside it (its words, to stop listening, are its name for screen readers and its tooltip). */
+  .listen.idle > .key[data-act="listen"][aria-pressed="true"] {
+    width: var(--control);
+    padding: 0;
+  }
+  .listen.idle > .key[data-act="listen"][aria-pressed="true"] .label {
+    display: none;
+  }
+}
+
+/* ---- listening together: inviting, guests ------------------------------------------------------------------- */
+/* The key beside the people listening, at the row's end; where the row has no room for it (a narrow column, many
+   faces), it takes a line of its own under them, at the right, rather than squeezing the words beside the faces. */
+.listeners:has(> .key[data-act="invite"]) {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.listeners:has(> .key[data-act="invite"]) > .grow {
+  flex: 1 0 auto;
+}
+.listeners > .num {
+  white-space: nowrap;
+}
+.listeners > .key[data-act="invite"] {
+  margin-left: auto;
+}
+/* The Invite dialog: which link (the host's choice), the form, the link made with its QR code, the links that work. */
+.invite-tabs {
+  margin-bottom: 12px;
+}
+.invite-hint {
+  margin: 0 0 10px;
+}
+.invite-form {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.invite-made {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-row);
+  background: var(--sunk);
+}
+.invite-link {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.invite-note {
+  margin: 0;
+  font-size: 12px;
+}
+.invite-url {
+  user-select: all;
+}
+.invite h3 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.invite-links {
+  padding: 0;
+}
+/* A QR code: dark on light whatever the theme (cameras read it so), on a white tile with rounded corners. */
+.qr-box {
+  flex: none;
+  width: 156px;
+  height: 156px;
+  padding: 6px;
+  border-radius: var(--r);
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.qr {
+  display: block;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+.qr-back {
+  fill: #fff;
+}
+.qr-marks {
+  fill: #111;
+}
+@media (forced-colors: active) {
+  /* A contrast theme repaints colours; the code keeps its own, or a camera may not read it. */
+  .qr-box,
+  .qr {
+    forced-color-adjust: none;
+  }
+}
+
+/* ---- listening together: what another app shared ------------------------------------------------------------- */
+.share-card {
+  padding: var(--pad);
+  gap: 10px;
+  max-width: 720px;
+}
+.share-label {
+  margin: 0;
+}
+.share-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.share-why {
+  padding: 0;
+}
+
+/* ---- listening together: the light that moves with the music ------------------------------------------------- */
+/* While this browser listens, the glow behind the disc and the light behind the glass follow the music's low end
+   (views/light.ts sets their opacity, which a browser changes without drawing again or sorting its layers anew). At
+   rest these layers are not seen, and the look is the one above. */
+.art .beat {
+  position: absolute;
+  inset: 6%;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--cover, none) center / cover;
+  filter: blur(26px) saturate(1.6);
+  opacity: 0;
+  transform: scale(1.1);
+  will-change: opacity;
+  pointer-events: none;
+}
+/* The glow's wider layer, further out and softer, seen only on the loudest beats: the glow seems to swell with them
+   while nothing changes size. */
+.art .beat.wide {
+  filter: blur(34px) saturate(1.6);
+  transform: scale(1.32);
+}
+/* The field's extra light: the cover again (its place and blur are the field's layers', above), with no fade of its
+   own, as it follows the music 20 times a second. */
+.ambient > .beat {
+  transition: none;
+}
+@media (forced-colors: active) {
+  .art .beat {
+    display: none;
+  }
+}
+/* A guest's card: the people listening, a face and a name each, and the guest's link under them. */
+.guest-people {
+  list-style: none;
+  margin: 0;
+  padding: 10px var(--pad);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.guest-people li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.guest-until {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px var(--pad) 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+}

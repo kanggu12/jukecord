@@ -32,6 +32,8 @@ export interface NewTrack {
   readonly uploader: string | null;
   readonly durationMs: number | null;
   readonly thumbnail: string | null;
+  /** What the site says the recording is, when it says (YouTube Music's song, artist and album): for its lyrics. */
+  readonly music?: { readonly artist: string; readonly title: string; readonly album: string | null } | null;
 }
 
 /** One place in a server's queue. The same track can be queued twice; each gets its own item. */

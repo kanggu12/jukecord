@@ -172,3 +172,63 @@ Trouble used to be in the log alone, which the people of a Discord server do not
 once an hour per server, and a state that lasts (YouTube's check for bots) once as it starts and once as it ends, so a
 bad day is a few lines, not one per failed fetch. A webhook was the other choice; a channel the bot posts in needs no
 secret to keep, and the bot is there already.
+
+## Lyrics from LRCLIB
+
+LRCLIB is free, needs no key, keeps timed lyrics (LRC) beside the plain ones, and asks only that a client says what it
+is and goes gently. The other sources either need an account and a key per installation, or answer with plain words
+only, or scrape pages. jukecord asks for the track playing only when someone opens its lyrics (never ahead, never for a
+track nobody plays), once per track: what LRCLIB found is kept in the database for good, and that it found nothing for
+a week, after which it is asked again (LRCLIB fills in songs it lacked). It sends the song's title, artist, album and
+length: what YouTube says the recording is when it says (yt-dlp's `track`, `artist` and `album`), else what the title
+and the channel give with the usual decorations taken off. LRCLIB matches the length within two seconds, which keeps a
+guess from finding another song's words. Requests go one at a time, a third of a second apart, and a 429 or 503 holds
+them all for as long as it says; they leave through the same address guard as yt-dlp's (a CONNECT tunnel, TLS inside
+it to LRCLIB itself), so jukecord reaches only public addresses whoever asks. `JUKECORD_LYRICS=off` turns all of it
+off. The panel and the API are given the lines with their times; a person who may change the music can seek to one.
+
+## Listening links for guests
+
+Listening along without Discord was what a host link gave, with every right. A listening link gives the least that
+listening needs: one server, the player, the queue and the lyrics, the audio of what plays or is queued there, for 1, 7
+or 30 days. A guest is a login of its own kind, with its own table of sessions (in the sessions table a login without
+a user is the host's, so a guest there would have been one row's mistake from every right), and the server answers a
+guest's request for any other operation with a refusal before anything else looks at it: an allow-list, not a list of
+what is forbidden, so a new operation is closed to guests until it is opened. The code is 32 random bytes kept as a
+hash; it travels after a `#` in the link, which browsers never send to a server, so it never lands in a server's or a
+reverse proxy's log, and the panel's page sends it to jukecord in a request of its own (from the panel's own pages
+only). A link takes 25 browsers at most, a server keeps 50 links at most, and failed codes count against an address as
+failed logins do. Revoking deletes the link and its guests' sessions, and their live connections end at once.
+
+## Friends let in by the host
+
+In browser-only mode every friend needed the host's own link. A login link can now be made for a friend who may only
+look and listen, or also change the music: a session of kind `friend` with that scope, never Manage Server, never
+tokens, and held to the rates and the caps on live connections as anyone but the host is. It is the host's way in, so
+it reaches every server the host has, and what a friend adds counts as the host's.
+
+## A light that follows the music, read without touching the sound
+
+The light needs the music's low end, which only WebAudio can measure. Routing the panel's audio element through an
+AudioContext (createMediaElementSource) would make the sound itself depend on WebAudio: on a phone that suspends audio
+contexts in the background, listening on a locked screen would stop. So the analyser reads a copy of the element's
+stream (captureStream), and the sound plays as it always did. Browsers without it (Safari, and Firefox, whose
+mozCaptureStream silences the element it copies) keep the glow's slow breathing. Only opacity changes, 20 times a second
+at most, on a timer, and only when the change shows: the glow seems to swell because a wider layer of it fades in on the
+loudest beats. Measured in Chromium on a GPU (ten seconds of listening, a bass line playing), a first version that
+changed opacity and scale at every animation frame took the main thread 1.5 to 1.9 s, against 0.2 s for the panel
+without it: asking for every frame made the browser run its style and layer passes 60 times a second whether or not
+anything had changed, and each change of scale made it sort its layers anew. This one took 0.54 s in the same
+conditions, with about 18 style passes a second (8 without it, 64 for the first version) and the same frames, paints and
+layouts as without it; on a busy machine its time stays within the spread of the panel's own. Nothing runs, the audio
+context suspended, while the tab is hidden, the music is paused or not heard here, or motion is off: at rest the panel
+does exactly what it did before (paused: no frames, style passes, layouts or paints, as without it).
+
+## The panel as an app
+
+A web app manifest with icons drawn from the mark, and a service worker that keeps only the panel's own files: never
+the API, the audio or the logins. It asks jukecord first for each file and uses its copy only when jukecord cannot be
+reached, so a new version shows at once as it did without a worker (the panel's "updated: reload" message stays the way
+to take it), and an installed panel opened while jukecord is away says so instead of showing the browser's error. The
+manifest's share target sends what another app shares to a page of the panel, which adds it on a press of a key: a
+page any site can send a browser to must not change the queue by itself.

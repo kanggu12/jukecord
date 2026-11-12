@@ -35,8 +35,9 @@ export interface Command {
   readonly usage: string;
   readonly summary: string;
   request(words: Words, lookups: Lookups): Request | Promise<Request>;
-  /** The answer for people; --json prints the JSON as it came instead. */
-  show(answer: unknown): string;
+  /** The answer for people, as the options typed ask for it (none given: as plain as it comes); --json prints the JSON
+   * as it came instead. */
+  show(answer: unknown, words?: Words): string;
 }
 
 /** A mistake in what was typed; the CLI prints it with the command's usage and exits with 2. */
@@ -634,9 +635,15 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'login-link': {
     name: 'link',
-    usage: '',
-    summary: 'A one-time host login link (10 minutes)',
-    request: () => ({}),
+    usage: '[--scope read|control]',
+    summary: 'A one-time login link (10 minutes): the host, or a friend who may view or control',
+    request: (words) => {
+      const scope = words.flags.get('scope');
+      if (scope === undefined) return {};
+      if (scope !== 'read' && scope !== 'control' && scope !== 'admin')
+        throw new UsageError('--scope read, control or admin');
+      return { query: { scope } };
+    },
     show: (answer) => (answer as { url: string }).url,
   },
   backup: {
@@ -686,6 +693,88 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       return { body: { channelId: channel === 'none' ? null : channel } };
     },
     show: showSettings,
+  },
+
+  lyrics: {
+    name: 'lyrics',
+    usage: '[--synced]',
+    summary: 'The lyrics of the track playing (--synced: with their times)',
+    request: () => ({}),
+    show: (answer, words) => {
+      const lyrics = answer as {
+        kind: string;
+        lines: { atMs: number; text: string }[];
+        text: string | null;
+        source: { name: string; url: string } | null;
+      };
+      if (lyrics.kind === 'none') return 'No lyrics found for this track';
+      if (lyrics.kind === 'instrumental') return `Instrumental (${lyrics.source?.name ?? 'LRCLIB'})`;
+      // With --synced, each line after its time ("[1:02] words"); a pause is its time alone.
+      const body =
+        words?.flags.has('synced') && lyrics.lines.length > 0
+          ? lyrics.lines.map((line) => `[${formatDuration(line.atMs)}] ${line.text}`.trimEnd()).join('\n')
+          : (lyrics.text ?? '');
+      return `${body}\n\nLyrics from ${lyrics.source?.name ?? 'LRCLIB'} (${lyrics.source?.url ?? 'https://lrclib.net'})`;
+    },
+  },
+  // Also typed "jukecord stop --after-track", which main.ts turns into this.
+  'stop-after': {
+    name: 'stop-after',
+    usage: '[on|off]',
+    summary: 'Stop when this track ends (off: play on after it)',
+    request: (words) => {
+      const choice = words.args[0] ?? 'on';
+      if (choice !== 'on' && choice !== 'off') throw new UsageError('stop-after on or off');
+      return { body: { on: choice === 'on' } };
+    },
+    show: (answer) =>
+      (answer as PlayerJson & { stopAfter?: boolean }).stopAfter
+        ? 'Stops after this track'
+        : 'Plays on after this track',
+  },
+  'listen-links': {
+    name: 'shares',
+    usage: '',
+    summary: "The server's listening links that still work",
+    request: () => ({}),
+    show: (answer) => {
+      const links = answer as {
+        id: number;
+        createdByName: string | null;
+        createdBy: string | null;
+        expiresAt: number;
+        guests: number;
+        maxGuests: number;
+      }[];
+      if (links.length === 0) return 'No listening links';
+      return links
+        .map(
+          (link) =>
+            `${link.id}  until ${new Date(link.expiresAt).toLocaleString()}, ${link.guests} of ${link.maxGuests} guests, made by ${link.createdBy ? (link.createdByName ?? link.createdBy) : 'the host'}`,
+        )
+        .join('\n');
+    },
+  },
+  'listen-link-create': {
+    name: 'share',
+    usage: '[--days 1|7|30]',
+    summary: 'A link to listen along without a Discord account (shown once)',
+    request: (words) => {
+      const days = option(words, 'days', 7);
+      if (days !== 1 && days !== 7 && days !== 30) throw new UsageError('--days 1, 7 or 30');
+      return { body: { days } };
+    },
+    show: (answer) => {
+      const created = answer as { url: string; link: { id: number; expiresAt: number; maxGuests: number } };
+      return `${created.url}\n(link ${created.link.id}, until ${new Date(created.link.expiresAt).toLocaleString()}, up to ${created.link.maxGuests} guests; it is not shown again)`;
+    },
+  },
+  'listen-link-revoke': {
+    name: 'unshare',
+    usage: '<link ID>',
+    summary: 'Revoke a listening link (its guests are out at once)',
+    request: (words) => ({ params: { id: number(words.args[0], 'the link ID (see jukecord shares)') } }),
+    show: showOk,
   },
 };
 

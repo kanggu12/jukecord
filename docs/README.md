@@ -30,6 +30,20 @@ Open the panel's address (on the machine running jukecord, `./jukecord open` pri
 - **Log** (the host only): jukecord's log, filtered by level and part.
 - **The menu** (your name, top right): theme, language, motion, the server's DJ role (for people who can manage the
   server), API tokens, keyboard shortcuts, logging out.
+- **Lyrics** (in the playing card's head): the words of the track playing, from LRCLIB, in the right column of a wide
+  window and as a sheet on a phone. The line being sung is lit and kept in sight; if you may change the music, choose a
+  line to play from there. Words without timings show as they are, and a track LRCLIB does not know says so.
+- **⋯** (in the playing card's head): **Stop after this track** stops the player, for everyone, when the track ends;
+  the queue stays. Pressed again, the player plays on after it.
+- **Invite** (beside the people listening in the voice card, in the ⋯ list and in the menu): a listening link for
+  guests and, for the host, a login link for a friend, each with a QR code and a copy key (see
+  [who may do what](#who-may-do-what)).
+- **The sleep timer** (beside **Listen here** while this browser listens): this browser stops listening after 15, 30 or
+  60 minutes, or when the track playing ends; the last seconds fade out. It is this browser's alone.
+- **As an app**: in a browser that offers it (Chrome or Edge's install button, Safari's **Add to Home Screen**), the
+  panel installs and opens in its own window, and opens when jukecord cannot be reached, saying so. On Android, an
+  installed panel is among the apps a video can be shared to: the shared address opens a page that adds it to the
+  queue on a press of **Add**, **Play next** or **Play now**.
 
 At the bottom, **Listen here** plays the music in this browser, in time with the voice channel; the volume is this
 browser's own. The page title shows what is playing, and the media keys and the lock screen of your computer or phone
@@ -46,6 +60,17 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 - When a server has a **DJ role**, only members with that role (and people who can manage the server) change the music;
   everyone else can look and listen. Set it in the panel's menu, with `/dj set`, or with `jukecord dj <role ID>`. A DJ
   role deleted in Discord counts as none: everyone may change the music again until another is set.
+- **Guests** come in with a **listening link**: anyone with the link listens along to its one server in a browser,
+  without a Discord account, for 1, 7 or 30 days. A guest sees the player, the queue and the lyrics and has **Listen
+  here**; it changes nothing and sees no other server, statistics, history, settings or log. Up to 25 browsers come in
+  with one link. People who may change the music make links (`Invite` in the panel, `/share create`,
+  `jukecord share`); each person sees and revokes their own, and people who can manage the server all of the
+  server's. Revoking a link ends its guests' connections at once. The link is shown once: jukecord keeps only its hash,
+  and the code travels after a `#`, which never reaches a server's or a proxy's log.
+- **Friends** come in with a **login link** the host makes (`Invite` in the panel, or `jukecord link --scope read` or
+  `--scope control`): one browser, once, within ten minutes, as the host's friend in every server here, to look and
+  listen (view) or also to change the music (control), never to change settings or tokens. What a friend adds counts
+  as the host's.
 
 - A server can choose an **alerts channel**, where jukecord says when something goes wrong: YouTube refusing it (its
   check for bots) and when that is over, jukecord restarting itself, its data's disk with less than 1 GiB free, a track
@@ -75,6 +100,9 @@ next track, <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move the queue row in f
 | `/version`                                   | the version                                                          |
 | `/alerts show, set, clear`                   | where jukecord tells this server about trouble (needs Manage Server) |
 | `/wrapped`                                   | the server's year in music, or a month, or the last 12 months        |
+| `/lyrics`                                    | the lyrics of the track playing, to you alone, a page at a time      |
+| `/stop after-track:`                         | True: stop when this track ends; False: play on after it             |
+| `/share create, list, revoke`                | listening links for guests, to you alone                             |
 
 Commands and answers are in Korean for people whose Discord is in Korean, and in English for everyone else. When you
 play something from Discord and the bot is in no voice channel, it joins yours. It leaves a channel nobody is in after
@@ -106,6 +134,9 @@ front door, `./jukecord help <command>` asks the running jukecord. A few:
 ./jukecord stats --days 7
 ./jukecord token create phone --scope control
 ./jukecord wrapped --month 2026-03
+./jukecord lyrics --synced
+./jukecord stop --after-track
+./jukecord share --days 30
 ```
 
 With more than one server, say which: `--guild <server ID>` or `JUKECORD_GUILD`. `--json` prints the API's answer as it
@@ -143,6 +174,7 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_REST_AFTER`                                                | `2m`               | how long a server nobody hears plays on before it pauses (`0`: it plays on)                    |
 | `JUKECORD_BACKUP_AT`                                                 | `off`              | a backup of the database every day at this time (`04:30`, in jukecord's time zone)             |
 | `JUKECORD_BACKUP_KEEP`                                               | `7`                | how many backups stay in the backups folder                                                    |
+| `JUKECORD_LYRICS`                                                    | `on`               | `off`: no lyrics, and nothing asked of LRCLIB                                                  |
 
 jukecord checks every setting when it starts and lists every problem at once. `jukecord doctor` shows the settings in
 effect (secrets only as set or not set) and checks the parts jukecord needs.

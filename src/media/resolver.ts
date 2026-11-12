@@ -9,7 +9,7 @@
 import type { FetchWatch } from '../app/alerts.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
-import type { TrackRepository } from '../store/store.ts';
+import type { MusicRepository, TrackRepository } from '../store/store.ts';
 import type { AddressCheck } from './address.ts';
 import { BusyError } from './busy.ts';
 import { canonicalSource, isPlaylistAddress, parseInput } from './source.ts';
@@ -29,6 +29,8 @@ export interface ResolverOptions {
   readonly perServer?: number;
   /** Hears how each lookup on a site went (for YouTube's check for bots, see app/alerts.ts). */
   readonly watch?: FetchWatch;
+  /** Where what a site says a recording is gets kept (its song, artist and album, for its lyrics); none: not kept. */
+  readonly music?: MusicRepository;
 }
 
 export class Resolver {
@@ -117,7 +119,12 @@ export class Resolver {
         this.options.log.info('left out a playlist entry on a private network', { title: track.title });
       }
     }
-    const tracks = allowed.map((track) => this.options.tracks.upsert(track));
+    const tracks = allowed.map((track) => {
+      const stored = this.options.tracks.upsert(track);
+      // What the site said the recording is, kept beside the track for finding its lyrics.
+      if (track.music) this.options.music?.set(stored.id, track.music);
+      return stored;
+    });
     this.options.log.info('looked up', {
       input: input.kind === 'search' ? `search: ${input.query}` : input.url.href,
       tracks: tracks.length,

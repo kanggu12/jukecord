@@ -1,0 +1,13 @@
+{
+  "id": 4815162,
+  "name": "Paper Boats on the River",
+  "trackName": "Paper Boats on the River",
+  "artistName": "Example Band",
+  "albumName": "Made-up Rivers",
+  "duration": 187.0,
+  "instrumental": false,
+  "hasWordSync": false,
+  "plainLyrics": "Fold the morning into paper\nSet it down where the water bends\n\nEvery boat a little letter\nEvery letter never ends",
+  "syncedLyrics": "[00:12.40] Fold the morning into paper\n[00:16.85] Set it down where the water bends\n[00:21.10] \n[00:24.02] Every boat a little letter\n[00:28.47] Every letter never ends\n[00:33.90] ",
+  "lyricsfile": "version: '1.0'\nmetadata:\n  title: Paper Boats on the River\n  artist: Example Band\n  album: Made-up Rivers\n  duration_ms: 187000\n  instrumental: false\nlines:\n- text: Fold the morning into paper\n  start_ms: 12400\n  end_ms: 16850\n"
+}

@@ -47,10 +47,14 @@ const GZIP_OVER = 2048;
 
 /** Someone listening in a browser, as the panel shows them. */
 export interface Listener {
-  /** The Discord user ID; null for the host. */
+  /** The Discord user ID; null for the host, a friend and a guest. */
   readonly id: string | null;
   readonly name: string;
   readonly avatar: string | null;
+  /** Set for a guest of a listening link (the panel says "Guest" in the person's language). */
+  readonly guest?: true;
+  /** Set for a friend the host let in with a login link (the panel says "Friend"). */
+  readonly friend?: true;
 }
 
 /** Who listens in a server: the first people (up to twenty), and how many browsers play along in all. */
@@ -89,6 +93,9 @@ interface Client {
   readonly caller: Caller;
   readonly principal: Principal;
   readonly who: Listener;
+  // Who it is among the listeners: one person however many tabs (their Discord ID, the host), each friend's and
+  // guest's browser one of its own.
+  readonly person: string;
   // Whether its browser can decompress gzip (it said so when it connected).
   readonly gzip: boolean;
   // The keys it counts under for the caps, or null when it is not counted there (the host).
@@ -170,6 +177,12 @@ export interface AttachOptions {
 // The context for reading a server's state on behalf of everyone subscribed to it (reading needs no rights).
 function reader(guildId: string): ActionContext {
   return { guildId, userId: null, mayControl: false, mayManage: false };
+}
+
+// What a guest is told of the voice channel: that the bot is in one (the listening bar says the music plays there),
+// not which, nor the server's other channels.
+function guestVoice(voice: ReturnType<Actions['voiceChannels']>): ReturnType<Actions['voiceChannels']> {
+  return { current: voice.current ? { channelId: '', name: '' } : null, channels: [] };
 }
 
 // The context for what one connection may see: its own person (voice channels are listed as they see them in
@@ -254,12 +267,17 @@ export class EventHub {
     const onVoice = ({ guildId }: { guildId: string }) => {
       const room = this.rooms.get(guildId);
       if (!room) return;
-      // Each connection gets the channels its own person can see, worked out once per person.
+      // Each connection gets the channels its own person can see, worked out once per person; a guest, only that
+      // the bot is in one.
       const lists = new Map<string, unknown>();
       for (const client of room.clients) {
         const context = viewer(client, guildId);
-        const key = context.userId ?? (context.mayManage ? 'host' : 'anyone');
-        if (!lists.has(key)) lists.set(key, actions.voiceChannels(context));
+        const guest = client.principal.kind === 'guest';
+        const key = guest ? 'guest' : (context.userId ?? (context.mayManage ? 'host' : 'anyone'));
+        if (!lists.has(key)) {
+          const voice = actions.voiceChannels(context);
+          lists.set(key, guest ? guestVoice(voice) : voice);
+        }
         this.send(client, { type: 'voice', guild: guildId, voice: lists.get(key) });
       }
     };
@@ -327,12 +345,22 @@ export class EventHub {
     const who: Listener =
       principal.kind === 'host'
         ? { id: null, name: 'Host', avatar: null }
-        : { id: principal.userId, name: person?.name ?? principal.userId, avatar: person?.avatar ?? null };
+        : principal.kind === 'guest'
+          ? { id: null, name: 'Guest', avatar: null, guest: true }
+          : principal.kind === 'friend'
+            ? { id: null, name: 'Friend', avatar: null, friend: true }
+            : { id: principal.userId, name: person?.name ?? principal.userId, avatar: person?.avatar ?? null };
     const client: Client = {
       socket,
       caller,
       principal,
       who,
+      person:
+        principal.kind === 'user'
+          ? principal.userId
+          : principal.kind === 'host'
+            ? 'host'
+            : `${principal.kind} ${caller.sessionHash ?? caller.tokenId ?? ''}`,
       gzip: options.gzip === true,
       login,
       address,
@@ -396,11 +424,14 @@ export class EventHub {
     return { connections: this.clients.size, listening };
   }
 
-  /** Ends the connections of the logins that match (a logout ends that browser's live updates at once). */
-  end(match: (caller: Caller) => boolean): void {
+  /**
+   * Ends the connections of the logins that match, saying why (a logout ends that browser's live updates at once, a
+   * revoked listening link its guests').
+   */
+  end(match: (caller: Caller) => boolean, reason = 'logged out'): void {
     for (const client of this.clients) {
       if (!match(client.caller)) continue;
-      client.socket.close(4401, 'logged out');
+      client.socket.close(4401, reason);
       this.drop(client);
     }
   }
@@ -471,9 +502,10 @@ export class EventHub {
     // The queue, the big part, is the start made once per version; only the end is this connection's own.
     const start = this.queueStart(guildId, room);
     client.queueVersion = start.version;
+    const voice = actions.voiceChannels(viewer(client, guildId));
     const ending = Buffer.from(
       `,"type":"state","player":${JSON.stringify(presenter.player(actions.nowPlaying(reader(guildId))))},` +
-        `"voice":${JSON.stringify(actions.voiceChannels(viewer(client, guildId)))},` +
+        `"voice":${JSON.stringify(client.principal.kind === 'guest' ? guestVoice(voice) : voice)},` +
         `"listeners":${JSON.stringify(this.listenersOf(room))}}`,
     );
     this.write(
@@ -578,7 +610,7 @@ export class EventHub {
       if (!client.listening) continue;
       count += 1;
       // The first twenty people are named; everyone counts.
-      if (people.size < LISTENERS_NAMED) people.set(client.who.id ?? 'host', client.who);
+      if (people.size < LISTENERS_NAMED) people.set(client.person, client.who);
     }
     room.listeners = { people: [...people.values()], count };
     return room.listeners;

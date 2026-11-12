@@ -70,6 +70,8 @@ export interface Config {
     /** How many backups stay in the backups folder. */
     readonly keep: number;
   };
+  /** Whether lyrics are looked up (at LRCLIB) for the track playing when someone asks for them. */
+  readonly lyrics: boolean;
   readonly log: {
     readonly level: LogLevel;
     /** The size at which the log file is rotated, in bytes. */
@@ -125,6 +127,7 @@ const KNOWN = new Set([
   'JUKECORD_REST_AFTER',
   'JUKECORD_BACKUP_AT',
   'JUKECORD_BACKUP_KEEP',
+  'JUKECORD_LYRICS',
   // Read by compose.yaml (the published address and the image), not by jukecord; known so they raise no warning
   // when .env passes them through.
   'JUKECORD_BIND',
@@ -342,6 +345,15 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     keep: read('JUKECORD_BACKUP_KEEP', 7, integer(1, 365)),
   };
 
+  // Lyrics are looked up at LRCLIB unless turned off: the one outside service jukecord asks besides Discord and the
+  // sites the tracks come from, so it has a switch of its own.
+  const lyrics = read('JUKECORD_LYRICS', true, (text) => {
+    const value = text.toLowerCase();
+    if (['on', 'true', 'yes', '1'].includes(value)) return true;
+    if (['off', 'false', 'no', '0'].includes(value)) return false;
+    throw new Error(`"${text}" is not on or off`);
+  });
+
   // Log settings: rotation keeps the log from growing without end (every log has a size limit and a count).
   const log = {
     level: read('JUKECORD_LOG_LEVEL', 'info' as LogLevel, (text) => {
@@ -380,6 +392,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     voice,
     restAfterMs,
     backups,
+    lyrics,
     log,
     warnings,
   };
@@ -416,6 +429,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
     'pause with nobody listening after': config.restAfterMs === 0 ? 'never' : `${config.restAfterMs} ms`,
     'daily backup': config.backups.at ? `at ${timeOfDay(config.backups.at)}, keeping ${config.backups.keep}` : 'off',
+    lyrics: config.lyrics ? 'from LRCLIB' : 'off',
   };
 }
 

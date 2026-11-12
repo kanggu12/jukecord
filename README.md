@@ -136,6 +136,20 @@ people use most.
   Discord follows the music. An alerts channel of the server's choosing hears about trouble (YouTube refusing jukecord,
   a restart by its watchdog, a full disk, a track leaving a looping queue, connections turned away), and a backup can
   be made every day at a time of the host's choosing.
+- **Lyrics in time.** The words of the track playing, from [LRCLIB](https://lrclib.net), beside the player (a sheet on a
+  phone) with the line being sung lit; whoever may change the music picks a line to play from there. Also `/lyrics`,
+  `jukecord lyrics` and the API; `JUKECORD_LYRICS=off` turns them off.
+- **Listening links for guests.** A link for 1, 7 or 30 days lets anyone listen along to one server in a browser
+  without a Discord account: the player, the queue and **Listen here**, nothing to change. Its maker and Manage Server
+  revoke it, which ends its guests at once. The host can also let a friend in to view or control with a one-time
+  login link. Both come with a QR code drawn by the panel.
+- **A light that moves with the music.** While a browser listens, the glow behind the disc and the light behind the
+  glass follow the music's low end; it rests when the tab is hidden, the music pauses or motion is off.
+- **An app on a phone.** The panel installs to a home screen and opens like an app; on Android, sharing a video from
+  another app puts it on a page that adds it to the queue.
+- **Stop after this track, and a sleep timer.** The player stops when the track ends (for everyone, from the panel,
+  `/stop`, `jukecord stop --after-track` or the API), and a browser stops listening after 15, 30 or 60 minutes or at
+  the end of the track.
 
 ### Light on a small machine
 
@@ -187,10 +201,11 @@ Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecor
 
 The queues, the history, the playlists, the settings and the logins are in one SQLite file in jukecord's data folder,
 and the fetched tracks beside it, with their pictures, up to `JUKECORD_CACHE_MAX`. Logins and tokens are kept only as
-hashes, and the logs mask tokens. jukecord itself talks to Discord and to the sites the tracks come from, and sends no
+hashes, and the logs mask tokens. jukecord itself talks to Discord, to the sites the tracks come from and, for lyrics,
+to LRCLIB (it sends the song's title, artist, album and length; `JUKECORD_LYRICS=off` stops it), and sends no
 telemetry; the panel shows the tracks' pictures from jukecord and people's pictures from Discord. Docker Compose
-publishes the panel on this computer only, until you give it
-a [public address](docs/INSTALL.md#friends-on-other-machines).
+publishes the panel on this computer only, until you give it a
+[public address](docs/INSTALL.md#friends-on-other-machines).
 
 ## Guides
 

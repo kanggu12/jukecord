@@ -15,7 +15,10 @@ import {
   GuildId,
   GuildSchema,
   HistoryEntrySchema,
+  ListenLinkCreatedSchema,
+  ListenLinkSchema,
   LogRecordSchema,
+  LyricsSchema,
   MeSchema,
   Nullable,
   OkSchema,
@@ -465,10 +468,14 @@ export const API = {
   'login-link': op({
     method: 'POST',
     path: '/login-links',
-    summary: 'Make a one-time link that logs a browser in as the host (valid for 10 minutes)',
+    summary:
+      'Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control)',
     tag: 'host',
     access: 'host',
-    response: Type.Object({ url: Type.String(), expiresAt: Type.Integer() }),
+    // Who the browser logs in as: the host itself (admin, the default), or a friend who may view (read) or control.
+    // In the query, so a request without a body (every one before friends) still makes the host's link.
+    query: Type.Object({ scope: Type.Optional(ScopeSchema) }),
+    response: Type.Object({ url: Type.String(), expiresAt: Type.Integer(), scope: ScopeSchema }),
   }),
   backup: op({
     method: 'POST',
@@ -519,6 +526,57 @@ export const API = {
     params: InGuild,
     body: Type.Object({ channelId: Nullable(Snowflake) }, strict),
     response: SettingsSchema,
+  }),
+  // Listening together.
+  lyrics: op({
+    method: 'GET',
+    path: '/guilds/{guild}/lyrics',
+    summary: 'The lyrics of the track playing, timed when they can be (from LRCLIB, kept once found)',
+    tag: 'player',
+    access: 'read',
+    params: InGuild,
+    response: LyricsSchema,
+  }),
+  'stop-after': op({
+    method: 'PUT',
+    path: '/guilds/{guild}/player/stop-after',
+    summary: 'Stop when the current track ends (on), or play on after it (off); the queue stays',
+    tag: 'player',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object({ on: Type.Boolean() }, strict),
+    response: PlayerSchema,
+  }),
+  'listen-links': op({
+    method: 'GET',
+    path: '/guilds/{guild}/listen-links',
+    summary: "The server's listening links that still work: yours, or all of them with Manage Server",
+    tag: 'server',
+    access: 'control',
+    params: InGuild,
+    response: Type.Array(ListenLinkSchema),
+  }),
+  'listen-link-create': op({
+    method: 'POST',
+    path: '/guilds/{guild}/listen-links',
+    summary: 'Make a link that lets guests without a Discord account listen along (1, 7 or 30 days); shown once',
+    tag: 'server',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object(
+      { days: Type.Union([Type.Literal(1), Type.Literal(7), Type.Literal(30)], { description: 'How long it works' }) },
+      strict,
+    ),
+    response: ListenLinkCreatedSchema,
+  }),
+  'listen-link-revoke': op({
+    method: 'DELETE',
+    path: '/guilds/{guild}/listen-links/{id}',
+    summary: 'Revoke a listening link: its guests are out at once (its maker, or Manage Server)',
+    tag: 'server',
+    access: 'control',
+    params: Type.Object({ guild: GuildId, id: Type.Integer({ minimum: 1, description: 'A listening link ID' }) }),
+    response: OkSchema,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

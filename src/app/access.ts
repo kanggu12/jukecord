@@ -1,10 +1,12 @@
 /**
  * Who may do what, and in which server: turns a login into the ActionContext the actions take.
  *
- * Two kinds of login exist. The host is the machine running jukecord: its CLI (with the host token from the data
+ * Four kinds of login exist. The host is the machine running jukecord: its CLI (with the host token from the data
  * directory) and the one-time login links it prints. The host may do everything in every server. A Discord user logs
  * in to the panel with Discord and may act in the servers they are a member of, where the server's DJ role (when one
- * is set) decides who changes the music and Manage Server decides who changes the settings.
+ * is set) decides who changes the music and Manage Server decides who changes the settings. A friend is a browser the
+ * host let in with a login link for view or control: every server the host has, never Manage Server. A guest came in
+ * with a listening link: the one server of that link, to look and listen, nothing to change.
  *
  * Membership and roles come from Discord through the bot and are kept for a minute, so a panel that asks every few
  * seconds does not hammer Discord, while a role taken away still stops working within a minute.
@@ -19,8 +21,22 @@ import {
   type MemberInfo,
 } from './actions.ts';
 
-/** A login: the host, or a Discord user. */
-export type Principal = { readonly kind: 'host' } | { readonly kind: 'user'; readonly userId: string };
+/** A login: the host, a Discord user, a friend the host let in, or a guest of a listening link. */
+export type Principal =
+  | { readonly kind: 'host' }
+  | { readonly kind: 'user'; readonly userId: string }
+  | { readonly kind: 'friend'; readonly scope: 'read' | 'control' }
+  | {
+      readonly kind: 'guest';
+      readonly linkId: number;
+      /** The one server its link opens. */
+      readonly guildId: string;
+      /** When its link stops working (and its session with it). */
+      readonly expiresAt: number;
+    };
+
+/** The logins that are someone of the server's own: everyone but a guest. */
+export type MemberPrincipal = Exclude<Principal, { readonly kind: 'guest' }>;
 
 /** The single queue of browser-only mode: without a bot there are no Discord servers, so jukecord keeps one of its own. */
 export const LOCAL_GUILD: GuildInfo = { id: 'local', name: 'jukecord', icon: null };
@@ -42,6 +58,14 @@ export interface AccessOptions {
 
 // The answer while Discord has not sent the server list yet (the first seconds after a start); panels ask again.
 const STILL_CONNECTING = 'jukecord is still connecting to Discord; try again in a moment';
+// The answer to a guest asking for any server but its link's: the same whether that server exists or not.
+const OTHER_SERVER = 'a listening link opens its own server only';
+
+// What a friend and a guest may do in a server they can open: a friend's view or control, never the settings; a
+// guest's look and listen.
+function narrowed(principal: Principal): { mayControl: boolean; mayManage: boolean } {
+  return { mayControl: principal.kind === 'friend' && principal.scope === 'control', mayManage: false };
+}
 
 // One remembered answer about a member (null: not in the server) and when it was asked.
 interface Remembered {
@@ -68,12 +92,26 @@ export class Access {
   /** The servers this login can open, with what it may do in each. */
   async guilds(principal: Principal): Promise<GuildAccess[]> {
     const directory = this.options.directory();
-    // Browser-only: the one local queue, which only the host can reach (there is no Discord login without a bot).
-    if (!directory) return principal.kind === 'host' ? [{ ...LOCAL_GUILD, mayControl: true, mayManage: true }] : [];
+    // Browser-only: the one local queue, which the host reaches, and the friends and guests it let in (there is no
+    // Discord login without a bot).
+    if (!directory) {
+      if (principal.kind === 'host') return [{ ...LOCAL_GUILD, mayControl: true, mayManage: true }];
+      if (principal.kind === 'friend') return [{ ...LOCAL_GUILD, ...narrowed(principal) }];
+      if (principal.kind === 'guest' && principal.guildId === LOCAL_GUILD.id)
+        return [{ ...LOCAL_GUILD, ...narrowed(principal) }];
+      return [];
+    }
     // Just started: an empty list now would read as "the bot is in no server".
     if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING);
     const guilds = directory.guilds();
     if (principal.kind === 'host') return guilds.map((guild) => ({ ...guild, mayControl: true, mayManage: true }));
+    // A friend: every server the host has, to view or control. A guest: its link's server, while the bot is there.
+    if (principal.kind === 'friend') return guilds.map((guild) => ({ ...guild, ...narrowed(principal) }));
+    if (principal.kind === 'guest') {
+      return guilds
+        .filter((guild) => guild.id === principal.guildId)
+        .map((guild) => ({ ...guild, ...narrowed(principal) }));
+    }
     // A user sees the servers they are in; the questions go out together, not one after another.
     const answers = await Promise.all(
       guilds.map(async (guild) => {
@@ -88,9 +126,14 @@ export class Access {
   async context(principal: Principal, guildId: string): Promise<ActionContext> {
     const directory = this.options.directory();
     const userId = principal.kind === 'user' ? principal.userId : null;
+    // A guest is answered for any other server before anything is looked up: it learns nothing of what is here.
+    if (principal.kind === 'guest' && guildId !== principal.guildId) throw new ActionError('forbidden', OTHER_SERVER);
     if (!directory) {
-      // Browser-only mode knows one server, and only the host.
+      // Browser-only mode knows one server: the host's, its friends' and its guests'.
       if (guildId !== LOCAL_GUILD.id) throw new ActionError('not-found', 'there is no such server here');
+      if (principal.kind === 'friend' || principal.kind === 'guest') {
+        return { guildId, userId: null, ...narrowed(principal) };
+      }
       if (principal.kind !== 'host') throw new ActionError('forbidden', 'only the host can use jukecord here');
       return { guildId, userId: null, mayControl: true, mayManage: true };
     }
@@ -99,6 +142,8 @@ export class Access {
       throw new ActionError('not-found', 'the bot is not in that server');
     }
     if (principal.kind === 'host') return { guildId, userId: null, mayControl: true, mayManage: true };
+    if (principal.kind === 'friend' || principal.kind === 'guest')
+      return { guildId, userId: null, ...narrowed(principal) };
     const member = await this.member(directory, guildId, principal.userId);
     if (!member) throw new ActionError('forbidden', 'you are not a member of that server');
     return { guildId, userId, ...this.rights(directory, guildId, member) };

@@ -13,6 +13,9 @@ import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
 import { liveWhy, mayControl, positionNow, state, t, update, watch } from '../state.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
+import { inviteDialog, mayInvite } from './invite.ts';
+import { lightGlow } from './light.ts';
+import { lyricsOpen, toggleLyrics, whenLyricsChange } from './lyrics.ts';
 
 /** A disc: the track's picture in the middle, the rainbow rim while playing, white when paused. */
 export function disc(size: 'lg' | 'sm', track: Track | null, mode: 'playing' | 'paused' | 'idle'): HTMLElement {
@@ -126,6 +129,11 @@ export function ago(at: number): string {
 export function nowCard(live: Live): HTMLElement {
   const pill = h('span', { class: 'pill tone-idle' });
   const art = h('div', { class: 'art' });
+  // The glow that follows the music's low end while this browser listens, and its wider layer for the loudest beats
+  // (light.ts sets how strong each is; at rest neither is seen).
+  const beat = h('div', { class: 'beat', 'aria-hidden': 'true' });
+  const beatWide = h('div', { class: 'beat wide', 'aria-hidden': 'true' });
+  lightGlow(beat, beatWide);
   const title = h('h3', { class: 'title' });
   const meta = h('div', { class: 'meta' });
   const error = h('div', { class: 'error', role: 'status' });
@@ -149,10 +157,35 @@ export function nowCard(live: Live): HTMLElement {
   const keys = h('div', { class: 'keys' }, pause, skip, stop, repeat, drop);
   const info = h('div', { class: 'info' }, title, meta, error, notice, liveNote, progress, keys);
   const body = h('div', { class: 'now' }, art, info);
+  // The keys in the card's head: the lyrics (they open beside the player, or as a sheet on a phone).
+  const lyricsKey = h(
+    'button',
+    {
+      class: 'key sm',
+      type: 'button',
+      'data-act': 'lyrics',
+      'aria-expanded': 'false',
+      'aria-controls': 'lyrics-view',
+    },
+    icon('mic-vocal'),
+    h('span', { class: 'label' }),
+  );
+  lyricsKey.onclick = () => toggleLyrics();
+  whenLyricsChange(() => lyricsKey.setAttribute('aria-expanded', String(lyricsOpen())));
+  // More for the playing track, as a list (stop after this track).
+  const moreKey = h(
+    'button',
+    { class: 'key sm square quiet', type: 'button', 'data-act': 'now-more', 'aria-haspopup': 'dialog' },
+    icon('ellipsis'),
+  );
+  moreKey.onclick = () => nowMenu();
+  const headKeys = h('div', { class: 'head-keys' }, lyricsKey, moreKey);
+  // Said beside the state while the player is to stop when this track ends.
+  const stopsAfter = h('span', { class: 'badge tone-pause', hidden: true });
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'now-h' },
-    h('div', { class: 'card-head' }, h('h2', { id: 'now-h' }, ''), pill),
+    h('div', { class: 'card-head' }, h('h2', { id: 'now-h' }, ''), pill, stopsAfter, headKeys),
     body,
   );
 
@@ -167,13 +200,22 @@ export function nowCard(live: Live): HTMLElement {
     const player = state.player;
     const words = t();
     (card.querySelector('#now-h') as HTMLElement).textContent = words.nowPlaying;
+    // The Lyrics key says its name, and is there only where lyrics are looked up (JUKECORD_LYRICS).
+    (lyricsKey.querySelector('.label') as HTMLElement).textContent = words.lyrics;
+    lyricsKey.hidden = !state.status?.lyrics;
+    // The More key holds what changes the music: there for whoever may.
+    moreKey.title = words.nowMore;
+    moreKey.setAttribute('aria-label', words.nowMore);
+    moreKey.hidden = !mayControl();
+    stopsAfter.hidden = !player?.stopAfter;
+    stopsAfter.textContent = words.stopsAfter;
     const mode = discMode(player);
     card.classList.toggle('playing', mode === 'playing');
     card.classList.toggle('paused', mode === 'paused');
     // The disc is rebuilt only when the track or the mode changes, so its spin is not restarted by every snapshot.
     const trackId = player?.track?.id ?? null;
     if (trackId !== drawnTrack || mode !== drawnMode) {
-      fill(art, disc('lg', player?.track ?? null, mode));
+      fill(art, disc('lg', player?.track ?? null, mode), beat, beatWide);
       // The glow behind the disc takes the cover's colours.
       const cover = player?.track ? coverUrl(guild(), player.track) : null;
       art.style.setProperty('--cover', cover ? cssUrl(cover) : 'none');
@@ -253,7 +295,8 @@ export function nowCard(live: Live): HTMLElement {
     liveNote.classList.toggle('refused', state.live === 'refused');
     refill(liveNote, why ?? '', why ? icon('wifi-off') : null, why ? h('span', null, why) : null);
     progress.hidden = !track;
-    // The keys: play, pause or resume, skip, stop, repeat, remove.
+    // The keys: play, pause or resume, skip, stop, repeat, remove. A guest has none: it can never press them.
+    keys.hidden = state.me?.kind === 'guest';
     const control = mayControl();
     const moving = status === 'playing' || status === 'loading';
     const queued = (state.queue?.items.length ?? 0) > 0;
@@ -379,7 +422,7 @@ export function nowCard(live: Live): HTMLElement {
     void act(repeat, () => api.repeat(guild(), next[state.player?.repeat ?? 'off']));
   };
 
-  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting'], draw);
+  watch(['player', 'lang', 'guild', 'me', 'queue', 'live', 'liveWaiting', 'status'], draw);
   draw();
   // The moving parts move only while playing.
   window.setInterval(() => {
@@ -415,6 +458,8 @@ export function queueCard(): HTMLElement {
     icon('ellipsis'),
   );
   const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
+  // The queue's tools: none for a guest, who can change nothing.
+  const tools = h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear, toolsMore);
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
@@ -423,7 +468,7 @@ export function queueCard(): HTMLElement {
       { class: 'card-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
       searchField,
-      h('div', { class: 'tools' }, shuffle, dedupe, save, load, clear, toolsMore),
+      tools,
     ),
     list,
   );
@@ -550,7 +595,8 @@ export function queueCard(): HTMLElement {
       next.tabIndex = -1;
       next.setAttribute('aria-hidden', 'true');
     }
-    // The grip only for someone who may move the row; a person who may only look gets its place, empty.
+    // The grip only for whoever may move the rows (a guest, a read-only login): anyone else keeps the column empty, as a
+    // grip that does nothing would promise a move.
     const grip = control
       ? h('span', { class: 'grip', title: words.dragToMove }, icon('grip-vertical'))
       : h('span', { class: 'grip', 'aria-hidden': 'true' });
@@ -666,6 +712,7 @@ export function queueCard(): HTMLElement {
     clearSearch.hidden = !searching;
     clearSearch.title = words.clearSearch;
     clearSearch.setAttribute('aria-label', words.clearSearch);
+    tools.hidden = state.me?.kind === 'guest';
     for (const [button, label] of [
       [shuffle, words.shuffle],
       [dedupe, words.dedupe],
@@ -903,6 +950,44 @@ export function queueCard(): HTMLElement {
   });
   draw();
   return card;
+}
+
+// The playing card's More menu, as a list: stop after this track (pressed again, play on after it). Read when a choice
+// is pressed: the track may have changed while the list was open.
+function nowMenu(): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(words.nowPlaying, box);
+  const player = state.player;
+  const stopAfter = h(
+    'button',
+    {
+      class: 'choice',
+      type: 'button',
+      'aria-pressed': String(Boolean(player?.stopAfter)),
+      dataset: { choice: 'stop-after' },
+    },
+    icon('circle-stop'),
+    h('span', { class: 'grow' }, words.stopAfter),
+    icon('check', 'check'),
+  );
+  stopAfter.disabled = !mayControl() || !player?.track;
+  stopAfter.onclick = () => {
+    dialog.close();
+    void act(null, () => api['stop-after'](guild(), !state.player?.stopAfter));
+  };
+  // Inviting someone to listen along: the same place as the key beside the listeners.
+  const invite = h(
+    'button',
+    { class: 'choice', type: 'button', dataset: { choice: 'invite' } },
+    icon('user-plus'),
+    h('span', { class: 'grow' }, words.inviteToListen),
+  );
+  invite.onclick = () => {
+    dialog.close();
+    inviteDialog();
+  };
+  fill(box, stopAfter, mayInvite() ? invite : null);
 }
 
 // A queued track's keys as a list (narrow cards and touch screens without dragging): play now, play next, one place
@@ -1178,6 +1263,14 @@ export function voiceCard(): HTMLElement {
   const top = h('div', { class: 'voice-now' }, icon('radio', 'lg'), where, leave);
   const channels = h('ul', { class: 'channels scroll' });
   const listening = h('div', { class: 'listeners' });
+  // Beside the people listening: inviting more of them (a listening link, or for the host a friend's login link).
+  const invite = h(
+    'button',
+    { class: 'key sm', type: 'button', 'data-act': 'invite', 'aria-haspopup': 'dialog' },
+    icon('user-plus'),
+    h('span', { class: 'label' }),
+  );
+  invite.onclick = () => inviteDialog();
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'voice-h' },
@@ -1253,6 +1346,8 @@ export function voiceCard(): HTMLElement {
     }
     // Who listens in browsers.
     const people = state.listeners.people;
+    (invite.querySelector('.label') as HTMLElement).textContent = words.invite;
+    invite.title = words.inviteToListen;
     fill(
       listening,
       icon('headphones'),
@@ -1261,13 +1356,16 @@ export function voiceCard(): HTMLElement {
         ? h(
             'span',
             { class: 'faces' },
-            ...people.slice(0, 6).map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')),
+            ...people
+              .slice(0, 6)
+              .map((person) => face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm')),
           )
         : h('span', { class: 'faint' }, words.nobody),
       // Faces say who; a number only for the browsers beyond the six faces shown.
       state.listeners.count > Math.min(6, people.length)
         ? h('span', { class: 'faint num' }, `+${state.listeners.count - Math.min(6, people.length)}`)
         : null,
+      mayInvite() ? invite : null,
     );
   };
   leave.onclick = () =>
@@ -1349,4 +1447,11 @@ export function historyCard(): HTMLElement {
     for (const span of list.querySelectorAll<HTMLElement>('[data-at]')) span.textContent = ago(Number(span.dataset.at));
   }, 60_000);
   return card;
+}
+
+/** A listener's name as the panel says it: a guest and a friend in the person's language, anyone else by name. */
+export function listenerName(person: { name: string; guest?: boolean; friend?: boolean }): string {
+  if (person.guest) return t().guest;
+  if (person.friend) return t().friend;
+  return person.name;
 }

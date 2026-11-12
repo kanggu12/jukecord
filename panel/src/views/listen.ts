@@ -13,7 +13,9 @@ import { api, coverUrl, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill, setOff } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { keep, mayControl, positionNow, state, t, update, watch } from '../state.ts';
-import { act, disc } from './player.ts';
+import { followMusic } from './light.ts';
+import { act, disc, listenerName } from './player.ts';
+import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
 const DRIFT_MS = 300;
@@ -28,10 +30,14 @@ export function listenBar(live: Live): HTMLElement {
   audio.hidden = true;
   audio.id = 'listen-audio';
   document.body.append(audio);
+  // The light follows this audio's low end while it plays here (light.ts).
+  followMusic(audio);
   // Opus in Ogg where the browser plays it; older Safari does not, and gets MP3.
   let format: 'opus' | 'mp3' = audio.canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'mp3';
   let loaded: string | null = null;
   let sync: Sync = 'off';
+  // How loud the sound is as a share of the volume chosen: below 1 only while the sleep timer fades it out.
+  let fade = 1;
 
   const toggle = h('button', { class: 'key', type: 'button', 'data-act': 'listen' });
   // Three bars that dance on the Listen key while the sound plays here, each a box of its own so that only its scale
@@ -49,10 +55,23 @@ export function listenBar(live: Live): HTMLElement {
   const slider = h('input', { type: 'range', min: '0', max: '100', step: '1' });
   const level = h('span', { class: 'num' });
   const volume = h('label', { class: 'volume' }, icon('volume-2'), slider, level);
+  // The sleep timer: this browser stops listening when it runs out, as the Listen key would stop it (set below, once
+  // that is made).
+  let stopListening = () => {};
+  // And starting it, for a guest's media keys (set with it below).
+  let listenOn = () => {};
+  const sleep = sleepKey({
+    stop: () => stopListening(),
+    fade: (level) => {
+      fade = level;
+      audio.volume = state.volume * fade;
+    },
+  });
   const bar = h(
     'footer',
     { class: 'listen' },
     toggle,
+    sleep,
     status,
     mini,
     h('div', { class: 'faces-box' }, faces, count),
@@ -112,7 +131,7 @@ export function listenBar(live: Live): HTMLElement {
       setSync('in-sync');
       return;
     }
-    audio.volume = state.volume;
+    audio.volume = state.volume * fade;
     if (audio.paused) {
       audio.play().then(
         () => setSync('in-sync'),
@@ -173,9 +192,13 @@ export function listenBar(live: Live): HTMLElement {
   const session = 'mediaSession' in navigator ? navigator.mediaSession : null;
   const guild = () => state.guild?.id ?? '';
   if (session) {
-    session.setActionHandler('play', () => void act(null, () => api.resume(guild())));
-    session.setActionHandler('pause', () => void act(null, () => api.pause(guild())));
-    session.setActionHandler('nexttrack', () => void act(null, () => api.skip(guild())));
+    // A guest changes nothing for the others: its keys start and stop listening here.
+    const guest = () => state.me?.kind === 'guest';
+    session.setActionHandler('play', () => (guest() ? listenOn() : void act(null, () => api.resume(guild()))));
+    session.setActionHandler('pause', () => (guest() ? stopListening() : void act(null, () => api.pause(guild()))));
+    session.setActionHandler('nexttrack', () => {
+      if (!guest()) void act(null, () => api.skip(guild()));
+    });
   }
   const describe = () => {
     const track = state.player?.track;
@@ -281,6 +304,8 @@ export function listenBar(live: Live): HTMLElement {
     // A key turned off with the focus on it (Skip on the last track) hands it to the other key, or to Listen here.
     setOff(pauseKey, !player || !mayControl() || (!player.track && !queued), toggle);
     setOff(skipKey, !mayControl() || !player?.track, pauseKey, toggle);
+    // A guest has neither: it can never press them.
+    mini.hidden = state.me?.kind === 'guest';
     // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
     bar.classList.toggle('idle', !player?.track);
     // Who else listens: the faces built again only when the people change (their pictures would load again).
@@ -288,7 +313,7 @@ export function listenBar(live: Live): HTMLElement {
     refill(
       faces,
       JSON.stringify(people.map((person) => [person.id, person.name, person.avatar])),
-      ...people.map((person) => face(person.name, avatarUrl(person.id, person.avatar), 'sm')),
+      ...people.map((person) => face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm')),
     );
     count.textContent = state.listeners.count > 0 ? words.listeners(state.listeners.count) : '';
     slider.value = String(Math.round(state.volume * 100));
@@ -303,13 +328,8 @@ export function listenBar(live: Live): HTMLElement {
   };
   skipKey.onclick = () => void act(skipKey, () => api.skip(guild()));
 
-  toggle.onclick = () => {
-    // Blocked: this press is the asking the browser waited for.
-    if (state.listening && sync === 'blocked') {
-      playFromPress();
-      return;
-    }
-    const on = !state.listening;
+  // Listening here on or off, said to the others and kept for this browser.
+  const listen = (on: boolean) => {
     update({ listening: on });
     live.listening(on);
     keep('listening', on ? 'on' : 'off');
@@ -318,9 +338,23 @@ export function listenBar(live: Live): HTMLElement {
     align();
     if (on) playFromPress();
   };
+  stopListening = () => {
+    if (state.listening) listen(false);
+  };
+  listenOn = () => {
+    if (!state.listening) listen(true);
+  };
+  toggle.onclick = () => {
+    // Blocked: this press is the asking the browser waited for.
+    if (state.listening && sync === 'blocked') {
+      playFromPress();
+      return;
+    }
+    listen(!state.listening);
+  };
   slider.oninput = () => {
     const value = Number(slider.value) / 100;
-    audio.volume = value;
+    audio.volume = value * fade;
     update({ volume: value });
     keep('volume', String(value));
   };

@@ -10,6 +10,7 @@ import type { Access } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
 import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
@@ -144,6 +145,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       mode: deps.discordMode ? ('discord' as const) : ('browser-only' as const),
       uptimeMs: Math.max(0, Math.round(status.uptimeMs)),
       login: { discord: deps.auth.discordLogin },
+      lyrics: status.lyrics,
     };
   },
 
@@ -151,7 +153,22 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const { principal, scope, csrf } = who(caller);
     const bot = deps.directory()?.self() ?? null;
     if (principal.kind === 'host')
-      return { kind: 'host' as const, id: null, name: 'Host', avatar: null, scope, csrf, bot };
+      return { kind: 'host' as const, id: null, name: 'Host', avatar: null, scope, csrf, bot, guest: null };
+    // A friend and a guest have no name of their own (the panel says which they are in the person's language).
+    if (principal.kind === 'friend')
+      return { kind: 'friend' as const, id: null, name: 'Friend', avatar: null, scope, csrf, bot, guest: null };
+    if (principal.kind === 'guest') {
+      return {
+        kind: 'guest' as const,
+        id: null,
+        name: 'Guest',
+        avatar: null,
+        scope,
+        csrf,
+        bot,
+        guest: { guildId: principal.guildId, expiresAt: principal.expiresAt },
+      };
+    }
     const person = deps.store.users.get(principal.userId);
     return {
       kind: 'user' as const,
@@ -161,6 +178,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       scope,
       csrf,
       bot,
+      guest: null,
     };
   },
   guilds: async ({ caller, deps }) => (await deps.access.guilds(who(caller).principal)).map((guild) => ({ ...guild })),
@@ -189,9 +207,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       },
       deps.logFiles,
     ).map((record) => ({ ...record })),
-  'login-link': ({ deps }) => {
-    const link = deps.auth.createLink();
-    return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt };
+  'login-link': ({ query, deps }) => {
+    const scope = query.scope ?? 'admin';
+    const link = deps.auth.createLink(scope);
+    return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt, scope };
   },
   backup: async ({ deps }) => {
     // Named by the time, so backups sort and none replaces another; the newest JUKECORD_BACKUP_KEEP stay. Written
@@ -207,6 +226,30 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   wrapped: ({ context, query, deps }) =>
     deps.presenter.wrapped(deps.actions.wrapped(context, query.period, query.tz ?? 0)),
   'alerts-channel': ({ context, body, deps }) => settingsAnswer(deps.actions.alertsChannel(context, body.channelId)),
+  lyrics: async ({ context, deps }) => {
+    const lyrics = await deps.actions.lyrics(context);
+    return {
+      trackId: lyrics.trackId,
+      kind: lyrics.kind,
+      lines: lyrics.lines.map((line) => ({ ...line })),
+      text: lyrics.text,
+      // Credited wherever they are shown; "none found" has nothing to credit.
+      source: lyrics.kind === 'none' ? null : { ...LYRICS_SOURCE },
+    };
+  },
+  'stop-after': ({ context, body, deps }) => deps.presenter.player(deps.actions.stopAfter(context, body.on)),
+  'listen-links': ({ context, deps }) => deps.presenter.listenLinks(deps.actions.listenLinks(context)),
+  'listen-link-create': ({ context, body, deps }) => {
+    const { code, link } = deps.actions.listenLinkCreate(context, body.days);
+    const [shown] = deps.presenter.listenLinks([link]);
+    if (!shown) throw new Error('the listening link just made cannot be shown');
+    // The code after a "#": the browser keeps it to itself, so no log or proxy on the way sees it.
+    return { url: `${deps.publicUrl}/listen#${code}`, link: shown };
+  },
+  'listen-link-revoke': ({ context, params, deps }) => {
+    deps.actions.listenLinkRevoke(context, params.id);
+    return OK;
+  },
 };
 
 // A server's settings as the API sends them (the schema's arrays are mutable).

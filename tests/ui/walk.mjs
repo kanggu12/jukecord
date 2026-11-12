@@ -98,6 +98,8 @@ async function open({
     [lang, motion],
   );
   const page = await context.newPage();
+  // Lyrics come from the walk itself: its server would ask LRCLIB, and the walk reaches no site.
+  await madeUpLyrics(page);
   if (discord) await asDiscord(page, discord === true ? {} : discord);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -148,7 +150,7 @@ async function measure(page, name, setting, errors) {
 }
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
-async function sweep(name, sizes, act, { discord = false, touch, forced = false } = {}) {
+async function sweep(name, sizes, act, { discord = false, touch, forced = false, login } = {}) {
   if (ONLY && !ONLY.has(name)) return;
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
@@ -157,7 +159,8 @@ async function sweep(name, sizes, act, { discord = false, touch, forced = false 
         const setting = { theme, lang, width, height };
         const { context, page, errors } = await open({
           ...setting,
-          login: !name.startsWith('login'),
+          // Logged in as the host, but on the login page's states and where a state logs in its own way (a guest).
+          login: login ?? !name.startsWith('login'),
           discord,
           forced,
           ...(touch === undefined ? {} : { touch }),
@@ -231,8 +234,11 @@ const MADE_UP = {
   ],
 };
 // Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones;
-// `view`, a person who may only look (no DJ role, no Manage Server).
-async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false } = {}) {
+// `view`, a person who may only look (no DJ role, no Manage Server); `listeners`, the people listening in browsers.
+async function asDiscord(
+  page,
+  { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false, listeners = MADE_UP.listeners } = {},
+) {
   await page.route(/\/api\/v1\/(status|me|guilds|guilds\/[^/]+\/settings)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -266,9 +272,9 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild, 
         ws.send(message);
         return;
       }
-      if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners: MADE_UP.listeners });
+      if (data.type === 'state') Object.assign(data, { voice: MADE_UP.voice, listeners });
       if (data.type === 'voice') data.voice = MADE_UP.voice;
-      if (data.type === 'listeners') data.listeners = MADE_UP.listeners;
+      if (data.type === 'listeners') data.listeners = listeners;
       ws.send(JSON.stringify(data));
     });
     ws.onMessage((message) => server.send(message));
@@ -277,6 +283,41 @@ async function asDiscord(page, { name = MADE_UP.me.name, guild = MADE_UP.guild, 
 // A live message of the walk's own to a page in the made-up Discord.
 function madeUpSay(page, message) {
   for (const ws of page.madeUpSockets ?? []) ws.send(JSON.stringify({ v: 1, guild: 'local', ...message }));
+}
+
+// Made-up lyrics for the track playing, in the shape the server gives them: a line every four seconds of the seeded
+// three-minute tracks, so that one is being sung whenever a page looks. `page.lyricsKind` picks what the answer is
+// (timed lines unless a state says otherwise). Every word is made up.
+const LYRIC_LINES = [
+  'Fold the morning into paper',
+  'Set it down where the water bends',
+  '',
+  'Every boat a little letter',
+  'Every letter never ends',
+  '종이배에 아침을 접어 실어 보내',
+  '강물이 굽는 곳까지 천천히',
+  'Lanterns on the far side of the river, waiting for the last of the boats to come home again',
+];
+async function madeUpLyrics(page) {
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/lyrics$/, async (route) => {
+    const player = await api('GET', '/guilds/local/player');
+    const kind = page.lyricsKind ?? 'synced';
+    const lines = Array.from({ length: 45 }, (_, index) => ({
+      atMs: index * 4000,
+      text: LYRIC_LINES[index % LYRIC_LINES.length],
+    }));
+    const json =
+      kind === 'none'
+        ? { trackId: player.track?.id ?? 0, kind, lines: [], text: null, source: null }
+        : {
+            trackId: player.track?.id ?? 0,
+            kind,
+            lines: kind === 'synced' ? lines : [],
+            text: lines.map((line) => line.text).join('\n'),
+            source: { name: 'LRCLIB', url: 'https://lrclib.net' },
+          };
+    await route.fulfill({ status: 200, contentType: 'application/json', json });
+  });
 }
 
 // ---- the walk ---------------------------------------------------------------------------------------------------
@@ -829,6 +870,168 @@ await sweep('keys-focus', [[1440, 900]], async (page) => {
   const focused = await page.evaluate(() => document.activeElement?.closest('[data-act]')?.dataset.act ?? 'the page');
   if (focused !== 'pause') throw new Error(`Stop turned off left the focus on ${focused}`);
 });
+
+// ---- listening together -------------------------------------------------------------------------------------------
+// A few tracks playing again for the states below, which need one.
+await api('POST', '/guilds/local/playlists/Quiet%20hours/load', { at: 'end' });
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+// The lyrics while a track plays: beside the player on two columns, a sheet on one, the line being sung lit.
+async function openLyrics(page) {
+  await page.click('[data-act="lyrics"]');
+  await page.waitForSelector('.lyrics .lyric.lit, .lyrics .empty, .lyrics-plain');
+  await page.waitForTimeout(400);
+}
+await sweep('lyrics', SIZES, openLyrics);
+await sweep('lyrics-plain', FEW, async (page) => {
+  page.lyricsKind = 'plain';
+  await openLyrics(page);
+});
+await sweep('lyrics-none', FEW, async (page) => {
+  page.lyricsKind = 'none';
+  await openLyrics(page);
+});
+await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
+// The playing card's More menu, and the card while the player is to stop after this track.
+await sweep('now-more', FEW, async (page) => {
+  await page.click('[data-act="now-more"]');
+  await page.waitForSelector('.dialog [data-choice="stop-after"]');
+});
+// From the top of the track, so it does not end (and stop) while these pages are looked at.
+await api('POST', '/guilds/local/player/seek', { positionMs: 0 });
+await api('PUT', '/guilds/local/player/stop-after', { on: true });
+await sweep('stops-after', FEW);
+await api('PUT', '/guilds/local/player/stop-after', { on: false });
+// Playing again if the track ended meanwhile (it stopped after it).
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+// The sleep timer: its choices, and the listening bar with thirty minutes set (phones show its key alone).
+async function listenHere(page) {
+  await page.click('[data-act="listen"]');
+  await page.waitForSelector('[data-act="sleep"]:not([hidden])');
+}
+await sweep('sleep-menu', FEW, async (page) => {
+  await listenHere(page);
+  await page.click('[data-act="sleep"]');
+  await page.waitForSelector('.dialog [data-sleep="30"]');
+});
+await sweep('sleep', [...NARROW, ...FEW], async (page) => {
+  await listenHere(page);
+  await page.click('[data-act="sleep"]');
+  await page.click('.dialog [data-sleep="30"]');
+  await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
+});
+await api('DELETE', '/guilds/local/queue');
+await api('POST', '/guilds/local/player/stop').catch(() => {});
+// Listening with nothing playing, the timer set: the bar keeps to the phone's width.
+await sweep('sleep-idle', NARROW, async (page) => {
+  await listenHere(page);
+  await page.click('[data-act="sleep"]');
+  await page.click('.dialog [data-sleep="30"]');
+  await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
+});
+
+// Inviting: a listening link for guests with its QR code and the links that work, and the host's login link for a
+// friend. The key beside the listeners opens it.
+await api('POST', '/guilds/local/playlists/Quiet%20hours/load', { at: 'end' });
+await api('POST', '/guilds/local/player/resume').catch(() => {});
+await until('playing');
+async function invite(page) {
+  await page.click('[data-act="invite"]');
+  await page.waitForSelector('.dialog .invite');
+}
+await sweep('invite', FEW, async (page) => {
+  await invite(page);
+  await page.click('.dialog [data-act="invite-make"]');
+  await page.waitForSelector('.dialog .qr');
+});
+await sweep('invite-friend', FEW, async (page) => {
+  await invite(page);
+  await page.click('.dialog .invite-tabs button:nth-child(2)');
+  await page.click('.dialog [data-act="invite-friend"]');
+  await page.waitForSelector('.dialog [data-pane="friend"] .qr');
+});
+// Listening links made by the host, for the guests' states below: each guest's page takes one of a link's 25 places, so
+// a new link every twenty pages (a server keeps at most fifty links).
+const links = { hash: '', used: 20 };
+async function guestLink() {
+  if (links.used >= 20) {
+    const made = await api('POST', '/guilds/local/listen-links', { days: 7 });
+    links.hash = new URL(made.url).hash;
+    links.used = 0;
+  }
+  links.used += 1;
+  return links.hash;
+}
+// A guest's panel: in with a listening link, the player and the queue, the lyrics, the menu.
+async function asGuest(page) {
+  await page.goto(`${BASE}/listen${await guestLink()}`);
+  await page.waitForSelector('.app .card');
+  await page.waitForSelector('.bar .pill.tone-idle');
+}
+await sweep('guest', SIZES, asGuest, { login: false });
+await sweep(
+  'guest-lyrics',
+  FEW,
+  async (page) => {
+    await asGuest(page);
+    await openLyrics(page);
+  },
+  { login: false },
+);
+await sweep(
+  'guest-menu',
+  FEW,
+  async (page) => {
+    await asGuest(page);
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .section');
+    await page.waitForTimeout(400);
+  },
+  { login: false },
+);
+// A friend the host let in to control, from a login link.
+await sweep(
+  'friend',
+  FEW,
+  async (page) => {
+    const link = await api('POST', '/login-links?scope=control');
+    await page.goto(link.url.replace(new URL(link.url).origin, BASE));
+    await page.waitForSelector('.app .card');
+  },
+  { login: false },
+);
+// Guests among the people listening, in the made-up Discord.
+await sweep('listeners-guest', FEW, null, {
+  discord: {
+    listeners: {
+      people: [
+        ...MADE_UP.listeners.people,
+        { id: null, name: 'Guest', avatar: null, guest: true },
+        { id: null, name: 'Friend', avatar: null, friend: true },
+      ],
+      count: 6,
+    },
+  },
+});
+// What another app shared, on the page that adds it: for the host, and for a guest (who only listens).
+const SHARED = `/add?title=Paper%20Boats&text=${encodeURIComponent('Listen to this https://media.example/demo005')}`;
+await sweep('share', FEW, async (page) => {
+  await page.goto(`${BASE}${SHARED}`);
+  await page.waitForSelector('.share-card .share-input');
+});
+await sweep(
+  'share-guest',
+  FEW,
+  async (page) => {
+    await asGuest(page);
+    await page.goto(`${BASE}${SHARED}`);
+    await page.waitForSelector('.share-card .share-why');
+  },
+  { login: false },
+);
+await api('DELETE', '/guilds/local/queue');
+await api('POST', '/guilds/local/player/stop').catch(() => {});
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

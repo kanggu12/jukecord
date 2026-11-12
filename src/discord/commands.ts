@@ -49,6 +49,12 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   status: '/version',
   wrapped: '/wrapped',
   'alerts-channel': '/alerts set',
+  lyrics: '/lyrics',
+  // /stop with its after-track option.
+  'stop-after': '/stop',
+  'listen-links': '/share list',
+  'listen-link-create': '/share create',
+  'listen-link-revoke': '/share revoke',
 };
 
 // One command: English name and description, Korean name and description.
@@ -152,7 +158,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           { name: 'The queue', value: 'queue', name_localizations: { ko: '대기열' } },
         ),
     ),
-    command('stop', 'Stop playing (the queue stays)', '정지', '재생 멈춤(대기열은 그대로)'),
+    command('stop', 'Stop playing (the queue stays)', '정지', '재생 멈춤(대기열은 그대로)').addBooleanOption((option) =>
+      option
+        .setName('after-track')
+        .setDescription('True: stop when this track ends instead of now; False: play on after it')
+        .setNameLocalizations({ ko: '곡끝나면' })
+        .setDescriptionLocalizations({ ko: 'True: 지금 말고 이 곡이 끝나면 멈춤, False: 곡이 끝나도 계속 재생' }),
+    ),
     command('np', 'What is playing now', '지금곡', '지금 재생 중인 곡'),
     command('queue', 'Show the queue', '대기열', '대기열 보기').addIntegerOption((option) =>
       option
@@ -368,6 +380,57 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setDescription('Tell this server about trouble nowhere')
           .setNameLocalizations({ ko: '끄기' })
           .setDescriptionLocalizations({ ko: '문제를 어디에도 알리지 않음' }),
+      ),
+    command('lyrics', 'The lyrics of the track playing', '가사', '지금 곡의 가사').addIntegerOption((option) =>
+      option
+        .setName('page')
+        .setDescription('Page')
+        .setNameLocalizations({ ko: '페이지' })
+        .setDescriptionLocalizations({ ko: '페이지' })
+        .setMinValue(1),
+    ),
+    command('share', 'Links to listen along without a Discord account', '공유', '디스코드 계정 없이 같이 듣는 링크')
+      .addSubcommand((sub) =>
+        sub
+          .setName('create')
+          .setDescription('Make a link to listen along (only you see it)')
+          .setNameLocalizations({ ko: '만들기' })
+          .setDescriptionLocalizations({ ko: '같이 듣는 링크 만들기(나에게만 보임)' })
+          .addIntegerOption((option) =>
+            option
+              .setName('days')
+              .setDescription('How long it works (default: 7 days)')
+              .setNameLocalizations({ ko: '기간' })
+              .setDescriptionLocalizations({ ko: '쓸 수 있는 기간(기본: 7일)' })
+              .addChoices(
+                { name: '1 day', value: 1, name_localizations: { ko: '1일' } },
+                { name: '7 days', value: 7, name_localizations: { ko: '7일' } },
+                { name: '30 days', value: 30, name_localizations: { ko: '30일' } },
+              ),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('list')
+          .setDescription('The listening links that still work')
+          .setNameLocalizations({ ko: '목록' })
+          .setDescriptionLocalizations({ ko: '아직 쓸 수 있는 듣기 링크' }),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('revoke')
+          .setDescription('Revoke a listening link: its guests are out at once')
+          .setNameLocalizations({ ko: '폐기' })
+          .setDescriptionLocalizations({ ko: '듣기 링크 폐기(손님은 바로 나감)' })
+          .addIntegerOption((option) =>
+            option
+              .setName('number')
+              .setDescription('Its number in /share list')
+              .setNameLocalizations({ ko: '번호' })
+              .setDescriptionLocalizations({ ko: '/공유 목록 의 번호' })
+              .setRequired(true)
+              .setMinValue(1),
+          ),
       ),
   ];
   return commands.map((builder) => builder.toJSON());

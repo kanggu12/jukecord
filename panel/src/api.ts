@@ -47,6 +47,13 @@ export const PANEL_ACTIONS = [
   'logs',
   'wrapped',
   'alerts-channel',
+  'lyrics',
+  'stop-after',
+  'listen-links',
+  'listen-link-create',
+  'listen-link-revoke',
+  // The host's login links, made in the Invite dialog for a friend (view or control).
+  'login-link',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -158,6 +165,8 @@ export interface Player {
   notice: string | null;
   /** Whether the loading track waits for its turn among the fetches of every server. */
   waiting: boolean;
+  /** Whether the player stops when this track ends. */
+  stopAfter: boolean;
 }
 export interface AddResult {
   items: QueueItem[];
@@ -185,6 +194,9 @@ export interface Listener {
   id: string | null;
   name: string;
   avatar: string | null;
+  /** A guest of a listening link, and a friend the host let in: named in the panel's words. */
+  guest?: boolean;
+  friend?: boolean;
 }
 export interface Listeners {
   people: Listener[];
@@ -234,6 +246,8 @@ export interface Status {
   mode: 'discord' | 'browser-only';
   uptimeMs: number;
   login: { discord: boolean };
+  /** Whether lyrics are looked up here (JUKECORD_LYRICS). */
+  lyrics: boolean;
 }
 export interface Guild {
   id: string;
@@ -243,13 +257,15 @@ export interface Guild {
   mayManage: boolean;
 }
 export interface Me {
-  kind: 'host' | 'user';
+  kind: 'host' | 'user' | 'friend' | 'guest';
   id: string | null;
   name: string;
   avatar: string | null;
   scope: 'read' | 'control' | 'admin';
   csrf: string | null;
   bot: { id: string; name: string; avatar: string | null } | null;
+  /** A guest's server, and when its listening link stops working. */
+  guest: { guildId: string; expiresAt: number } | null;
 }
 export interface Token {
   id: number;
@@ -257,6 +273,24 @@ export interface Token {
   scope: 'read' | 'control' | 'admin';
   createdAt: number;
   usedAt: number | null;
+}
+/** A listening link as it is listed (its code was shown once, when it was made). */
+export interface ListenLink {
+  id: number;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdAt: number;
+  expiresAt: number;
+  guests: number;
+  maxGuests: number;
+}
+/** The lyrics of the track playing: timed lines (kind synced) and the words without timings. */
+export interface Lyrics {
+  trackId: number;
+  kind: 'synced' | 'plain' | 'instrumental' | 'none';
+  lines: { atMs: number; text: string }[];
+  text: string | null;
+  source: { name: string; url: string } | null;
 }
 export interface LogRecord {
   time: string;
@@ -327,6 +361,14 @@ export const api = {
     ),
   'alerts-channel': (guild: string, channelId: string | null) =>
     request<Settings>('PUT', `${g(guild)}/settings/alerts-channel`, { channelId }),
+  lyrics: (guild: string) => request<Lyrics>('GET', `${g(guild)}/lyrics`),
+  'stop-after': (guild: string, on: boolean) => request<Player>('PUT', `${g(guild)}/player/stop-after`, { on }),
+  'listen-links': (guild: string) => request<ListenLink[]>('GET', `${g(guild)}/listen-links`),
+  'listen-link-create': (guild: string, days: 1 | 7 | 30) =>
+    request<{ url: string; link: ListenLink }>('POST', `${g(guild)}/listen-links`, { days }),
+  'listen-link-revoke': (guild: string, id: number) => request<unknown>('DELETE', `${g(guild)}/listen-links/${id}`),
+  'login-link': (scope: 'read' | 'control') =>
+    request<{ url: string; expiresAt: number; scope: string }>('POST', `/login-links?scope=${scope}`),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */
@@ -344,4 +386,20 @@ export async function logOut(): Promise<void> {
  */
 export function coverUrl(guild: string, track: Track): string | null {
   return track.thumbnail ? `/api/v1${g(guild)}/tracks/${track.id}/cover` : null;
+}
+
+/**
+ * Comes in as a guest with a listening link's code (from the address's "#", which never reaches a server): the cookie
+ * comes back with the answer. Throws ApiError with jukecord's reason when it does not work.
+ */
+export async function joinListen(code: string): Promise<void> {
+  const response = await fetch('/auth/listen', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ code }),
+  });
+  if (response.ok) return;
+  const json = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+  throw new ApiError(json?.error?.code ?? String(response.status), json?.error?.message ?? '', response.status);
 }

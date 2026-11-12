@@ -42,6 +42,18 @@ switch, the sliders and the seek bar, the logo). On the pages it photographs it 
 rules (names, roles, landmarks, headings). It also presses **Listen here** and waits for the browser to be in time
 with the server. `tests/ui/verdict.mjs` fails on any finding; the pictures land in the folder given.
 
+The walk also looks at listening together: the lyrics beside the player and as a sheet (timed, plain, none found, and
+in a contrast theme), the playing card's ⋯ list and a stop after the track, the sleep timer (its choices, and the
+listening bar with a timer set while a track plays and while it waits), the Invite dialog (a listening link with its QR
+code, a friend's login link), a guest's panel (the player and the queue, the lyrics, its menu), a friend's, guests among
+the people listening, and the page of what another app shared, for the host and for a guest. Its lyrics come from the
+walk itself, as the server's would: the walk reaches no site, and its server would ask LRCLIB.
+
+The unit tests read LRCLIB's answers in their real shapes (`tests/fixtures/lrclib`, read once from LRCLIB, with
+made-up songs and words in place of real ones), take requests through a real address guard to a site of the test's
+own (HTTPS with a certificate made by openssl, skipped without it), try every way in a guest must not reach, and check
+the panel's QR codes against one that a separate decoder read back.
+
 ## Measurements
 
 `tests/perf/measure.sh` starts a throwaway jukecord with a server used every day for a year (a thousand different

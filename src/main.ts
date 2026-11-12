@@ -27,6 +27,8 @@ import { MediaCache } from './media/cache.ts';
 import { Covers } from './media/covers.ts';
 import { startEgressGuard } from './media/egress.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
+import { LrclibClient, Lyrics } from './media/lyrics.ts';
+import { outbound } from './media/outbound.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
@@ -175,9 +177,24 @@ async function main(): Promise<number> {
     log: log.child('lookup'),
     ...(config.media.allowPrivate ? {} : { checkAddress: publicAddressesOnly() }),
     watch: alerts,
+    // What YouTube says a recording is, kept for finding its lyrics.
+    music: store.music,
   });
   // The tracks' covers, fetched once into the cache by the same address rule as yt-dlp's (src/media/covers.ts).
   const covers = new Covers({ cache, log: log.child('covers'), allowPrivate: config.media.allowPrivate });
+  // Lyrics from LRCLIB, unless turned off: its requests go through the same address guard as yt-dlp's, and say what
+  // asks (LRCLIB wants a client's name, version and home).
+  const lyrics = config.lyrics
+    ? new Lyrics({
+        lyrics: store.lyrics,
+        music: store.music,
+        lookup: new LrclibClient({
+          get: outbound({ proxy: egress?.url ?? null }),
+          userAgent: `jukecord/${VERSION} (https://github.com/kanggu12/jukecord)`,
+        }),
+        log: log.child('lyrics'),
+      })
+    : null;
   const actions = new Actions({
     store,
     queue,
@@ -187,6 +204,7 @@ async function main(): Promise<number> {
     startedAt: Date.now(),
     queueMax: config.queueMax,
     trackMaxMs: config.media.trackMaxMs,
+    lyrics,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);
@@ -306,6 +324,13 @@ async function main(): Promise<number> {
     : null;
   schedule?.start();
 
+  // A revoked listening link ends its guests' live connections at once, whichever way it was revoked.
+  actions.setEndGuests((linkId) =>
+    web.hub.end(
+      (caller) => caller.principal.kind === 'guest' && caller.principal.linkId === linkId,
+      'the listening link has ended',
+    ),
+  );
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;

@@ -63,8 +63,11 @@ In Discord: join the voice channel and use the slash commands (`/play`, `/add`, 
 the panel's address, log in with Discord and press **Listen here**. Everyone sees the servers they share with the bot.
 
 **Can someone without Discord listen?**
-Logins come from Discord. The host's one-time links (`./jukecord open`, `jukecord link`) log in as the host, with every
-right.
+Yes, with a listening link: anyone who opens it listens along to that server in a browser for 1, 7 or 30 days, and
+changes nothing. People who may change the music make one with **Invite** in the panel, `/share create` or
+`jukecord share`, and can revoke it. The host can also let a friend in to view or control with a one-time login link
+(`jukecord link --scope read` or `--scope control`), and the host's own one-time links (`./jukecord open`,
+`jukecord link`) log in as the host, with every right.
 
 **Are the voice channel and the browser in time?**
 A browser plays the same file as the voice channel and follows the player's clock; one more than 0.3 s off jumps back
@@ -81,8 +84,11 @@ fingers.
 ## Privacy
 
 **What leaves my computer?**
-jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. It fetches each track's
-picture once from its site and keeps it with the track, and the panel shows it from jukecord; people's pictures come
+jukecord talks to Discord and to the sites the tracks come from, and sends no telemetry. For lyrics it asks
+[LRCLIB](https://lrclib.net), sending the song's title, artist, album and length, only for a track that is playing when
+someone opens its lyrics, once per track (`JUKECORD_LYRICS=off` turns it off). Every request jukecord makes, yt-dlp's,
+LRCLIB's and the covers', goes to public addresses only. It fetches each track's picture once from its site and keeps
+it with the track, and the panel shows it from jukecord; people's pictures come
 from Discord.
 [Your data](../README.md#your-data) says what it keeps, and where.
 

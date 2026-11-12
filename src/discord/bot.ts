@@ -49,6 +49,9 @@ import {
   historyCard,
   type Lang,
   langOf,
+  listenLinkCard,
+  listenLinksCard,
+  lyricsCard,
   note,
   nowCard,
   playlistsCard,
@@ -437,7 +440,7 @@ export class Bot implements Directory, AlertSink {
       // channel's, with its keys for everyone.
       const sub = interaction.options.getSubcommand(false);
       const lookup =
-        ['version', 'queue', 'history', 'stats'].includes(interaction.commandName) ||
+        ['version', 'queue', 'history', 'stats', 'lyrics', 'share'].includes(interaction.commandName) ||
         !COMMAND_NAMES.has(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
         (interaction.commandName === 'playlist' && sub === 'list') ||
@@ -482,12 +485,19 @@ export class Bot implements Directory, AlertSink {
           await this.replyCard(interaction, actions.seek(context, at), lang);
           return;
         }
-        case 'stop':
+        case 'stop': {
+          // With after-track: when this track ends (True), or not after all (False); the card says which.
+          const after = options.getBoolean('after-track');
+          if (after !== null) {
+            await interaction.editReply(nowCard(actions.stopAfter(context, after), lang, this.options.panelUrl));
+            return;
+          }
           actions.stop(context);
           await interaction.editReply({
             embeds: [note(lang, 'Stopped (the queue stays)', '재생 멈춤(대기열은 그대로)')],
           });
           return;
+        }
         case 'np':
           await this.replyCard(interaction, actions.nowPlaying(context), lang);
           return;
@@ -625,6 +635,16 @@ export class Bot implements Directory, AlertSink {
           await interaction.editReply({ embeds: [alertsCard(settings, lang)] });
           return;
         }
+        case 'share':
+          await this.onShare(interaction, context, lang);
+          return;
+        case 'lyrics': {
+          // The title of the track the lyrics are for: the action takes the track playing as it is called.
+          const title = actions.nowPlaying(context).track?.title ?? '';
+          const lyrics = await actions.lyrics(context);
+          await interaction.editReply({ embeds: [lyricsCard(lyrics, title, options.getInteger('page') ?? 1, lang)] });
+          return;
+        }
         default:
           // A command from an older registration that this version no longer has.
           await interaction.editReply({
@@ -682,6 +702,39 @@ export class Bot implements Directory, AlertSink {
         const name = options.getString('name', true);
         actions.playlistDelete(context, name);
         await interaction.editReply({ embeds: [note(lang, `Deleted "${name}"`, `"${name}" 지움`)] });
+        return;
+      }
+    }
+  }
+
+  // Listening links, answered to the person alone (a link is for them to pass on): a new one, the ones that still
+  // work, or one revoked by its number in the list.
+  private async onShare(interaction: ChatInputCommandInteraction, context: ActionContext, lang: Lang): Promise<void> {
+    const actions = this.options.actions;
+    const options = interaction.options;
+    switch (options.getSubcommand()) {
+      case 'create': {
+        // A link to a panel nobody can open would be no link at all.
+        const panel = this.options.panelUrl;
+        if (!panel) {
+          await interaction.editReply({
+            embeds: [note(lang, 'The panel has no address people can open', '아직 열 수 있는 패널 주소가 없음')],
+          });
+          return;
+        }
+        const { code, link } = actions.listenLinkCreate(context, options.getInteger('days') ?? 7);
+        await interaction.editReply({ embeds: [listenLinkCard(`${panel}/listen#${code}`, link, lang)] });
+        return;
+      }
+      case 'list':
+        await interaction.editReply({ embeds: [listenLinksCard(actions.listenLinks(context), lang)] });
+        return;
+      case 'revoke': {
+        const id = options.getInteger('number', true);
+        actions.listenLinkRevoke(context, id);
+        await interaction.editReply({
+          embeds: [note(lang, `Revoked listening link ${id}`, `듣기 링크 ${id}번 폐기함`)],
+        });
         return;
       }
     }

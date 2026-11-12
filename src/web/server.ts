@@ -129,6 +129,12 @@ const STATUS: Readonly<Record<string, number>> = {
 // The changes that start a fetch somebody waits for (yt-dlp and ffmpeg, at once): the tighter rate applies to them.
 const FETCHING: ReadonlySet<OperationName> = new Set(['skip', 'play-now', 'jump', 'remove-current']);
 
+// What a guest of a listening link may ask for: the player and the queue of its server and the lyrics of what plays,
+// who it is and which server it opens, and the status. Anything else is refused before it is looked at, whatever its
+// access would allow a login; the audio and the live updates check the guest's server on their own.
+const GUEST_MAY: ReadonlySet<OperationName> = new Set(['now-playing', 'queue', 'lyrics', 'me', 'guilds', 'status']);
+const GUEST_ONLY = 'a guest of a listening link can only listen';
+
 // What a refusal says when jukecord sheds work it can do later, and when a login or an address sends changes faster
 // than the rates allow.
 const BUSY = 'jukecord is busy; try again in a moment';
@@ -549,6 +555,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
         const verdict = permission(spec.access, caller);
         if (verdict === 'unauthorized') return failure(reply, 'unauthorized', 'log in first');
+        if (caller?.principal.kind === 'guest' && !GUEST_MAY.has(name)) return failure(reply, 'forbidden', GUEST_ONLY);
         if (verdict === 'forbidden') {
           return failure(
             reply,
@@ -794,17 +801,42 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       }
     },
   );
-  // A one-time login link from `jukecord open`: the browser becomes the host.
+  // A one-time login link from `jukecord open`: the browser becomes the host, or the host's friend with the view or
+  // control the link was made for.
   app.get<{ Params: { code: string } }>('/auth/link/:code', async (request, reply) => {
     // A link that works logs in even from a blocked address (it was made by the host a moment ago); one that does not
     // counts as a failure, and from a blocked address says so.
-    if (!auth.useLink(request.params.code)) {
+    const scope = auth.useLink(request.params.code);
+    if (scope === null) {
       const blocked = auth.limiter.blocked(request.ip);
       auth.limiter.fail(request.ip);
       return reply.redirect(blocked ? '/login?error=too-many' : '/login?error=link');
     }
-    log.info('logged in with a login link');
-    return reply.header('set-cookie', auth.startSession({ kind: 'host' })).redirect('/');
+    log.info(scope === 'admin' ? 'logged in with a login link' : 'a friend logged in with a login link', { scope });
+    return reply.header('set-cookie', auth.startLinkSession(scope)).redirect('/');
+  });
+  // A listening link: /listen#<code> is the panel's own page, which sends the code here (the part after "#" never
+  // reaches a server, so no log or proxy sees it). The browser comes in as a guest of the link, unless it is logged
+  // in already. Only from the panel's own pages: another site cannot make a browser its guest.
+  app.post<{ Body: { code?: unknown } }>('/auth/listen', async (request, reply) => {
+    if (!sameOrigin(request, options.publicUrl)) {
+      return failure(reply, 'forbidden', 'connections come from the panel only');
+    }
+    const code = typeof request.body?.code === 'string' ? request.body.code : '';
+    const { caller } = identify(request);
+    const used = auth.useListenLink(code, caller);
+    if (used.kind === 'invalid') {
+      // A code that does not work is a failed login like any other (a guess at the codes is held back).
+      const blocked = auth.limiter.blocked(request.ip);
+      auth.limiter.fail(request.ip);
+      return blocked
+        ? failure(reply, 'too-many', 'too many failed logins; wait ten minutes')
+        : failure(reply, 'not-found', 'this listening link has ended or does not exist');
+    }
+    if (used.kind === 'full') return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    if (used.kind === 'already') return reply.send({ ok: true });
+    log.info('a guest came in with a listening link', { link: used.linkId, guild: used.guildId });
+    return reply.header('set-cookie', used.cookie).send({ ok: true });
   });
   app.post('/auth/logout', async (request, reply) => {
     const { caller, blocked } = identify(request);

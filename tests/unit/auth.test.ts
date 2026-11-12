@@ -143,11 +143,12 @@ describe('Auth sessions', () => {
   it('turns a login link into one login within ten minutes', () => {
     const { auth, advance } = setup();
     const first = auth.createLink();
-    assert.equal(auth.useLink(first.code), true);
-    assert.equal(auth.useLink(first.code), false);
+    // The host's own, unless made for a friend.
+    assert.equal(auth.useLink(first.code), 'admin');
+    assert.equal(auth.useLink(first.code), null);
     const second = auth.createLink();
     advance(10 * 60_000);
-    assert.equal(auth.useLink(second.code), false);
+    assert.equal(auth.useLink(second.code), null);
   });
 });
 

@@ -9,6 +9,8 @@ import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/act
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
 import type { HistoryEntry, Playlist, QueueItem } from '../core/types.ts';
+import type { LyricsAnswer } from '../media/lyrics.ts';
+import type { ListenLinkRow } from '../store/store.ts';
 import { formatDuration } from '../util/time.ts';
 
 /** The two languages the bot answers in; anything else gets English. */
@@ -62,6 +64,20 @@ const TEXT = {
   alerts: { en: 'Alerts channel', ko: '알림 채널' },
   alertsHere: { en: 'jukecord tells this server about trouble here', ko: 'jukecord가 이 서버의 문제를 여기에 알림' },
   noAlerts: { en: 'jukecord tells this server about trouble nowhere', ko: 'jukecord가 이 서버에 문제를 알리지 않음' },
+  lyrics: { en: 'Lyrics', ko: '가사' },
+  noLyrics: { en: 'No lyrics found for this track', ko: '이 곡의 가사를 찾지 못함' },
+  instrumental: { en: 'Instrumental: no words', ko: '연주곡: 가사 없음' },
+  lyricsFrom: { en: 'Lyrics from LRCLIB', ko: '가사 출처: LRCLIB' },
+  stopsAfter: { en: 'Stops after this track', ko: '이 곡이 끝나면 멈춤' },
+  listenLink: { en: 'A link to listen along', ko: '같이 듣는 링크' },
+  listenLinkHint: {
+    en: 'Anyone with it listens along in a browser without a Discord account and changes nothing. It is shown once.',
+    ko: '이 링크가 있으면 디스코드 계정 없이 브라우저에서 같이 듣고, 아무것도 바꿀 수 없음. 이번 한 번만 보임.',
+  },
+  listenLinks: { en: 'Listening links', ko: '듣기 링크' },
+  noListenLinks: { en: 'No listening links', ko: '듣기 링크 없음' },
+  until: { en: 'until', ko: '만료' },
+  guests: { en: 'guests', ko: '손님' },
 } as const;
 
 /** A short confirmation ("Done", "Removed 3 duplicates") in the person's language. */
@@ -157,9 +173,12 @@ export function nowCard(snapshot: PlayerSnapshot, lang: Lang, panelUrl: string |
       `${line(snapshot.track.title, snapshot.track.url, null, snapshot.addedBy, lang)}\n${bar(snapshot.positionMs, snapshot.durationMs)}${notice}`,
     );
   if (snapshot.track.thumbnail) embed.setThumbnail(snapshot.track.thumbnail);
-  // The repeat mode, when one is on, under the bar.
+  // The repeat mode, when one is on, and a stop asked for after this track, under the bar.
+  const footer: string[] = [];
   if (snapshot.repeat !== 'off')
-    embed.setFooter({ text: snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang] });
+    footer.push(snapshot.repeat === 'track' ? TEXT.repeatTrack[lang] : TEXT.repeatQueue[lang]);
+  if (snapshot.stopAfter) footer.push(TEXT.stopsAfter[lang]);
+  if (footer.length > 0) embed.setFooter({ text: footer.join(' · ') });
   // The card's language travels in the buttons, so a press redraws the card in the language it was made in, not the
   // presser's (a card in the channel is everyone's).
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -440,4 +459,64 @@ export function alertsCard(settings: SettingsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.alerts[lang]);
   if (settings.alertsChannelId === null) return embed.setDescription(TEXT.noAlerts[lang]);
   return embed.setDescription(`<#${settings.alertsChannelId}>\n${TEXT.alertsHere[lang]}`);
+}
+
+// How many characters of lyrics one page of the card holds: an embed takes 4096, and a page this long reads whole.
+const LYRICS_PAGE = 1800;
+
+/** One page of the lyrics of the track playing, the words only (no timings), with the source credited. */
+export function lyricsCard(lyrics: LyricsAnswer, title: string, page: number, lang: Lang): EmbedBuilder {
+  const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(`${TEXT.lyrics[lang]} · ${title}`.slice(0, 256));
+  if (lyrics.kind === 'none') return embed.setDescription(TEXT.noLyrics[lang]);
+  if (lyrics.kind === 'instrumental')
+    return embed.setDescription(TEXT.instrumental[lang]).setFooter({ text: TEXT.lyricsFrom[lang] });
+  // Pages of whole lines: each line goes on the page it starts on, unless that page is full.
+  const pages: string[] = [];
+  let current = '';
+  for (const line of (lyrics.text ?? '').split('\n')) {
+    // A line longer than a page (it happens with words written without line breaks) is cut into pieces of a page.
+    for (let at = 0; at < Math.max(1, line.length); at += LYRICS_PAGE) {
+      const piece = line.slice(at, at + LYRICS_PAGE);
+      if (current.length + piece.length + 1 > LYRICS_PAGE && current) {
+        pages.push(current);
+        current = '';
+      }
+      current = current ? `${current}\n${piece}` : piece;
+    }
+  }
+  if (current.trim()) pages.push(current);
+  const count = Math.max(1, pages.length);
+  const shown = Math.min(Math.max(1, page), count);
+  return embed
+    .setDescription(pages[shown - 1]?.trim() || TEXT.noLyrics[lang])
+    .setFooter({ text: `${TEXT.page[lang]} ${shown}/${count} · ${TEXT.lyricsFrom[lang]}` });
+}
+
+/** A listening link just made, with when it stops working and how many guests it takes. */
+export function listenLinkCard(url: string, link: ListenLinkRow, lang: Lang): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(COLOUR.added)
+    .setTitle(TEXT.listenLink[lang])
+    .setDescription(`${url}\n\n${TEXT.listenLinkHint[lang]}`)
+    .setFooter({
+      text: `#${link.id} · ${TEXT.guests[lang]} ${link.maxGuests}`,
+    })
+    .setTimestamp(link.expiresAt);
+}
+
+/** The listening links that still work: their numbers (for /share revoke), until when, their guests, who made them. */
+export function listenLinksCard(links: readonly ListenLinkRow[], lang: Lang): EmbedBuilder {
+  if (links.length === 0) return new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.noListenLinks[lang]);
+  return new EmbedBuilder()
+    .setColor(COLOUR.neutral)
+    .setTitle(TEXT.listenLinks[lang])
+    .setDescription(
+      links
+        .slice(0, 25)
+        .map(
+          (link) =>
+            `**${link.id}** · ${TEXT.until[lang]} <t:${Math.floor(link.expiresAt / 1000)}:R> · ${TEXT.guests[lang]} ${link.guests}/${link.maxGuests} · ${link.createdBy ? `<@${link.createdBy}>` : TEXT.nobody[lang]}`,
+        )
+        .join('\n'),
+    );
 }

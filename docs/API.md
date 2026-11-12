@@ -108,6 +108,8 @@ playlist) so a program does not need to ask again.
 | `seek` Go to a place in the current track | `POST /api/v1/guilds/{guild}/player/seek` | control | `jukecord seek` | `/seek` |
 | `repeat` Repeat nothing, the current track, or the queue | `PUT /api/v1/guilds/{guild}/player/repeat` | control | `jukecord repeat` | `/repeat` |
 | `stop` Stop playing; the queue stays | `POST /api/v1/guilds/{guild}/player/stop` | control | `jukecord stop` | `/stop` |
+| `lyrics` The lyrics of the track playing, timed when they can be (from LRCLIB, kept once found) | `GET /api/v1/guilds/{guild}/lyrics` | read | `jukecord lyrics` | `/lyrics` |
+| `stop-after` Stop when the current track ends (on), or play on after it (off); the queue stays | `PUT /api/v1/guilds/{guild}/player/stop-after` | control | `jukecord stop-after` | `/stop` |
 
 ### Queue
 
@@ -156,6 +158,9 @@ playlist) so a program does not need to ask again.
 | `dj-role` Set the role that may change the music (null: everyone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/dj-role` | admin | `jukecord dj` | `/dj set` |
 | `status` The version, the mode and whether Discord is connected | `GET /api/v1/status` | anyone | `jukecord status` | `/version` |
 | `alerts-channel` Set the text channel where jukecord tells this server about trouble (null: nowhere); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/alerts-channel` | admin | `jukecord alerts` | `/alerts set` |
+| `listen-links` The server's listening links that still work: yours, or all of them with Manage Server | `GET /api/v1/guilds/{guild}/listen-links` | control | `jukecord shares` | `/share list` |
+| `listen-link-create` Make a link that lets guests without a Discord account listen along (1, 7 or 30 days); shown once | `POST /api/v1/guilds/{guild}/listen-links` | control | `jukecord share` | `/share create` |
+| `listen-link-revoke` Revoke a listening link: its guests are out at once (its maker, or Manage Server) | `DELETE /api/v1/guilds/{guild}/listen-links/{id}` | control | `jukecord unshare` | `/share revoke` |
 
 ### Your login
 
@@ -172,7 +177,7 @@ playlist) so a program does not need to ask again.
 | Operation | Request | Needs | CLI | Discord |
 | :-- | :-- | :-- | :-- | :-- |
 | `logs` The newest log records, oldest first | `GET /api/v1/logs` | the host | `jukecord logs` |  |
-| `login-link` Make a one-time link that logs a browser in as the host (valid for 10 minutes) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
+| `login-link` Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
 | `backup` Write a copy of the database to the backups folder of the data directory | `POST /api/v1/backups` | the host | `jukecord backup` |  |
 | `doctor` Check the parts jukecord needs and show the settings (secrets as set or not set) | `GET /api/v1/doctor` | the host | `jukecord doctor` |  |
 

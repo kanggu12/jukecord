@@ -113,6 +113,7 @@ export const PlayerSchema = Type.Object(
       }),
     ),
     waiting: Type.Boolean({ description: 'Whether the loading track waits for its turn among the fetches' }),
+    stopAfter: Type.Boolean({ description: 'Whether the player stops when the current track ends' }),
   },
   { title: 'Player' },
 );
@@ -272,6 +273,7 @@ export const StatusSchema = Type.Object(
     mode: Type.Union([Type.Literal('discord'), Type.Literal('browser-only')]),
     uptimeMs: Type.Integer(),
     login: Type.Object({ discord: Type.Boolean({ description: 'Whether logging in with Discord is set up' }) }),
+    lyrics: Type.Boolean({ description: 'Whether lyrics are looked up here (JUKECORD_LYRICS)' }),
   },
   { title: 'Status' },
 );
@@ -291,13 +293,21 @@ export const ScopeSchema = Type.Union([Type.Literal('read'), Type.Literal('contr
 
 export const MeSchema = Type.Object(
   {
-    kind: Type.Union([Type.Literal('host'), Type.Literal('user')]),
+    kind: Type.Union([Type.Literal('host'), Type.Literal('user'), Type.Literal('friend'), Type.Literal('guest')], {
+      description: 'friend: let in by the host with a login link; guest: in with a listening link',
+    }),
     id: Nullable(Type.String()),
     name: Type.String(),
     avatar: Nullable(Type.String()),
     scope: ScopeSchema,
     csrf: Nullable(Type.String({ description: 'Send as the x-jukecord-csrf header with every change (panel only)' })),
     bot: Nullable(Type.Object({ id: Type.String(), name: Type.String(), avatar: Nullable(Type.String()) })),
+    guest: Nullable(
+      Type.Object(
+        { guildId: Type.String(), expiresAt: Type.Integer() },
+        { description: "A guest's server, and when its listening link stops working" },
+      ),
+    ),
   },
   { title: 'Me' },
 );
@@ -366,3 +376,50 @@ export const OkSchema = Type.Object({ ok: Type.Literal(true) }, { title: 'Ok' })
 
 /** How many things a change removed. */
 export const RemovedSchema = Type.Object({ removed: Type.Integer() }, { title: 'Removed' });
+
+/** The lyrics of the track playing. */
+export const LyricsSchema = Type.Object(
+  {
+    trackId: Type.Integer({ description: 'The track they are for (the one playing when asked)' }),
+    kind: Type.Union(
+      [Type.Literal('synced'), Type.Literal('plain'), Type.Literal('instrumental'), Type.Literal('none')],
+      {
+        description: 'synced: timed lines; plain: words without timings; instrumental: no words; none: none found',
+      },
+    ),
+    lines: Type.Array(
+      Type.Object({
+        atMs: Type.Integer({ description: 'When the line starts, in milliseconds from the start of the track' }),
+        text: Type.String({ description: 'Its words; empty for a pause' }),
+      }),
+      { description: 'The timed lines, for kind synced; empty otherwise' },
+    ),
+    text: Nullable(Type.String({ description: 'The words without timings' })),
+    source: Nullable(
+      Type.Object({ name: Type.String(), url: Type.String() }, { description: 'Where they come from (LRCLIB)' }),
+    ),
+  },
+  { title: 'Lyrics' },
+);
+
+/** A listening link as it is listed: never its code, which is shown once, when it is made. */
+export const ListenLinkSchema = Type.Object(
+  {
+    id: Type.Integer(),
+    createdBy: Nullable(Type.String({ description: 'Discord user ID; null for the host' })),
+    createdByName: Nullable(Type.String()),
+    createdAt: Type.Integer(),
+    expiresAt: Type.Integer({ description: 'When it stops working, and its guests are out' }),
+    guests: Type.Integer({ description: 'The browsers in with it now' }),
+    maxGuests: Type.Integer({ description: 'The most browsers it lets in at once' }),
+  },
+  { title: 'ListenLink' },
+);
+
+export const ListenLinkCreatedSchema = Type.Object(
+  {
+    url: Type.String({ description: 'The link to give guests: shown in this answer only, stored only as a hash' }),
+    link: ListenLinkSchema,
+  },
+  { title: 'ListenLinkCreated' },
+);
