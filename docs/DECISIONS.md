@@ -101,6 +101,18 @@ picture costs far less than a large one, and it changes only when the track does
 without drawing anything again; the menu's motion switch and the system's own setting stop all of it, and the system's
 setting for less transparency turns the glass solid.
 
+## A type scale whose lines centre the letters
+
+A browser rounds a face's ascent and descent to whole pixels and splits the room left in a line into whole pixels too,
+the odd one going under the letters. At 13 px Pretendard (12 above the baseline, 3 below) on a line of 1.45 (18.85
+px), every word stood 0.9 px above the middle of its key, and so above the icon beside it, which the key centred
+exactly. Each size of the panel's type scale has a line height that leaves an even room (11/15, 12/18, 13/19, 15/22,
+20/28, 24/31, measured for every size at one and two device pixels per pixel), so a key, a label or a row centres the
+letters themselves; and an icon is as tall as a line of its words, its drawing in the middle, so it stands on their
+first line whether a row centres its items or lines them up at their tops. Trimming a line to the capitals (CSS
+`text-box`) does the same, but only on an element that holds the words, and not in Firefox. The layout instrument
+holds icons to the centre of their words, and a row's controls to one height and one centre, to half a pixel.
+
 ## Live messages made once, not compressed per connection
 
 The panel replaces its whole queue with every queue message, which keeps it simple and always right, but a
