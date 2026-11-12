@@ -80,8 +80,10 @@ export class VoiceOutput implements PlayerOutput {
   // Whether the player wants this output paused. @discordjs/voice ignores a pause while a new stream is still
   // buffering (its first tens of milliseconds); the wish is kept and applied once it plays.
   private wantPaused = false;
-  // The server's sound (volume and preset), read at each start of a stream.
+  // The server's sound (volume and preset), read at each start of a stream, and the sound of the stream started last
+  // (null while none plays), so a change can tell whether the stream has it already.
   private readonly sound: () => Sound;
+  private streaming: Sound | null = null;
 
   constructor(options: {
     ffmpeg: Ffmpeg;
@@ -119,6 +121,7 @@ export class VoiceOutput implements PlayerOutput {
     // A start plays; a pause that follows sets the wish again.
     this.wantPaused = false;
     const sound = this.sound();
+    this.streaming = sound;
     const fromStart = offsetMs < FROM_START_MS;
     if (fromStart && isPlain(sound)) {
       // The plain sound from the top: the cached file as it is, which is what Discord carries.
@@ -162,8 +165,14 @@ export class VoiceOutput implements PlayerOutput {
 
   stop(): void {
     this.session = -1;
+    this.streaming = null;
     this.audio.stop(true);
     this.release();
+  }
+
+  /** The sound of the stream started last, or null when none was started since the last stop. */
+  streamSound(): Sound | null {
+    return this.streaming;
   }
 
   // Closes what fed the previous resource: the file handle or the ffmpeg process.
@@ -286,10 +295,11 @@ export class VoiceManager implements VoiceControl {
    * within SOUND_COOLDOWN_MS are merged into the last one, heard when the cooldown ends.
    */
   soundChanged(guildId: string): void {
-    // Not in voice: the next stream starts with the new sound by itself.
-    if (!this.joined.has(guildId)) return;
+    // Not in voice, or the stream has this sound already: the next stream starts with it by itself.
+    if (!this.stale(guildId)) return;
     const wait = (this.soundAt.get(guildId) ?? Number.NEGATIVE_INFINITY) + SOUND_COOLDOWN_MS - this.clock.now();
-    if (wait <= 0) {
+    // A wait longer than the cooldown is a clock set back meanwhile: not a reason to keep the old sound.
+    if (wait <= 0 || wait > SOUND_COOLDOWN_MS) {
       this.soundAt.set(guildId, this.clock.now());
       this.players.get(guildId).restartOutputs();
       return;
@@ -300,10 +310,20 @@ export class VoiceManager implements VoiceControl {
       guildId,
       this.clock.setTimeout(() => {
         this.soundTimers.delete(guildId);
+        // A stream started meanwhile (the next track, a resume) has the newest sound already: nothing to start again.
+        if (!this.stale(guildId)) return;
         this.soundAt.set(guildId, this.clock.now());
-        if (this.joined.has(guildId)) this.players.get(guildId).restartOutputs();
+        this.players.get(guildId).restartOutputs();
       }, wait),
     );
+  }
+
+  // Whether the bot is in a server's voice with a stream whose sound is not the server's sound now.
+  private stale(guildId: string): boolean {
+    const streaming = this.joined.get(guildId)?.output.streamSound() ?? null;
+    if (streaming === null) return false;
+    const now = this.sound(guildId);
+    return streaming.volume !== now.volume || streaming.preset !== now.preset;
   }
 
   channel(guildId: string): { channelId: string; name: string } | null {
@@ -477,6 +497,7 @@ export class VoiceManager implements VoiceControl {
     const waiting = this.soundTimers.get(guildId);
     if (waiting !== undefined) this.clock.clearTimeout(waiting);
     this.soundTimers.delete(guildId);
+    this.soundAt.delete(guildId);
     this.players.get(guildId).detach(joined.output);
     this.bus?.emit('voice', { guildId, channel: null });
     // Nobody listens in voice any more: an open vote to skip counts the browsers alone.

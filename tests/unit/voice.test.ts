@@ -187,8 +187,11 @@ describe('VoiceOutput and the sound of the voice channel', () => {
       output.start(media, 30_000, 4);
       // Plain from the top: no ffmpeg. Plain from the middle: the seek. A sound: ffmpeg's sound, faded in mid-track.
       assert.deepEqual(asked, ['seek', 'sound 0 false', 'sound 30000 true']);
+      // The stream says which sound it has, until it stops.
+      assert.deepEqual(output.streamSound(), { volume: 100, preset: 'bass' });
       await new Promise((resolve) => setTimeout(resolve, 50));
       output.stop();
+      assert.equal(output.streamSound(), null);
     } finally {
       cleanup();
     }

@@ -8,6 +8,7 @@ import { type ActionContext, ActionError, Actions, type VoiceControl } from '../
 import { Bus } from '../../src/core/bus.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
+import type { Sound } from '../../src/core/sound.ts';
 import { VoiceManager } from '../../src/discord/voice.ts';
 import { createLogger } from '../../src/log.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
@@ -93,42 +94,73 @@ describe('the voice sound through the actions', () => {
 });
 
 describe('the voice side and a change of sound', () => {
-  it('starts the stream again at once, and merges the changes of the next 400 ms into one at its end', async () => {
+  it('starts the stream again at once, merges the changes of the next 400 ms into one, and skips a stream up to date', async () => {
     const clock = new FakeClock();
+    // The server's sound, which each test step sets, and the sound of the stream playing, which a restart takes up.
+    let sound: Sound = { volume: 100, preset: 'off' };
+    let streaming: Sound | null = { volume: 100, preset: 'off' };
     let restarts = 0;
     const voice = new VoiceManager({
       client: { guilds: { cache: new Map() } } as never,
-      players: { get: () => ({ restartOutputs: () => (restarts += 1), detach: () => {} }) } as never,
+      players: {
+        get: () => ({
+          restartOutputs: () => {
+            restarts += 1;
+            streaming = sound;
+          },
+          detach: () => {},
+        }),
+      } as never,
       ffmpeg: {} as never,
       log: createLogger({ level: 'error', sinks: [] }),
       idleMs: 0,
       clock,
+      sound: () => sound,
     });
+    const change = (next: Sound) => {
+      sound = next;
+      voice.soundChanged('G');
+    };
     // Not in voice: nothing to start again.
-    voice.soundChanged('G');
+    change({ volume: 90, preset: 'off' });
     assert.equal(restarts, 0);
-    // In voice, as a join leaves it.
+    // In voice, as a join leaves it, its stream playing.
     (voice as unknown as { joined: Map<string, unknown> }).joined.set('G', {
       connection: { state: { status: 'ready' }, destroy: () => {} },
-      output: {},
+      output: { streamSound: () => streaming },
       channelId: '1',
       name: 'Lounge',
     });
-    voice.soundChanged('G');
+    change({ volume: 80, preset: 'off' });
     assert.equal(restarts, 1);
-    // Three more within the cooldown: one, when it ends.
+    // Three more within the cooldown: one, when it ends, with the last of them.
     await clock.advance(100);
-    voice.soundChanged('G');
-    voice.soundChanged('G');
+    change({ volume: 70, preset: 'off' });
+    change({ volume: 60, preset: 'bass' });
     await clock.advance(100);
-    voice.soundChanged('G');
+    change({ volume: 50, preset: 'bass' });
     assert.equal(restarts, 1);
     await clock.advance(200);
     assert.equal(restarts, 2);
-    // Leaving voice drops a change still waiting.
-    voice.soundChanged('G');
-    voice.leave('G');
+    assert.deepEqual(streaming, { volume: 50, preset: 'bass' });
+    // A change back and forth within the cooldown, ending where the stream is: nothing to start again.
+    change({ volume: 40, preset: 'bass' });
+    change({ volume: 50, preset: 'bass' });
     await clock.advance(1000);
     assert.equal(restarts, 2);
+    // A stream that started meanwhile with the newest sound (the next track) is not started again.
+    await clock.advance(1000);
+    change({ volume: 30, preset: 'bass' });
+    assert.equal(restarts, 3);
+    change({ volume: 20, preset: 'bass' });
+    streaming = { volume: 20, preset: 'bass' };
+    await clock.advance(1000);
+    assert.equal(restarts, 3);
+    // Leaving voice drops a change still waiting.
+    change({ volume: 10, preset: 'bass' });
+    change({ volume: 15, preset: 'bass' });
+    voice.leave('G');
+    await clock.advance(1000);
+    assert.equal(restarts, 4);
   });
 });
