@@ -846,9 +846,14 @@ async function playingHere(page) {
 await sweep('keys-typed', [[1440, 900]], async (page) => {
   const { now } = await playingHere(page);
   const skips = [];
-  await page.route('**/api/v1/guilds/*/player/skip', (route) => {
+  // A skip names the track it is meant for (?track=), so the address may end in a query.
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/player\/skip(\?.*)?$/, (route) => {
     skips.push(route.request().url());
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(now) });
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...now, votes: null }),
+    });
   });
   // A key pressed with nothing focused, as a keyboard layout or an input mode reports it.
   const press = (key, code) =>
