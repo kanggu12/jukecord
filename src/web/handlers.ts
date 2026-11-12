@@ -238,6 +238,14 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
 
   autoplay: ({ context, body, deps }) => deps.presenter.player(deps.actions.autoplay(context, body.mode)),
 
+  'playlist-export': ({ context, params, query, deps }) => ({
+    ...deps.actions.playlistExport(context, params.name, query.format ?? 'text'),
+  }),
+  'playlist-import': async ({ context, body, deps, signal }) => {
+    const result = await deps.actions.playlistImport(context, body.name, body.content, signal);
+    return { playlist: deps.presenter.playlist(result.playlist), tracks: result.tracks, leftOut: result.leftOut };
+  },
+
   search: async ({ context, query, deps, signal }) => ({
     query: searchWords(query.q),
     results: (await deps.actions.search(context, query.q, query.limit ?? 8, signal)).map((found) => ({

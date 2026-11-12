@@ -21,8 +21,10 @@ import { QueueService } from './core/queue.ts';
 import { Bot } from './discord/bot.ts';
 import { ConsoleSink, createLogger, FileSink } from './log.ts';
 import { publicAddressesOnly } from './media/address.ts';
+import { BatchLookups } from './media/batch.ts';
 import { MediaCache } from './media/cache.ts';
 import { startEgressGuard } from './media/egress.ts';
+import { publicFetch } from './media/fetch.ts';
 import { Ffmpeg } from './media/ffmpeg.ts';
 import { Prefetcher } from './media/prefetch.ts';
 import { Media } from './media/preparer.ts';
@@ -158,6 +160,10 @@ async function main(): Promise<number> {
     recent: (source) => search?.recent(source) ?? null,
   });
   search = new Search({ ytdlp, slots: resolver, log: log.child('search') });
+  // jukecord's own requests (Deezer, Spotify, Apple Music, a file attached in Discord): public addresses only.
+  const fetchOut = publicFetch({ allowPrivate: config.media.allowPrivate });
+  // Lookups that come in lists (an imported playlist, a link's tracks), three at a time across every list.
+  const batch = new BatchLookups();
   // A track when a queue runs out, for the servers that turn autoplay on.
   const autoplay = new Autoplay({
     bus,
@@ -182,6 +188,8 @@ async function main(): Promise<number> {
     trackMaxMs: config.media.trackMaxMs,
     search,
     autoplay,
+    ...(checkAddress ? { checkAddress } : {}),
+    batch,
   });
 
   const restored = players.restoreAll(store.tracks, store.playerState);
@@ -205,6 +213,8 @@ async function main(): Promise<number> {
         voiceIdleMs: config.voice.idleMs,
         log: log.child('discord'),
         panelUrl: config.publicUrl,
+        // Files attached to /playlist import, from Discord's public addresses (the address rule as yt-dlp's).
+        fetch: fetchOut,
       })
     : null;
   const directory = (): Directory | null => bot;

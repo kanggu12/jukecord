@@ -262,6 +262,25 @@ const EN = {
     related: 'Autoplay is on: when the queue runs out, it adds a track related to the last one',
   } as Record<string, string>,
   byAutoplay: 'added by Autoplay',
+  // Playlists in and out.
+  exportKey: 'Export',
+  exportTitle: (name: string) => `Export "${name}"`,
+  formatText: 'Addresses',
+  formatTextHint: 'A text file, one address per line',
+  formatM3u: 'M3U',
+  formatM3uHint: 'For music players: each address with its length and name',
+  formatJson: 'jukecord',
+  formatJsonHint: 'With titles, channels, lengths and pictures, for another jukecord',
+  importKey: 'Import',
+  importTitle: 'Import a playlist',
+  importText:
+    'Addresses one per line, an M3U, or a file exported from jukecord. A line that is not an address is searched on YouTube.',
+  importPaste: 'The list, or a file chosen below',
+  chooseFile: 'Choose a file',
+  importing: 'Importing',
+  imported: (name: string, n: number, left: number) =>
+    `Imported "${name}": ${n === 1 ? '1 track' : `${n} tracks`}${left > 0 ? ` · ${left} left out` : ''}`,
+  fileTooLarge: 'The file is larger than 1 MiB',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -511,6 +530,22 @@ const KO: Strings = {
     related: '자동 재생 켜짐: 대기열이 비면 마지막 곡과 비슷한 곡을 넣음',
   },
   byAutoplay: '자동 재생이 넣음',
+  exportKey: '내보내기',
+  exportTitle: (name: string) => `"${name}" 내보내기`,
+  formatText: '주소 목록',
+  formatTextHint: '텍스트 파일, 한 줄에 주소 하나',
+  formatM3u: 'M3U',
+  formatM3uHint: '음악 플레이어용: 주소마다 길이와 이름',
+  formatJson: 'jukecord',
+  formatJsonHint: '제목, 채널, 길이, 그림까지 담김: 다른 jukecord로 옮길 때',
+  importKey: '가져오기',
+  importTitle: '플레이리스트 가져오기',
+  importText: '한 줄에 주소 하나, M3U, jukecord에서 내보낸 파일을 받음. 주소가 아닌 줄은 YouTube에서 찾음.',
+  importPaste: '목록을 붙여 넣거나 아래에서 파일을 고르세요',
+  chooseFile: '파일 고르기',
+  importing: '가져오는 중',
+  imported: (name: string, n: number, left: number) => `"${name}" 가져옴: ${n}곡${left > 0 ? ` · ${left}곡 빠짐` : ''}`,
+  fileTooLarge: '1MiB보다 큰 파일',
 };
 
 /** The languages. */

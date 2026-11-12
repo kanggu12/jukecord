@@ -12,6 +12,7 @@ import {
   api,
   type HistoryEntry,
   type Player,
+  type PlaylistFile,
   type QueueItem,
   type SearchResult,
   type Track,
@@ -1031,9 +1032,19 @@ function trackMenu(id: number): void {
 async function playlistsDialog(): Promise<void> {
   const words = t();
   const box = h('ul', { class: 'list', style: 'padding: 0' });
-  const dialog = showDialog(words.playlists, box);
-  // The dialog's Close key: where the keyboard goes when no playlist is left to stand on.
-  const closeKey = () => box.closest('.dialog')?.querySelector<HTMLElement>('.dialog-keys .key') ?? null;
+  // A playlist from a file or a pasted list, beside the Close key.
+  const importKey = h(
+    'button',
+    { class: 'key', type: 'button', 'data-act': 'import' },
+    icon('upload'),
+    words.importKey,
+  );
+  importKey.disabled = !mayControl();
+  importKey.onclick = () => importDialog(() => void draw());
+  const dialog = showDialog(words.playlists, box, [importKey]);
+  // The dialog's Close key (the last of its keys): where the keyboard goes when no playlist is left to stand on.
+  const closeKey = () =>
+    [...(box.closest('.dialog')?.querySelectorAll<HTMLElement>('.dialog-keys .key') ?? [])].at(-1) ?? null;
   const draw = async () => {
     let playlists: Awaited<ReturnType<typeof api.playlists>>;
     try {
@@ -1086,6 +1097,19 @@ async function playlistsDialog(): Promise<void> {
       },
       icon('trash-2'),
     );
+    // The playlist as a file, of the kind chosen next.
+    const exportKey = h(
+      'button',
+      {
+        class: 'key sm square quiet',
+        type: 'button',
+        title: words.exportKey,
+        'aria-label': `${words.exportKey}: ${playlist.name}`,
+        dataset: { key: 'export' },
+      },
+      icon('download'),
+    );
+    exportKey.onclick = () => exportDialog(playlist.name);
     loadKey.onclick = async () => {
       const result = await act(loadKey, () => api['playlist-load'](guild(), playlist.name));
       if (result) {
@@ -1127,6 +1151,7 @@ async function playlistsDialog(): Promise<void> {
       ),
       renameKey,
       deleteKey,
+      exportKey,
       loadKey,
     );
   };
@@ -1134,6 +1159,111 @@ async function playlistsDialog(): Promise<void> {
   // The list came after the dialog opened on its Close key: the keyboard starts at the first playlist's Load instead,
   // unless it has moved on meanwhile.
   if (document.activeElement === closeKey()) box.querySelector<HTMLElement>('[data-key="load"]')?.focus();
+}
+
+// A playlist as a file: the three kinds to choose from, each with what it holds; the choice is saved by the browser.
+function exportDialog(name: string): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(words.exportTitle(name), box);
+  const kind = (format: PlaylistFile['format'], label: string, hint: string) => {
+    const button = h(
+      'button',
+      { class: 'choice', type: 'button', dataset: { format } },
+      icon('download'),
+      h(
+        'span',
+        { class: 'grow' },
+        h('span', { class: 'choice-name' }, label),
+        h('span', { class: 'choice-hint' }, hint),
+      ),
+    );
+    button.onclick = () => {
+      dialog.close();
+      void act(null, async () => {
+        const file = await api['playlist-export'](guild(), name, format);
+        // A link to the text, pressed and let go: the browser saves it under the file's name.
+        const type = format === 'json' ? 'application/json' : format === 'm3u' ? 'audio/x-mpegurl' : 'text/plain';
+        const link = h('a', { href: URL.createObjectURL(new Blob([file.content], { type })), download: file.filename });
+        document.body.append(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+      });
+    };
+    return button;
+  };
+  fill(
+    box,
+    kind('text', words.formatText, words.formatTextHint),
+    kind('m3u', words.formatM3u, words.formatM3uHint),
+    kind('json', words.formatJson, words.formatJsonHint),
+  );
+}
+
+// A playlist from a file or a pasted list: its name, the list (a file chosen fills it), and the key that imports it.
+// `done` redraws the playlists under it.
+function importDialog(done: () => void): void {
+  const words = t();
+  const name = h('input', {
+    type: 'text',
+    maxlength: '100',
+    placeholder: words.playlistName,
+    'aria-label': words.playlistName,
+  });
+  const paste = h('textarea', {
+    class: 'paste',
+    rows: '7',
+    placeholder: words.importPaste,
+    'aria-label': words.importPaste,
+  });
+  const picker = h('input', {
+    type: 'file',
+    accept: '.txt,.m3u,.m3u8,.json,text/plain,application/json,audio/x-mpegurl',
+    hidden: true,
+  });
+  const choose = h('button', { class: 'key', type: 'button' }, icon('folder-open'), words.chooseFile);
+  const go = h('button', { class: 'key primary', type: 'button' }, icon('upload'), words.importKey);
+  const box = h(
+    'div',
+    { class: 'import-form' },
+    h('p', { class: 'import-text' }, words.importText),
+    h('label', { class: 'field' }, name),
+    paste,
+    picker,
+    h('div', { class: 'import-keys' }, choose, go),
+  );
+  const dialog = showDialog(words.importTitle, box);
+  choose.onclick = () => picker.click();
+  picker.onchange = async () => {
+    const file = picker.files?.[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+      toast(words.fileTooLarge, 'bad', 'circle-alert');
+      return;
+    }
+    paste.value = await file.text();
+    // No name yet: the file's own, without its extension.
+    if (!name.value.trim()) name.value = file.name.replace(/\.[a-z0-9]{2,5}$/i, '').slice(0, 100);
+  };
+  go.onclick = async () => {
+    const title = name.value.trim();
+    if (!title) {
+      name.focus();
+      return;
+    }
+    if (!paste.value.trim()) {
+      paste.focus();
+      return;
+    }
+    fill(go, icon('loader-circle', 'spin'), words.importing);
+    const result = await act(go, () => api['playlist-import'](guild(), title, paste.value));
+    fill(go, icon('upload'), words.importKey);
+    if (!result) return;
+    toast(words.imported(result.playlist.name, result.tracks, result.leftOut), result.leftOut > 0 ? 'pause' : 'play');
+    dialog.close();
+    done();
+  };
 }
 
 // What an add did, as a toast: how many went in and what was left out.

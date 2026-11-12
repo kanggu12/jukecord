@@ -11,15 +11,25 @@ import type { InsertAt, QueueService } from '../core/queue.ts';
 import { plainReason, REASONS } from '../core/reasons.ts';
 import type { HistoryEntry, LikedTrack, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
-import { AddressError } from '../media/address.ts';
+import { type AddressCheck, AddressError } from '../media/address.ts';
+import { BATCH_MOST, BatchLookups } from '../media/batch.ts';
 import { BusyError } from '../media/busy.ts';
 import type { Resolver } from '../media/resolver.ts';
 import type { Search } from '../media/search.ts';
-import { parseInput } from '../media/source.ts';
+import { canonicalSource, parseInput, youtubeVideoId } from '../media/source.ts';
 import type { AutoplayMode, HistoryStats, RepeatMode, Store } from '../store/store.ts';
 import { LIKES_MAX, StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import type { Autoplay } from './autoplay.ts';
+import {
+  fileName,
+  PLAYLIST_FORMATS,
+  type PlaylistFile,
+  PlaylistFileError,
+  type PlaylistFormat,
+  readPlaylist,
+  writePlaylist,
+} from './playlist-files.ts';
 
 /**
  * Every action by name. The four ways in each declare which of these they offer; the parity test fails when one is
@@ -62,6 +72,8 @@ export const ACTIONS = [
   'unlike',
   'likes-add',
   'autoplay',
+  'playlist-export',
+  'playlist-import',
 ] as const;
 
 export type ActionName = (typeof ACTIONS)[number];
@@ -194,7 +206,29 @@ export interface ActionsOptions {
   readonly search?: Search;
   /** What picks a track when a queue runs out (told when a person stops the music); absent in tests that need none. */
   readonly autoplay?: Autoplay;
+  /** The turns of lookups that come in lists (an imported playlist's lines); one of its own when absent. */
+  readonly batch?: BatchLookups;
+  /** The check of addresses a file brings (private networks refused); none: every address passes. */
+  readonly checkAddress?: AddressCheck;
 }
+
+/** A playlist as a file (see playlist-files.ts). */
+export interface PlaylistExport {
+  readonly name: string;
+  readonly format: PlaylistFormat;
+  readonly filename: string;
+  readonly content: string;
+}
+
+/** What an import made: the playlist, how many tracks it holds, and how many entries were left out. */
+export interface ImportResult {
+  readonly playlist: Playlist;
+  readonly tracks: number;
+  readonly leftOut: number;
+}
+
+/** The most entries an import takes (as many as a playlist added from a site). */
+export const IMPORT_MOST = 500;
 
 /** What an add did: the new queue items, and how many tracks were left out and why. */
 export interface AddResult {
@@ -232,9 +266,12 @@ export const AUTOPLAY_MODES: readonly AutoplayMode[] = ['off', 'history', 'relat
 
 export class Actions {
   private readonly options: ActionsOptions;
+  // The turns of lookups that come in lists, shared by every import (and the links of other services).
+  private readonly batch: BatchLookups;
 
   constructor(options: ActionsOptions) {
     this.options = options;
+    this.batch = options.batch ?? new BatchLookups();
   }
 
   /** Called by the Discord side once it is up, so join and leave start working. */
@@ -668,6 +705,125 @@ export class Actions {
     const player = this.options.players.get(context.guildId);
     player.setAutoplay(mode as AutoplayMode);
     return player.snapshot();
+  }
+
+  /** A saved playlist as a file: its addresses (text), an M3U, or jukecord's JSON (anyone may look). */
+  playlistExport(context: ActionContext, name: string, format: string): PlaylistExport {
+    if (!PLAYLIST_FORMATS.includes(format as PlaylistFormat))
+      throw new ActionError('invalid', `the format is one of ${PLAYLIST_FORMATS.join(', ')}`);
+    const store = this.options.store;
+    const playlist = store.playlists.find(context.guildId, name);
+    if (!playlist) throw new ActionError('not-found', `there is no playlist named "${name.trim()}"`);
+    const kind = format as PlaylistFormat;
+    return {
+      name: playlist.name,
+      format: kind,
+      filename: fileName(playlist.name, kind),
+      content: writePlaylist(playlist.name, store.playlists.tracks(playlist.id), kind),
+    };
+  }
+
+  /**
+   * Makes a playlist from a file or a pasted list (see playlist-files.ts), under a name not taken yet. An address
+   * jukecord knows is that track; one the file describes (jukecord's JSON, an M3U's line) is stored as the file says,
+   * after the same check as a typed address; the rest (addresses alone, words) are looked up, three at a time and at
+   * most a hundred. What cannot be found is left out and counted.
+   */
+  async playlistImport(
+    context: ActionContext,
+    name: string,
+    content: string,
+    signal?: AbortSignal,
+  ): Promise<ImportResult> {
+    this.control(context);
+    const store = this.options.store;
+    const clean = name.trim();
+    if (clean.length === 0 || clean.length > 100)
+      throw new ActionError('invalid', 'a playlist name is 1 to 100 characters');
+    if (store.playlists.find(context.guildId, clean))
+      throw new ActionError('conflict', `a playlist named "${clean}" exists`);
+    let file: PlaylistFile;
+    try {
+      file = readPlaylist(content);
+    } catch (error) {
+      if (error instanceof PlaylistFileError) throw new ActionError('invalid', error.message);
+      throw error;
+    }
+    if (file.entries.length === 0) throw new ActionError('invalid', 'there is nothing to import in it');
+    const entries = file.entries.slice(0, IMPORT_MOST);
+    // Each entry's tracks (a line may be a playlist's address), or null when nothing was found for it.
+    const found: (Track[] | null)[] = entries.map(() => null);
+    const toLook: number[] = [];
+    for (const [index, entry] of entries.entries()) {
+      if (entry.url) {
+        const url = new URL(entry.url);
+        const source = canonicalSource(url);
+        const known = store.tracks.bySource(source);
+        if (known) {
+          found[index] = [known];
+          continue;
+        }
+        if (entry.title) {
+          // What the file says about an address jukecord does not know, after the check every address added gets.
+          try {
+            await this.options.checkAddress?.(url);
+          } catch {
+            continue;
+          }
+          found[index] = [
+            store.tracks.upsert({
+              source,
+              url: youtubeVideoId(url) ? source : url.href,
+              title: entry.title,
+              uploader: entry.uploader,
+              durationMs: entry.durationMs,
+              thumbnail: entry.thumbnail,
+            }),
+          ];
+          continue;
+        }
+      }
+      if (entry.url || entry.words) toLook.push(index);
+    }
+    // At most a hundred lookups; the entries past them are left out.
+    const asked = toLook.slice(0, BATCH_MOST);
+    if (asked.length > 0) {
+      let results: (Track[] | Error)[];
+      try {
+        results = await this.batch.map(
+          context.userId,
+          asked,
+          (index, stop) =>
+            this.options.resolver.resolveListed(entries[index]?.url ?? entries[index]?.words ?? '', stop),
+          signal ? { signal } : {},
+        );
+      } catch (error) {
+        if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+        throw error;
+      }
+      results.forEach((result, at) => {
+        const index = asked[at];
+        if (index !== undefined && !(result instanceof Error)) found[index] = result;
+      });
+    }
+    // In the file's order, at most as many as a playlist takes (a line that was a playlist's address adds several).
+    const tracks = found.flatMap((entry) => entry ?? []).slice(0, IMPORT_MOST);
+    const leftOut = file.entries.length - entries.length + found.filter((entry) => entry === null).length;
+    if (tracks.length === 0) throw new ActionError('not-found', 'nothing in it could be found');
+    // Taken while the lookups ran: refused as before, rather than saved over.
+    if (store.playlists.find(context.guildId, clean))
+      throw new ActionError('conflict', `a playlist named "${clean}" exists`);
+    try {
+      const playlist = store.playlists.save(
+        context.guildId,
+        clean,
+        tracks.map((track) => track.id),
+        context.userId,
+      );
+      return { playlist, tracks: tracks.length, leftOut };
+    } catch (error) {
+      throw this.fromStore(error);
+    }
   }
 
   // Store errors are mistakes in the request (an unknown item, a name taken); they become "invalid" or "conflict".

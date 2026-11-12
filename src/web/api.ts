@@ -15,12 +15,14 @@ import {
   GuildId,
   GuildSchema,
   HistoryEntrySchema,
+  ImportResultSchema,
   LikedSchema,
   LogRecordSchema,
   MeSchema,
   Nullable,
   OkSchema,
   PlayerSchema,
+  PlaylistFileSchema,
   PlaylistSchema,
   QueueSchema,
   RemovedSchema,
@@ -75,6 +77,8 @@ export interface OperationSpec {
   readonly query?: TObject;
   readonly body?: TObject;
   readonly response: TSchema;
+  /** The largest body it takes, in bytes, when more than the server's usual 64 KiB (an imported playlist file). */
+  readonly bodyLimit?: number;
 }
 
 // Keeps each entry's exact types (the literal method, the schemas), which the handlers' types are computed from.
@@ -556,6 +560,40 @@ export const API = {
       strict,
     ),
     response: PlayerSchema,
+  }),
+
+  // Playlists in and out, as files.
+  'playlist-export': op({
+    method: 'GET',
+    path: '/guilds/{guild}/playlists/{name}/export',
+    summary: "A saved playlist as a file: addresses (text), M3U, or jukecord's JSON",
+    tag: 'playlists',
+    access: 'read',
+    params: InGuildPlaylist,
+    query: Type.Object({
+      format: Type.Optional(
+        Type.Union([Type.Literal('text'), Type.Literal('m3u'), Type.Literal('json')], { default: 'text' }),
+      ),
+    }),
+    response: PlaylistFileSchema,
+  }),
+  'playlist-import': op({
+    method: 'POST',
+    path: '/guilds/{guild}/playlists/import',
+    summary: 'Make a playlist from a file (addresses, M3U or jukecord JSON) or a pasted list, under a new name',
+    tag: 'playlists',
+    access: 'control',
+    params: InGuild,
+    body: Type.Object(
+      {
+        name: Type.String({ minLength: 1, maxLength: 100 }),
+        content: Type.String({ minLength: 1, maxLength: 1_048_576, description: "The file's text (up to 1 MiB)" }),
+      },
+      strict,
+    ),
+    response: ImportResultSchema,
+    // A file of 500 tracks with their titles, written as JSON inside JSON.
+    bodyLimit: 2 * 1024 * 1024,
   }),
 } satisfies Record<OperationName, OperationSpec>;
 

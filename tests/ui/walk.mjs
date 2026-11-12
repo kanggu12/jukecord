@@ -755,6 +755,39 @@ await sweep('autoplay-row', DISCOVERY, async (page) => {
 });
 await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
 await api('DELETE', '/guilds/local/queue');
+// Playlists in and out: a playlist's three kinds of file, and the import with a list pasted in.
+await sweep(
+  'playlist-export',
+  [
+    [390, 844],
+    [1440, 900],
+  ],
+  async (page) => {
+    await tool(page, 'load');
+    await page.locator('.dialog .channel [data-key="export"]').first().click();
+    await page.waitForSelector('.dialog .choice[data-format="m3u"]');
+  },
+);
+await sweep(
+  'playlist-import',
+  [
+    [360, 780],
+    [390, 844],
+    [1024, 768],
+    [1440, 900],
+  ],
+  async (page) => {
+    await tool(page, 'load');
+    await page.click('.dialog [data-act="import"]');
+    await page.waitForSelector('.dialog .paste');
+    await page.locator('.dialog .import-form input[type="text"]').fill('Saturday');
+    await page
+      .locator('.dialog .paste')
+      .fill(
+        ['https://media.example/demo001', 'https://media.example/demo002', 'Example Band - Velvet Hours'].join('\n'),
+      );
+  },
+);
 
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));

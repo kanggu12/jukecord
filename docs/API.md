@@ -141,6 +141,8 @@ playlist) so a program does not need to ask again.
 | `playlist-load` Add a saved playlist to the queue | `POST /api/v1/guilds/{guild}/playlists/{name}/load` | control | `jukecord playlist load` | `/playlist load` |
 | `playlist-rename` Rename a saved playlist | `PATCH /api/v1/guilds/{guild}/playlists/{name}` | control | `jukecord playlist rename` | `/playlist rename` |
 | `playlist-delete` Delete a saved playlist | `DELETE /api/v1/guilds/{guild}/playlists/{name}` | control | `jukecord playlist delete` | `/playlist delete` |
+| `playlist-export` A saved playlist as a file: addresses (text), M3U, or jukecord's JSON | `GET /api/v1/guilds/{guild}/playlists/{name}/export` | read | `jukecord playlist export` | `/playlist export` |
+| `playlist-import` Make a playlist from a file (addresses, M3U or jukecord JSON) or a pasted list, under a new name | `POST /api/v1/guilds/{guild}/playlists/import` | control | `jukecord playlist import` | `/playlist import` |
 
 ### Voice
 

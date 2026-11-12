@@ -283,3 +283,24 @@ export const LikedSchema = Type.Object(
   },
   { title: 'Liked' },
 );
+
+/** A saved playlist as a file. */
+export const PlaylistFileSchema = Type.Object(
+  {
+    name: Type.String(),
+    format: Type.Union([Type.Literal('text'), Type.Literal('m3u'), Type.Literal('json')]),
+    filename: Type.String({ description: 'A name to save it under' }),
+    content: Type.String({ description: "The file's text" }),
+  },
+  { title: 'PlaylistFile' },
+);
+
+/** What an import made. */
+export const ImportResultSchema = Type.Object(
+  {
+    playlist: PlaylistSchema,
+    tracks: Type.Integer({ description: 'How many tracks the playlist holds' }),
+    leftOut: Type.Integer({ description: 'Entries left out: not found, not an address, or past the limits' }),
+  },
+  { title: 'ImportResult' },
+);

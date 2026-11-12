@@ -11,7 +11,7 @@
  * - align: controls on one row of a group that differ in height or centre by more than 1px;
  * - crossing: a floating layer (toast, sheet, chart tip) whose edge cuts across another box;
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
- *   the bar's toast, a dialog's shade over the bar);
+ *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest;
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
@@ -307,8 +307,12 @@ window.__audit = () => {
     if (crossed > 0) add('crossing', layer, `${crossed} boxes: ${names.join(', ')}`);
   }
 
-  // The middle of a sheet, a dialog or a toast must be that layer (not a scrim or a sheet drawn over it).
+  // The middle of a sheet, a dialog or a toast must be that layer (not a scrim or a sheet drawn over it). A dialog
+  // opened over another one (a playlist's file kinds over the playlists, a rename) covers the one under it by design:
+  // only the newest dialog, the last in the page, is held to it.
+  const dialogs = [...document.querySelectorAll('.dialog')].filter(shown);
   for (const layer of [...document.querySelectorAll('.sheet, .dialog, .toast')].filter(shown)) {
+    if (layer.matches('.dialog') && layer !== dialogs.at(-1)) continue;
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);

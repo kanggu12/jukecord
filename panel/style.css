@@ -1821,6 +1821,59 @@ img {
   color: var(--ink-2);
 }
 
+/* ---- playlists in and out -------------------------------------------------------------------------------------- */
+/* The import dialog: what it takes, the name, the list (pasted, or a file's), and its keys. */
+.import-form {
+  display: grid;
+  gap: 10px;
+}
+.import-text {
+  margin: 0;
+  color: var(--ink-2);
+}
+/* The list sunk into the dialog like a field, in a fixed-width face (addresses and files line up), growing downwards. */
+.paste {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  padding: 8px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--sunk);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font:
+    12px / 1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+.paste::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+  font-family: var(--font);
+}
+.paste:focus-visible {
+  outline: 0;
+  border-color: var(--focus);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.18),
+    0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+}
+/* Smaller text in a field makes Safari zoom the page. */
+@media (max-width: 900px) {
+  .paste {
+    font-size: 16px;
+  }
+}
+.import-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 /* ---- likes ------------------------------------------------------------------------------------------------------ */
 /* A heart that likes a track: a line, and filled in the text's own colour once liked (the fill says it; it takes no
    tint, as other keys that are on do). A contrast theme marks it as it marks every key that is on. */

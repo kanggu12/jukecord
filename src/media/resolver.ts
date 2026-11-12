@@ -54,6 +54,23 @@ export class Resolver {
     who: string | null = null,
     server: string | null = null,
   ): Promise<Track[]> {
+    return this.resolveIn(text, signal, (work) => this.run(who, server, work));
+  }
+
+  /**
+   * As resolve, outside the lookup slots: for the lookups that come in lists (an imported playlist's lines), which
+   * take their turns in BatchLookups instead, so a long list never holds the slots people wait for.
+   */
+  async resolveListed(text: string, signal?: AbortSignal): Promise<Track[]> {
+    return this.resolveIn(text, signal, (work) => work());
+  }
+
+  // Resolves an input, running the lookup (when one is needed) through `slot`.
+  private async resolveIn(
+    text: string,
+    signal: AbortSignal | undefined,
+    slot: <T>(work: () => Promise<T>) => Promise<T>,
+  ): Promise<Track[]> {
     const input = parseInput(text);
     if (input.kind === 'url' && !isPlaylistAddress(input.url)) {
       // A single address seen before: answered from the database, with nothing fetched now (playing it later goes
@@ -67,7 +84,7 @@ export class Resolver {
     }
     let found: Awaited<ReturnType<YtDlp['lookup']>>;
     try {
-      found = await this.run(who, server, async () => {
+      found = await slot(async () => {
         // An address on a private network is refused before yt-dlp starts (address.ts), which says so more plainly
         // than the guard yt-dlp would meet.
         if (input.kind === 'url') await this.options.checkAddress?.(input.url);

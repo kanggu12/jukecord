@@ -385,6 +385,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     app.route({
       method: spec.method,
       url: routePath(spec),
+      // An operation that takes a file may take more than the usual 64 KiB.
+      ...(spec.bodyLimit ? { bodyLimit: spec.bodyLimit } : {}),
       schema: {
         ...(spec.params ? { params: plain(spec.params) } : {}),
         ...(spec.query ? { querystring: plain(spec.query) } : {}),

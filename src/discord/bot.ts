@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import {
   ActivityType,
+  AttachmentBuilder,
   type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
@@ -33,6 +34,7 @@ import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
+import type { PublicFetch } from '../media/fetch.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
 import type { DiscordRepository, SettingsRepository, UserRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
@@ -71,6 +73,8 @@ export interface BotOptions {
   readonly voiceIdleMs: number;
   /** Where the people who use commands are remembered, so the panel can show who added what. */
   readonly users: UserRepository;
+  /** How a file attached to /playlist import is fetched (public addresses only); without it, that is refused. */
+  readonly fetch?: PublicFetch;
 }
 
 export class Bot implements Directory {
@@ -302,7 +306,7 @@ export class Bot implements Directory {
       const lookup =
         ['version', 'queue', 'like'].includes(interaction.commandName) ||
         (interaction.commandName === 'dj' && sub === 'show') ||
-        (interaction.commandName === 'playlist' && sub === 'list') ||
+        (interaction.commandName === 'playlist' && (sub === 'list' || sub === 'export')) ||
         (interaction.commandName === 'likes' && sub !== 'add');
       await interaction.deferReply(lookup ? { flags: MessageFlags.Ephemeral } : {});
       switch (interaction.commandName) {
@@ -529,6 +533,40 @@ export class Bot implements Directory {
         const name = options.getString('name', true);
         actions.playlistDelete(context, name);
         await interaction.editReply({ embeds: [note(lang, `Deleted "${name}"`, `"${name}" 지움`)] });
+        return;
+      }
+      case 'export': {
+        // The file itself, attached to the answer (to the person who asked).
+        const file = actions.playlistExport(
+          context,
+          options.getString('name', true),
+          options.getString('format') ?? 'text',
+        );
+        await interaction.editReply({
+          embeds: [note(lang, `"${file.name}" as a file`, `"${file.name}" 파일`)],
+          files: [new AttachmentBuilder(Buffer.from(file.content, 'utf8'), { name: file.filename })],
+        });
+        return;
+      }
+      case 'import': {
+        const attachment = options.getAttachment('file', true);
+        if (attachment.size > 1024 * 1024) throw new ActionError('invalid', 'the file is larger than 1 MiB');
+        if (!this.options.fetch) throw new ActionError('unavailable', 'importing a file is not set up here');
+        // Discord keeps the file at a public address; jukecord fetches it as it fetches anything (public addresses).
+        const fetched = await this.options.fetch(attachment.url, { maxBytes: 1024 * 1024, timeoutMs: 15_000 });
+        if (fetched.status !== 200) throw new ActionError('unavailable', 'Discord did not hand over the file');
+        const result = await actions.playlistImport(context, options.getString('name', true), fetched.text);
+        const name = result.playlist.name;
+        const left = result.leftOut;
+        await interaction.editReply({
+          embeds: [
+            note(
+              lang,
+              `Imported "${name}": ${result.tracks} tracks${left > 0 ? `, ${left} left out` : ''}`,
+              `"${name}" 가져옴: ${result.tracks}곡${left > 0 ? `, ${left}곡 빠짐` : ''}`,
+            ),
+          ],
+        });
         return;
       }
     }

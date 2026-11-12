@@ -51,6 +51,8 @@ export const PANEL_ACTIONS = [
   'unlike',
   'likes-add',
   'autoplay',
+  'playlist-export',
+  'playlist-import',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -254,6 +256,19 @@ export interface Liked {
   track: Track;
   likedAt: number;
 }
+/** A saved playlist as a file. */
+export interface PlaylistFile {
+  name: string;
+  format: 'text' | 'm3u' | 'json';
+  filename: string;
+  content: string;
+}
+/** What an import made. */
+export interface Imported {
+  playlist: Playlist;
+  tracks: number;
+  leftOut: number;
+}
 
 const g = (guild: string) => `/guilds/${encodeURIComponent(guild)}`;
 
@@ -322,6 +337,10 @@ export const api = {
     request<AddResult>('POST', `${g(guild)}/likes/queue`, { at }),
   autoplay: (guild: string, mode: Player['autoplay']) =>
     request<Player>('PUT', `${g(guild)}/player/autoplay`, { mode }),
+  'playlist-export': (guild: string, name: string, format: PlaylistFile['format']) =>
+    request<PlaylistFile>('GET', `${g(guild)}/playlists/${encodeURIComponent(name)}/export?format=${format}`),
+  'playlist-import': (guild: string, name: string, content: string) =>
+    request<Imported>('POST', `${g(guild)}/playlists/import`, { name, content }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /** Ends the login (the cookie goes) and shows the login page. */

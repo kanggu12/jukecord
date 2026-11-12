@@ -132,6 +132,19 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [/^your likes are full \((\d+) tracks\)$/, '좋아요 목록이 가득 참($1곡)'],
   // Autoplay.
   [/^autoplay is one of (.+)$/, '자동 재생은 $1 중 하나'],
+  // Playlists in and out.
+  [/^the format is one of (.+)$/, '형식은 $1 중 하나'],
+  ['there is nothing to import in it', '가져올 것이 없음'],
+  ['nothing in it could be found', '그 안의 곡을 하나도 찾지 못함'],
+  ['the file is not valid JSON', '올바른 JSON 파일이 아님'],
+  ['the JSON is not a jukecord playlist', 'jukecord 플레이리스트 JSON이 아님'],
+  ['the file is larger than 1 MiB', '1MiB보다 큰 파일'],
+  ['importing a file is not set up here', '여기서는 파일 가져오기를 쓸 수 없음'],
+  ['Discord did not hand over the file', '디스코드가 파일을 넘겨주지 않음'],
+  [
+    'jukecord is still adding a list of yours; try again when it is done',
+    '내 목록을 아직 넣는 중: 끝나면 다시 시도하세요',
+  ],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

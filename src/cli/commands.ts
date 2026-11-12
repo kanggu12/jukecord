@@ -6,6 +6,7 @@
  * exist. People type 1-based queue numbers, as /queue and the panel show them; the commands look the item up.
  */
 
+import fs from 'node:fs';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
 
@@ -596,6 +597,44 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       return { body: { mode } };
     },
     show: showPlayer,
+  },
+
+  'playlist-export': {
+    name: 'playlist export',
+    usage: '<name> [--format text|m3u|json]',
+    summary: 'A saved playlist as a file, printed (redirect it into one)',
+    request: (words) => {
+      const format = words.flags.get('format') ?? 'text';
+      if (format !== 'text' && format !== 'm3u' && format !== 'json')
+        throw new UsageError('--format text, m3u or json');
+      return { params: { name: rest(words, 'which playlist') }, query: { format } };
+    },
+    // The file as it is, so `> name.m3u` makes the file.
+    show: (answer) => (answer as { content: string }).content.replace(/\n$/, ''),
+  },
+  'playlist-import': {
+    name: 'playlist import',
+    usage: '<name> <file> (quote a spaced name)',
+    summary: 'Make a playlist from a file: addresses, M3U or jukecord JSON',
+    request: (words) => {
+      const [name, file] = words.args;
+      if (!name || !file) throw new UsageError('say the new playlist name and the file');
+      let content: string;
+      try {
+        // Read here, on this machine: jukecord gets the text.
+        if (fs.statSync(file).size > 1024 * 1024) throw new UsageError(`${file} is larger than 1 MiB`);
+        content = fs.readFileSync(file, 'utf8');
+      } catch (error) {
+        if (error instanceof UsageError) throw error;
+        throw new UsageError(`${file} cannot be read`);
+      }
+      return { body: { name, content } };
+    },
+    show: (answer) => {
+      const result = answer as { playlist: { name: string }; tracks: number; leftOut: number };
+      const left = result.leftOut > 0 ? `, ${result.leftOut} left out` : '';
+      return `Imported ${result.playlist.name}: ${result.tracks} tracks${left}`;
+    },
   },
 
   search: {

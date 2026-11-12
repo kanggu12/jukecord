@@ -54,6 +54,8 @@ export const SLASH_COMMANDS: Readonly<Record<ActionName, string>> = {
   unlike: '/likes remove',
   'likes-add': '/likes add',
   autoplay: '/autoplay',
+  'playlist-export': '/playlist export',
+  'playlist-import': '/playlist import',
 };
 
 // One command: English name and description, Korean name and description.
@@ -256,6 +258,42 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setNameLocalizations({ ko: '지우기' })
           .setDescriptionLocalizations({ ko: '플레이리스트 지우기' })
           .addStringOption(playlistName),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('export')
+          .setDescription('A saved playlist as a file')
+          .setNameLocalizations({ ko: '내보내기' })
+          .setDescriptionLocalizations({ ko: '저장한 플레이리스트를 파일로 받기' })
+          .addStringOption(playlistName)
+          .addStringOption((option) =>
+            option
+              .setName('format')
+              .setDescription('The kind of file (default: addresses, one per line)')
+              .setNameLocalizations({ ko: '형식' })
+              .setDescriptionLocalizations({ ko: '파일 형식(기본: 한 줄에 주소 하나)' })
+              .addChoices(
+                { name: 'Addresses (text)', value: 'text', name_localizations: { ko: '주소 목록(텍스트)' } },
+                { name: 'M3U', value: 'm3u', name_localizations: { ko: 'M3U' } },
+                { name: 'jukecord (JSON)', value: 'json', name_localizations: { ko: 'jukecord(JSON)' } },
+              ),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('import')
+          .setDescription('Make a playlist from a file: addresses, M3U or jukecord JSON')
+          .setNameLocalizations({ ko: '가져오기' })
+          .setDescriptionLocalizations({ ko: '파일로 플레이리스트 만들기: 주소 목록, M3U, jukecord JSON' })
+          .addStringOption((option) => playlistName(option).setAutocomplete(false))
+          .addAttachmentOption((option) =>
+            option
+              .setName('file')
+              .setDescription('The file (up to 1 MiB)')
+              .setNameLocalizations({ ko: '파일' })
+              .setDescriptionLocalizations({ ko: '파일(1MiB까지)' })
+              .setRequired(true),
+          ),
       ),
     command(
       'join',

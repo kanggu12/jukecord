@@ -34,7 +34,7 @@ class Unreachable extends Error {
 }
 
 // Options that take a value, and the switches; anything else starting with -- is a typing mistake.
-const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope']);
+const VALUED = new Set(['url', 'token', 'guild', 'limit', 'level', 'component', 'days', 'scope', 'format']);
 const SWITCHES = new Set(['json', 'help', 'version', 'next']);
 
 // What people type from Discord's names, to the command it means here.
@@ -155,12 +155,13 @@ export class Client {
     }
     let response: Response;
     try {
-      // Lookups (yt-dlp) can take a while for a long playlist; a minute and a half covers them.
+      // Lookups (yt-dlp) can take a while: a hundred of an imported list or a link from another service, three at a
+      // time, take about a minute; three minutes cover them.
       response = await fetch(url, {
         method: spec.method,
         headers,
         ...(body === undefined ? {} : { body }),
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(180_000),
       });
     } catch (error) {
       throw new Unreachable(
