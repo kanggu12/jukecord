@@ -74,12 +74,14 @@ export interface LiveLimits {
   readonly probeMs?: number;
 }
 
-/** The limits unless the settings say otherwise: a thousand in all, ten tabs per login, twenty per address. */
-export const DEFAULT_LIVE_LIMITS: LiveLimits = { total: 1000, perLogin: 10, perAddress: 20 };
+// How long a probed connection has to answer (see LiveLimits.probeMs). A pong comes back in a fraction of a second from
+// a browser that is there, but a phone in a tunnel, or a ping stuck behind a big message on a slow line, stalls for
+// several: five seconds closed a tab that stalled for six, and its reconnect was refused because the tab knocking had
+// taken its place. Fifteen is the least time the panel waits before it knocks again after a 1013.
+const PROBE_MS = 15_000;
 
-// How long a probed connection has to answer (see LiveLimits.probeMs): a pong comes back in a fraction of a second
-// from a browser that is there, even on a slow phone line.
-const PROBE_MS = 5000;
+/** The limits unless the settings say otherwise: a thousand in all, ten tabs per login, twenty per address. */
+export const DEFAULT_LIVE_LIMITS: LiveLimits = { total: 1000, perLogin: 10, perAddress: 20, probeMs: PROBE_MS };
 
 // One open connection.
 interface Client {

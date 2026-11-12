@@ -213,7 +213,8 @@ cookie comes from a page that is not the panel's (the panel's address differs fr
 when the login may no longer open the server it shows. Any other close is worth reconnecting after. `1013` (try again
 later) comes at once, with the reason, when a connection would be one too many: jukecord has as many as
 `JUKECORD_LIVE_MAX` allows (1000 by default), or ten are open from the same login, or twenty from the same address
-(the host's own count in the total only); or the address failed to log in too often. Wait longer before trying again:
+(the host's own count in the total only); or the address failed to log in too often. The connections holding the
+places are pinged then, and the ones that do not answer within 15 s are closed. Wait longer before trying again:
 the panel waits 15 s, doubling up to a minute. `voice` lists the
 channels the connection's own person can see in Discord (the host sees them all); when the bot is in a channel that
 person cannot see, `current` has its ID and an empty `name`.
