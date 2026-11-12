@@ -332,7 +332,8 @@ img {
   gap: 12px;
   padding: 0 16px;
   height: var(--bar-h);
-  background: color-mix(in oklch, var(--bg) 62%, transparent);
+  /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
+  background: color-mix(in oklch, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-bottom: 1px solid var(--line);
@@ -1587,7 +1588,8 @@ img {
   gap: 12px;
   height: var(--listen-h);
   padding: 0 16px;
-  background: color-mix(in oklch, var(--bg) 62%, transparent);
+  /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
+  background: color-mix(in oklch, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-top: 1px solid var(--line);
