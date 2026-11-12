@@ -303,8 +303,9 @@ describe('what a guest must not reach', () => {
       `/guilds/${GUILD}/settings`,
       `/guilds/${GUILD}/voice`,
       `/guilds/${GUILD}/listen-links`,
-      // A search, the likes and a playlist's file: a guest neither adds nor likes.
+      // A search and its results' pictures, the likes and a playlist's file: a guest neither adds nor likes.
       `/guilds/${GUILD}/search?q=paper%20boats`,
+      `/guilds/${GUILD}/search/cover?url=${encodeURIComponent('https://example.com/watch?v=a')}`,
       `/guilds/${GUILD}/likes`,
       `/guilds/${GUILD}/playlists/mine/export`,
       '/logs',

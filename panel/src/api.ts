@@ -490,6 +490,14 @@ export function coverUrl(guild: string, track: Track): string | null {
 }
 
 /**
+ * The address of a search result's picture, which jukecord serves as it serves a track's cover (the browser never asks
+ * the image host), or null when the site gave the result no picture.
+ */
+export function searchCoverUrl(guild: string, result: SearchResult): string | null {
+  return result.thumbnail ? `/api/v1${g(guild)}/search/cover?${new URLSearchParams({ url: result.url })}` : null;
+}
+
+/**
  * Comes in as a guest with a listening link's code (from the address's "#", which never reaches a server): the cookie
  * comes back with the answer. Throws ApiError with jukecord's reason when it does not work.
  */

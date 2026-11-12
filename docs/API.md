@@ -270,6 +270,11 @@ asked of the site again for an hour). Covers that must be fetched first are held
 address (sixty at once; the host is not held), and are not fetched while jukecord is behind (`503`); four are fetched
 at once, and past a line of 32 waiting the answer is `503` too.
 
+`GET /api/v1/guilds/{guild}/search/cover?url=<address>` sends the picture of a search's result before it is added, the
+same way: `url` is a result's `url`, from a search made in the last half hour (any other address answers `404`), for
+people who may search. It is kept under the same key as the track the result becomes, so adding it fetches nothing
+more. The panel's add field shows its results' pictures from here, so a browser asks no image host at all.
+
 ## Health and metrics
 
 | Path       | Answers                                                                                    |

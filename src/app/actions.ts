@@ -1094,6 +1094,23 @@ export class Actions {
     }
   }
 
+  /**
+   * A track a search showed in the last half hour, by its address, or null for an address no recent search found: the
+   * add field's list shows its picture from jukecord (web/server.ts). Only for people who may search.
+   */
+  searched(context: ActionContext, address: string): NewTrack | null {
+    this.control(context);
+    let url: URL;
+    try {
+      url = new URL(address);
+    } catch {
+      // Not an address at all: no search found it.
+      return null;
+    }
+    // By the canonical address, which is what the search kept it by (Search.recent).
+    return this.options.search?.recent(canonicalSource(url)) ?? null;
+  }
+
   /** The tracks this login liked, newest first (anyone may look at their own). */
   likes(context: ActionContext): LikedTrack[] {
     return this.options.store.likes.list(likesOwner(context));

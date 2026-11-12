@@ -1157,17 +1157,28 @@ const DISCOVERY = [
 // A made-up search: the seeded tracks as YouTube would list them (title, channel, length, cover), put between the
 // page and jukecord, so no search reaches a site.
 const FOUND = [];
+// Each made-up result's picture, by the result's address: the seed's covers are pictures in jukecord's cache (their
+// own addresses lead nowhere), sent where the panel asks jukecord for a search result's picture.
+const PICTURES = new Map();
 for (const entry of await api('GET', '/guilds/local/history?limit=60')) {
   if (FOUND.length >= 8 || FOUND.some((found) => found.url === entry.track.url)) continue;
-  const { id, url, title, uploader, durationMs } = entry.track;
-  // The seed's covers are pictures in jukecord's cache (their own addresses lead nowhere): shown from jukecord, as a
-  // site's picture would be shown from the site.
-  FOUND.push({ url, title, uploader, durationMs, thumbnail: `${BASE}/api/v1/guilds/local/tracks/${id}/cover` });
+  const { id, url, title, uploader, durationMs, thumbnail } = entry.track;
+  PICTURES.set(url, `${BASE}/api/v1/guilds/local/tracks/${id}/cover`);
+  FOUND.push({ url, title, uploader, durationMs, thumbnail });
 }
 async function searchFor(page, words) {
   await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
     route.fulfill({ json: { query: new URL(route.request().url()).searchParams.get('q') ?? '', results: FOUND } }),
   );
+  // jukecord would fetch a result's picture from the address the search found; here it is the seed's cover.
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\/cover\?/, (route) => {
+    const cover = PICTURES.get(new URL(route.request().url()).searchParams.get('url') ?? '');
+    if (cover) return route.continue({ url: cover });
+    return route.fulfill({
+      status: 404,
+      json: { error: { code: 'not-found', message: 'no search found that address' } },
+    });
+  });
   await page.locator('#add-input').fill(words);
   await page.waitForSelector('#add-found [role="option"]');
 }

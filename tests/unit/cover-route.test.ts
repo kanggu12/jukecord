@@ -7,11 +7,13 @@ import {
   ALICE,
   asHost,
   BOB,
+  DJ_ROLE,
   exampleTrack,
   GUILD,
   OTHER_GUILD,
   sessionFor,
   type TestServer,
+  type TestServerOptions,
   testServer,
 } from '../support/web.ts';
 
@@ -27,15 +29,15 @@ const PNG = Buffer.from(
 const pictured = (name: string) => ({ ...exampleTrack(name), thumbnail: `https://images.example.com/${name}.png` });
 
 // A server whose made-up image host has one picture for each of these tracks, and none for "gone".
-async function serverWithPictures(rates?: { covers: { perSecond: number; burst: number } }): Promise<TestServer> {
+async function serverWithPictures(extra: Partial<TestServerOptions> = {}): Promise<TestServer> {
   const pictures = Object.fromEntries(
-    ['queued', 'played', 'saved', 'other', 'cached', 'busy', 'one', 'two'].map((name) => [
+    ['queued', 'played', 'saved', 'other', 'cached', 'busy', 'one', 'two', 'found'].map((name) => [
       `https://images.example.com/${name}.png`,
       { bytes: PNG, type: 'png' as const },
     ]),
   );
   pictures['https://images.example.com/gone.png'] = new CoverError('the site answered 404') as never;
-  const server = await testServer({ pictures, ...(rates ? { rates } : {}) });
+  const server = await testServer({ pictures, ...extra });
   server.directory.join(GUILD, ALICE);
   return server;
 }
@@ -158,7 +160,7 @@ describe('covers through jukecord', () => {
   });
 
   it('holds the covers it must fetch to a rate per login, sends cached ones freely, and the host is not held', async () => {
-    const server = await serverWithPictures({ covers: { perSecond: 0.001, burst: 1 } });
+    const server = await serverWithPictures({ rates: { covers: { perSecond: 0.001, burst: 1 } } });
     try {
       const [one, two] = [pictured('one'), pictured('two')].map((track) => server.store.tracks.upsert(track));
       if (!one || !two) throw new Error('no tracks');
@@ -199,6 +201,98 @@ describe('covers through jukecord', () => {
       const later = await ask(busy.id);
       assert.equal(later.statusCode, 503);
       assert.equal(later.headers['retry-after'], '2');
+      assert.equal(server.pictureRequests.length, 1);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("search results' pictures through jukecord", () => {
+  // What the made-up search finds for these words: a result with a picture and one without.
+  const found = pictured('found');
+  const bare = exampleTrack('bare');
+  const picture = (address: string) => api(`/guilds/${GUILD}/search/cover?${new URLSearchParams({ url: address })}`);
+  const searchFor = (server: TestServer, headers: Record<string, string>) =>
+    server.web.app.inject({ method: 'GET', url: api(`/guilds/${GUILD}/search?q=paper%20boats`), headers });
+
+  it('sends the picture of a result a search found, and the same file once the result is added', async () => {
+    const server = await serverWithPictures({ searched: { 'paper boats': [found, bare] } });
+    const inject = (options: InjectOptions) => server.web.app.inject(options);
+    try {
+      // No search found it yet: nothing is fetched for an address someone made up.
+      const early = await inject({ method: 'GET', url: picture(found.url), headers: asHost });
+      assert.equal(early.statusCode, 404);
+      assert.equal(early.json().error.message, 'no search found that address lately');
+      assert.deepEqual(server.pictureRequests, []);
+      assert.equal((await searchFor(server, asHost)).statusCode, 200);
+      const sent = await inject({ method: 'GET', url: picture(found.url), headers: asHost });
+      assert.equal(sent.statusCode, 200);
+      assert.equal(sent.headers['content-type'], 'image/png');
+      assert.deepEqual(sent.rawPayload, PNG);
+      assert.equal(sent.headers['cache-control'], 'private, max-age=86400');
+      assert.deepEqual(server.pictureRequests, ['https://images.example.com/found.png']);
+      // The same address as another spelling of it (the host in capitals): the same result, from the cache.
+      const spelt = await inject({
+        method: 'GET',
+        url: picture(found.url.replace('example.com', 'EXAMPLE.com')),
+        headers: asHost,
+      });
+      assert.equal(spelt.statusCode, 200);
+      assert.equal(server.pictureRequests.length, 1);
+      // A result the site gave no picture: none, for an hour, and nothing asked of a site.
+      const none = await inject({ method: 'GET', url: picture(bare.url), headers: asHost });
+      assert.equal(none.statusCode, 404);
+      assert.equal(none.json().error.message, 'that search result has no picture');
+      assert.equal(none.headers['cache-control'], 'private, max-age=3600');
+      // Not an address, or none given: no search found it.
+      for (const url of [picture('paper boats'), api(`/guilds/${GUILD}/search/cover`)]) {
+        assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404, url);
+      }
+      // Added: the track's cover is the file the result's picture was kept as, so the site is not asked again.
+      const track = server.store.tracks.upsert(found);
+      server.queue.add(GUILD, [track.id], 'end', null);
+      const cover = await inject({
+        method: 'GET',
+        url: api(`/guilds/${GUILD}/tracks/${track.id}/cover`),
+        headers: asHost,
+      });
+      assert.equal(cover.statusCode, 200);
+      assert.equal(server.pictureRequests.length, 1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('shows the pictures only to people who may search: not a reader, a member without the DJ role, or a stranger', async () => {
+    const server = await serverWithPictures({ searched: { 'paper boats': [found] } });
+    const inject = (options: InjectOptions) => server.web.app.inject(options);
+    try {
+      await searchFor(server, asHost);
+      const alice = sessionFor(server, ALICE);
+      // Every member may change the music while the server has no DJ role.
+      assert.equal(
+        (await inject({ method: 'GET', url: picture(found.url), headers: { cookie: alice.cookie } })).statusCode,
+        200,
+      );
+      server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      const held = await inject({ method: 'GET', url: picture(found.url), headers: { cookie: alice.cookie } });
+      assert.equal(held.statusCode, 403);
+      const created = await inject({
+        method: 'POST',
+        url: api('/tokens'),
+        headers: asHost,
+        payload: { name: 'reader', scope: 'read' },
+      });
+      const reader = { authorization: `Bearer ${created.json().token}` };
+      assert.equal((await inject({ method: 'GET', url: picture(found.url), headers: reader })).statusCode, 403);
+      const bob = sessionFor(server, BOB);
+      assert.equal(
+        (await inject({ method: 'GET', url: picture(found.url), headers: { cookie: bob.cookie } })).statusCode,
+        403,
+      );
+      assert.equal((await inject({ method: 'GET', url: picture(found.url) })).statusCode, 401);
+      // The one fetch was the first one's: the refusals asked nothing of the site.
       assert.equal(server.pictureRequests.length, 1);
     } finally {
       await server.close();

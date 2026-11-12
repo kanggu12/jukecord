@@ -97,7 +97,7 @@ export function openApiDocument(serverUrl = API_PREFIX): Json {
     if (spec.access === 'public') operation.security = [];
     paths[spec.path] = { ...(paths[spec.path] ?? {}), [spec.method.toLowerCase()]: operation };
   }
-  // The two browser endpoints that are not JSON operations, so the document lists everything under the prefix.
+  // The browser endpoints that are not JSON operations, so the document lists everything under the prefix.
   paths['/guilds/{guild}/tracks/{track}/audio'] = {
     get: {
       operationId: 'audio',
@@ -115,6 +115,48 @@ export function openApiDocument(serverUrl = API_PREFIX): Json {
         '404': { description: 'The track is not playing or queued in this server' },
         '409': { description: 'The track is not prepared yet' },
         '503': { description: 'Too many MP3 copies are being made; try again in a moment' },
+      },
+    },
+  };
+  // The pictures jukecord fetches once and keeps (src/media/covers.ts), in the formats it keeps.
+  const picture = {
+    description: 'The picture',
+    content: { 'image/jpeg': {}, 'image/png': {}, 'image/gif': {}, 'image/webp': {}, 'image/avif': {} },
+  };
+  const pictureLater = {
+    '429': { description: 'Too many pictures to fetch at once for this login or address; try again after Retry-After' },
+    '503': { description: 'jukecord is busy; try again after Retry-After' },
+  };
+  paths['/guilds/{guild}/tracks/{track}/cover'] = {
+    get: {
+      operationId: 'cover',
+      summary: "A track's cover, fetched once by jukecord and kept, for a track the server shows",
+      tags: ['browser'],
+      parameters: [
+        { name: 'guild', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'track', in: 'path', required: true, schema: { type: 'integer', minimum: 1 } },
+      ],
+      responses: {
+        '200': picture,
+        '404': { description: 'The track is not in this server, or it has no cover' },
+        ...pictureLater,
+      },
+    },
+  };
+  paths['/guilds/{guild}/search/cover'] = {
+    get: {
+      operationId: 'searchCover',
+      summary: "The picture of a search's result before it is added, by its address (found in the last half hour)",
+      tags: ['browser'],
+      parameters: [
+        { name: 'guild', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'url', in: 'query', required: true, schema: { type: 'string' } },
+      ],
+      responses: {
+        '200': picture,
+        '403': { description: 'This login may not search here' },
+        '404': { description: 'No search found the address lately, or it has no picture' },
+        ...pictureLater,
       },
     },
   };

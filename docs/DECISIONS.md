@@ -144,8 +144,10 @@ under the same rule as every other fetch (the name resolved by jukecord, public 
 the address checked, a redirect checked again) and with limits of its own (2 MiB, ten seconds, a few at once, picture
 formats told by their own bytes, never SVG, which can carry script). The pictures live in the media cache beside the
 audio and count towards its limit, each by its own last use: the history and Wrapped show covers of tracks whose audio
-went long ago. Discord's cards keep the site's address: Discord fetches pictures itself, through its own proxy, and
-cannot reach jukecord.
+went long ago. A search's results show their pictures the same way before anything is added, each kept under the key
+of the track it becomes, so the content security policy allows pictures from jukecord and from Discord's own address
+(people's avatars, the servers' icons) only. Discord's cards keep the site's address: Discord fetches pictures itself,
+through its own proxy, and cannot reach jukecord.
 
 ## The song of the year
 

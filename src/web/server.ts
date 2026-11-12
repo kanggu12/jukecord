@@ -22,7 +22,7 @@ import type { Logger } from '../log.ts';
 import { isPrivateAddress } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import { MediaCache } from '../media/cache.ts';
-import type { CoverFile, Covers } from '../media/covers.ts';
+import type { CoverFile, Covers, Pictured } from '../media/covers.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
@@ -457,8 +457,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           "default-src 'self'",
           "script-src 'self'",
           "style-src 'self'",
-          // Covers come from jukecord itself; people's avatars and the servers' icons from Discord.
-          "img-src 'self' data: https:",
+          // Covers and search results' pictures come from jukecord itself; people's avatars and the servers' icons
+          // from Discord's own address, and nothing from anywhere else.
+          "img-src 'self' data: https://cdn.discordapp.com",
           "media-src 'self' blob:",
           `connect-src 'self'${sockets}`,
           "font-src 'self'",
@@ -694,10 +695,44 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     },
   );
 
-  // A track's cover, from jukecord itself (src/media/covers.ts): only for a track the server shows somewhere (playing,
-  // queued, in its history or in one of its playlists), to a login that can open that server. A cached cover is sent
-  // as a file; one not cached yet is fetched once, within the cover rate of the login and its address, and not while
-  // jukecord is behind.
+  // Sends a cover from the cache, or fetches it once first (src/media/covers.ts): within the cover rate of the login and
+  // its address, and not while jukecord is behind. A picture that cannot be had, or none at all, answers `missing`,
+  // which the browser need not ask again for an hour: as long as jukecord remembers the failure.
+  const sendCover = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    caller: Caller,
+    pictured: Pictured,
+    missing: string,
+  ): Promise<FastifyReply> => {
+    const none = () => failure(reply.header('cache-control', 'private, max-age=3600'), 'not-found', missing);
+    if (!pictured.thumbnail) return none();
+    let cover: CoverFile | null = options.covers.cached(pictured);
+    if (!cover) {
+      if (behind()) return later(reply, 'busy', BUSY, 2000);
+      // The host is not held to a rate, as for every other request.
+      if (caller.principal.kind !== 'host') {
+        const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
+        const wait = coverFetches.wait(keys);
+        if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
+        coverFetches.take(keys);
+      }
+      try {
+        cover = await options.covers.get(pictured);
+      } catch (error) {
+        if (error instanceof BusyError) return later(reply, 'busy', error.message, 2000);
+        throw error;
+      }
+      if (!cover) return none();
+    }
+    // A cover does not change once fetched; the browser may keep it for a day, then ask whether it did.
+    return reply
+      .header('cache-control', 'private, max-age=86400')
+      .sendFile(path.basename(cover.path), path.dirname(cover.path));
+  };
+
+  // A track's cover, from jukecord itself: only for a track the server shows somewhere (playing, queued, in its
+  // history or in one of its playlists), to a login that can open that server.
   app.get<{ Params: { guild: string; track: string } }>(
     `${API_PREFIX}/guilds/:guild/tracks/:track/cover`,
     async (request, reply) => {
@@ -719,33 +754,29 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           (caller.principal.kind !== 'guest' && deps.store.likes.has(likesOwner(context), id)));
       const track = shown ? deps.store.tracks.get(id) : null;
       if (!track) return failure(reply, 'not-found', 'that track is not in this server');
-      // A track without a picture, or one whose picture cannot be had: the browser need not ask again for an hour,
-      // which is as long as jukecord remembers the failure.
-      const none = () =>
-        failure(reply.header('cache-control', 'private, max-age=3600'), 'not-found', 'that track has no cover');
-      if (!track.thumbnail) return none();
-      let cover: CoverFile | null = options.covers.cached(track);
-      if (!cover) {
-        if (behind()) return later(reply, 'busy', BUSY, 2000);
-        // The host is not held to a rate, as for every other request.
-        if (caller.principal.kind !== 'host') {
-          const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
-          const wait = coverFetches.wait(keys);
-          if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
-          coverFetches.take(keys);
-        }
-        try {
-          cover = await options.covers.get(track);
-        } catch (error) {
-          if (error instanceof BusyError) return later(reply, 'busy', error.message, 2000);
-          throw error;
-        }
-        if (!cover) return none();
-      }
-      // A track's cover does not change once fetched; the browser may keep it for a day, then ask whether it did.
-      return reply
-        .header('cache-control', 'private, max-age=86400')
-        .sendFile(path.basename(cover.path), path.dirname(cover.path));
+      return sendCover(request, reply, caller, track, 'that track has no cover');
+    },
+  );
+
+  // The picture of a search's result before it is added (the add field's list), from jukecord as a track's cover is,
+  // so the browser does not ask the image host either: only for an address a search found in the last half hour, to
+  // people who may search. It is kept by the same key as the track the result becomes, so adding it fetches nothing.
+  app.get<{ Params: { guild: string }; Querystring: { url?: unknown } }>(
+    `${API_PREFIX}/guilds/:guild/search/cover`,
+    async (request, reply) => {
+      const { caller, blocked } = identify(request, reply);
+      if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
+      // Held to what the search itself needs, as the operations are: whoever cannot search has no result to see.
+      const verdict = permission(API.search.access, caller);
+      if (!caller || verdict === 'unauthorized') return failure(reply, 'unauthorized', 'log in first');
+      // A guest cannot search (the operations hold guests to GUEST_MAY, and the search is not one of them).
+      if (caller.principal.kind === 'guest') return failure(reply, 'forbidden', GUEST_ONLY);
+      if (verdict === 'forbidden') return failure(reply, 'forbidden', `this needs a ${API.search.access} token`);
+      const context = await deps.access.context(caller.principal, request.params.guild);
+      const address = typeof request.query.url === 'string' ? request.query.url : '';
+      const found = deps.actions.searched(context, address);
+      if (!found) return failure(reply, 'not-found', 'no search found that address lately');
+      return sendCover(request, reply, caller, found, 'that search result has no picture');
     },
   );
 

@@ -302,6 +302,15 @@ describe('the HTTP API', () => {
       const spec = API[name];
       assert.equal(document.paths[spec.path]?.[spec.method.toLowerCase()]?.operationId, name);
     }
+    // The browser's own endpoints, which are not JSON operations, are listed too.
+    for (const route of [
+      '/guilds/{guild}/tracks/{track}/audio',
+      '/guilds/{guild}/tracks/{track}/cover',
+      '/guilds/{guild}/search/cover',
+      '/events',
+    ]) {
+      assert.ok(document.paths[route]?.get, `${route} is missing from the document`);
+    }
     const refs = [...JSON.stringify(document).matchAll(/"\$ref":"#\/components\/schemas\/(\w+)"/g)].map((m) => m[1]);
     assert.ok(refs.length > 20);
     for (const ref of refs) assert.ok(ref && ref in document.components.schemas, `${ref} does not resolve`);
@@ -338,6 +347,11 @@ describe('the HTTP API', () => {
     assert.match(
       String(page.headers['content-security-policy']),
       /default-src 'self'.*connect-src 'self' ws:\/\/localhost:8795/,
+    );
+    // Pictures from jukecord (covers, search results) and Discord's avatars and icons only: no other site's.
+    assert.match(
+      String(page.headers['content-security-policy']),
+      /img-src 'self' data: https:\/\/cdn\.discordapp\.com;/,
     );
     assert.equal(page.headers['x-content-type-options'], 'nosniff');
     const answer = await inject({ method: 'GET', url: api('/status') });

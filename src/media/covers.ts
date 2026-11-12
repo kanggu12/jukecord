@@ -1,6 +1,6 @@
 /**
- * Covers: each track's picture, fetched once by jukecord and kept in the media cache beside its audio, so the panel
- * shows it from jukecord's own address.
+ * Covers: each track's picture (and a search result's, before it is added), fetched once by jukecord and kept in the
+ * media cache beside its audio, so the panel shows it from jukecord's own address.
  *
  * Browsers then never ask the image hosts (the sites the tracks come from see no listener's address), and a picture
  * from the panel's own origin can be drawn into a canvas (Wrapped's "Save as picture"). A cover is fetched by the same
@@ -14,7 +14,7 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import type { Track } from '../core/types.ts';
+import type { NewTrack } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { VERSION } from '../version.ts';
 import { isPrivateAddress, resolveAll } from './address.ts';
@@ -46,6 +46,12 @@ export interface Picture {
   readonly bytes: Buffer;
   readonly type: CoverType;
 }
+
+/**
+ * What a cover is kept by: the canonical address (the cache key, so a search result's picture is its track's once it
+ * is added), the picture's address, and the title for the log. A track, or a search result not added yet.
+ */
+export type Pictured = Pick<NewTrack, 'source' | 'thumbnail' | 'title'>;
 
 /** A cached cover, ready to be sent. */
 export interface CoverFile {
@@ -285,7 +291,7 @@ export class Covers {
   }
 
   /** The cover a track has in the cache now (marked as used), or null; nothing is fetched. */
-  cached(track: Track): CoverFile | null {
+  cached(track: Pictured): CoverFile | null {
     if (!track.thumbnail) return null;
     return this.options.cache.cover(MediaCache.keyOf(track.source));
   }
@@ -294,7 +300,7 @@ export class Covers {
    * A track's cover: from the cache, or fetched now and kept. Null when the track has no picture or it cannot be had
    * (a failure is remembered for an hour). Throws BusyError when too many wait for a place already.
    */
-  async get(track: Track): Promise<CoverFile | null> {
+  async get(track: Pictured): Promise<CoverFile | null> {
     const address = track.thumbnail;
     if (!address) return null;
     const key = MediaCache.keyOf(track.source);
@@ -326,7 +332,7 @@ export class Covers {
   }
 
   // Waits for a place (or is refused as busy after the wait limit), fetches, and keeps the picture.
-  private async fetchAndKeep(track: Track, address: string, key: string, mark: string): Promise<CoverFile | null> {
+  private async fetchAndKeep(track: Pictured, address: string, key: string, mark: string): Promise<CoverFile | null> {
     await this.place();
     try {
       const picture = await this.fetch(address, this.stopping.signal);

@@ -17,6 +17,7 @@ import {
   type PlaylistFile,
   type QueueItem,
   type SearchResult,
+  searchCoverUrl,
   type Track,
 } from '../api.ts';
 import { ONE_COLUMN } from '../columns.ts';
@@ -1665,9 +1666,9 @@ export function addCard(): HTMLElement {
   // keyboard picks with Enter, Shift+Enter and Ctrl+Enter, which the line under the list says).
   const option = (result: SearchResult, index: number): HTMLElement => {
     const words = t();
-    const picture = result.thumbnail
-      ? h('img', { src: result.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', decoding: 'async' })
-      : null;
+    // From jukecord, as every cover is (api.ts), never from the image host.
+    const address = searchCoverUrl(guild(), result);
+    const picture = address ? h('img', { src: address, alt: '', loading: 'lazy', decoding: 'async' }) : null;
     const cover = h('span', { class: 'cover' }, picture ?? h('span', { class: 'note' }, icon('music-2')));
     if (picture)
       picture.onerror = () => {

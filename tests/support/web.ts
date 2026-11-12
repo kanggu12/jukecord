@@ -224,13 +224,18 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return tracks.map((track) => store.tracks.upsert(track));
     },
   } as unknown as Resolver;
-  // The search answers from its table, as many as asked for, and remembers who asked.
+  // The search answers from its table, as many as asked for, and remembers what it showed by the canonical address, as
+  // the real one does for picking a result and showing its picture (Search.recent).
   const searched = options.searched ?? {};
+  const shown = new Map<string, NewTrack>();
   const search = {
-    find: async (words: string, ask: { limit?: number } = {}) =>
-      (searched[searchWords(words)] ?? []).slice(0, ask.limit ?? 8),
+    find: async (words: string, ask: { limit?: number } = {}) => {
+      const tracks = (searched[searchWords(words)] ?? []).slice(0, ask.limit ?? 8);
+      for (const track of tracks) shown.set(track.source, track);
+      return tracks;
+    },
     cached: () => null,
-    recent: () => null,
+    recent: (source: string) => shown.get(source) ?? null,
   } as unknown as Search;
   const directory = new FakeDirectory();
   const voice = new FakeVoice();
