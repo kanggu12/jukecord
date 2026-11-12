@@ -31,6 +31,17 @@ describe('sayError', () => {
     }
   });
 
+  it('has Korean for why a live connection is turned away', () => {
+    for (const reason of [
+      'jukecord has as many live connections as it allows',
+      'too many live connections for this login; close a tab or two',
+      'too many live connections from this address; close a tab or two',
+      'too many failed logins; wait ten minutes',
+    ]) {
+      assert.notEqual(sayError(reason, 'ko'), sayError(reason, 'en'), `no Korean for "${reason}"`);
+    }
+  });
+
   it('translates the messages with values, and every short reason', () => {
     assert.equal(sayError('the queue is full (1000 tracks)', 'ko'), '대기열이 가득 참(1000곡)');
     assert.equal(sayError('there is no playlist named "Road trip"', 'ko'), '"Road trip" 플레이리스트 없음');

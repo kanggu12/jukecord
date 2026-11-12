@@ -24,7 +24,7 @@ import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
 import { type Caller, CSRF_HEADER } from './auth.ts';
-import { EventHub } from './events.ts';
+import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { openApiDocument } from './openapi.ts';
 
@@ -45,6 +45,8 @@ export interface WebServerOptions {
   /** Makes the MP3 copy of a cached track for browsers without Opus. */
   readonly mp3: (track: Track, signal: AbortSignal) => Promise<string | null>;
   readonly log: Logger;
+  /** How many live connections there may be (in all, per login, per address); tests and the settings change it. */
+  readonly live?: Partial<LiveLimits>;
   /** Whether jukecord can serve requests (for /readyz). */
   readonly ready: () => boolean;
   readonly discordReady: () => boolean;
@@ -127,6 +129,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     // The queue's change counter, read without the queue: the hub keeps each server's queue message per version.
     queueVersion: (guildId) => options.queue.version(guildId),
     stillValid: (caller) => auth.stillValid(caller),
+    limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
   });
 
   // Responses by status class, for /metrics.
@@ -339,6 +342,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       guild: typeof request.query.guild === 'string' ? request.query.guild : undefined,
       // gzip=1: the panel can decompress (it has DecompressionStream), so big messages may come as gzip frames.
       gzip: request.query.gzip === '1',
+      // For the cap per address: the browser's address (behind a trusted proxy, the one it forwarded).
+      address: request.ip,
     });
   });
 

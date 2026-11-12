@@ -93,6 +93,12 @@ function frame(): void {
     status: (status) => update({ live: status }),
     outdated: () => toast(t().reload, 'pause', 'refresh-cw'),
     message: (message) => receive(message),
+    // 1013, jukecord asks to be tried again later: why is said in the bar now, and stays in the bar's label (its
+    // title) until a connection is taken.
+    waiting: (reason) => {
+      update({ liveWaiting: reason });
+      if (reason) toast(reason, 'bad', 'wifi-off');
+    },
     // 4401, the login is gone: to the login page. 4410, the server shown is closed to this login now: start again
     // with the servers it can open. 4403, this page's address is not the one jukecord expects: said on the page.
     ended: (code) => {
@@ -225,7 +231,14 @@ function frame(): void {
                 ? ['pause', words.lookOnly]
                 : ['play', words.connected];
     pill.className = `pill tone-${tone}`;
-    pill.title = state.live === 'refused' ? words.wrongAddress : guild && !mayControl() ? words.lookOnlyHint : '';
+    pill.title =
+      state.live === 'refused'
+        ? words.wrongAddress
+        : state.live !== 'open' && state.liveWaiting
+          ? state.liveWaiting
+          : guild && !mayControl()
+            ? words.lookOnlyHint
+            : '';
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them
     // must survive the status and guild updates.
@@ -275,7 +288,7 @@ function frame(): void {
     if (account.getAttribute('aria-expanded') === 'true') closeSheets();
     else menuSheet(navigate, menuHooks);
   };
-  watch(['status', 'guild', 'live', 'lang', 'me', 'guilds'], drawBar);
+  watch(['status', 'guild', 'live', 'liveWaiting', 'lang', 'me', 'guilds'], drawBar);
   // The light behind the glass: the cover of the track playing, in two layers that take turns, so the old cover fades
   // out while the new one fades in. Nothing playing: the field rests near grey.
   const ambient = h('div', { class: 'ambient', 'aria-hidden': 'true' }, h('div'), h('div'));

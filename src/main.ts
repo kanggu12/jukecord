@@ -210,6 +210,8 @@ async function main(): Promise<number> {
     cache,
     mp3: (track, signal) => media.mp3(track, signal),
     log: log.child('web'),
+    // Open panels at once (JUKECORD_LIVE_MAX); the caps per login and per address stay at their defaults.
+    live: { total: config.liveMax },
     ready: () => store.db.isOpen,
     discordReady: () => bot?.ready() ?? false,
     deps: {

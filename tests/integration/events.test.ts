@@ -238,3 +238,52 @@ describe('live updates end with the login', () => {
     }
   });
 });
+
+describe('live connections are capped', () => {
+  it('in all, per login and per address, closing the one over a cap with 1013 and why; the host counts in all only', async () => {
+    const server = await testServer({ listen: true, live: { total: 4, perLogin: 2, perAddress: 3 } });
+    const sockets: Socket[] = [];
+    try {
+      server.directory.join(GUILD, ALICE);
+      const base = `${server.url.replace('http://', 'ws://')}/api/v1/events`;
+      const open = (headers: Record<string, string>) => {
+        const socket = new Socket(base, headers);
+        sockets.push(socket);
+        return socket;
+      };
+      // Two tabs of one login, and a third: over the cap for that login.
+      const first = sessionFor(server, ALICE);
+      const asFirst = { cookie: first.cookie, origin: server.url };
+      await open(asFirst).next('hello');
+      await open(asFirst).next('hello');
+      assert.deepEqual(await open(asFirst).closed, {
+        code: 1013,
+        reason: 'too many live connections for this login; close a tab or two',
+      });
+      // Another login from the same address: its first tab fits, the next is one too many from this address.
+      const second = sessionFor(server, ALICE);
+      const asSecond = { cookie: second.cookie, origin: server.url };
+      await open(asSecond).next('hello');
+      assert.deepEqual(await open(asSecond).closed, {
+        code: 1013,
+        reason: 'too many live connections from this address; close a tab or two',
+      });
+      // The host is not held to those two caps, only to the total: the fourth connection fits, the fifth does not.
+      await open({ authorization: `Bearer ${HOST_TOKEN}` }).next('hello');
+      assert.deepEqual(await open({ authorization: `Bearer ${HOST_TOKEN}` }).closed, {
+        code: 1013,
+        reason: 'jukecord has as many live connections as it allows',
+      });
+      // A tab closed frees its place.
+      const [tab] = sockets;
+      tab?.close();
+      await tab?.closed;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await open(asFirst).next('hello');
+      assert.equal(server.web.hub.counts().connections, 4);
+    } finally {
+      for (const socket of sockets) socket.close();
+      await server.close();
+    }
+  });
+});

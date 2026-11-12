@@ -187,7 +187,11 @@ does not use the WebSocket's own per-message compression.
 
 jukecord closes a connection for good with `4401` when its login ends (logged out, expired, revoked), `4403` when a
 cookie comes from a page that is not the panel's (the panel's address differs from `JUKECORD_PUBLIC_URL`), and `4410`
-when the login may no longer open the server it shows. Any other close is worth reconnecting after. `voice` lists the
+when the login may no longer open the server it shows. Any other close is worth reconnecting after. `1013` (try again
+later) comes at once, with the reason, when a connection would be one too many: jukecord has as many as
+`JUKECORD_LIVE_MAX` allows (1000 by default), or ten are open from the same login, or twenty from the same address
+(the host's own count in the total only); or the address failed to log in too often. Wait longer before trying again:
+the panel waits 15 s, doubling up to a minute. `voice` lists the
 channels the connection's own person can see in Discord (the host sees them all); when the bot is in a channel that
 person cannot see, `current` has its ID and an empty `name`.
 

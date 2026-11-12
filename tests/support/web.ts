@@ -23,6 +23,7 @@ import { MediaCache } from '../../src/media/cache.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
+import type { LiveLimits } from '../../src/web/events.ts';
 import { Presenter } from '../../src/web/present.ts';
 import { createWebServer, type WebServer } from '../../src/web/server.ts';
 import { FakeClock, FakeMedia } from './fakes.ts';
@@ -128,6 +129,8 @@ export interface TestServerOptions {
   readonly panelDir?: string | null;
   /** What the resolver finds for each input. */
   readonly found?: Record<string, NewTrack[]>;
+  /** The caps on live connections (lower than the defaults to test them). */
+  readonly live?: Partial<LiveLimits>;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -199,6 +202,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     cache,
     mp3: async () => null,
     log,
+    ...(options.live ? { live: options.live } : {}),
     ready: () => true,
     discordReady: () => !options.browserOnly,
     deps: {

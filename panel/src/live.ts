@@ -8,11 +8,12 @@
  * that came after a big one waits for it.
  *
  * It reconnects by itself (about 1 s, then doubling up to about 10 s, each wait spread at random) and subscribes again
- * after each reconnect, so a laptop waking up or jukecord restarting needs nothing from the person. A jukecord that has just started may not know its
- * Discord servers yet and answers "unavailable"; the subscription is then asked again the same way, and the
- * connection counts as open only once the server's state has arrived. The server's clock is the one that counts: the
- * difference to this browser's clock is measured with pings and the fastest round trip of the last few wins, because
- * a slow answer says more about the network than about the clocks.
+ * after each reconnect, so a laptop waking up or jukecord restarting needs nothing from the person. When jukecord asks
+ * to be tried again later (1013: it has as many connections as it allows), it says why and waits longer. A jukecord
+ * that has just started may not know its Discord servers yet and answers "unavailable"; the subscription is then asked
+ * again the same way, and the connection counts as open only once the server's state has arrived. The server's clock is
+ * the one that counts: the difference to this browser's clock is measured with pings and the fastest round trip of the
+ * last few wins, because a slow answer says more about the network than about the clocks.
  */
 
 /** The protocol version this panel understands (src/web/events.ts). */
@@ -29,6 +30,9 @@ export interface LiveHandlers {
   /** The server ended the connection for good: 4401 the login is gone, 4403 this page's address is refused, 4410 the
    * server shown may not be opened any more. */
   ended(code: number): void;
+  /** The server asked to be tried again later (1013), saying why (too many connections, too many failed logins);
+   * called once per run of such refusals, and with null once a connection is taken again. */
+  waiting(reason: string | null): void;
 }
 
 export class Live {
@@ -37,6 +41,8 @@ export class Live {
   private listeningOn = false;
   private retry = 1000;
   private retryTimer = 0;
+  // Whether the last close was a 1013 ("try again later"), so the reason is said once, not at every refusal.
+  private told = false;
   private pingTimer = 0;
   private closedByUs = false;
   // Whether the server shown has sent its state on this socket, and the wait before asking again when it was not ready.
@@ -110,7 +116,8 @@ export class Live {
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
     socket.onopen = () => {
-      this.retry = 1000;
+      // The wait between tries is not made short again here but at jukecord's hello (see handle): a connection that
+      // jukecord turns away (1013) opens first too.
       // The server in the address may not be the one shown any more: it changed while the socket was connecting.
       const asked = new URL(socket.url).searchParams.get('guild');
       if (this.guild && this.guild !== asked) this.send({ type: 'subscribe', guild: this.guild });
@@ -151,10 +158,19 @@ export class Live {
         this.handlers.ended(event.code);
         return;
       }
+      // 1013: jukecord is full (as many live connections as it allows, in all, from this login or from this address)
+      // or this address failed to log in too often. The panel says why, once, and waits longer than after a drop (15 s,
+      // doubling up to a minute) so that refused panels do not knock again all together.
+      const later = event.code === 1013;
+      if (later) {
+        if (!this.told) this.handlers.waiting(event.reason || 'jukecord asked to try again later');
+        this.told = true;
+        this.retry = Math.max(this.retry, 15_000);
+      }
       // Each panel waits a different share of the delay (half to one and a half times it): after a restart of jukecord
       // a crowd of panels comes back spread over the seconds, not all in the same instant.
       this.retryTimer = window.setTimeout(() => this.connect(), this.retry * (0.5 + Math.random()));
-      this.retry = Math.min(10_000, this.retry * 2);
+      this.retry = Math.min(later ? 60_000 : 10_000, this.retry * 2);
     };
   }
 
@@ -163,6 +179,12 @@ export class Live {
     if (typeof message.v === 'number' && message.v > PROTOCOL) {
       this.handlers.outdated();
       return;
+    }
+    if (message.type === 'hello') {
+      // jukecord took the connection: the next drop waits the shortest time again, and a refusal said is over.
+      this.retry = 1000;
+      if (this.told) this.handlers.waiting(null);
+      this.told = false;
     }
     if (message.type === 'pong') this.pong(message, arrived);
     else if (message.type === 'hello' && typeof message.serverTime === 'number' && this.samples.length === 0) {

@@ -56,6 +56,8 @@ export interface Config {
   };
   /** The most tracks one server's queue may hold. */
   readonly queueMax: number;
+  /** The most live connections (open panels and other WebSocket clients) at once, across every server. */
+  readonly liveMax: number;
   readonly voice: {
     /** How long the bot stays alone in a voice channel before it leaves (0: it does not leave by itself). */
     readonly idleMs: number;
@@ -108,6 +110,7 @@ const KNOWN = new Set([
   'JUKECORD_TRACK_MAX',
   'JUKECORD_YTDLP_COOKIES',
   'JUKECORD_QUEUE_MAX',
+  'JUKECORD_LIVE_MAX',
   'JUKECORD_VOICE_IDLE',
   'JUKECORD_TRUST_PROXY',
   'JUKECORD_ALLOW_PRIVATE_ADDRESSES',
@@ -291,6 +294,10 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
   // The queue limit keeps a pasted 5,000-track playlist (or a script) from making the panel and the database crawl.
   const queueMax = read('JUKECORD_QUEUE_MAX', 1000, integer(10, 100_000));
 
+  // How many live connections at once: each open panel tab is one. A thousand idle ones take about 120 MiB, and each
+  // queue change goes out to all of them; a bigger machine can take more, a small one may want fewer.
+  const liveMax = read('JUKECORD_LIVE_MAX', 1000, integer(10, 100_000));
+
   // How long the bot waits alone in a voice channel; "0" turns leaving by itself off.
   const voice = {
     idleMs: read('JUKECORD_VOICE_IDLE', 5 * 60_000, (text) => {
@@ -335,6 +342,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     discord: { token, clientId, clientSecret },
     media,
     queueMax,
+    liveMax,
     voice,
     log,
     warnings,
@@ -368,6 +376,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'yt-dlp cookies': config.media.cookies ?? 'not set',
     'private addresses': config.media.allowPrivate ? 'allowed' : 'refused',
     'queue limit': String(config.queueMax),
+    'live connections limit': String(config.liveMax),
     'leave voice when alone after': config.voice.idleMs === 0 ? 'never' : `${config.voice.idleMs} ms`,
   };
 }

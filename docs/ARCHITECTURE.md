@@ -69,7 +69,9 @@ ended, and the panel replaces its queue with each one. Who is listening goes out
 first twenty people. A big message is compressed once, as gzip, and the same bytes go to every panel whose browser can
 unpack it; the WebSocket's own compression, which compressed every message again for each connection and kept a
 compressor per connection, is off. A server's queue is serialised once per change, and a panel subscribing takes it
-from there, adding only its own part (its voice channels).
+from there, adding only its own part (its voice channels). There are at most `JUKECORD_LIVE_MAX` connections (1000),
+ten per login and twenty per address; one more is closed at once with 1013 and the reason, which the panel shows
+before it tries again, later than after a drop.
 
 ## Getting a track
 

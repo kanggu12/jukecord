@@ -10,7 +10,8 @@
  * carrying the latest queue (a burst of changes becomes one message), and who is listening at most once a second.
  * Each message is made once for everyone showing that server: a panel that can decompress (it says so with `gzip=1`
  * when it connects) gets a big one as one gzip binary frame, the same bytes for every panel; the others get the JSON
- * as text. Nothing is compressed per connection.
+ * as text. Nothing is compressed per connection. How many connections there may be is capped in total, per login and
+ * per address; one over a cap is closed with 1013 ("try again later") and a reason the panel shows.
  *
  * The browser plays along by itself, from the snapshots: the player is the clock (see core/player.ts). To turn the
  * server's times into its own, it measures the difference between the two clocks with ping/pong.
@@ -21,7 +22,7 @@ import { type ActionContext, ActionError, type Actions } from '../app/actions.ts
 import type { Bus } from '../core/bus.ts';
 import type { Logger } from '../log.ts';
 import type { UserRepository } from '../store/store.ts';
-import type { Caller } from './auth.ts';
+import { addressKey, type Caller } from './auth.ts';
 import { compressStart, gzip, gzipJoined, type Start } from './gzip.ts';
 import type { Presenter } from './present.ts';
 
@@ -57,6 +58,19 @@ export interface Listeners {
   readonly count: number;
 }
 
+/** How many live connections there may be. The host's own are counted in the total only. */
+export interface LiveLimits {
+  /** In all (JUKECORD_LIVE_MAX). */
+  readonly total: number;
+  /** From one login: a panel session or an API token (each browser tab is a connection). */
+  readonly perLogin: number;
+  /** From one address (an IPv6 address by its /56, as the login limiter counts). */
+  readonly perAddress: number;
+}
+
+/** The limits unless the settings say otherwise: a thousand in all, ten tabs per login, twenty per address. */
+export const DEFAULT_LIVE_LIMITS: LiveLimits = { total: 1000, perLogin: 10, perAddress: 20 };
+
 // One open connection.
 interface Client {
   readonly socket: WebSocket;
@@ -65,6 +79,9 @@ interface Client {
   readonly who: Listener;
   // Whether its browser can decompress gzip (it said so when it connected).
   readonly gzip: boolean;
+  // The keys it counts under for the caps, or null when it is not counted there (the host).
+  readonly login: string | null;
+  readonly address: string | null;
   // The server it shows, once subscribed.
   guild: string | null;
   // Whether its browser is playing along.
@@ -116,17 +133,21 @@ export interface EventHubOptions {
   readonly now?: () => number;
   /** Whether a caller's login still exists (logged out, expired and revoked logins end their connections). */
   readonly stillValid?: (caller: Caller) => boolean;
+  /** How many connections there may be (default DEFAULT_LIVE_LIMITS). */
+  readonly limits?: LiveLimits;
   /** The fewest milliseconds between queue messages and between listener messages of a server (tests shorten them). */
   readonly queueEveryMs?: number;
   readonly listenersEveryMs?: number;
 }
 
-/** What a new connection asks for and what its browser can take. */
+/** What a new connection asks for, where it comes from, and what its browser can take. */
 export interface AttachOptions {
   /** The server to subscribe to at once. */
   readonly guild?: string | undefined;
   /** Whether the browser can decompress gzip messages. */
   readonly gzip?: boolean;
+  /** The address it comes from, for the per-address cap. */
+  readonly address?: string | undefined;
 }
 
 // The context for reading a server's state on behalf of everyone subscribed to it (reading needs no rights).
@@ -169,11 +190,15 @@ function outgoing(size: number, text: () => Buffer, packed: () => Buffer): (clie
 export class EventHub {
   private readonly options: EventHubOptions;
   private readonly now: () => number;
+  private readonly limits: LiveLimits;
   private readonly queueEveryMs: number;
   private readonly listenersEveryMs: number;
   private readonly clients = new Set<Client>();
   // The servers some connection shows, each with its connections and what is kept for them.
   private readonly rooms = new Map<string, Room>();
+  // Open connections per login and per address, for the caps.
+  private readonly perLogin = new Map<string, number>();
+  private readonly perAddress = new Map<string, number>();
   private readonly heartbeat: NodeJS.Timeout;
   // The bus listeners, kept to remove them on close.
   private readonly off: (() => void)[] = [];
@@ -181,6 +206,7 @@ export class EventHub {
   constructor(options: EventHubOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
+    this.limits = options.limits ?? DEFAULT_LIVE_LIMITS;
     this.queueEveryMs = options.queueEveryMs ?? QUEUE_EVERY_MS;
     this.listenersEveryMs = options.listenersEveryMs ?? LISTENERS_EVERY_MS;
     const { bus, presenter, actions } = options;
@@ -226,9 +252,36 @@ export class EventHub {
     this.heartbeat.unref();
   }
 
-  /** Takes over a new connection from a logged-in caller; `guild` subscribes at once when given. */
-  attach(socket: WebSocket, caller: Caller, options: AttachOptions = {}): void {
+  /**
+   * Takes over a new connection from a logged-in caller; `guild` subscribes at once when given. A connection over one
+   * of the caps is closed with 1013 and the reason, and false is returned.
+   */
+  attach(socket: WebSocket, caller: Caller, options: AttachOptions = {}): boolean {
     const principal = caller.principal;
+    // The host is not held to the per-login and per-address caps: it is the machine's own, and its tabs and scripts
+    // are its business. Every connection counts in the total.
+    const host = principal.kind === 'host';
+    const login = host ? null : (caller.sessionHash ?? `token ${caller.tokenId ?? 'host'}`);
+    const address = host ? null : addressKey(options.address);
+    const refusal =
+      this.clients.size >= this.limits.total
+        ? 'jukecord has as many live connections as it allows'
+        : login !== null && (this.perLogin.get(login) ?? 0) >= this.limits.perLogin
+          ? 'too many live connections for this login; close a tab or two'
+          : address !== null && (this.perAddress.get(address) ?? 0) >= this.limits.perAddress
+            ? 'too many live connections from this address; close a tab or two'
+            : null;
+    if (refusal) {
+      // 1013: try again later. Said in the log too, with a hint for the usual cause of the per-address one.
+      this.options.log.info('refused a live connection', {
+        reason: refusal,
+        ...(address !== null && refusal.includes('address')
+          ? { hint: 'behind a reverse proxy, set JUKECORD_TRUST_PROXY so each browser has its own address' }
+          : {}),
+      });
+      socket.close(1013, refusal);
+      return false;
+    }
     const person = principal.kind === 'user' ? this.options.users.get(principal.userId) : null;
     const who: Listener =
       principal.kind === 'host'
@@ -240,6 +293,8 @@ export class EventHub {
       principal,
       who,
       gzip: options.gzip === true,
+      login,
+      address,
       guild: null,
       listening: false,
       alive: true,
@@ -247,6 +302,8 @@ export class EventHub {
       queueVersion: -1,
     };
     this.clients.add(client);
+    if (login !== null) this.perLogin.set(login, (this.perLogin.get(login) ?? 0) + 1);
+    if (address !== null) this.perAddress.set(address, (this.perAddress.get(address) ?? 0) + 1);
     socket.on('pong', () => {
       client.alive = true;
     });
@@ -255,6 +312,7 @@ export class EventHub {
     socket.on('error', (error) => this.options.log.debug('a panel connection failed', { error }));
     this.send(client, { type: 'hello', serverTime: this.now(), you: who });
     if (options.guild) void this.subscribe(client, options.guild);
+    return true;
   }
 
   /** The people listening in a browser to a server (the first twenty), and how many browsers that is. */
@@ -287,6 +345,8 @@ export class EventHub {
     this.rooms.clear();
     for (const client of this.clients) client.socket.close(1001, 'jukecord is restarting');
     this.clients.clear();
+    this.perLogin.clear();
+    this.perAddress.clear();
   }
 
   // One message from a browser. Anything unexpected is ignored: a panel from a newer version may say more.
@@ -548,6 +608,16 @@ export class EventHub {
   // Forgets a connection; a listener leaving is announced to the others.
   private drop(client: Client): void {
     if (!this.clients.delete(client)) return;
+    // Its places in the caps are free again.
+    for (const [counts, key] of [
+      [this.perLogin, client.login],
+      [this.perAddress, client.address],
+    ] as const) {
+      if (key === null) continue;
+      const left = (counts.get(key) ?? 1) - 1;
+      if (left > 0) counts.set(key, left);
+      else counts.delete(key);
+    }
     const guildId = client.guild;
     this.leaveRoom(client);
     if (client.listening && guildId) this.listenersChanged(guildId);

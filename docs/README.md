@@ -112,6 +112,7 @@ Settings are environment variables; with Docker Compose they go in `.env`. Every
 | `JUKECORD_PREFETCH`                                                  | `2`                | how many of the next tracks are fetched ahead                                                  |
 | `JUKECORD_TRACK_MAX`                                                 | `3h`               | the longest track that may be added                                                            |
 | `JUKECORD_QUEUE_MAX`                                                 | `1000`             | the most tracks a server's queue holds                                                         |
+| `JUKECORD_LIVE_MAX`                                                  | `1000`             | the most open panels at once (live connections); also ten per login and twenty per address     |
 | `JUKECORD_VOICE_IDLE`                                                | `5m`               | how long the bot stays alone in a voice channel (`0`: it stays)                                |
 | `JUKECORD_YTDLP_COOKIES`                                             |                    | a cookies file for YouTube's sign-in check ([Troubleshooting](TROUBLESHOOTING.md))             |
 | `JUKECORD_YTDLP`, `JUKECORD_FFMPEG`                                  | `yt-dlp`, `ffmpeg` | the programs jukecord runs                                                                     |

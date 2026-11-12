@@ -19,6 +19,8 @@ export interface State {
   listeners: Listeners;
   history: HistoryEntry[];
   live: LiveStatus;
+  /** Why jukecord asked the live connection to try again later (1013), while it waits; null otherwise. */
+  liveWaiting: string | null;
   lang: Lang;
   /** The menu's choices, kept in this browser. */
   theme: 'system' | 'light' | 'dark';
@@ -64,6 +66,7 @@ export const state: State = {
   listeners: { people: [], count: 0 },
   history: [],
   live: 'connecting',
+  liveWaiting: null,
   lang: pickLang(langChoice === 'auto' ? null : langChoice),
   theme: (stored('theme') ?? 'system') as State['theme'],
   langChoice,

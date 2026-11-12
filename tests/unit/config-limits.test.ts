@@ -12,6 +12,7 @@ describe('loadConfig: limits, cookies and secrets from files', () => {
     const config = loadConfig({}, '/srv', files({}));
     assert.equal(config.media.trackMaxMs, 3 * 3_600_000);
     assert.equal(config.queueMax, 1000);
+    assert.equal(config.liveMax, 1000);
     assert.equal(config.voice.idleMs, 300_000);
     assert.equal(config.media.cookies, null);
   });
@@ -21,6 +22,7 @@ describe('loadConfig: limits, cookies and secrets from files', () => {
       {
         JUKECORD_TRACK_MAX: '90m',
         JUKECORD_QUEUE_MAX: '250',
+        JUKECORD_LIVE_MAX: '3000',
         JUKECORD_VOICE_IDLE: '0',
         JUKECORD_YTDLP_COOKIES: 'cookies.txt',
       },
@@ -29,6 +31,7 @@ describe('loadConfig: limits, cookies and secrets from files', () => {
     );
     assert.equal(config.media.trackMaxMs, 90 * 60_000);
     assert.equal(config.queueMax, 250);
+    assert.equal(config.liveMax, 3000);
     assert.equal(config.voice.idleMs, 0);
     assert.equal(config.media.cookies, '/srv/cookies.txt');
   });
@@ -58,6 +61,7 @@ describe('loadConfig: limits, cookies and secrets from files', () => {
             JUKECORD_YTDLP_COOKIES: '/missing.txt',
             JUKECORD_TRACK_MAX: '30s',
             JUKECORD_QUEUE_MAX: '5',
+            JUKECORD_LIVE_MAX: '1',
             JUKECORD_VOICE_IDLE: '1s',
           },
           '/srv',
@@ -72,6 +76,7 @@ describe('loadConfig: limits, cookies and secrets from files', () => {
           'JUKECORD_YTDLP_COOKIES',
           'JUKECORD_TRACK_MAX',
           'JUKECORD_QUEUE_MAX',
+          'JUKECORD_LIVE_MAX',
           'JUKECORD_VOICE_IDLE',
         ]) {
           assert.match(all, new RegExp(part));

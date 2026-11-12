@@ -53,6 +53,8 @@ function hub(
     users: { get: (id: string) => ({ id, name: `Person ${id}`, avatar: null }) },
     log,
     queueVersion: () => queue.version,
+    // The fake callers have no session or address of their own: the caps are tested over real connections instead.
+    limits: { total: 10_000, perLogin: 10_000, perAddress: 10_000 },
     ...(extra.stillValid ? { stillValid: extra.stillValid } : {}),
     ...(extra.queueEveryMs !== undefined ? { queueEveryMs: extra.queueEveryMs } : {}),
     ...(extra.listenersEveryMs !== undefined ? { listenersEveryMs: extra.listenersEveryMs } : {}),
