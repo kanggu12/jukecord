@@ -478,7 +478,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
 
   // Every error becomes {"error":{"code","message"}} with the matching status; only unexpected ones are logged.
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof ActionError) return failure(reply, error.code, error.message);
+    // A refusal of a busy moment says when to ask again (Retry-After), as the server's own busy answers do.
+    if (error instanceof ActionError) {
+      if (error.retryAfterMs !== null) return later(reply, error.code, error.message, error.retryAfterMs);
+      return failure(reply, error.code, error.message);
+    }
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);
     const fastifyError = error as { validation?: unknown; statusCode?: number; message: string };
     if (fastifyError.validation) return failure(reply, 'invalid', unfit(fastifyError as Unfit, request));

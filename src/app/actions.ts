@@ -117,6 +117,11 @@ export interface ActionContext {
   readonly mayManage: boolean;
 }
 
+// How long a refusal of a busy moment says to wait: every lookup slot taken frees one in a second or two; a list of the
+// person's own being added takes a while (a hundred lookups at most).
+const BUSY_RETRY_MS = 2000;
+const LIST_RETRY_MS = 10_000;
+
 /** Why an action could not be done; the ways in turn the code into an HTTP status, an ephemeral reply or an exit code. */
 export type ActionErrorCode = 'invalid' | 'not-found' | 'forbidden' | 'conflict' | 'unavailable';
 
@@ -128,11 +133,17 @@ export class ActionError extends Error {
    * network) that found nothing. The web server gives a refused change its address's share back unless it did.
    */
   readonly spent: boolean;
+  /**
+   * How long until asking again may work, for a refusal of a busy moment (every lookup slot taken, LRCLIB down): the
+   * web server sends it as Retry-After, which the command line turns into its own exit code. Null for any other.
+   */
+  readonly retryAfterMs: number | null;
 
-  constructor(code: ActionErrorCode, message: string, options: { spent?: boolean } = {}) {
+  constructor(code: ActionErrorCode, message: string, options: { spent?: boolean; retryAfterMs?: number } = {}) {
     super(message);
     this.code = code;
     this.spent = options.spent ?? false;
+    this.retryAfterMs = options.retryAfterMs ?? null;
   }
 }
 
@@ -414,8 +425,8 @@ export class Actions {
       const message = error instanceof Error ? error.message : String(error);
       // The address was asked of DNS (see Resolver): a lookup was spent on it.
       if (error instanceof AddressError) throw new ActionError('invalid', REASONS.privateNetwork, { spent: true });
-      // No lookup ran: every place was taken.
-      if (error instanceof BusyError) throw new ActionError('unavailable', message);
+      // No lookup ran: every place was taken, for a moment.
+      if (error instanceof BusyError) throw new ActionError('unavailable', message, { retryAfterMs: BUSY_RETRY_MS });
       // Nothing typed: said as it is, nothing looked up. Anything else: the short reason (the resolver logged the full
       // text), after a lookup that cost what any lookup costs.
       if (/nothing to add/.test(message)) throw new ActionError('invalid', message);
@@ -541,7 +552,8 @@ export class Actions {
         .notFound;
     } catch (error) {
       if (error instanceof LinkError) throw new ActionError(error.code, error.message);
-      if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+      if (error instanceof BusyError)
+        throw new ActionError('unavailable', error.message, { retryAfterMs: BUSY_RETRY_MS });
       throw error;
     }
     if (items.length === 0) {
@@ -982,7 +994,8 @@ export class Actions {
       return await source.forTrack(track);
     } catch (error) {
       // LRCLIB down, slow, asking to wait, or too many lookups waiting: a moment later may work.
-      if (error instanceof LyricsUnavailable) throw new ActionError('unavailable', error.message);
+      if (error instanceof LyricsUnavailable)
+        throw new ActionError('unavailable', error.message, { retryAfterMs: error.retryAfterMs });
       throw error;
     }
   }
@@ -1089,7 +1102,8 @@ export class Actions {
     } catch (error) {
       // The asker went away (the next key was typed): its own abort, as it is.
       if (signal?.aborted) throw error;
-      if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+      if (error instanceof BusyError)
+        throw new ActionError('unavailable', error.message, { retryAfterMs: BUSY_RETRY_MS });
       throw new ActionError('not-found', plainReason(error instanceof Error ? error.message : String(error)));
     }
   }
@@ -1266,7 +1280,9 @@ export class Actions {
           signal ? { signal } : {},
         );
       } catch (error) {
-        if (error instanceof BusyError) throw new ActionError('unavailable', error.message);
+        // A list of this person's is being added already: a while, not a moment.
+        if (error instanceof BusyError)
+          throw new ActionError('unavailable', error.message, { retryAfterMs: LIST_RETRY_MS });
         throw error;
       }
       results.forEach((result, at) => {

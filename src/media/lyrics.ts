@@ -36,9 +36,18 @@ export interface LyricsAnswer {
   readonly text: string | null;
 }
 
-/** Lyrics that cannot be had right now (LRCLIB down, slow or asking to wait, or too many lookups waiting). */
+/**
+ * Lyrics that cannot be had right now (LRCLIB down, slow or asking to wait, or too many lookups waiting), and how long
+ * until asking again may work: a failed track is not asked of LRCLIB again for two minutes.
+ */
 export class LyricsUnavailable extends Error {
   override name = 'LyricsUnavailable';
+  readonly retryAfterMs: number;
+
+  constructor(message: string, retryAfterMs: number) {
+    super(message);
+    this.retryAfterMs = retryAfterMs;
+  }
 }
 
 /** What gives a track its lyrics: the actions ask this. */
@@ -337,10 +346,14 @@ export class Lyrics implements LyricsSource {
     if (pending) return pending;
     const failedAt = this.failed.get(track.id);
     if (failedAt !== undefined && this.now() - failedAt < FAILED_WAIT_MS) {
-      throw new LyricsUnavailable('LRCLIB did not answer; try again in a moment');
+      // Asked again only once the wait after the failure is over.
+      throw new LyricsUnavailable(
+        'LRCLIB did not answer; try again in a moment',
+        FAILED_WAIT_MS - (this.now() - failedAt),
+      );
     }
     if (this.pending.size >= WAITING_MAX) {
-      throw new LyricsUnavailable('jukecord is looking up other lyrics right now; try again in a moment');
+      throw new LyricsUnavailable('jukecord is looking up other lyrics right now; try again in a moment', 2000);
     }
     const lookup = this.lookUp(track).finally(() => this.pending.delete(track.id));
     this.pending.set(track.id, lookup);
@@ -381,7 +394,7 @@ export class Lyrics implements LyricsSource {
         track: track.title,
         reason: error instanceof Error ? error.message : String(error),
       });
-      throw new LyricsUnavailable('LRCLIB did not answer; try again in a moment');
+      throw new LyricsUnavailable('LRCLIB did not answer; try again in a moment', FAILED_WAIT_MS);
     }
   }
 

@@ -15,7 +15,7 @@ describe('the lyrics operation', () => {
   let server: TestServer;
   let off: TestServer;
   // What the stand-in for LRCLIB gives next: an answer, or a failure.
-  let next: LyricsAnswer | Error = new LyricsUnavailable('LRCLIB did not answer; try again in a moment');
+  let next: LyricsAnswer | Error = new LyricsUnavailable('LRCLIB did not answer; try again in a moment', 120_000);
   const asked: number[] = [];
 
   before(async () => {
@@ -43,6 +43,8 @@ describe('the lyrics operation', () => {
     const answer = await lyrics(off);
     assert.equal(answer.statusCode, 503);
     assert.equal(answer.json().error.message, 'lyrics are turned off here');
+    // Not a busy moment: no time to try again at (the command line exits 1, not 4).
+    assert.equal(answer.headers['retry-after'], undefined);
     const status = await off.web.app.inject({ method: 'GET', url: `${API_PREFIX}/status` });
     assert.equal(status.json().lyrics, false);
     assert.equal((await server.web.app.inject({ method: 'GET', url: `${API_PREFIX}/status` })).json().lyrics, true);
@@ -57,10 +59,11 @@ describe('the lyrics operation', () => {
       headers: asHost,
       payload: { input: 'one' },
     });
-    // LRCLIB down: a moment later may work.
+    // LRCLIB down: a moment later may work, said with when (the command line's "try again later" exit code).
     const down = await lyrics(server);
     assert.equal(down.statusCode, 503);
     assert.equal(down.json().error.code, 'unavailable');
+    assert.equal(down.headers['retry-after'], '120');
     next = {
       trackId: 0,
       kind: 'synced',

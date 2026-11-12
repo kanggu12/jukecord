@@ -209,6 +209,30 @@ describe('the rates of changes and shedding when behind', () => {
     }
   });
 
+  it('says when to try again after a refusal of a busy moment, and only then', async () => {
+    const server = await testServer({ busy: ['while every lookup is taken'], nothingFound: ['no such song'] });
+    try {
+      const add = (input: string) =>
+        server.web.app.inject({
+          method: 'POST',
+          url: api(`/guilds/${GUILD}/queue`),
+          headers: asHost,
+          payload: { input },
+        });
+      // Every lookup slot taken: "a moment later", with when (the command line's "try again later" exit code, 4).
+      const busy = await add('while every lookup is taken');
+      assert.equal(busy.statusCode, 503);
+      assert.equal(busy.json().error.code, 'unavailable');
+      assert.equal(busy.headers['retry-after'], '2');
+      // Nothing found is no busy moment: no time to try again at.
+      const missing = await add('no such song');
+      assert.equal(missing.statusCode, 404);
+      assert.equal(missing.headers['retry-after'], undefined);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('counts an address across its logins, and skips against a tighter rate', async () => {
     const server = await testServer({ rates: { now: () => 5_000 } });
     try {

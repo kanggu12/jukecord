@@ -20,6 +20,7 @@ import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { NewTrack } from '../../src/core/types.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
+import { BusyError } from '../../src/media/busy.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import { Covers, type Picture } from '../../src/media/covers.ts';
 import type { LyricsSource } from '../../src/media/lyrics.ts';
@@ -160,6 +161,8 @@ export interface TestServerOptions {
   readonly pictures?: Record<string, Picture | Error>;
   /** Inputs the resolver looks up and finds nothing for ("nothing was found", as yt-dlp's search says). */
   readonly nothingFound?: readonly string[];
+  /** Inputs met while every lookup slot is taken (the resolver's BusyError). */
+  readonly busy?: readonly string[];
   /** The caps on live connections (lower than the defaults to test them). */
   readonly live?: Partial<LiveLimits>;
   /** The rates of changes and their clock, and whether jukecord counts as behind (to test the limits). */
@@ -219,6 +222,9 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     resolve: async (input: string) => {
       // Looked up on the site, which found nothing: a lookup that cost what any lookup costs.
       if (options.nothingFound?.includes(input)) throw new Error('nothing was found');
+      // Every lookup slot taken: nothing looked up, for a moment.
+      if (options.busy?.includes(input))
+        throw new BusyError('jukecord is looking up other tracks right now; try again in a moment');
       const tracks = found[input];
       if (!tracks) throw new Error(`nothing to add for "${input}"`);
       return tracks.map((track) => store.tracks.upsert(track));

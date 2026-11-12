@@ -330,11 +330,22 @@ describe('Lyrics', () => {
     const [stored] = addTracks(store, 1);
     assert.ok(stored);
     store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: null });
-    await assert.rejects(lyrics.forTrack(stored), LyricsUnavailable);
-    // Asked again at once: answered without asking LRCLIB.
-    await assert.rejects(lyrics.forTrack(stored), /LRCLIB did not answer/);
+    await assert.rejects(lyrics.forTrack(stored), (error: unknown) => {
+      // Said with how long until asking may work: the whole two minutes.
+      assert.ok(error instanceof LyricsUnavailable);
+      assert.equal(error.retryAfterMs, 2 * 60_000);
+      return true;
+    });
+    // Asked again a little later: answered without asking LRCLIB, with what is left of the wait.
+    advance(30_000);
+    await assert.rejects(lyrics.forTrack(stored), (error: unknown) => {
+      assert.ok(error instanceof LyricsUnavailable);
+      assert.match(error.message, /LRCLIB did not answer/);
+      assert.equal(error.retryAfterMs, 90_000);
+      return true;
+    });
     assert.equal(calls.length, 1);
-    advance(2 * 60_000);
+    advance(90_000);
     assert.equal((await lyrics.forTrack(stored)).kind, 'synced');
     assert.equal(store.lyrics.get(stored.id)?.kind, 'synced');
   });
