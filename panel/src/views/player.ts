@@ -1566,9 +1566,11 @@ export function addCard(): HTMLElement {
     'aria-describedby': 'add-found-keys',
   });
   const field = h('label', { class: 'field' }, icon('link'), input);
-  const add = h('button', { class: 'key', type: 'submit', dataset: { at: 'end' } });
+  // Add is the main key, as it is what Enter does: in a shared queue, the key that draws the eye must not be Play now,
+  // which cuts off the track everyone is hearing.
+  const add = h('button', { class: 'key primary', type: 'submit', dataset: { at: 'end' } });
   const next = h('button', { class: 'key', type: 'button', dataset: { at: 'next' } });
-  const now = h('button', { class: 'key primary', type: 'button', dataset: { at: 'now' } });
+  const now = h('button', { class: 'key', type: 'button', dataset: { at: 'now' } });
   const form = h('form', { class: 'add' }, field, add, next, now);
   // What a search found: a listbox of results, a line for the state of the search, and the keys that pick.
   const list = h('ul', { class: 'found-list', id: 'add-found', role: 'listbox' });
@@ -1579,9 +1581,9 @@ export function addCard(): HTMLElement {
   const said = h('p', { class: 'sr', role: 'status' });
   // Why the keys are off for someone who may only look, in words a touch screen shows too (a title it does not).
   const why = h('p', { class: 'look-only', hidden: true });
-  // Why the last add did not go through, under the field it came from (the bar's toast is far from it on a desktop).
-  // Not an alert of its own: the toast says it out loud already, and a screen reader heard it twice.
-  const failed = h('p', { class: 'add-failed', hidden: true });
+  // Why the last add from the field did not go through, under the field (the bar is far from it on a desktop). It is
+  // said here alone, out loud too: a toast saying the same in the bar showed the reason twice.
+  const failed = h('p', { class: 'add-failed', role: 'alert', hidden: true });
   // While a link brought in from outside is held over the page: where it goes.
   const dropNote = h('p', { class: 'drop-note', hidden: true }, icon('list-plus'), h('span'));
   // With autoplay on and nothing waiting: what happens when the queue runs out.
@@ -1815,6 +1817,19 @@ export function addCard(): HTMLElement {
       event.preventDefault();
       event.stopPropagation();
       close();
+    } else if (event.key === 'Escape' && input.value !== '') {
+      // Escape again (the list closed, or none was open): the words go, as a search field's do, with whatever they
+      // found and the last refusal under the field.
+      event.preventDefault();
+      event.stopPropagation();
+      window.clearTimeout(typing);
+      asking?.abort();
+      input.value = '';
+      results = [];
+      resultsFor = '';
+      refused = null;
+      failed.hidden = true;
+      close();
     } else if (event.key === 'Enter') {
       // Enter adds, Shift+Enter plays next, Ctrl+Enter (Cmd+Enter on a Mac) plays now: the result the arrows are on,
       // or what is typed.
@@ -1874,11 +1889,14 @@ export function addCard(): HTMLElement {
         close();
       }
       added(result);
-    } else {
-      // Said under the field as well as in the bar (see refusal below).
-      toast(refusal(failure), 'bad', 'circle-alert');
+    } else if (fromField) {
+      // From the field: said under it, where the person is looking (see failed above), and nowhere else.
       refused = { guild: guild(), reason: failure };
       draw();
+    } else {
+      // A link pasted or dropped anywhere on the page: the field may be out of sight (a phone's page scrolled), so the
+      // bar says it, and the line under the field (for what was typed there) says nothing.
+      toast(refusal(failure), 'bad', 'circle-alert');
     }
     const after = waiting.shift();
     if (after) void submit(after.where, after.text, after.fromField);

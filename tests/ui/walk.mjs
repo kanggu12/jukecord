@@ -790,13 +790,18 @@ await sweep(
   { discord: true },
 );
 // An add that does not go through (an address on a private network, which jukecord does not fetch): the reason under
-// the field as well as in the bar.
+// the field, said there alone (a toast in the bar said it a second time).
 await sweep('add-failed', FEW, async (page) => {
   // The refusal is an answer of 400, which the browser reports on its console: expected here.
   page.expectedErrors = [/status of 400/];
   await page.fill('#add-input', 'http://10.0.0.1/tune');
   await page.click('.add [type="submit"]');
   await page.waitForSelector('.add-failed:not([hidden])');
+  await page.waitForTimeout(300);
+  if ((await page.locator('.toast').count()) > 0) throw new Error('the reason is said in a toast as well');
+  // The add card's filled key is Add, what Enter does: Play now cuts off the track everyone is hearing.
+  const filled = await page.locator('.add .key.primary').getAttribute('data-at');
+  if (filled !== 'end') throw new Error(`the add card's filled key is "${filled}", not Add`);
 });
 // Someone who may only look, in the made-up Discord: no grips, no keys on the rows, the saved playlists to look at.
 await sweep(
@@ -1269,6 +1274,15 @@ await sweep(
     await page.waitForSelector('.found-state:not([hidden])');
   },
 );
+// Escape in the add field: first the results close, the words staying; again, the words go, as a search field's do.
+await sweep('add-escape', [[1440, 900]], async (page) => {
+  await searchFor(page, 'paper boats');
+  await page.keyboard.press('Escape');
+  if ((await page.inputValue('#add-input')) !== 'paper boats') throw new Error('the first Escape took the words');
+  if (await page.locator('#add-found').isVisible()) throw new Error('the first Escape left the results open');
+  await page.keyboard.press('Escape');
+  if ((await page.inputValue('#add-input')) !== '') throw new Error('a second Escape kept the words');
+});
 // A link from another window held over the page: the add card says where it goes.
 await sweep(
   'drop-link',
