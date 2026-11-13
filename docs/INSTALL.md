@@ -208,7 +208,9 @@ Any other word goes to the `jukecord` command inside: `./jukecord np`, `./jukeco
 ## Backups
 
 `./jukecord backup` writes a consistent copy of the database while the music and the panel go on, however big the
-database, and prints its whole path. The media cache stays out: tracks are fetched again when played. To put one back:
+database, and prints its whole path; when it cannot, it says why and ends with the jukecord command's
+[exit code](README.md#the-jukecord-command). The media cache stays out: tracks are fetched again when played. To put
+one back:
 
 ```bash
 ./jukecord restore backups/jukecord-<time>.db

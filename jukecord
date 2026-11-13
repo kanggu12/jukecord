@@ -332,8 +332,13 @@ case "$command" in
     inside status
     ;;
   backup)
-    # Written inside the volume by jukecord itself (a consistent copy while it runs), then copied out here.
-    file=$(inside backup --json | sed -n 's/.*"file": *"\([^"]*\)".*/\1/p')
+    # Written inside the volume by jukecord itself (a consistent copy while it runs), then copied out here. Asked in
+    # the command's own words, not its JSON: a refusal reaches this terminal as the command says it to people (on
+    # stderr; under --json it was a JSON blob), and the front door ends with the command's exit code (3 when jukecord
+    # did not answer, 4 when it said to try again later).
+    made=$(inside backup) || exit
+    # Done, it prints "<file> (<size> KiB)", as every version since 0.1.0 has: the file is what comes before the size.
+    file=${made% (*}
     mkdir -p backups
     compose cp "$service:$file" "backups/$(basename "$file")"
     # The whole path: restore takes a relative one from where it is typed, which need not be this folder.
