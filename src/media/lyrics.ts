@@ -314,6 +314,9 @@ const FAILED_WAIT_MS = 2 * 60_000;
 const WAITING_MAX = 8;
 // Answers ready to send, the newest few: a crowd of panels asking when a track starts reads the database once.
 const ANSWERS_KEPT = 64;
+// The longest wait for LRCLIB a lookup sits out in the line: the pause between requests, a short Retry-After. A longer
+// one (a 429 may ask for minutes) turns the lookup away with the time left, so nobody's question hangs that long.
+const LONGEST_WAIT_MS = 10_000;
 
 /** The lyrics of tracks, from the database or from LRCLIB. */
 export class Lyrics implements LyricsSource {
@@ -355,6 +358,9 @@ export class Lyrics implements LyricsSource {
     if (this.pending.size >= WAITING_MAX) {
       throw new LyricsUnavailable('jukecord is looking up other lyrics right now; try again in a moment', 2000);
     }
+    // LRCLIB asked jukecord to wait longer than a lookup sits out: said at once, with the time left.
+    const wait = this.nextAt - this.now();
+    if (wait > LONGEST_WAIT_MS) throw new LyricsUnavailable('LRCLIB did not answer; try again in a moment', wait);
     const lookup = this.lookUp(track).finally(() => this.pending.delete(track.id));
     this.pending.set(track.id, lookup);
     return lookup;
@@ -386,6 +392,8 @@ export class Lyrics implements LyricsSource {
       });
       return this.answer(row);
     } catch (error) {
+      // Turned away in the line by a long wait LRCLIB asked for: nothing was asked about this track, nothing to keep.
+      if (error instanceof LyricsUnavailable) throw error;
       const now = this.now();
       this.failed.set(track.id, now);
       // Old failures are forgotten as new ones come, so the map holds only the last two minutes' worth.
@@ -418,6 +426,8 @@ export class Lyrics implements LyricsSource {
   private turn<T>(request: () => Promise<T>): Promise<T> {
     const run = async () => {
       const wait = this.nextAt - this.now();
+      // A 429 came while this one waited in line: it is turned away with the time left rather than held for minutes.
+      if (wait > LONGEST_WAIT_MS) throw new LyricsUnavailable('LRCLIB did not answer; try again in a moment', wait);
       if (wait > 0) await this.sleep(wait);
       try {
         return await request();

@@ -357,9 +357,40 @@ describe('Lyrics', () => {
     assert.ok(first && second);
     for (const stored of [first, second]) store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
     await assert.rejects(lyrics.forTrack(first), LyricsUnavailable);
-    // The next track's lookup waits out the 20 s (and up to a third more) before its first request.
-    await assert.rejects(lyrics.forTrack(second), LyricsUnavailable);
-    assert.ok(slept[0] !== undefined && slept[0] >= 20_000 && slept[0] <= 26_700, String(slept[0]));
+    // The next track's lookup is turned away at once, with the 20 s (and up to a third more) left to wait: a person
+    // asking does not wait out LRCLIB's minutes, and LRCLIB is asked nothing meanwhile.
+    await assert.rejects(lyrics.forTrack(second), (error: unknown) => {
+      assert.ok(error instanceof LyricsUnavailable);
+      assert.ok(error.retryAfterMs >= 20_000 && error.retryAfterMs <= 26_700, String(error.retryAfterMs));
+      return true;
+    });
+    assert.deepEqual(slept, []);
+    assert.equal(client.asked.length, 1);
+    // One already in the line when the 429 came is turned away the same way.
+    const again = lrclib([json(429, fixture('rate-limited.json'), { 'retry-after': '20' })]);
+    const other = service(again.client);
+    const [one, two] = addTracks(other.store, 2);
+    assert.ok(one && two);
+    for (const stored of [one, two]) other.store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
+    const [said, inLine] = await Promise.allSettled([other.lyrics.forTrack(one), other.lyrics.forTrack(two)]);
+    assert.equal(said.status, 'rejected');
+    assert.ok(inLine.status === 'rejected' && inLine.reason instanceof LyricsUnavailable);
+    assert.ok(inLine.reason.retryAfterMs >= 20_000 && inLine.reason.retryAfterMs <= 26_700);
+    assert.equal(again.asked.length, 1);
+  });
+
+  it('waits in line for a short pause between requests, not for a long one', async () => {
+    // A wait of LRCLIB's of five seconds: the next lookup waits it out and is answered.
+    const found = JSON.parse(fixture('get-found.json')) as LrclibRecord;
+    const { fake } = lookup({ match: [new LrclibWait(5000), found] });
+    const { store, lyrics, slept } = service(fake);
+    const [first, second] = addTracks(store, 2);
+    assert.ok(first && second);
+    for (const stored of [first, second])
+      store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: null });
+    await assert.rejects(lyrics.forTrack(first), LyricsUnavailable);
+    assert.equal((await lyrics.forTrack(second)).kind, 'synced');
+    assert.ok(slept[0] !== undefined && slept[0] >= 5000 && slept[0] <= 6700, String(slept[0]));
   });
 
   it('turns a lookup away when many are waiting already', async () => {
