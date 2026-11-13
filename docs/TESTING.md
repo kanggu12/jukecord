@@ -41,12 +41,14 @@ the first month) are saved into the folder as `picture-*.png`, to be looked at w
 `tests/ui/audit.js` measures each page: text that is clipped (unless marked so, with its whole text as the title) or
 drawn over other text, a key whose words run out of its box, contrast below 4.5:1 (with translucent layers
 composited), rows and columns to half a pixel (the controls of one row at one height and one centre with the labels
-and words in it, an icon on the centre of the first line of its words, cards side by side at one top and one bottom,
-the children stacked in one container at one left edge and the boxes ending them at one right edge, words side by side
-on one baseline, every padding, margin and gap on the spacing scale), floating layers that cut across other boxes, a
-sheet, a dialog or a toast that something else covers, a page wider than the screen, a badge whose word breaks out of
-it, the playing card's keys leaving one key alone on a row, a list in a card with room for fewer than three rows, a
-box that scrolls with nothing in it the keyboard can stop on, a state told by a fill alone drawn like its absence (as
+and words in it, an icon on the centre of the first line of its words, the words of a key, a pill, a badge or a face in
+the middle of their frame (upright by their capitals, or by a Korean word's syllables), cards side by side at one top
+and one bottom, the children stacked in one container at one left edge and the boxes ending them at one right edge,
+words side by side on one baseline, every padding, margin and gap on the spacing scale), floating layers that cut
+across other boxes, a sheet, a dialog or a toast that something else covers, a page wider than the screen, a badge
+whose word breaks out of it, the playing card's keys leaving one key alone on a row, a list in a card with room for
+fewer than three rows, a dialog that scrolls while the window has room under it, a box that scrolls with nothing in it
+the keyboard can stop on, a state told by a fill alone drawn like its absence (as
 a contrast theme paints), keys and cards under a screen's notch or home bar, touch targets under 44 pixels (keys,
 fields, the switch, the sliders and the seek bar, the logo), and a listen bar pushed off the foot of the window (a
 page that ran past the window and scrolled its bars with it). On the pages it photographs it also runs axe-core's

@@ -11,6 +11,8 @@
  * - align: the controls of one row (keys, fields, pickers, rows of choices, menus) at different heights, or with the
  *   labels and words standing in that row, at different centres;
  * - icon: an icon (or a lamp, a face, a swatch) off the centre of the line of words beside it;
+ * - label: the words of a key, a pill, a badge or a face off the middle of their frame: upright their capitals (Korean,
+ *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are;
  * - cards: cards side by side that do not share their top and their bottom (the player's two columns too);
  * - column: things stacked in a frame (a card, a sheet, a dialog, a page) whose left edges, or the right edges of boxes
  *   that end together, almost meet: a few pixels apart, which reads as a mistake rather than an indent;
@@ -31,6 +33,7 @@
  *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
  *   room for fewer than three whole rows (a short window left the queue one row beside the cards above it, or none);
+ *   a dialog that scrolls while the window has room for more of it below;
  * - adrift: the listen bar off the foot of the window: the page ran past the window and its bars scrolled with it (the
  *   search's results once pushed the queue's column 170 px past a 900 px window, and nothing above said so);
  * - sizes: the font sizes in use (reported, not a finding);
@@ -434,6 +437,17 @@ window.__audit = () => {
     if (whole < 3) add('cramped', list, `${whole} whole rows in ${Math.round(box.height)}px`);
   }
 
+  // A dialog that scrolls while the window has room under it: its rows are cut at its foot for nothing (the Invite
+  // dialog stopped at seven tenths of a 900 px window, its listening link cut in half, 108 px above the window's foot).
+  for (const dialog of document.querySelectorAll('.dialog')) {
+    if (!shown(dialog)) continue;
+    const scrolls = [dialog, ...dialog.querySelectorAll('*')].some(
+      (box) => box.scrollHeight > box.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(box).overflowY),
+    );
+    const room = window.innerHeight - dialog.getBoundingClientRect().bottom;
+    if (scrolls && room > 32) add('cramped', dialog, `scrolls with ${Math.round(room)} px of the window free under it`);
+  }
+
   // Touch targets on touch screens.
   if (matchMedia('(pointer: coarse)').matches) {
     // Every control a finger presses: keys, fields, the switch and the sliders (the seek bar too), and links that
@@ -749,6 +763,139 @@ window.__audit = () => {
     const target = height(box) > pitch + HALF ? block : beside[0];
     const off = middle(box) - middle(target);
     if (Math.abs(off) > HALF) add('icon', holder, `${describe(mark)} ${px(off)} px off its words' centre`);
+  }
+
+  // Words in a frame (a key, a pill, a badge, a face's initials) stand in the middle of it. Upright, the eye takes a
+  // word's middle from its capitals (Korean, from its syllables), not from the room a typeface keeps for accents and
+  // descenders; across, from the icon and the inked letters. Only frames that draw a box (a bare key shows no edges to
+  // be centred in), hold one line of words and are about as tall as that line (a key, not a tile with words on top).
+  const FRAMED = 'button, a.key, .key, .pill, .badge, .avatar, .guild-icon';
+  const inkMemo = new Map();
+  const inkPen = document.createElement('canvas').getContext('2d');
+  // How far a string's letters reach above and below the baseline, in the face, weight and size an element draws them
+  // with. Read from a canvas, which draws with the page's own fonts.
+  function inkOf(style, text) {
+    const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const key = `${font}|${text}`;
+    if (!inkMemo.has(key)) {
+      inkPen.font = font;
+      const metrics = inkPen.measureText(text);
+      inkMemo.set(key, { up: metrics.actualBoundingBoxAscent, down: metrics.actualBoundingBoxDescent });
+    }
+    return inkMemo.get(key);
+  }
+  // Where the baseline stands under the top of the letters' box, in pixels, for a typeface at a size: read from a probe
+  // at that very size, as the browser rounds the face's ascent and descent to whole pixels at each size (11 px
+  // Pretendard stands 10 px above its baseline, not the 10.5 its proportions give).
+  const footMemo = new Map();
+  function footOf(style) {
+    const key = `${style.fontSize} ${style.fontFamily}`;
+    if (!footMemo.has(key)) {
+      const probe = document.createElement('div');
+      probe.style.cssText = `position:fixed;left:-10000px;top:0;visibility:hidden;font:${style.fontSize}/normal ${style.fontFamily}`;
+      const letter = document.createTextNode('H');
+      const foot = document.createElement('span');
+      foot.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+      probe.append(letter, foot);
+      document.documentElement.append(probe);
+      const range = document.createRange();
+      range.selectNodeContents(letter);
+      footMemo.set(key, foot.getBoundingClientRect().bottom - range.getBoundingClientRect().top);
+      probe.remove();
+    }
+    return footMemo.get(key);
+  }
+  const KOREAN = /[ᄀ-ᇿ㄰-㆏가-힯]/g;
+  for (const frame of document.querySelectorAll(FRAMED)) {
+    if (!seen(frame) || !drawsBox(frame)) continue;
+    // Its own words: not those of a frame inside it (a key's badge), which is measured as a frame of its own.
+    const pieces = [];
+    const walker = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement;
+      if (!parent || !drawn(parent) || parent.closest(FRAMED) !== frame) continue;
+      // The letters drawn: a range from the first to the last that is not a space (spaces at the ends are not drawn).
+      const from = node.textContent.search(/\S/);
+      if (from < 0) continue;
+      const to = node.textContent.trimEnd().length;
+      const range = document.createRange();
+      range.setStart(node, from);
+      range.setEnd(node, to);
+      const rects = [...range.getClientRects()].filter((rect) => rect.width >= 0.5 && rect.height >= 0.5);
+      // A piece that wraps makes the frame a block of lines, not a key's label: none of it is measured.
+      if (rects.length > 1) {
+        pieces.length = 0;
+        break;
+      }
+      if (rects.length === 1)
+        pieces.push({ text: node.textContent.slice(from, to), style: getComputedStyle(parent), rect: rects[0] });
+    }
+    if (pieces.length === 0) continue;
+    const lines = linesOf(frame, frame);
+    if (lines.length !== 1) continue;
+    const outer = frame.getBoundingClientRect();
+    const style = getComputedStyle(frame);
+    const inner = {
+      left: outer.left + Number.parseFloat(style.borderLeftWidth),
+      right: outer.right - Number.parseFloat(style.borderRightWidth),
+      top: outer.top + Number.parseFloat(style.borderTopWidth),
+      bottom: outer.bottom - Number.parseFloat(style.borderBottomWidth),
+    };
+    if (height(inner) > 3 * height(lines[0])) continue;
+    // Upright: from the highest capital or syllable to the baseline, or to the syllables' foot when there are some.
+    let top = Number.POSITIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+    for (const piece of pieces) {
+      const base = piece.rect.top + footOf(piece.style);
+      const korean = (piece.text.match(KOREAN) ?? []).join('');
+      if (/[A-Za-z0-9]/.test(piece.text)) {
+        top = Math.min(top, base - inkOf(piece.style, 'H').up);
+        bottom = Math.max(bottom, base);
+      }
+      if (korean) {
+        const ink = inkOf(piece.style, korean);
+        top = Math.min(top, base - ink.up);
+        bottom = Math.max(bottom, base + ink.down);
+      }
+    }
+    if (Number.isFinite(top)) {
+      const off = (top + bottom) / 2 - middle(inner);
+      if (Math.abs(off) > HALF)
+        add('label', frame, `its words ${px(Math.abs(off))} px ${off > 0 ? 'below' : 'above'} its middle`);
+    }
+    // Across: the icons and the words, as laid out, between the frame's sides, when the frame centres what it holds or
+    // is as wide as what it holds (a key sized by its words, an icon with a margin of its own or a hidden one keeping
+    // its room put them off its middle). A wide frame that starts its words at the left (a row of a menu) is not
+    // centred, and not measured; nor is one padded more on one side, which means it (the account key: its face as near
+    // its start as its top). The laid-out boxes, not the ink: a letter's own side bearings are the typeface's, and the
+    // canvas cannot draw the page's tabular figures to measure them.
+    if (Math.abs(Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)) > HALF) continue;
+    let left = pieces[0].rect.left;
+    let right = pieces.at(-1).rect.right;
+    // Everything else it holds beside its words, in view or scrolled away: an icon (the panel's or any drawing), an
+    // image, a frame of its own (a count's badge), shapes with no words (the listen key's dancing bars). Not what is
+    // laid over it (a dot in its corner), nor the parts of a drawing.
+    for (const thing of frame.querySelectorAll('*')) {
+      if (thing.parentElement?.closest(FRAMED) !== frame || thing.parentElement?.closest('svg') || !drawn(thing))
+        continue;
+      const shape = thing.matches(`svg, img, ${FRAMED}`) || (drawsBox(thing) && !thing.textContent.trim());
+      if (!shape || /absolute|fixed/.test(getComputedStyle(thing).position)) continue;
+      const box = thing.getBoundingClientRect();
+      left = Math.min(left, box.left);
+      right = Math.max(right, box.right);
+    }
+    const room =
+      inner.right - Number.parseFloat(style.paddingRight) - (inner.left + Number.parseFloat(style.paddingLeft));
+    const centres =
+      /center/.test(style.justifyContent) || (!/flex|grid/.test(style.display) && style.textAlign === 'center');
+    if (!centres && room - (right - left) > 1) continue;
+    const across = (left + right) / 2 - (inner.left + inner.right) / 2;
+    if (Math.abs(across) > HALF)
+      add(
+        'label',
+        frame,
+        `its icon and words ${px(Math.abs(across))} px ${across > 0 ? 'right' : 'left'} of its middle`,
+      );
   }
 
   // Cards side by side: one top and one bottom (the room left over is inside a card, not under it).
