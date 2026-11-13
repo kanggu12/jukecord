@@ -40,6 +40,91 @@ describe('migrations', () => {
   });
 });
 
+describe('an upgrade from the last release', () => {
+  it('brings a database as 0.2.1 left it (schema 3), with rows in every table, to this schema, all of them read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-migrate-'));
+    try {
+      const file = path.join(dir, 'jukecord.db');
+      const ALICE = '300000000000000001';
+      // The released schema (its migrations are never edited) and a row in each of its tables, as people's
+      // databases have them: a queue, a track playing on repeat, history, a playlist, a DJ role, the commands'
+      // fingerprint, a person met, a host login and a Discord login, and a token.
+      const old = new DatabaseSync(file);
+      for (const migration of MIGRATIONS.filter((entry) => entry.version <= 3)) old.exec(migration.sql);
+      old.exec('PRAGMA user_version = 3');
+      old.exec(`
+        INSERT INTO tracks (source, url, title, created_at, updated_at) VALUES
+          ('youtube:a', 'https://example.com/a', 'Track a', 1, 1), ('youtube:b', 'https://example.com/b', 'Track b', 1, 1);
+        INSERT INTO queue_items (guild_id, position, track_id, added_by, added_at) VALUES ('${GUILD}', 0, 2, '${ALICE}', 2);
+        INSERT INTO player_state (guild_id, track_id, added_by, status, position_ms, updated_at, repeat)
+          VALUES ('${GUILD}', 1, NULL, 'playing', 5000, 3, 'queue');
+        INSERT INTO history (guild_id, track_id, added_by, played_at, played_ms) VALUES ('${GUILD}', 2, '${ALICE}', 4, 1000);
+        INSERT INTO playlists (guild_id, name, created_by, created_at, updated_at) VALUES ('${GUILD}', 'Mix', NULL, 5, 5);
+        INSERT INTO playlist_items (playlist_id, position, track_id) VALUES (1, 0, 1), (1, 1, 2);
+        INSERT INTO guild_settings (guild_id, dj_role_id, updated_at) VALUES ('${GUILD}', '500000000000000001', 6);
+        INSERT INTO discord_commands (guild_id, hash, updated_at) VALUES ('${GUILD}', 'abc', 7);
+        INSERT INTO users (id, name, avatar, updated_at) VALUES ('${ALICE}', 'Alice', NULL, 8);
+        INSERT INTO sessions (id_hash, kind, user_id, csrf, created_at, seen_at, expires_at) VALUES
+          ('host-hash', 'host', NULL, 'c1', 9, 9, 9999999999999), ('alice-hash', 'user', '${ALICE}', 'c2', 9, 9, 9999999999999);
+        INSERT INTO api_tokens (hash, name, kind, user_id, scope, created_at) VALUES ('token-hash', 'laptop', 'host', NULL, 'control', 10);
+      `);
+      old.close();
+      const store = Store.open(file);
+      try {
+        assert.equal(store.schemaVersion(), MIGRATIONS.at(-1)?.version);
+        assert.deepEqual(
+          store.queue.list(GUILD).map((item) => [item.track.title, item.addedBy]),
+          [['Track b', ALICE]],
+        );
+        // The player comes back on its track and repeat, with autoplay (new) off.
+        const player = store.playerState.load(GUILD);
+        assert.deepEqual(
+          [player?.trackId, player?.status, player?.positionMs, player?.repeat, player?.autoplay],
+          [1, 'playing', 5000, 'queue', 'off'],
+        );
+        assert.deepEqual(
+          store.history.list(GUILD).map((entry) => entry.track.title),
+          ['Track b'],
+        );
+        const mix = store.playlists.find(GUILD, 'Mix');
+        assert.deepEqual(
+          store.playlists.tracks(mix?.id ?? 0).map((track) => track.title),
+          ['Track a', 'Track b'],
+        );
+        // The DJ role stays; the settings added since are at the defaults of a server that never chose.
+        assert.deepEqual(store.settings.get(GUILD), { djRoleId: '500000000000000001', alertsChannelId: null });
+        assert.deepEqual(store.settings.community(GUILD), COMMUNITY_DEFAULTS);
+        assert.equal(store.discord.commandsHash(GUILD), 'abc');
+        assert.equal(store.users.get(ALICE)?.name, 'Alice');
+        // Logins from before friends' scopes still log in with all their login may (admin), as they did.
+        assert.deepEqual(
+          [store.sessions.get('host-hash')?.kind, store.sessions.get('host-hash')?.scope],
+          ['host', 'admin'],
+        );
+        assert.deepEqual(
+          [store.sessions.get('alice-hash')?.userId, store.sessions.get('alice-hash')?.scope],
+          [ALICE, 'admin'],
+        );
+        assert.equal(store.tokens.byHash('token-hash')?.scope, 'control');
+        // The tables added since start empty, and take rows.
+        assert.equal(store.likes.count('host'), 0);
+        assert.deepEqual(store.listenLinks.list(GUILD), []);
+        assert.deepEqual(store.voiceChannels.all(), []);
+        assert.equal(store.lyrics.get(1), null);
+        assert.equal(store.likes.add('host', 1), true);
+        assert.equal(store.history.has(GUILD, 2), true);
+        // The database passes SQLite's own check after the upgrade, its foreign keys included.
+        assert.equal((store.db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check, 'ok');
+        assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
+      } finally {
+        store.close();
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('history pruning', () => {
   it("keeps a server's newest entries and leaves other servers alone", () => {
     const store = memoryStore();
