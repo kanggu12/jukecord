@@ -14,6 +14,7 @@ import { ApiError } from '../api.ts';
 import { h, icon } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import { state, t } from '../state.ts';
+import { fadeEdges } from './fade.ts';
 
 type Tone = 'play' | 'load' | 'pause' | 'bad';
 
@@ -239,6 +240,8 @@ export function sheet(options: { side?: 'left' | 'right'; label: string; onClose
   closeSheet?.();
   const scrim = h('div', { class: 'scrim' });
   const body = h('div', { class: 'sheet-body scroll' });
+  // What it holds fades out at an edge with more beyond it, as every box that scrolls.
+  fadeEdges(body);
   // A close key of its own: on a phone the sheet covers the whole width, and there is no scrim left to tap.
   const shut = h(
     'button',
@@ -304,6 +307,9 @@ function dialog<T>(
     };
     const parts = build(finish);
     const content = parts.content ? h('div', { class: 'dialog-content scroll' }, parts.content) : null;
+    // A long list fades out at an edge with more beyond it (on a phone the periods' list ended on a whole row with two
+    // more hidden under it, and nothing said so).
+    if (content) fadeEdges(content);
     // A long list scrolls in the dialog: the keyboard must reach it then.
     if (content && parts.content instanceof Element) {
       unwatch = reachableWhenLong(content, parts.content, parts.title);

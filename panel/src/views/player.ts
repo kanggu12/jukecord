@@ -41,6 +41,7 @@ import {
   watch,
 } from '../state.ts';
 import { lengthText, rounded } from '../time.ts';
+import { fadeEdges } from '../ui/fade.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
 import { lightGlow } from './light.ts';
@@ -659,6 +660,8 @@ export function queueCard(): HTMLElement {
     icon('ellipsis'),
   );
   const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
+  // Its rows fade out at an edge with more beyond it (a sliver of a cover at its foot read as a mistake).
+  fadeEdges(list);
   // The queue's tools: none for a guest, who can change nothing.
   const tools = h('div', { class: 'tools' }, shuffle, turns, dedupe, save, load, clear, toolsMore);
   // What happens when the queue runs out, beside its title: the mode in words, and a list of the three to choose from.
@@ -1674,6 +1677,8 @@ export function addCard(): HTMLElement {
   const form = h('form', { class: 'add' }, field, add, next, now);
   // What a search found: a listbox of results, a line for the state of the search, and the keys that pick.
   const list = h('ul', { class: 'found-list', id: 'add-found', role: 'listbox' });
+  // The results fade out at an edge with more beyond it, as every list that scrolls.
+  fadeEdges(list);
   const searchState = h('p', { class: 'found-state' });
   const keysHint = h('p', { class: 'found-keys', id: 'add-found-keys' });
   const found = h('div', { class: 'found', hidden: true }, searchState, list, keysHint);
@@ -2146,6 +2151,8 @@ export function voiceCard(): HTMLElement {
   const leave = h('button', { class: 'key sm', type: 'button' });
   const top = h('div', { class: 'voice-now' }, icon('radio'), where, leave);
   const channels = h('ul', { class: 'channels scroll' });
+  // A server's many channels fade out at an edge with more beyond it, as every list that scrolls.
+  fadeEdges(channels);
   const listening = h('div', { class: 'listeners' });
   // Beside the people listening: inviting more of them (a listening link, or for the host a friend's login link).
   const invite = h(
@@ -2447,6 +2454,8 @@ function libraryMenu(track: Track): void {
 export function historyCard(): HTMLElement {
   const count = h('span', { class: 'count' });
   const list = h('ol', { class: 'list scroll history' });
+  // Its rows fade out at an edge with more beyond it, as the queue's.
+  fadeEdges(list);
   // The two lists, as a row of two choices; the card's heading names both, for screen readers.
   let view = libraryView();
   const choices = h('div', { class: 'seg library-seg', role: 'group' });

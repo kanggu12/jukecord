@@ -21,6 +21,7 @@ import {
   momentText,
   monthText,
 } from '../time.ts';
+import { fadeEdges } from '../ui/fade.ts';
 import { problem } from '../ui/layers.ts';
 import { count } from './wrapped.ts';
 
@@ -375,6 +376,8 @@ export function logsPage(): HTMLElement {
   const older = h('button', { class: 'key', type: 'button' });
   // A named region the keyboard can enter, so the records can be scrolled without a mouse.
   const list = h('div', { class: 'logs scroll', style: 'flex:1;min-height:0', role: 'region', tabindex: '0' });
+  // The records fade out at an edge with more beyond it (the first one in sight was sliced through its letters).
+  fadeEdges(list);
   // Older records go above the ones shown, so the key that brings them sits at the top of the list (its row is hidden
   // when there is nothing older).
   const olderHead = h('div', { class: 'card-head log-older', hidden: true }, older);

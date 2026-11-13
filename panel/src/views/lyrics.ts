@@ -18,6 +18,7 @@ import { ONE_COLUMN } from '../columns.ts';
 import { clock, fill, h, icon } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { mayControl, positionNow, state, t, watch } from '../state.ts';
+import { fadeEdges } from '../ui/fade.ts';
 import { problem, sheet, toast } from '../ui/layers.ts';
 
 // A line is lit this much before its time: the eye reaches it as the voice does.
@@ -79,6 +80,8 @@ export function lyricsView(live: Live): HTMLElement {
   const head = h('div', { class: 'card-head' }, heading, what, h('div', { class: 'tools' }, shut));
   // The lines scroll here; the keyboard reaches the box itself when there are no keys in it (plain words, say).
   const body = h('div', { class: 'lyrics-body scroll', tabindex: '0' });
+  // The lines fade out at an edge with more beyond it, over a line and more: a line the edge halves reads as going on.
+  fadeEdges(body);
   const credit = h('p', { class: 'lyrics-credit' });
   const content = h('div', { class: 'lyrics', id: 'lyrics-view' }, head, body, credit);
   const card = h('section', { class: 'card fill lyrics-card', 'aria-labelledby': 'lyrics-h', hidden: true });

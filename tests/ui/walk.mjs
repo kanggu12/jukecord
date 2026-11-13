@@ -347,6 +347,63 @@ async function madeUpLyrics(page) {
   });
 }
 
+// ---- checks that several states share ----------------------------------------------------------------------------
+// Each throws with what it found, as a state's own checks do.
+
+// Waits for the page's next two frames: what the panel draws in a frame of its own (the edges' fades) is drawn by then.
+async function twoFrames(page) {
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
+// A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond up to about a row of what
+// it holds (--fade): a row the edge cuts reads as going on out of sight, not as cut through its words (the log's first
+// record sliced through its letters, a sliver of a cover at the queue's foot, lyric lines halved at both edges, a
+// dialog's list ending on a whole row with two more under it and nothing to say so). With nothing to scroll, no fade.
+async function edgesFade(page) {
+  await twoFrames(page);
+  const problems = await page.evaluate(() => {
+    const found = [];
+    for (const box of document.querySelectorAll('.scroll, .found-list')) {
+      if (!box.getClientRects().length) continue;
+      const name = box.classList[0];
+      const style = getComputedStyle(box);
+      const masked = /gradient/.test(style.maskImage);
+      if (box.scrollHeight <= box.clientHeight + 1) {
+        if (masked) found.push(`${name} fades with nothing to scroll`);
+        continue;
+      }
+      if (!masked) {
+        found.push(`${name} scrolls with its edges cut, not faded`);
+        continue;
+      }
+      // The fade at its fullest (--fade) is a row of what the box holds at least (the middle one of its rows' heights).
+      const most = Number.parseFloat(style.getPropertyValue('--fade'));
+      if (!Number.isFinite(most)) {
+        found.push(`${name}'s fade is "${style.getPropertyValue('--fade')}", not a length`);
+        continue;
+      }
+      const rows = [
+        ...box.querySelectorAll(':scope > li, :scope > .log, .lyrics-lines > li:not(.pause), .menu-list > *'),
+      ]
+        .filter((row) => row.getClientRects().length)
+        .map((row) => row.getBoundingClientRect().height)
+        .sort((a, b) => a - b);
+      const row = rows[Math.floor(rows.length / 2)];
+      if (row !== undefined && most + 0.5 < row)
+        found.push(`${name} fades over ${most} px at most, its rows are ${row}`);
+      // Each edge's fade as drawn (what the page told the box, up to --fade) against what lies beyond it.
+      const drawn = (edge) => Math.min(most, Number.parseFloat(box.style.getPropertyValue(`--fade-${edge}`)) || 0);
+      const beyond = { above: box.scrollTop, below: box.scrollHeight - box.clientHeight - box.scrollTop };
+      for (const [edge, length] of Object.entries(beyond)) {
+        if (Math.abs(drawn(edge) - Math.min(most, length)) > 1)
+          found.push(`${name} fades ${edge} over ${drawn(edge)} px, ${Math.round(length)} beyond`);
+      }
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the scrolling boxes' edges: ${problems.join('; ')}`);
+}
+
 // ---- the walk ---------------------------------------------------------------------------------------------------
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 await sweep('idle', SIZES);
@@ -739,6 +796,8 @@ await sweep('logs', FEW, async (page) => {
   if (!look.refresh) problems.push('Refresh shows its icon alone');
   if (look.hole > 12.5) problems.push(`${Math.round(look.hole)} px between the widest level and the component`);
   if (problems.length > 0) throw new Error(problems.join('; '));
+  // The records fade out at an edge with more beyond it (the first one in sight was sliced through its letters).
+  await edgesFade(page);
 });
 await sweep('loading', FEW, async (page) => {
   const inject = await intercept(page);
@@ -900,6 +959,8 @@ await sweep('wrapped-periods', FEW, async (page) => {
   await wrappedAt(page, 'last-12-months');
   await page.click('[data-act="period"]');
   await page.waitForSelector('.dialog .choice');
+  // On a phone the periods' list ended on a whole row, January and February hidden under it with nothing to say so.
+  await edgesFade(page);
 });
 await sweep(
   'wrapped-picture',
@@ -1127,9 +1188,9 @@ async function openLyrics(page) {
 }
 await sweep('lyrics', SIZES, async (page) => {
   await openLyrics(page);
-  // The lines fade out at the box's edges rather than being cut there (letters' stubs under the head's rule).
-  const mask = await page.evaluate(() => getComputedStyle(document.querySelector('.lyrics-body')).maskImage);
-  if (!/gradient/.test(mask)) throw new Error("the lyrics' lines are cut at the box's edges, not faded");
+  // The lines fade out at the box's edges rather than being cut there, over a line at least: letters' stubs under the
+  // head's rule, and over 24 and 32 px half lines still showed at both edges.
+  await edgesFade(page);
   // In a sheet (one column): the sheet's close key on the centre of the lyrics' head and inside it. A head shorter
   // than a finger's key left the key hanging across the line under it.
   const off = await page.evaluate(() => {

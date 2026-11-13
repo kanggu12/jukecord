@@ -420,6 +420,48 @@ img {
   background: var(--line-2);
   border-radius: 6px;
 }
+/* A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond (ui/fade.ts says how much)
+   up to --fade, about a row of what it holds: a row the edge cuts reads as going on out of sight, not as cut through
+   its words (the log's first record, a sliver of a cover at the queue's foot, a lyric line halved under the head's
+   rule, a dialog's list ending on a whole row with more hidden under it). With nothing to scroll there is no mask.
+   --fade is a length (registered), so what it computes to can be read as one (tests/ui/walk.mjs). */
+@property --fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 48px;
+}
+/* How much lies beyond each edge (ui/fade.ts, up to --fade): the box's own, not its rows' (set as it scrolls, they
+   would make every row's style be worked out again on each frame). */
+@property --fade-above {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --fade-below {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.scroll,
+.found-list {
+  --fade: 48px;
+}
+/* Rows of a track: the queue, the history, a search's results. A row is 56 px (a cover and its room), or its keys and
+   8 px above and below them where they are taller (a finger's 44 px keys: 60 px). */
+.list.scroll,
+.found-list {
+  --fade: max(56px, var(--control-sm) + 2 * var(--s-8));
+}
+.scroll[data-fade],
+.found-list[data-fade] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 min(var(--fade-above, 0px), var(--fade)),
+    #000 calc(100% - min(var(--fade-below, 0px), var(--fade))),
+    transparent
+  );
+}
 
 /* ---- the frame: bar, main, listening bar ------------------------------------------------------------------- */
 .app {
@@ -3896,9 +3938,11 @@ kbd {
     --pos-w: 24px;
     grid-template-columns: var(--pos-w) 48px minmax(0, 1fr) auto;
   }
-  /* A log record on a narrow window: time, level and component on one line, the message across the line under them. */
+  /* A log record on a narrow window: time, level and component on one line, the message across the line under them.
+     Its edges fade over a record of two lines. */
   .logs {
     column-gap: var(--s-8);
+    --fade: 56px;
   }
   .log {
     row-gap: 2px;
@@ -4319,12 +4363,12 @@ kbd {
   position: relative;
   flex: 1;
   min-height: 0;
-  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane); at the top,
-     the fade's height (below), so the first line stands clear of it when the lines are at their start. */
+  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane); 24 px of room
+     over the first line. */
   padding: var(--s-24) calc(var(--pad) - var(--s-8)) var(--s-8);
-  /* The lines fade out at the box's top and bottom edges, over most of a line, rather than being cut there: cut, the
-     line above showed stubs of its letters under the head's rule, and the last one was sliced by the credit's. */
-  mask-image: linear-gradient(to bottom, transparent, #000 var(--s-24), #000 calc(100% - var(--s-32)), transparent);
+  /* The lines fade out at the box's edges as every scrolling box's do (.scroll[data-fade]), over a line and a third:
+     over 24 and 32 px, under a line's 36, a line halved by the edge still showed as half a line at both edges. */
+  --fade: 48px;
 }
 /* Room after the last line, so it too can stand a third of the way down when it is sung. */
 .lyrics-body::after {
