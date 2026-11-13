@@ -3261,6 +3261,11 @@ kbd {
     width: auto;
     padding: 0 var(--s-12);
   }
+  /* Its word hidden, the count leads the key and starts with a capital as a key's words do ("Voted 1/2"); beside the
+     word it reads on from it ("Skip voted 1/2"). */
+  .now .keys .key .votes::first-letter {
+    text-transform: uppercase;
+  }
 }
 /* Narrower, the five keys with the count do not fit one row (a phone's card): the main key takes a row of its own and
    the other four share the next, as on the narrowest cards. */

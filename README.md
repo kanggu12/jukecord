@@ -78,7 +78,7 @@ and open the panel.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/discord-dark.webp">
-    <img alt="jukecord in a made-up Discord server, Night Owls. On the left, the bot is in the voice channel Lounge with Mina, Joon, Sol and 하늘, its picture ringed in green as it plays. In the channel music, Joon used /add, and the bot answers that Morning Light was added as the third track. Below, the bot's card of the track playing: Paper Boats on the River, added by Mina, at 1:12 of 3:00, autoplay on from this server's plays and one of two votes to skip, with the keys Pause, Skip (1 of 2) and Open the panel. Over the message box, Discord suggests jukecord's commands: /play, /add, /listen, /lyrics and /share." src="docs/assets/discord-light.webp" width="100%">
+    <img alt="jukecord in a made-up Discord server, Night Owls. On the left, the bot is in the voice channel Lounge with Mina, Joon, Sol and 하늘, its picture ringed in green as it plays. In the channel music, Joon used /add, and the bot answers that Morning Light was added as the third track. Below, the bot's card of the track playing: Paper Boats on the River, added by Mina, at 1:12 of 3:00, autoplay on from this server's plays and one of two votes to skip, with the keys Pause, Skip (votes 1/2) and Open the panel. Over the message box, Discord suggests jukecord's commands: /play, /add, /listen, /lyrics and /share." src="docs/assets/discord-light.webp" width="100%">
   </picture>
 </p>
 

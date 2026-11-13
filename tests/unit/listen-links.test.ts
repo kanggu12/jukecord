@@ -314,7 +314,7 @@ describe('what a guest must not reach', () => {
     ]) {
       const answer = await as('GET', route);
       assert.equal(answer.statusCode, 403, route);
-      assert.equal(answer.json().error.message, 'a guest of a listening link can only listen', route);
+      assert.equal(answer.json().error.message, 'a guest can only look and listen', route);
     }
   });
 

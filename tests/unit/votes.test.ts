@@ -92,13 +92,18 @@ describe('votes to skip', () => {
     assert.equal(title(), 'Track 1');
     // Voting again changes nothing; the panels heard the count.
     assert.deepEqual(actions.skip(listener(ANN)).votes, { votes: 1, needed: 2 });
-    assert.deepEqual(actions.skipVotes(listener(CAT)), { on: true, votes: 1, needed: 2 });
+    assert.deepEqual(actions.skipVotes(listener(CAT)), { on: true, votes: 1, needed: 2, voted: false });
+    // The voter's own view says they voted; the live updates mark their panels alone.
+    assert.equal(actions.skipVotes(listener(ANN)).voted, true);
+    assert.deepEqual([...actions.skipVoters(GUILD)], [ANN]);
     assert.ok(told.length >= 1);
     const second = actions.skip(listener(BEN));
     assert.equal(second.votes, null);
     assert.equal(title(), 'Track 2');
-    // A new track starts with no votes.
-    assert.deepEqual(actions.skipVotes(listener(CAT)), { on: true, votes: 0, needed: 2 });
+    // A new track starts with no votes, and nobody has voted on it.
+    assert.deepEqual(actions.skipVotes(listener(CAT)), { on: true, votes: 0, needed: 2, voted: false });
+    assert.equal(actions.skipVotes(listener(ANN)).voted, false);
+    assert.equal(actions.skipVoters(GUILD).size, 0);
   });
 
   it('takes the one vote of someone listening alone, and refuses one from someone not listening', async () => {
@@ -138,10 +143,12 @@ describe('votes to skip', () => {
     actions.skip(listener(ANN));
     actions.skip(listener(BEN));
     assert.equal(title(), 'Track 1');
-    // A voter leaves: one vote of four, two needed.
+    // A voter leaves: one vote of four, two needed. Their vote counts no more, so it is not theirs to see either.
     listen(BEN, CAT, DEE, DJ.userId ?? '');
     await clock.advance(300);
-    assert.deepEqual(actions.skipVotes(listener(BEN)), { on: true, votes: 1, needed: 2 });
+    assert.deepEqual(actions.skipVotes(listener(BEN)), { on: true, votes: 1, needed: 2, voted: true });
+    assert.equal(actions.skipVotes(listener(ANN)).voted, false);
+    assert.deepEqual([...actions.skipVoters(GUILD)], [BEN]);
     // The voter comes back and two others leave: two votes of three is enough, within a moment.
     listen(ANN, BEN, CAT);
     assert.equal(title(), 'Track 1');

@@ -34,7 +34,8 @@ const TEXT = {
   playingNow: { en: 'Playing now', ko: '지금 재생' },
   paused: { en: 'Paused', ko: '일시정지' },
   loading: { en: 'Getting it ready', ko: '준비 중' },
-  waiting: { en: 'Waiting for its turn', ko: '차례를 기다리는 중' },
+  // A fetch waiting for its place among every server's downloads (not a person's turn: that is Take turns).
+  waiting: { en: 'Waiting to download', ko: '다운로드 대기 중' },
   nothing: { en: 'Nothing is playing', ko: '재생 중인 곡 없음' },
   queue: { en: 'Queue', ko: '대기열' },
   empty: { en: 'The queue is empty', ko: '대기열이 비어 있음' },
@@ -58,7 +59,7 @@ const TEXT = {
   topTracks: { en: 'Most played', ko: '많이 들은 곡' },
   topPeople: { en: 'Added most', ko: '많이 추가한 사람' },
   nobody: { en: 'the host', ko: '호스트' },
-  noStats: { en: 'Nothing was played in this time', ko: '이 기간에 들은 곡 없음' },
+  noStats: { en: 'Nothing was played in this period', ko: '이 기간에 들은 곡 없음' },
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿀 수 있음' },
@@ -87,14 +88,22 @@ const TEXT = {
   noLimit: { en: 'no limit', ko: '제한 없음' },
   stay: { en: 'Stay in voice', ko: '음성 채널에 머물기' },
   volume: { en: 'Voice volume', ko: '음성 채널 음량' },
-  sound: { en: 'Sound', ko: '음색' },
+  // The panel's words: the presets are effects on the sound, and the plain one is the track as it is ("off" read as
+  // the sound being off).
+  sound: { en: 'Sound', ko: '음향 효과' },
   presets: {
-    en: { off: 'off', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
-    ko: { off: '끔', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
+    en: { off: 'original', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
+    ko: { off: '효과 없음', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
   },
+  // The Skip button while a vote is under way: what the count is of, as a count ("1/2표" read as a half).
   skipVotes: {
-    en: (votes: number, needed: number) => `Skip (${votes} of ${needed})`,
-    ko: (votes: number, needed: number) => `건너뛰기 (${votes}/${needed})`,
+    en: (votes: number, needed: number) => `Skip (votes ${votes}/${needed})`,
+    ko: (votes: number, needed: number) => `건너뛰기 (투표 ${votes}/${needed})`,
+  },
+  // Told to the person whose press of Skip was a vote, alone: the card is everyone's and cannot say whose vote it was.
+  voted: {
+    en: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
+    ko: (votes: number, needed: number) => `건너뛰기에 투표함: ${needed}표 중 ${votes}표`,
   },
   votesLine: {
     en: (votes: number, needed: number) => `Votes to skip: ${votes} of ${needed}`,
@@ -115,6 +124,11 @@ export function note(lang: Lang, en: string, ko: string): EmbedBuilder {
 /** A problem, shown only to the person who asked. */
 export function problem(message: string): EmbedBuilder {
   return new EmbedBuilder().setColor(COLOUR.problem).setDescription(message);
+}
+
+/** That a press of Skip was the presser's vote, and how the vote stands, for them alone. */
+export function votedNote(votes: number, needed: number, lang: Lang): EmbedBuilder {
+  return note(lang, TEXT.voted.en(votes, needed), TEXT.voted.ko(votes, needed));
 }
 
 // The most text a card holds: Discord refuses an embed whose description is longer, and the whole answer with it.
@@ -407,7 +421,7 @@ export function soundCard(sound: Sound, lang: Lang): EmbedBuilder {
   return note(
     lang,
     `Voice volume ${sound.volume}%, sound: ${TEXT.presets.en[sound.preset]}`,
-    `음성 채널 음량 ${sound.volume}%, 음색: ${TEXT.presets.ko[sound.preset]}`,
+    `음성 채널 음량 ${sound.volume}%, 음향 효과: ${TEXT.presets.ko[sound.preset]}`,
   );
 }
 

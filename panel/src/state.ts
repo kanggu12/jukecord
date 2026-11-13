@@ -61,7 +61,7 @@ export function keep(name: string, value: string): void {
 }
 
 /** No vote to skip: votes off, or none cast (the state before the server's own arrives, and after a switch). */
-export const NO_VOTES: Votes = { on: false, votes: 0, needed: 0 };
+export const NO_VOTES: Votes = { on: false, votes: 0, needed: 0, voted: false };
 
 /** The plain sound: the track as it is (before the server's own arrives, and after a switch). */
 export const PLAIN: Sound = { volume: 100, preset: 'off' };
@@ -170,6 +170,23 @@ export function lookOnlyWhy(): string {
 /** Whether the person may press Skip: to skip, or (without the DJ role, where Skip is a vote) to vote. */
 export function maySkip(): boolean {
   return mayControl() || (state.votes.on && state.me?.scope !== 'read');
+}
+
+/** Whether the person's Skip is a vote: they may press it, without the DJ role, where Skip is one. */
+export function skipIsVote(): boolean {
+  return state.votes.on && maySkip() && !mayControl();
+}
+
+/**
+ * What Skip does for the person, as its title and its name for screen readers: skips, or votes, with the count of a
+ * vote under way in words ("2/3" is read as two thirds); after their vote, that they voted.
+ */
+export function skipTitle(): string {
+  const words = t();
+  const votes = state.votes;
+  if (votes.on && votes.voted) return words.votedToSkip(votes.votes, votes.needed);
+  const name = skipIsVote() ? words.voteToSkip : words.skip;
+  return votes.on && votes.votes > 0 ? `${name}: ${words.skipVotes(votes.votes, votes.needed)}` : name;
 }
 
 /** The track's position now: the snapshot's place plus the time since, while playing (in the server's time). */

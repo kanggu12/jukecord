@@ -244,10 +244,19 @@ const MADE_UP = {
 };
 // Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones;
 // `view`, a person who may only look (no DJ role, no Manage Server); `listeners`, the people listening in browsers;
-// `control: false`, a person without the server's DJ role; `votes`, how a vote to skip stands in the state.
+// `control: false`, a person without the server's DJ role; `votes`, how a vote to skip stands in the state; `djRole`,
+// a server whose DJ role is chosen (the menu's settings say how Skip works then).
 async function asDiscord(
   page,
-  { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false, listeners = MADE_UP.listeners, control, votes } = {},
+  {
+    name = MADE_UP.me.name,
+    guild = MADE_UP.guild,
+    view = false,
+    listeners = MADE_UP.listeners,
+    control,
+    votes,
+    djRole = false,
+  } = {},
 ) {
   await page.route(/\/api\/v1\/(status|me|guilds|guilds\/[^/]+\/settings)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
@@ -259,7 +268,13 @@ async function asDiscord(
         : what === 'me'
           ? { ...body, ...MADE_UP.me, name, bot: MADE_UP.bot }
           : what === 'settings'
-            ? { ...body, roles: MADE_UP.roles, channels: MADE_UP.channels, alertsChannelId: MADE_UP.channels[0].id }
+            ? {
+                ...body,
+                roles: MADE_UP.roles,
+                channels: MADE_UP.channels,
+                alertsChannelId: MADE_UP.channels[0].id,
+                ...(djRole ? { djRoleId: MADE_UP.roles[0].id } : {}),
+              }
             : body.map((entry) => ({
                 ...entry,
                 name: guild,
@@ -425,7 +440,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await page.waitForSelector('.history .row');
   await page.click('[data-act="listen"]');
   await page.waitForFunction(
-    () => document.querySelector('.listen .what span')?.textContent?.includes('In time'),
+    () => document.querySelector('.listen .what span')?.textContent?.includes('In sync'),
     null,
     {
       timeout: 15000,
@@ -454,7 +469,7 @@ if (!ONLY || ONLY.has('listening')) {
   let synced = false;
   for (let i = 0; i < 40 && !synced; i += 1) {
     await page.waitForTimeout(250);
-    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In sync'));
   }
   const audio = await page.evaluate(() => {
     const element = document.querySelector('audio') ?? [...document.querySelectorAll('*')].find(() => false);
@@ -1141,9 +1156,39 @@ await api('POST', '/guilds/local/player/stop').catch(() => {});
 await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
 await api('POST', '/guilds/local/player/resume').catch(() => {});
 await until('playing');
+// The Skip key of someone whose Skip is a vote: it says what its count is of, as a count ("votes 1/2", "투표 1/2"; the
+// old "1/2표" read as a half), and once their vote is in, that they voted. The row of keys stays one line, or the main
+// key alone over the other four, at every width (a longer count once left a key alone on a second line).
+async function skipSays(page, voted) {
+  // The count comes with the live state, a moment after the page: waited for (and said missing below if it never came).
+  await page.waitForSelector('.now [data-act="skip"] .votes', { timeout: 10000 }).catch(() => {});
+  const { text, lang, rows } = await page.evaluate(() => {
+    const row = document.querySelector('.now .keys');
+    const tops = new Map();
+    for (const key of row?.querySelectorAll(':scope > .key') ?? []) {
+      if (key.hidden || !key.offsetParent) continue;
+      const top = Math.round(key.getBoundingClientRect().top);
+      tops.set(top, (tops.get(top) ?? 0) + 1);
+    }
+    return {
+      text: row?.querySelector('[data-act="skip"] .votes')?.textContent ?? '',
+      lang: document.documentElement.lang,
+      rows: [...tops.values()],
+    };
+  });
+  const want = lang === 'ko' ? `${voted ? '투표함' : '투표'} 1/2` : `${voted ? 'voted' : 'votes'} 1/2`;
+  if (text !== want) throw new Error(`Skip's count says "${text}", not "${want}"`);
+  if (rows.length > 2 || (rows.length === 2 && rows[0] !== 1)) throw new Error(`the keys lie in rows of ${rows}`);
+}
 // Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
 // count stays on the key when a narrow row shows icons alone).
-await sweep('vote-skip', SIZES, null, { discord: { control: false, votes: { on: true, votes: 1, needed: 2 } } });
+await sweep('vote-skip', SIZES, (page) => skipSays(page, false), {
+  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } },
+});
+// The same person once their vote is in: the key says they voted.
+await sweep('vote-skip-voted', SIZES, (page) => skipSays(page, true), {
+  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } },
+});
 // The menu of someone who manages the server, with the server's settings under the DJ role.
 await sweep(
   'menu-settings',
@@ -1154,6 +1199,17 @@ await sweep(
     await page.waitForTimeout(400);
   },
   { discord: true },
+);
+// The same with a DJ role chosen: the vote's hint says how Skip from everyone else works.
+await sweep(
+  'menu-settings-role',
+  FEW,
+  async (page) => {
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .settings .switch');
+    await page.waitForTimeout(400);
+  },
+  { discord: { djRole: true } },
 );
 // Take turns now from the queue's tools (its own key on a wide card, the list behind the tools key on a narrow one),
 // and the toast that says what moved.
@@ -1184,13 +1240,13 @@ if (!ONLY || ONLY.has('listening-sound')) {
   let synced = false;
   for (let i = 0; i < 40 && !synced; i += 1) {
     await page.waitForTimeout(250);
-    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In sync'));
   }
   let still = true;
   for (const preset of ['night', 'bass']) {
     await api('PUT', '/guilds/local/voice/sound', { preset });
     await page.waitForTimeout(2500);
-    still &&= await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+    still &&= await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In sync'));
   }
   report.push({
     state: 'listening-sound',

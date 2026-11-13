@@ -180,7 +180,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'only its maker and people who can manage the server can revoke a listening link',
     '듣기 링크는 만든 사람과 서버 관리 권한이 있는 사람만 폐기할 수 있음',
   ],
-  ['a guest of a listening link can only listen', '듣기 링크로 들어온 손님은 듣기만 할 수 있음'],
+  ['a guest can only look and listen', '손님은 보고 듣기만 할 수 있음'],
   ['a listening link opens its own server only', '듣기 링크는 그 링크의 서버만 열 수 있음'],
   ['this listening link has ended or does not exist', '끝났거나 없는 듣기 링크'],
   ['this listening link has as many guests as it allows', '이 듣기 링크의 손님 자리가 가득 참'],
@@ -192,7 +192,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [/^each person may have (\d+) tracks in the queue here$/, '이 서버에서는 한 사람이 대기열에 $1곡까지 추가할 수 있음'],
   [/^the limit is 0 \(none\) to (\d+) tracks$/, '제한은 0(없음)부터 $1곡까지'],
   [/^the volume is 0 to (\d+) percent$/, '음량은 0부터 $1퍼센트까지'],
-  [/^the sound is one of (.+)$/, '음색은 $1 중 하나'],
+  [/^the sound is one of (.+)$/, '음향 효과는 $1 중 하나'],
   // Searching (the add field's list, Discord's suggestions, the API).
   ['searching is not set up here', '여기서는 검색을 쓸 수 없음'],
   ['nothing to search for', '찾을 말이 없음'],

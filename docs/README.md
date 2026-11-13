@@ -143,7 +143,7 @@ bass, clearer voices, brighter, or softer at night (less low end, gentler highs,
 `/sound`, `jukecord volume 80` and `jukecord sound night`, for whoever may change the music. A change is heard within a
 moment, from the same place in the track. Browsers listening along apply the same sound, each at its own volume.
 
-At 100 % with the sound off, the voice channel gets each cached track as it is. Otherwise jukecord decodes, filters
+At 100 % with the original sound, the voice channel gets each cached track as it is. Otherwise jukecord decodes, filters
 and encodes it again
 ([why, and what it costs](DECISIONS.md#the-voice-channels-sound-ffmpeg-only-while-it-is-not-plain)).
 

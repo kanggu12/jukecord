@@ -54,7 +54,7 @@ describe('the playing card and the votes to skip', () => {
     await flush();
     const kept = np.shown.at(-1)?.text ?? '';
     assert.equal(np.shown.length, 2);
-    assert.match(kept, /\[Skip \(1 of 2\) jukecord:skip:en:\d+\]/);
+    assert.match(kept, /\[Skip \(votes 1\/2\) jukecord:skip:en:\d+\]/);
     assert.match(kept, /Votes to skip: 1 of 2/);
     // The press of the card's Skip by someone without the role is the second vote: the track goes.
     const track = players.get(GUILD).snapshot().track?.id;
@@ -62,7 +62,9 @@ describe('the playing card and the votes to skip', () => {
     await handlers(bot).onButton(press.interaction);
     assert.equal(press.shown[0]?.kind, 'update');
     assert.notEqual(players.get(GUILD).snapshot().track?.id, track);
-    assert.doesNotMatch(press.shown[0]?.text ?? '', /of 2/);
+    assert.doesNotMatch(press.shown[0]?.text ?? '', /of 2|\/2/);
+    // A press that made the track go was no vote left standing: nothing more is said.
+    assert.equal(press.shown.length, 1);
     await bot.client.destroy();
   });
 
@@ -72,8 +74,28 @@ describe('the playing card and the votes to skip', () => {
     const press = interaction('button', `jukecord:skip:en:${track}`);
     await handlers(bot).onButton(press.interaction);
     assert.equal(players.get(GUILD).snapshot().track?.id, track);
-    assert.match(press.shown[0]?.text ?? '', /\[Skip \(1 of 2\) jukecord:skip:en:\d+\]/);
+    assert.match(press.shown[0]?.text ?? '', /\[Skip \(votes 1\/2\) jukecord:skip:en:\d+\]/);
     assert.match(press.shown[0]?.text ?? '', /Votes to skip: 1 of 2/);
+    // The card is everyone's: the presser alone hears that the vote was theirs.
+    assert.equal(press.shown[1]?.kind, 'followUp');
+    assert.equal(press.shown[1]?.ephemeral, true);
+    assert.equal(press.shown[1]?.text, 'Voted to skip: 1 of 2');
+    await bot.client.destroy();
+  });
+
+  it("tells the presser of a Korean card's Skip of their vote in their own language, the card in its own", async () => {
+    const { bot, players } = await voting();
+    const track = players.get(GUILD).snapshot().track?.id;
+    const press = interaction('button', `jukecord:skip:en:${track}`, {}, { locale: 'ko' });
+    await handlers(bot).onButton(press.interaction);
+    // The card keeps the language it was made in; the count reads as a count, not a half ("1/2표").
+    assert.match(press.shown[0]?.text ?? '', /\[Skip \(votes 1\/2\) jukecord:skip:en:\d+\]/);
+    assert.equal(press.shown[1]?.text, '건너뛰기에 투표함: 2표 중 1표');
+    // Pressed again: the vote stands as it was, and the presser hears so again.
+    const again = interaction('button', `jukecord:skip:ko:${track}`, {}, { locale: 'ko' });
+    await handlers(bot).onButton(again.interaction);
+    assert.match(again.shown[0]?.text ?? '', /\[건너뛰기 \(투표 1\/2\) jukecord:skip:ko:\d+\]/);
+    assert.equal(again.shown[1]?.text, '건너뛰기에 투표함: 2표 중 1표');
     await bot.client.destroy();
   });
 });

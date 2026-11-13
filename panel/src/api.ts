@@ -202,6 +202,8 @@ export interface Votes {
   on: boolean;
   votes: number;
   needed: number;
+  /** Whether this login's person has a vote that counts in it (their Skip says "voted"). */
+  voted: boolean;
 }
 export interface AddResult {
   items: QueueItem[];
