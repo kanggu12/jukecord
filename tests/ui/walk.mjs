@@ -680,6 +680,56 @@ await sweep(
   },
   { forced: true },
 );
+// Entries of the same count share a place, in every ranked list on the page (two tracks played once each were 1st and
+// 2nd, as if one had played less): a tie's places are one, and the count after it has its position's place.
+async function placesShared(page) {
+  return page.evaluate(() => {
+    const main = document.querySelector('main:not([hidden])') ?? document.body;
+    // Each list's rows as [place, count].
+    const lists = [
+      ...[...main.querySelectorAll('.wrapped-tracks')].map((list) =>
+        [...list.querySelectorAll('.row')].map((row) => [
+          row.querySelector('.pos')?.textContent,
+          row.querySelector('.n')?.textContent,
+        ]),
+      ),
+      ...[...main.querySelectorAll('.ranks')].map((list) =>
+        [...list.querySelectorAll('.rank')].map((row) => [
+          row.querySelector('.num')?.textContent,
+          row.querySelector('.n')?.textContent,
+        ]),
+      ),
+    ];
+    const wrong = [];
+    for (const rows of lists)
+      rows.forEach(([place, count], index) => {
+        if (index === 0) return;
+        const [before, last] = rows[index - 1];
+        if (count === last && place !== before) wrong.push(`two of ${count} at places ${before} and ${place}`);
+        if (count !== last && Number(place) !== index + 1) wrong.push(`${count} at place ${place}, not ${index + 1}`);
+      });
+    return wrong;
+  });
+}
+// No colour on the page is drawn with a hue it lost. Mixed in oklch with transparent, a colour of little chroma (the
+// inks, the light field) kept its chroma but lost its hue, which the browser drew at 0°, a rose: the light theme's
+// bars were pink, its grey ink warm.
+async function noLostHue(page) {
+  const lost = await page.evaluate(() => {
+    const found = new Set();
+    for (const element of document.querySelectorAll('html, body, body *')) {
+      for (const part of [null, '::before', '::after']) {
+        const style = getComputedStyle(element, part);
+        for (const value of [style.color, style.backgroundColor, style.borderTopColor, style.boxShadow])
+          for (const match of value.matchAll(/oklch\(([\d.]+) ([\d.]+) none/g))
+            if (Number(match[2]) > 0.003)
+              found.add(`${element.tagName.toLowerCase()}.${element.classList[0] ?? ''}${part ?? ''}: ${match[0]}`);
+      }
+    }
+    return [...found];
+  });
+  if (lost.length > 0) throw new Error(`colours drawn with a lost hue: ${lost.slice(0, 3).join(' | ')}`);
+}
 await sweep('stats', SIZES, async (page) => {
   // The link in the bar on a wide window; on a narrow one the links are in the menu, so the address itself (waiting
   // for a hidden link to become pressable would take half a minute a page).
@@ -696,6 +746,15 @@ await sweep('stats', SIZES, async (page) => {
     (counts) => counts.filter((count) => /^\s*[\d,]+\s*$/.test(count.textContent ?? '')).length,
   );
   if (bare > 0) problems.push(`${bare} counts in the ranks with no unit`);
+  problems.push(...(await placesShared(page)));
+  await noLostHue(page).catch((error) => problems.push(error.message));
+  // Wrapped stands on the title's line, at every width (on a phone it stood alone on a third line of the head).
+  const apart = await page.evaluate(() => {
+    const title = document.querySelector('.stats-head h1')?.getBoundingClientRect();
+    const key = document.querySelector('.stats-head [data-route="wrapped"]')?.getBoundingClientRect();
+    return title && key ? Math.abs(title.top + title.height / 2 - (key.top + key.height / 2)) : 0;
+  });
+  if (apart > 1) problems.push(`Wrapped stands ${Math.round(apart)} px off the title's line`);
   if (problems.length > 0) throw new Error(problems.join('; '));
 });
 await sweep('stats-tip', FEW, async (page) => {
@@ -867,6 +926,12 @@ async function wrappedIsTrue(page, period) {
       song: Boolean(song),
       side: Boolean(song && first && song.getBoundingClientRect().top === first.getBoundingClientRect().top),
       fill: row && first && head ? row.offsetHeight / (first.offsetHeight - head.offsetHeight) : 1,
+      // The first track's card's share of the page's width, on a window wide enough for two columns.
+      wide:
+        first && window.innerWidth > 1100
+          ? first.getBoundingClientRect().width /
+            (document.querySelector('.wrapped .page-body')?.getBoundingClientRect().width ?? 1)
+          : 0,
     };
   }, period);
   const { wrapped } = facts;
@@ -883,6 +948,10 @@ async function wrappedIsTrue(page, period) {
     problems.push(`${wrapped.days} days of at most ${facts.longest} min under ${facts.total}`);
   if (facts.side && facts.fill < 0.5)
     problems.push(`the first track's row fills ${Math.round(facts.fill * 100)} % of its card`);
+  // Its column's width, with or without the song beside it (alone across the row, a laptop's card was 1,408 px wide
+  // with its row in the first 360).
+  if (facts.wide > 0.5) problems.push(`the first track's card is ${Math.round(facts.wide * 100)} % of the row wide`);
+  problems.push(...(await placesShared(page)));
   if (problems.length > 0) throw new Error(`Wrapped says what is not true: ${problems.join('; ')}`);
 }
 // Wrapped at a time, and both checks on it, their problems said together.
@@ -895,7 +964,12 @@ async function wrappedChecked(page, period) {
 }
 await sweep('wrapped', SIZES, (page) => wrappedChecked(page, 'last-12-months'), { discord: true });
 await sweep('wrapped-few', FEW, (page) => wrappedChecked(page, firstMonth), { discord: true });
-await sweep('wrapped-empty', FEW, (page) => wrappedAt(page, '2020'));
+// A time with no plays: nothing to save, so no key for it (a filled slab half a phone wide that did nothing).
+await sweep('wrapped-empty', FEW, async (page) => {
+  await wrappedAt(page, '2020');
+  if (await page.locator('[data-act="picture"]').isVisible())
+    throw new Error('Save as picture shows with nothing to save');
+});
 await sweep('wrapped-periods', FEW, async (page) => {
   await wrappedAt(page, 'last-12-months');
   await page.click('[data-act="period"]');
@@ -974,6 +1048,41 @@ await sweep('notice', FEW, async (page) => {
 await sweep('waiting', FEW, async (page) => {
   await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
 });
+// The server's choices in the menu: their names start at one place, whatever stands before them (Everyone's people icon
+// and the roles' dots: the dots were 6 px narrower, and the roles' names 6 px left of Everyone), and the choice made is
+// the brand's blue, its check and an "on" switch alike (they wore the play green beside the chosen segments' blue).
+async function settingsLook(page) {
+  const wrong = await page.evaluate(() => {
+    const problems = [];
+    const lefts = new Set(
+      [...document.querySelectorAll('.sheet .choice[data-choice] > .grow')]
+        .filter((label) => label.getClientRects().length > 0)
+        .map((label) => Math.round(label.getBoundingClientRect().left)),
+    );
+    if (lefts.size > 1) problems.push(`the choices' names start at ${[...lefts].join(', ')}`);
+    // The tokens as the browser writes them, to compare with what it computed.
+    const root = getComputedStyle(document.documentElement);
+    const probe = document.createElement('i');
+    document.body.append(probe);
+    const colour = (token) => {
+      probe.style.color = root.getPropertyValue(token);
+      return getComputedStyle(probe).color;
+    };
+    const accent = colour('--accent');
+    const key = colour('--key');
+    probe.remove();
+    for (const check of document.querySelectorAll(
+      '.sheet .choice:is([aria-pressed="true"], [aria-checked="true"]) .check',
+    ))
+      if (getComputedStyle(check).color !== accent) problems.push(`a chosen check in ${getComputedStyle(check).color}`);
+    for (const toggle of document.querySelectorAll('.sheet .switch[aria-checked="true"]')) {
+      const track = getComputedStyle(toggle, '::before').backgroundColor;
+      if (track !== key) problems.push(`an on switch in ${track}`);
+    }
+    return problems;
+  });
+  if (wrong.length > 0) throw new Error(wrong.join('; '));
+}
 // The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
 await sweep(
   'menu-discord',
@@ -982,6 +1091,7 @@ await sweep(
     await page.click('[data-act="menu"]');
     await page.waitForSelector('.sheet .section .choice[aria-pressed="true"] >> nth=1');
     await page.waitForTimeout(400);
+    await settingsLook(page);
   },
   { discord: true },
 );
@@ -1269,6 +1379,31 @@ async function invite(page) {
   await page.click('[data-act="invite"]');
   await page.waitForSelector('.dialog .invite');
 }
+// A link made and shown: Copy is the dialog's one filled key (with Make the link filled too, the step done was as loud
+// as the next, and a second press made a second link), whole in the dialog's room, and the dialog's body where it
+// began (under a phone's fold, a press on Copy scrolled it by 6 px and cut the top off the choices under the title).
+async function linkShown(page) {
+  const shown = await page.evaluate(() => {
+    const dialog = document.querySelector('.dialog:not([hidden])');
+    const body = dialog.querySelector('.dialog-content');
+    const filled = [...dialog.querySelectorAll('.key.primary')]
+      .filter((key) => key.getClientRects().length > 0)
+      .map((key) => key.dataset.act);
+    const copy = [...dialog.querySelectorAll('[data-act="invite-copy"]')].find((key) => key.getClientRects().length);
+    const key = copy?.getBoundingClientRect();
+    const room = body.getBoundingClientRect();
+    return {
+      filled,
+      scrolled: body.scrollTop,
+      cut: !key || key.top < room.top - 0.5 || key.bottom > room.bottom + 0.5,
+    };
+  });
+  const problems = [];
+  if (shown.filled.join() !== 'invite-copy') problems.push(`filled keys: ${shown.filled.join(', ')}`);
+  if (shown.scrolled > 0) problems.push(`the dialog's body scrolled by ${shown.scrolled} px`);
+  if (shown.cut) problems.push("Copy is cut by the dialog's room");
+  if (problems.length > 0) throw new Error(`with a link shown: ${problems.join('; ')}`);
+}
 await sweep('invite', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
@@ -1278,6 +1413,7 @@ await sweep('invite', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-copy"]');
   const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
   if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
+  await linkShown(page);
   // The links that work: the one just made is marked (the rows read word for word the same), each row says who made it
   // and when, and no part of the line under the date breaks inside itself (the made-by part wrapped alone after a dot).
   await page.waitForSelector('.dialog .invite-links .channel .badge');
@@ -1295,9 +1431,10 @@ await sweep('invite', FEW, async (page) => {
     throw new Error(`marked as new: ${rows.map((row) => row.marked).join(', ')}`);
   if (rows.some((row) => row.broken)) throw new Error('a part of a link row breaks across lines');
 });
-// The question over the Invite dialog (revoking a link): the dialog under it is shaded and takes no clicks. Over a
-// dialog on top of every shade, the list's Revoke stayed bright and pressable under the question, and the two dialogs
-// read as one box cut across.
+// The question over the Invite dialog (revoking a link): the dialog under it steps aside while it is open, taking no
+// clicks, and the question says which link. Over a dialog on top of every shade, the list's Revoke stayed bright and
+// pressable under the question; then shaded, shorter and at the same top, the question still cut across it (half a
+// line of the Invite dialog under its edge, a phone's QR code sliced in two).
 await sweep('invite-revoke', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
@@ -1312,12 +1449,20 @@ await sweep('invite-revoke', FEW, async (page) => {
     return below.contains(hit) ? 'the Invite dialog under the question takes clicks' : null;
   });
   if (under) throw new Error(under);
+  const shown = await page.$$eval(
+    '.dialog',
+    (dialogs) => dialogs.filter((dialog) => dialog.getClientRects().length > 0).length,
+  );
+  if (shown !== 1) throw new Error(`${shown} dialogs show at once`);
+  const text = (await page.locator('.dialog .dialog-text').textContent()) ?? '';
+  if (!/until|까지/.test(text)) throw new Error(`the question does not say which link: ${text}`);
 });
 await sweep('invite-friend', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog .invite-tabs button:nth-child(2)');
   await page.click('.dialog [data-act="invite-friend"]');
   await page.waitForSelector('.dialog [data-pane="friend"] .qr');
+  await linkShown(page);
 });
 // Listening links made by the host, for the guests' states below: each guest's page takes one of a link's 25 places, so
 // a new link every twenty pages (a server keeps at most fifty links).
@@ -1385,8 +1530,9 @@ await sweep(
   },
   { login: false },
 );
-// A friend let in to look only (the View link): the add card says why its keys are off, in this login's terms. It
-// said only the DJ role could change the music, on a jukecord with no Discord and no roles at all.
+// A friend let in to look only (the View link): the add card says what this login may do, in its terms (it said only
+// the DJ role could change the music, on a jukecord with no Discord and no roles at all), and shows no field or key it
+// cannot use (a field that looked usable and three dim keys, Add the loudest thing on the card).
 await sweep(
   'friend-view',
   FEW,
@@ -1396,6 +1542,11 @@ await sweep(
     await page.waitForSelector('.add-card .look-only:not([hidden])');
     const why = (await page.locator('.add-card .look-only').textContent()) ?? '';
     if (/DJ/.test(why)) throw new Error(`a View login is told: ${why}`);
+    const unusable = await page.$$eval(
+      '.add-card :is(input, .key)',
+      (found) => found.filter((element) => element.getClientRects().length > 0).length,
+    );
+    if (unusable > 0) throw new Error(`a View login's add card shows ${unusable} field and keys it cannot use`);
   },
   { login: false },
 );
@@ -1449,6 +1600,13 @@ await sweep(
       found.map((key) => `${key.dataset.act}${key.disabled ? ' (off)' : ''}`),
     );
     if (keys.join() !== 'share-leave') throw new Error(`a guest's share keys: ${keys.join()}`);
+    // Titled as what it is for a guest, the link that came, with no queue it would go to (it was "Add to the queue",
+    // over "jukecord's queue", then said a guest cannot add).
+    const title = (await page.locator('.page.share h1').textContent()) ?? '';
+    // Any space between the words (the panel's words may keep a phrase together with no-break spaces).
+    if (/Add\sto\sthe\squeue|대기열에\s추가/.test(title)) throw new Error(`a guest's share page is titled "${title}"`);
+    if (await page.locator('.share-card .share-server').count())
+      throw new Error("a guest's share page names the queue it would go to");
   },
   { login: false },
 );
@@ -1520,6 +1678,10 @@ await sweep(
     await page.click('[data-act="menu"]');
     await page.waitForSelector('.sheet .settings .switch');
     await page.waitForTimeout(400);
+    const problems = [];
+    await settingsLook(page).catch((error) => problems.push(error.message));
+    await noLostHue(page).catch((error) => problems.push(error.message));
+    if (problems.length > 0) throw new Error(problems.join('; '));
   },
   { discord: { djRole: true } },
 );

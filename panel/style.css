@@ -71,8 +71,11 @@
   --groove: rgba(255, 255, 255, 0.045);
   --disc: #0b0c10;
   /* The charts' bars and the ranks' meters: ink, as the rest of the page's figures (a blue of their own meant nothing;
-     colour is for what it means: play, pause, load, a problem, and the rainbow of the mark). */
-  --series: color-mix(in oklch, var(--ink) 58%, transparent);
+     colour is for what it means: play, pause, load, a problem, and the rainbow of the mark).
+     Every mix with transparent is made in srgb, which keeps the colour as it is and thins it. In oklch a colour of
+     little chroma (the inks, the light field) lost its hue against transparent's, and the browser drew the chroma
+     left at hue 0, a rose: the light theme's bars were pink and its grey ink warm. */
+  --series: color-mix(in srgb, var(--ink) 58%, transparent);
   --rest: #f4f4f5;
   /* The mark's colours: the same rainbow on the arch, the disc's rim and the progress bar. */
   --rainbow: #ff6f61, #ffb84d, #4fcf86, #4aa3ff, #a77bff, #ff6f61;
@@ -118,7 +121,7 @@
   --focus: oklch(0.55 0.15 250);
   --groove: rgba(255, 255, 255, 0.06);
   --disc: #16181f;
-  --series: color-mix(in oklch, var(--ink) 52%, transparent);
+  --series: color-mix(in srgb, var(--ink) 52%, transparent);
   --rest: #aab0c0;
 }
 @media (prefers-color-scheme: light) {
@@ -161,7 +164,7 @@
     --focus: oklch(0.55 0.15 250);
     --groove: rgba(255, 255, 255, 0.06);
     --disc: #16181f;
-    --series: color-mix(in oklch, var(--ink) 52%, transparent);
+    --series: color-mix(in srgb, var(--ink) 52%, transparent);
     --rest: #aab0c0;
   }
 }
@@ -356,7 +359,7 @@ img {
   display: block;
 }
 ::selection {
-  background: color-mix(in oklch, var(--load) 35%, transparent);
+  background: color-mix(in srgb, var(--load) 35%, transparent);
 }
 :focus-visible {
   outline: 2px solid var(--focus);
@@ -434,7 +437,7 @@ img {
    a word beside the name, the connection its lamp and its word, the pages their words with the one in use underlined
    along the bar's foot, the account a bare key. Under the pointer a part takes a faint tint of the bar's glass. */
 .bar {
-  --bar-hover: color-mix(in oklch, var(--ink) 6%, transparent);
+  --bar-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   position: sticky;
   top: 0;
   z-index: 30;
@@ -445,7 +448,7 @@ img {
   padding: var(--safe-top) max(16px, var(--safe-right)) 0 max(16px, var(--safe-left));
   height: var(--bar-h);
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
-  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-bottom: 1px solid var(--line);
@@ -563,7 +566,7 @@ img {
   height: 8px;
   border-radius: 50%;
   background: var(--tone, var(--ink-3));
-  box-shadow: 0 0 6px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 60%, transparent);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--tone, var(--ink-3)) 60%, transparent);
   flex: none;
 }
 .tone-idle .dot,
@@ -685,9 +688,10 @@ img {
 }
 /* A role's face (the host, a guest, a friend: no account, so no name to take letters from): a person in the second
    ink on a solid grey, as a server's icon without a picture is shown, with no hue (a role is not one person to tell
-   apart). Solid, so a face over the one before it in a row of faces hides it as a picture does. */
+   apart). Solid, so a face over the one before it in a row of faces hides it as a picture does. Mixed in srgb: in
+   oklch the light theme's ink and white both have no hue, and the mix came out a faint rose. */
 .avatar.role {
-  background: color-mix(in oklch, var(--ink) 14%, var(--panel-opaque));
+  background: color-mix(in srgb, var(--ink) 14%, var(--panel-opaque));
   color: var(--ink-2);
 }
 /* The person in the middle of the face, seven tenths of its width (the icon's own box is a line's height), its lines
@@ -919,7 +923,7 @@ img {
 @media (hover: hover) {
   .key:hover {
     background: var(--raised-2);
-    border-color: color-mix(in oklch, var(--ink) 20%, transparent);
+    border-color: color-mix(in srgb, var(--ink) 20%, transparent);
   }
 }
 .key:active:not(:disabled) {
@@ -968,7 +972,7 @@ img {
 @media (hover: hover) {
   .key.quiet.bad:hover {
     color: var(--bad);
-    background: color-mix(in oklch, var(--bad) 12%, transparent);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
   }
 }
 /* A key is at least as wide as it is tall: a short word on a small key (Join, Leave) stays a finger's width on a touch
@@ -989,8 +993,8 @@ img {
   width: var(--control-sm);
 }
 .key[aria-pressed="true"] {
-  background: color-mix(in oklch, var(--load) 16%, transparent);
-  border-color: color-mix(in oklch, var(--load) 40%, transparent);
+  background: color-mix(in srgb, var(--load) 16%, transparent);
+  border-color: color-mix(in srgb, var(--load) 40%, transparent);
   color: var(--ink);
 }
 .key:disabled,
@@ -1028,13 +1032,13 @@ img {
 /* Under a mouse only (see .server:hover). */
 @media (hover: hover) {
   .field:hover {
-    border-color: color-mix(in oklch, var(--ink) 28%, transparent);
+    border-color: color-mix(in srgb, var(--ink) 28%, transparent);
   }
 }
 /* Focused: its line in the focus colour and a soft ring of it round the field (no glow). */
 .field:focus-within {
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent);
 }
 /* The input fills the field, which holds the room round its words (the browser's own padding would add a pixel). */
 .field input {
@@ -1106,7 +1110,7 @@ img {
 .seg button[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 /* A field in a head is of the head's small size, as its keys are. */
 .card-head .field {
@@ -1164,7 +1168,7 @@ img {
   height: 20px;
   translate: 0 -50%;
   border-radius: 10px;
-  background: color-mix(in oklch, var(--ink) 22%, transparent);
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
   transition: background 160ms ease;
 }
 /* The knob. */
@@ -1182,8 +1186,10 @@ img {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
   transition: transform 160ms var(--ease);
 }
+/* On: the brand's blue, the colour of a choice made (the play green said "playing" beside a chosen segment's blue). The
+   main key's blue, which the white knob reads on. */
 .switch[aria-checked="true"]::before {
-  background: var(--play);
+  background: var(--key);
 }
 .switch[aria-checked="true"]::after {
   transform: translateX(14px);
@@ -1482,7 +1488,7 @@ img {
   top: 6px;
   height: 4px;
   border-radius: 2px;
-  background: color-mix(in oklch, var(--ink) 30%, transparent);
+  background: color-mix(in srgb, var(--ink) 30%, transparent);
   transition:
     top 0.15s ease,
     height 0.15s ease;
@@ -1507,7 +1513,7 @@ img {
   background: conic-gradient(var(--rainbow));
 }
 .paused .track .fill {
-  background: color-mix(in oklch, var(--ink) 45%, transparent);
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
 }
 .paused .track .knob {
   background: var(--rest);
@@ -1775,7 +1781,7 @@ img {
   overflow: hidden;
   background: var(--raised-2);
   /* A hairline round the picture, so a cover of the field's own colour still has an edge (no shadow: it is flat). */
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
 }
 .album .case img {
   width: 100%;
@@ -1857,6 +1863,14 @@ img {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--ink-3);
+}
+/* What someone who may only look may do, alone in the add card in place of the field and its keys: an icon and the
+   words in the second ink, as the card's other lines (a faint footnote under no field read as a stray caption). */
+.add-card > .look-only {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-6);
+  color: var(--ink-2);
 }
 /* Why the last add did not go through, under the field it came from. */
 .add-failed {
@@ -2036,7 +2050,7 @@ img {
   border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--raised-2);
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
 }
 .result .cover img {
   width: 100%;
@@ -2123,7 +2137,7 @@ img {
   content: "";
   position: absolute;
   inset: -1px;
-  border: 2px dashed color-mix(in oklch, var(--focus) 70%, transparent);
+  border: 2px dashed color-mix(in srgb, var(--focus) 70%, transparent);
   border-radius: inherit;
   pointer-events: none;
   opacity: 1;
@@ -2141,8 +2155,8 @@ img {
 /* ---- autoplay --------------------------------------------------------------------------------------------------- */
 /* The queue's autoplay key: on, it takes the tint of a key that is on (a contrast theme fills it, below). */
 .autoplay-key.on {
-  background: color-mix(in oklch, var(--load) 16%, transparent);
-  border-color: color-mix(in oklch, var(--load) 40%, transparent);
+  background: color-mix(in srgb, var(--load) 16%, transparent);
+  border-color: color-mix(in srgb, var(--load) 40%, transparent);
 }
 /* The key says what it is in words, as the head's tools do. A card of 640 px or less (a phone's, a narrow window's)
    lists autoplay, named with its mode, with the tools behind the queue's tools key (see toolsMore), at the width the
@@ -2230,7 +2244,7 @@ img {
 .paste:focus-visible {
   outline: 0;
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent);
 }
 /* Smaller text in a field makes Safari zoom the page. */
 @media (max-width: 900px) {
@@ -2435,7 +2449,7 @@ img {
   /* Its parts above the home bar and clear of the corners; its glass reaches the edges. */
   padding: 0 max(16px, var(--safe-right)) var(--safe-bottom) max(16px, var(--safe-left));
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
-  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-top: 1px solid var(--line);
@@ -2460,7 +2474,7 @@ img {
 }
 .listen .key[data-act="listen"][aria-pressed="true"] {
   background: var(--accent-soft);
-  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--ink);
 }
 /* The player's own keys on the bar, and the sleep timer: bare icons, a tint under the pointer. */
@@ -2608,9 +2622,9 @@ img {
   animation: fade 160ms ease-out;
 }
 /* A dialog's shade covers everything, the bar too. A dialog and its shade share one level, so the page's order stacks
-   them: a dialog opened over another (a question over the Invite dialog or the playlists) has its shade over the one
-   below, which then reads as under it and takes no clicks (on a level above every shade, the dialog below stayed
-   bright and pressable, and the two looked like one box cut in half). */
+   them. A dialog opened over another (a question over the Invite dialog, a playlist's keys over the playlists) puts the
+   one below and its shade aside until it closes (ui/layers.ts): one dialog shows at a time, and no edge of one cuts
+   across the other (shorter and at the same top, the question showed half a line of the Invite dialog under it). */
 .scrim.full {
   inset: 0;
   z-index: 40;
@@ -2792,9 +2806,10 @@ img {
   box-shadow: inset 0 0 0 1px var(--line-2);
   font-weight: 600;
 }
+/* The check of the choice made, in the brand's blue as a chosen segment's frame (green is the colour of playing). */
 .choice .check {
   margin-left: auto;
-  color: var(--play);
+  color: var(--accent);
   visibility: hidden;
 }
 .choice:is([aria-checked="true"], [aria-current="true"], [aria-pressed="true"]) .check {
@@ -2804,6 +2819,14 @@ img {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  flex: none;
+}
+/* A role's dot in a choice: in a slot as wide as the icon of the choice above it (Everyone's people), the dot in its
+   middle, so the names after them start at one place. */
+.swatch-slot {
+  display: grid;
+  place-items: center;
+  width: var(--icon);
   flex: none;
 }
 .dialog {
@@ -3228,10 +3251,22 @@ kbd {
 .wrapped-first .row {
   grid-template-columns: 48px minmax(0, 1fr);
 }
-/* The song's card alone in its row (a time with no song: every track played once) or the first track's alone: across
-   the row. */
+/* A card alone in the row (a song with no first track, which a time with plays does not have): across it. */
 .wrapped-hero > :only-child {
   grid-column: 1 / -1;
+}
+/* A time with no song (every track played once): the totals in the song's place, two by two, beside the first track in
+   its own column (alone across the row, its card was 1,408 px wide on a laptop with its row in the first 360). */
+@media (min-width: 1101px) {
+  .wrapped-hero > .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* The first track as a tile among the totals: its row under the tile's name, its words at the tile's inset, the pane
+   under the pointer reaching 8 px out as a list's rows' do. */
+.tile.wrapped-first .list {
+  margin: var(--s-4) calc(-1 * var(--s-8)) 0;
+  padding: 0;
 }
 /* Beside the song, on a wide window, the first track is a smaller record of its own: its album made bigger with its
    words beside it, in the middle of the card's room as the song's record is in its own. As a row under the card's
@@ -3312,7 +3347,7 @@ kbd {
   flex: 1;
   min-width: 0;
   border-radius: var(--r-sm) var(--r-sm) 0 0;
-  background: color-mix(in oklch, var(--series) 38%, transparent);
+  background: color-mix(in srgb, var(--series) 38%, transparent);
 }
 .moment .spark i.top {
   background: var(--series);
@@ -3835,7 +3870,7 @@ kbd {
     right: 0;
     bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
     padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
-    background: color-mix(in oklch, var(--bg) 90%, transparent);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
     border-top: 1px solid var(--line);
@@ -3920,8 +3955,7 @@ kbd {
   .page-head .page-tools {
     flex-wrap: wrap;
   }
-  /* The title takes half the line at least, so the levels go under it and Refresh stays beside it. The statistics'
-     head, a title and one choice of range, keeps them on one line. */
+  /* The title takes half the line at least, so the levels go under it and Refresh stays beside it. */
   .page-head:has(.log-filter) h1 {
     flex: 1 1 0;
     min-width: 50%;
@@ -3940,6 +3974,17 @@ kbd {
     order: 3;
     flex: 1 1 100%;
     width: auto;
+  }
+  /* The statistics' head: the title with Wrapped at the line's end, the range of days under them (the range and
+     Wrapped side by side under the title left Wrapped alone on a third line of a phone's head). */
+  .page-head.stats-head h1 {
+    flex: 1 1 0;
+  }
+  .page-head.stats-head .page-tools {
+    display: contents;
+  }
+  .page-head.stats-head .seg {
+    order: 1;
   }
 }
 @media (max-width: 400px) {
@@ -4358,7 +4403,7 @@ kbd {
   text-align: left;
   font: 700 var(--fs-xl) / var(--lh-xl) var(--font);
   letter-spacing: -0.01em;
-  color: color-mix(in oklch, var(--ink) 52%, transparent);
+  color: color-mix(in srgb, var(--ink) 52%, transparent);
   transition:
     color 0.35s ease,
     background 0.2s ease;
@@ -4370,7 +4415,7 @@ button.lyric {
 @media (hover: hover) {
   button.lyric:hover {
     background: var(--hover-tint);
-    color: color-mix(in oklch, var(--ink) 75%, transparent);
+    color: color-mix(in srgb, var(--ink) 75%, transparent);
   }
 }
 /* The line being sung: the text's own ink (no glow round it: the brighter words say it). */
@@ -4503,6 +4548,38 @@ button.lyric {
 }
 .invite-url {
   user-select: all;
+}
+/* A phone: the QR code and Copy side by side (the note over Copy at the code's top, Copy at its foot), and the link and
+   until when it works across the dialog under them. Stacked, the code over the link pushed Copy, the key to press
+   next, under the dialog's fold, and a press on it scrolled the dialog by a few pixels, cutting off the top of the
+   choices under its title. */
+@media (max-width: 560px) {
+  .invite-made:has(> .qr-box) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--s-8) var(--pad);
+  }
+  /* The link's column gives its parts to the grid. */
+  .invite-made:has(> .qr-box) > .invite-link {
+    display: contents;
+  }
+  .invite-made:has(> .qr-box) > .qr-box {
+    grid-area: 1 / 1 / 3 / 2;
+  }
+  .invite-made:has(> .qr-box) .invite-note:first-child {
+    grid-area: 1 / 2;
+  }
+  .invite-made:has(> .qr-box) .invite-link > .line {
+    grid-area: 2 / 2;
+    align-self: end;
+  }
+  .invite-made:has(> .qr-box) .invite-url {
+    grid-area: 3 / 1 / 4 / -1;
+  }
+  /* What Copy did, and until when the link works: across, in their order under the link. */
+  .invite-made:has(> .qr-box) .invite-link > :is(.copy-result, .invite-note:not(:first-child)) {
+    grid-column: 1 / -1;
+  }
 }
 .invite h3 {
   margin: var(--pad) 0 var(--s-8);

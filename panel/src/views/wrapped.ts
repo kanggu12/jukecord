@@ -8,7 +8,7 @@
  * choosing another puts it there too, and Back goes to the one before.
  */
 
-import { busiestHour, busiestWeekday, hasSong } from '../../../src/core/facts.ts';
+import { busiestHour, busiestWeekday, hasSong, ranks } from '../../../src/core/facts.ts';
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
 import { state, t, watch } from '../state.ts';
@@ -122,7 +122,10 @@ export function wrappedPage(): HTMLElement {
     periodKey.disabled = !shown;
     fill(save, icon('image-down'), h('span', { class: 'label' }, words.savePicture));
     save.title = words.savePicture;
-    save.disabled = !shown || shown.plays === 0;
+    // A time with no plays has nothing to save: no key for it (a filled slab half a phone wide that did nothing). Off
+    // while the time loads.
+    save.hidden = shown !== null && shown.plays === 0;
+    save.disabled = !shown;
   };
 
   const draw = (wrapped: Wrapped) => {
@@ -162,32 +165,44 @@ export function wrappedPage(): HTMLElement {
       : null;
     // The first track of the time: what it began with, and when.
     const first = wrapped.firstTrack;
-    const firstCard = first
+    const firstRow = first
       ? h(
-          'section',
-          { class: 'card wrapped-first', 'aria-labelledby': 'wrapped-first-h' },
-          h('div', { class: 'card-head' }, h('h2', { id: 'wrapped-first-h' }, words.firstTrack)),
+          'ol',
+          { class: 'list' },
           h(
-            'ol',
-            { class: 'list' },
+            'li',
+            { class: 'row', dataset: { id: `first-${first.track.id}` } },
+            album(first.track),
             h(
-              'li',
-              { class: 'row', dataset: { id: `first-${first.track.id}` } },
-              album(first.track),
+              'div',
+              { class: 'text' },
+              // Two lines at most (style.css), the whole title its tooltip.
               h(
                 'div',
-                { class: 'text' },
-                // Two lines at most (style.css), the whole title its tooltip.
-                h(
-                  'div',
-                  { class: 'name', title: first.track.title, 'data-clip': 'ok' },
-                  h('a', { href: first.track.url, target: '_blank', rel: 'noopener noreferrer' }, first.track.title),
-                ),
-                subLine(h('span', null, firstWhen(first.playedAt, wrapped.period)), h('span', null, firstBy(first))),
+                { class: 'name', title: first.track.title, 'data-clip': 'ok' },
+                h('a', { href: first.track.url, target: '_blank', rel: 'noopener noreferrer' }, first.track.title),
               ),
+              subLine(h('span', null, firstWhen(first.playedAt, wrapped.period)), h('span', null, firstBy(first))),
             ),
           ),
         )
+      : null;
+    // Beside the song, a card under its own head, as the song's is. With no song, a tile among the totals beside it,
+    // its name where theirs are (a card's head beside the totals' names stood 5 px off their line).
+    const firstCard = firstRow
+      ? songCard
+        ? h(
+            'section',
+            { class: 'card wrapped-first', 'aria-labelledby': 'wrapped-first-h' },
+            h('div', { class: 'card-head' }, h('h2', { id: 'wrapped-first-h' }, words.firstTrack)),
+            firstRow,
+          )
+        : h(
+            'section',
+            { class: 'card tile wrapped-first', 'aria-labelledby': 'wrapped-first-h' },
+            h('div', { class: 'k', id: 'wrapped-first-h' }, words.firstTrack),
+            firstRow,
+          )
       : null;
     // The totals, as the statistics show them.
     const tiles = h(
@@ -209,7 +224,9 @@ export function wrappedPage(): HTMLElement {
         ),
       ),
     );
-    // The most played, each on its album, with its plays.
+    // The most played, each on its album, with its plays and its place (shared in a tie: two tracks played once each
+    // are both first).
+    const trackPlaces = ranks(wrapped.topTracks.map((entry) => entry.plays));
     const topTracks = h(
       'ol',
       { class: 'list wrapped-tracks' },
@@ -217,7 +234,7 @@ export function wrappedPage(): HTMLElement {
         h(
           'li',
           { class: 'row', dataset: { id: `top-${entry.track.id}` } },
-          h('span', { class: 'pos' }, index + 1),
+          h('span', { class: 'pos' }, trackPlaces[index] ?? index + 1),
           album(entry.track),
           h(
             'div',
@@ -236,6 +253,7 @@ export function wrappedPage(): HTMLElement {
     );
     // Whose picks played most: faces and meters, as on the statistics, each with the plays of what they added.
     const most = Math.max(1, ...wrapped.topPeople.map((entry) => entry.plays));
+    const peoplePlaces = ranks(wrapped.topPeople.map((entry) => entry.plays));
     const topPeople = h(
       'ol',
       { class: 'ranks' },
@@ -243,7 +261,7 @@ export function wrappedPage(): HTMLElement {
         h(
           'li',
           { class: 'rank' },
-          h('span', { class: 'faint num' }, index + 1),
+          h('span', { class: 'faint num' }, peoplePlaces[index] ?? index + 1),
           h(
             'span',
             { class: 'who' },
@@ -321,8 +339,12 @@ export function wrappedPage(): HTMLElement {
             words.keptFrom(dayText(wrapped.keptFrom, state.lang, true), count(10_000)),
           )
         : null,
-      h('div', { class: 'wrapped-hero' }, songCard, firstCard),
-      tiles,
+      // The song of the time beside the first track, the totals under them. With no song (every track played once),
+      // the totals take the song's place, two by two, and the first track keeps its column: alone across the row, its
+      // card was 1,408 px wide on a laptop with its row in the first 360.
+      ...(songCard
+        ? [h('div', { class: 'wrapped-hero' }, songCard, firstCard), tiles]
+        : [h('div', { class: 'wrapped-hero' }, tiles, firstCard)]),
       h(
         'div',
         { class: 'charts wrapped-tops' },
@@ -549,6 +571,9 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
   const hour = busiestHour(wrapped);
   const song = hasSong(wrapped) ? wrapped.song : null;
   const first = wrapped.firstTrack;
+  // The places as the page numbers them: shared in a tie.
+  const trackPlaces = ranks(wrapped.topTracks.map((entry) => entry.plays));
+  const peoplePlaces = ranks(wrapped.topPeople.map((entry) => entry.plays));
   return {
     lang: state.lang,
     server: { name: guild.name, icon: guildIconUrl(guild.id, guild.icon, 128) },
@@ -584,10 +609,11 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
       { label: words.tileDays, value: count(wrapped.days), unit: '' },
     ],
     tracksLabel: words.mostPlayed,
-    // Each with its unit, as on the page.
-    tracks: wrapped.topTracks.map((entry) => ({
+    // Each with its unit and its place, as on the page.
+    tracks: wrapped.topTracks.map((entry, index) => ({
       title: entry.track.title,
       plays: words.playsCount(entry.plays),
+      rank: trackPlaces[index] ?? index + 1,
       cover: coverUrl(guild.id, entry.track),
     })),
     momentsLabel: words.momentsLabel,
@@ -605,11 +631,12 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
         : []),
     ],
     peopleLabel: words.picksPlayed,
-    people: wrapped.topPeople.slice(0, 3).map((entry) => ({
+    people: wrapped.topPeople.slice(0, 3).map((entry, index) => ({
       // The host has no picture and no Discord name: "Host" in the panel's words, a person for a face.
       name: entry.name ?? words.theHost,
       picture: avatarUrl(entry.userId, entry.avatar, 128),
       plays: words.playsCount(entry.plays),
+      rank: peoplePlaces[index] ?? index + 1,
       role: entry.userId === null,
     })),
   };

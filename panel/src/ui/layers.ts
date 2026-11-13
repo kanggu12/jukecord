@@ -88,8 +88,9 @@ export function messageOf(error: unknown): string {
 }
 
 // The open layers (the sheet and dialogs over it), newest last. Escape closes the newest only, and Tab stays inside it:
-// a rename dialog over the playlists closes alone, and the keyboard never wanders to the page under the scrim.
-const layers: { element: HTMLElement; close: () => void }[] = [];
+// a rename dialog over the playlists closes alone, and the keyboard never wanders to the page under the scrim. A
+// dialog's entry keeps its shade too, which goes away and comes back with it while another dialog is over it.
+const layers: { element: HTMLElement; close: () => void; shade?: HTMLElement }[] = [];
 
 /** Whether a sheet or a dialog is open (the player's shortcuts wait while one is). */
 export function layerOpen(): boolean {
@@ -197,9 +198,9 @@ export function goTo(path: string): void {
   history.pushState(null, '', path);
 }
 
-// Puts a layer on top; returns the function that takes it off again.
-function push(element: HTMLElement, close: () => void): () => void {
-  const entry = { element, close };
+// Puts a layer on top (with its shade, for a dialog); returns the function that takes it off again.
+function push(element: HTMLElement, close: () => void, shade?: HTMLElement): () => void {
+  const entry = { element, close, ...(shade ? { shade } : {}) };
   layers.push(entry);
   arm();
   return () => {
@@ -286,6 +287,12 @@ function dialog<T>(
   return new Promise((resolve) => {
     const previous = document.activeElement as HTMLElement | null;
     const scrim = h('div', { class: 'scrim full' });
+    // The dialog under this one, when one is open (a question over the Invite dialog, a playlist's keys over the
+    // playlists): it steps away while this one is open, its shade with it, and comes back when this one closes. One
+    // dialog shows at a time: over another at the same top, a shorter one cut across it (half a line of the Invite
+    // dialog showed under the question's edge, and on a phone the edge sliced the QR code in two).
+    const top = layers.at(-1);
+    const under = top?.element.matches('.dialog') ? top : null;
     let done = false;
     let off = () => {};
     // Stops watching the content's length (set below when there is content).
@@ -297,6 +304,8 @@ function dialog<T>(
       unwatch();
       scrim.remove();
       box.remove();
+      // The dialog under it back, before the focus goes back to the key in it that opened this one.
+      if (under) stepAside(under, false);
       // A toast said in this dialog goes on where the next one is said (the bar, or the dialog below).
       handOver(box);
       refocus(previous);
@@ -318,8 +327,9 @@ function dialog<T>(
       h('div', { class: 'dialog-notes' }),
       h('div', { class: 'dialog-keys' }, ...parts.keys),
     );
-    off = push(box, () => finish(cancel));
+    off = push(box, () => finish(cancel), scrim);
     scrim.onclick = () => finish(cancel);
+    if (under) stepAside(under, true);
     document.body.append(scrim, box);
     // The input, else the first choice of a list, else the first key (Cancel, in a question): the first one that can
     // take the focus (a list's first choice can be off: the queue's tools for someone who may only look), or the focus
@@ -330,6 +340,12 @@ function dialog<T>(
       )?.focus(),
     );
   });
+}
+
+// Hides a dialog and its shade while another dialog is over it, or shows them again.
+function stepAside(layer: { element: HTMLElement; shade?: HTMLElement }, aside: boolean): void {
+  layer.element.hidden = aside;
+  if (layer.shade) layer.shade.hidden = aside;
 }
 
 // A dialog's content longer than the dialog has room for scrolls inside it (a short window, a page zoomed in): it then
