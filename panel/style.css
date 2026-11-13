@@ -4455,21 +4455,61 @@ button.lyric {
 }
 
 /* ---- listening together: what another app shared ------------------------------------------------------------- */
+/* One task, so one column in the middle of the window, the page's title over the card at its edge (the card hugged the
+   left of a wide window, with the other half empty beside it). */
+.page.share > * {
+  width: 100%;
+  max-width: 520px;
+  margin-inline: auto;
+}
 .share-card {
   padding: var(--pad);
   gap: var(--s-12);
-  max-width: 720px;
 }
 .share-label {
   margin: 0;
 }
+/* What came: its mark, then its name and its address under it (or the address alone), as words to read, not a box
+   that looks like a field to type in. */
+.share-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-12);
+}
+.share-name {
+  font-weight: 600;
+}
+.share-input {
+  overflow-wrap: anywhere;
+}
+/* Leaving at the start of the row, the keys that add at its end (Add, the main key, first of them). */
 .share-keys {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s-8);
 }
+.share-keys > .share-leave {
+  margin-right: auto;
+}
+/* Leaving alone (nothing to add, or not allowed to): at the row's end, as a dialog's one key. */
+.share-keys > .share-leave:only-child {
+  margin-right: 0;
+  margin-left: auto;
+}
 .share-why {
   padding: 0;
+}
+/* On a phone the keys that add share the card's width, as the player's add card's do, and leaving takes the row under
+   them, the card's width too. */
+@media (max-width: 560px) {
+  .share-keys > .key {
+    flex: 1 1 0;
+  }
+  .share-keys > .share-leave {
+    order: 1;
+    flex-basis: 100%;
+    margin: 0;
+  }
 }
 
 /* ---- listening together: the light that moves with the music ------------------------------------------------- */

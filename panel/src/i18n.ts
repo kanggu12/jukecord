@@ -380,6 +380,8 @@ const EN = {
   shareServer: (name: string) => `The queue of ${name}`,
   shareNothing: 'Nothing to add came with it',
   shareOther: 'Another server',
+  // The share page for someone who may not add: the way back.
+  shareBack: 'Back to the player',
   // How a server's people share the music.
   serverSettings: 'Server settings',
   stay: 'Stay in voice',
@@ -802,6 +804,7 @@ const KO: Strings = {
   shareServer: (name: string) => `${name} 대기열`,
   shareNothing: '추가할 내용이 함께 오지 않음',
   shareOther: '다른 서버',
+  shareBack: '플레이어로 돌아가기',
   serverSettings: '서버 설정',
   stay: '음성 채널에 머물기',
   stayHint: '모두 나가도 봇이 채널에 남음',

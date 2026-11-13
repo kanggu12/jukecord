@@ -1162,9 +1162,17 @@ await sweep('listeners-guest', FEW, null, {
 });
 // What another app shared, on the page that adds it: for the host, and for a guest (who only listens).
 const SHARED = `/add?title=Paper%20Boats&text=${encodeURIComponent('Listen to this https://media.example/demo005')}`;
+// What came reads as words (its name over its address, in no box like a field's), and a key leaves without a change:
+// Cancel beside the keys that add; for a guest, who may not add, no key that does nothing, and one back to the player
+// (it had three dead keys and the logo for a way back).
 await sweep('share', FEW, async (page) => {
   await page.goto(`${BASE}${SHARED}`);
   await page.waitForSelector('.share-card .share-input');
+  if ((await page.locator('.share-card .share-name').textContent()) !== 'Paper Boats')
+    throw new Error('the shared title is not shown');
+  if (await page.locator('.share-card .secret').count()) throw new Error('what was shared sits in a box like a field');
+  const keys = await page.$$eval('.share-keys .key', (found) => found.map((key) => key.dataset.act));
+  if (keys.join() !== 'share-leave,share-end,share-next,share-now') throw new Error(`the share keys: ${keys.join()}`);
 });
 await sweep(
   'share-guest',
@@ -1173,6 +1181,10 @@ await sweep(
     await asGuest(page);
     await page.goto(`${BASE}${SHARED}`);
     await page.waitForSelector('.share-card .share-why');
+    const keys = await page.$$eval('.share-keys .key', (found) =>
+      found.map((key) => `${key.dataset.act}${key.disabled ? ' (off)' : ''}`),
+    );
+    if (keys.join() !== 'share-leave') throw new Error(`a guest's share keys: ${keys.join()}`);
   },
   { login: false },
 );
