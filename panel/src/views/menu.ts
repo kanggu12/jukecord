@@ -425,7 +425,13 @@ function drawShare(box: HTMLElement, guild: string, settings: Settings): void {
     box,
     h('h3', null, words.serverSettings),
     // Votes first, under the DJ role they go with; the queue's two rules next; staying in voice last.
-    switchLine(words.voteSkip, words.voteSkipHint, settings.voteSkip, (on) => api['vote-skip'](guild, on)),
+    // A vote needs a DJ role to stand against (the server counts none while everyone may skip): said until one is set.
+    switchLine(
+      words.voteSkip,
+      settings.djRoleId === null ? words.voteSkipNoRole : words.voteSkipHint,
+      settings.voteSkip,
+      (on) => api['vote-skip'](guild, on),
+    ),
     switchLine(words.takeTurns, words.takeTurnsHint, settings.takeTurns, (on) => api['take-turns'](guild, on)),
     limitLine(settings.personLimit, (tracks) => api['person-limit'](guild, tracks)),
     switchLine(words.stay, words.stayHint, settings.stay, (on) => api.stay(guild, on)),
