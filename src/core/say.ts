@@ -93,7 +93,13 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['a token name is 1 to 100 characters', '토큰 이름은 1~100자'],
   ['the new order does not hold exactly the items in the queue', '새 순서가 지금 대기열의 곡과 맞지 않음'],
   ['this needs the host', '호스트만 할 수 있음'],
-  [/^this needs a (\w+) token$/, '$1 권한이 있는 토큰이 필요함'],
+  [/^this needs an? (\w+) token$/, '$1 권한이 있는 토큰이 필요함'],
+  // What a friend's login (a link from the host, no token) may not do.
+  [
+    'a friend who may only look and listen cannot change the music',
+    '보기만 하는 친구 로그인으로는 음악을 바꿀 수 없음',
+  ],
+  ["a friend cannot change the server's settings or tokens", '친구 로그인으로는 서버 설정이나 토큰을 바꿀 수 없음'],
   [/^repeat is one of (.+)$/, '반복은 $1 중 하나'],
   [/^no such address: (.+)$/, '없는 주소: $1'],
   [/^playlist (\d+) does not exist$/, '없는 플레이리스트(번호 $1)'],

@@ -445,6 +445,18 @@ describe('a friend the host lets in with a login link', () => {
       ] as [Method, string, unknown?][]) {
         assert.equal((await send(controller, method, route, payload)).statusCode, 403, `${method} ${route}`);
       }
+      // Said as what a friend may not do: a friend logs in with a link, and has no token to change ("a admin token").
+      const refusal = async (who: { cookie: string; csrf: string }, method: Method, route: string, payload?: unknown) =>
+        (await send(who, method, route, payload)).json().error.message;
+      assert.equal(
+        await refusal(viewer, 'POST', `/guilds/${GUILD}/queue`, { input: 'one' }),
+        'a friend who may only look and listen cannot change the music',
+      );
+      assert.equal(
+        await refusal(controller, 'PUT', `/guilds/${GUILD}/settings/dj-role`, { roleId: null }),
+        "a friend cannot change the server's settings or tokens",
+      );
+      assert.equal(await refusal(controller, 'GET', '/logs'), 'this needs the host');
       // A friend's row is never read as the host's.
       assert.equal(server.auth.identify({ cookie: controller.cookie })?.principal.kind, 'friend');
     } finally {

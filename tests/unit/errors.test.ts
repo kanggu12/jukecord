@@ -93,6 +93,15 @@ describe('sayError', () => {
     assert.equal(sayError('something new', 'ko'), 'Something new');
     // The refusals with a value that a panel can meet.
     assert.equal(sayError('this needs a control token', 'ko'), 'control 권한이 있는 토큰이 필요함');
+    assert.equal(sayError('this needs an admin token', 'ko'), 'admin 권한이 있는 토큰이 필요함');
+    assert.equal(
+      sayError('a friend who may only look and listen cannot change the music', 'ko'),
+      '보기만 하는 친구 로그인으로는 음악을 바꿀 수 없음',
+    );
+    assert.equal(
+      sayError("a friend cannot change the server's settings or tokens", 'ko'),
+      '친구 로그인으로는 서버 설정이나 토큰을 바꿀 수 없음',
+    );
     assert.equal(sayError('no such address: GET /api/v1/nothing', 'ko'), '없는 주소: GET /api/v1/nothing');
     // jukecord's name keeps its small letter at the start of a sentence, as everywhere else.
     assert.equal(

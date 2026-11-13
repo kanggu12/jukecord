@@ -234,6 +234,18 @@ function plain<T>(schema: T | undefined): T | undefined {
 }
 
 // Whether a caller may call an operation with this access (the server's own rules come later, in the action).
+// What a refusal by permission says: the host for what only it may do; what a friend's login may not do, as a friend
+// logs in with a link and has no token to change; otherwise the token it takes ("an admin token", "a control token").
+function forbiddenFor(access: Permission, caller: Caller): string {
+  if (access === 'host') return 'this needs the host';
+  if (caller.principal.kind === 'friend') {
+    return access === 'admin'
+      ? "a friend cannot change the server's settings or tokens"
+      : 'a friend who may only look and listen cannot change the music';
+  }
+  return `this needs ${access === 'admin' ? 'an' : 'a'} ${access} token`;
+}
+
 function permission(access: Permission, caller: Caller | null): 'ok' | 'unauthorized' | 'forbidden' {
   if (access === 'public') return 'ok';
   if (!caller) return 'unauthorized';
@@ -566,13 +578,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         const verdict = permission(spec.access, caller);
         if (verdict === 'unauthorized') return failure(reply, 'unauthorized', 'log in first');
         if (caller?.principal.kind === 'guest' && !GUEST_MAY.has(name)) return failure(reply, 'forbidden', GUEST_ONLY);
-        if (verdict === 'forbidden') {
-          return failure(
-            reply,
-            'forbidden',
-            `this needs ${spec.access === 'host' ? 'the host' : `a ${spec.access} token`}`,
-          );
-        }
+        if (verdict === 'forbidden' && caller) return failure(reply, 'forbidden', forbiddenFor(spec.access, caller));
         // A panel change must carry the session's CSRF token (see src/web/auth.ts).
         if (
           caller &&
@@ -775,7 +781,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (!caller || verdict === 'unauthorized') return failure(reply, 'unauthorized', 'log in first');
       // A guest cannot search (the operations hold guests to GUEST_MAY, and the search is not one of them).
       if (caller.principal.kind === 'guest') return failure(reply, 'forbidden', GUEST_ONLY);
-      if (verdict === 'forbidden') return failure(reply, 'forbidden', `this needs a ${API.search.access} token`);
+      if (verdict === 'forbidden') return failure(reply, 'forbidden', forbiddenFor(API.search.access, caller));
       const context = await deps.access.context(caller.principal, request.params.guild);
       const address = typeof request.query.url === 'string' ? request.query.url : '';
       const found = deps.actions.searched(context, address);
