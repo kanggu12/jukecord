@@ -933,10 +933,6 @@ img {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
-.card-head .head-search {
-  flex: 0 1 220px;
-  margin-left: auto;
-}
 .card-head .tools {
   margin-left: auto;
   display: flex;
@@ -945,10 +941,32 @@ img {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-/* After the search, the tools take the next line when the head has no room for them on its first: there the first
-   key's pane reaches 8 px out of the head's inset, so its icon stands under the title's first letter. */
-.card-head .head-search + .tools {
+/* The queue's head: its lines are chosen by the card's width alone, never by the length of its words. A line that held
+   everything by a few pixels broke with a longer count: "총 1시간 9분" where "총 39분" had been sent the tools onto a
+   second line, moved the search 486 px and dropped the list 33 px. Each line holds the longest words it may have (a
+   count of "1000 tracks · 66 h 40 min in all", "Autoplay: past plays"), the search giving way first (140 to 220 px):
+   - by default (a laptop's card, a tablet's): the title, its count and autoplay, the search at the line's end, and the
+     tools on a line of their own under them, the first key's pane 8 px out of the head's inset so that its icon stands
+     under the title's first letter;
+   - a card of 1232 px or more (a 1920 px window, a 2560 one): all of them on one line (1,165 px of them in English,
+     the playlists' key named "Playlists", with 24 px of inset on each side);
+   - 640 px or less (a phone): the title and its count, then the search with the tools beside it (further below);
+   - windows short of height keep one line, or the tools on the title's (further below), for the queue's rows. */
+.queue-head .head-search {
+  flex: 1 1 140px;
+  max-width: 220px;
+  margin-left: auto;
+}
+.queue-head > .tools {
+  flex: 1 1 100%;
+  justify-content: flex-start;
   margin-left: calc(-1 * var(--s-8));
+}
+@container card (min-width: 1232px) {
+  .queue-head > .tools {
+    flex: none;
+    margin-left: 0;
+  }
 }
 .card-body {
   padding: var(--pad);
@@ -2232,8 +2250,9 @@ img {
 }
 @media (forced-colors: active) {
   /* A contrast theme draws a frame round every key and row of choices: what reaches 8 px out of the head's inset on a
-     pane nobody sees (the tools after the search, the history's two words) would stand 8 px out of line, framed. */
-  .card-head .head-search + .tools,
+     pane nobody sees (the queue's tools on their own line, the history's two words) would stand 8 px out of line,
+     framed. */
+  .queue-head > .tools,
   .card-head .seg {
     margin-left: 0;
   }
@@ -3772,21 +3791,13 @@ kbd {
     padding-block: var(--s-8);
   }
 }
-/* A card under 980 px puts its search on a line of its own under the title, so the tools keep their words beside the
-   title (as icons alone, on a tablet's touch screen with no tooltips, "Remove duplicates", "Save" and "Load" were
-   guesses). Under 640 px Shuffle and Take turns keep theirs and the others wait behind the tools key, listed with
-   theirs (as six icons alone, Take turns and Remove duplicates could not be told); a tablet held upright (744 to 768
-   px, a card of about 710) shows them all. */
-@container (max-width: 980px) {
-  .card-head .head-search {
-    order: 3;
-    flex: 1 1 100%;
-    margin-left: 0;
-  }
-  .card-head .head-search + .tools {
-    margin-left: auto;
-  }
-}
+/* The queue's tools keep their words on their own line (as icons alone, on a tablet's touch screen with no tooltips,
+   "Remove duplicates", "Save" and "Load" were guesses). Under 640 px Shuffle and Take turns keep theirs and the others
+   wait behind the tools key, listed with theirs (as six icons alone, Take turns and Remove duplicates could not be
+   told); a tablet held upright (744 to 768 px, a card of about 710) shows them all. There (a phone) the title and its
+   count have the head's first line to themselves, as tall as its line of keys elsewhere, and the search takes the
+   second with the tools beside it: next to a count of "1 h 9 min", Shuffle and the tools key were sent onto a line of
+   their own. */
 @container (max-width: 640px) {
   .card-head
     .tools:has(> .tools-more)
@@ -3796,17 +3807,25 @@ kbd {
   .card-head .tools .tools-more {
     display: inline-flex;
   }
-}
-/* Narrower still: the search goes to its own line under the title, and a queued track has two keys, not three. */
-@container (max-width: 560px) {
-  .card-head .head-search {
-    order: 3;
+  /* The title's line as tall as a one-line head's inside (48 px less 8 above and below), so the title stands where
+     every other card's does. */
+  .queue-head > h2 {
     flex: 1 1 100%;
+    align-items: center;
+    min-height: calc(48px - 2 * var(--s-8));
+  }
+  .queue-head .head-search {
+    flex: 1 1 0;
+    max-width: none;
     margin-left: 0;
   }
-  .card-head .head-search + .tools {
-    margin-left: auto;
+  .queue-head > .tools {
+    flex: none;
+    margin-left: 0;
   }
+}
+/* Narrower still: a queued track has two keys, not three. */
+@container (max-width: 560px) {
   /* A narrow card (a phone) shows one key per queue row, which lists the others (see trackMenu). Rows without that
      key (recently played) keep theirs. */
   .row .acts:has(> .more-key) > :not(.more-key) {
@@ -3822,12 +3841,12 @@ kbd {
    all of them where the card has room for them on that line (a 1920 px screen at 150 %), Shuffle and Take turns where
    it has less (1366 by 768), Shuffle alone narrower; the others wait behind the tools key, listed with theirs. */
 @media (width > 1100px) and (max-height: 720px) and (pointer: fine) {
-  .card-head .head-search {
-    order: 0;
-    flex: 0 1 240px;
-    margin-left: auto;
+  /* The search gives way first (140 to 240 px), so the line holds the longest count beside the tools shown. */
+  .queue-head .head-search {
+    max-width: 240px;
   }
-  .card-head .head-search + .tools {
+  .queue-head > .tools {
+    flex: none;
     margin-left: 0;
   }
   @container card (max-width: 1200px) {
@@ -3859,6 +3878,29 @@ kbd {
   }
   .card-head .tools .tools-more {
     display: inline-flex;
+  }
+  /* The tools on the title's line at its end, the search across the line under them (on a card of 640 px or less too,
+     where a phone's head puts them beside the search). */
+  .queue-head > h2 {
+    flex: none;
+    min-height: 0;
+  }
+  .queue-head > .tools {
+    flex: none;
+    margin-left: auto;
+  }
+  .queue-head .head-search {
+    order: 1;
+    flex: 1 1 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+  /* Autoplay waits behind the tools key too where the line has no room for its longest words beside the longest count
+     and the tools (633 px of them in English: a card under 665 px, a window under 1021 px). */
+  @container card (max-width: 664.5px) {
+    .card-head .autoplay-key {
+      display: none;
+    }
   }
 }
 /* Shorter still (a 1920 by 1080 screen at 150 % with the browser's bars, about 1280 by 610): the gaps, the cards' heads,

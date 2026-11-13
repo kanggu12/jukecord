@@ -675,9 +675,10 @@ export function queueCard(): HTMLElement {
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
+    // Its lines are chosen by the card's width alone, never by the length of its words (style.css, .queue-head).
     h(
       'div',
-      { class: 'card-head' },
+      { class: 'card-head queue-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
       autoKey,
       searchField,

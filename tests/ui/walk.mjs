@@ -356,6 +356,49 @@ async function twoFrames(page) {
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 }
 
+// The queue's head is laid out by the card's width alone: with the longest count and autoplay words it may show, it is
+// as tall, and its search, tools and autoplay key stand where they stood (a count of "총 1시간 9분" where "총 39분"
+// had been sent the tools onto a second line, moved the search 486 px and dropped the list 33 px; on a phone,
+// Shuffle and the tools key took a line of their own). The search may give way: its right edge stays.
+async function headSteady(page) {
+  const moved = await page.evaluate(() => {
+    const head = document.querySelector('.queue-head');
+    if (!head?.getClientRects().length) return [];
+    const ko = document.documentElement.lang === 'ko';
+    const count = head.querySelector('h2 .count');
+    const auto = head.querySelector('.autoplay-key .label');
+    // Where each part stands: the head's height, the tops of all, the search's right edge, the tools' left.
+    const where = () => {
+      const box = (selector) => {
+        const part = head.querySelector(selector);
+        return part?.getClientRects().length ? part.getBoundingClientRect() : null;
+      };
+      const search = box('.head-search');
+      const tools = box('.tools');
+      const autoplay = box('.autoplay-key');
+      return {
+        'the head': head.getBoundingClientRect().height,
+        "the search's top": search?.top,
+        "the search's right": search?.right,
+        "the tools' top": tools?.top,
+        "the tools' left": tools?.left,
+        "autoplay's top": autoplay?.top,
+      };
+    };
+    const before = where();
+    const was = [count.textContent, auto?.textContent];
+    count.textContent = ko ? '1000곡 · 총 66시간 40분' : '1000 tracks · 66 h 40 min in all';
+    if (auto) auto.textContent = ko ? '자동 재생: 비슷한 곡' : 'Autoplay: past plays';
+    const after = where();
+    count.textContent = was[0];
+    if (auto) auto.textContent = was[1];
+    return Object.keys(before)
+      .filter((name) => before[name] !== undefined && Math.abs(before[name] - after[name]) > 0.5)
+      .map((name) => `${name} by ${(after[name] - before[name]).toFixed(1)} px`);
+  });
+  if (moved.length > 0) throw new Error(`the queue's head moves with the length of its words: ${moved.join(', ')}`);
+}
+
 // A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond up to about a row of what
 // it holds (--fade): a row the edge cuts reads as going on out of sight, not as cut through its words (the log's first
 // record sliced through its letters, a sliver of a cover at the queue's foot, lyric lines halved at both edges, a
@@ -1123,11 +1166,22 @@ await sweep(
     [1280, 610],
     [1920, 700],
   ],
-  toolsInWords,
+  async (page) => {
+    await toolsInWords(page);
+    await headSteady(page);
+  },
   { touch: false },
 );
 // A laptop's 1024 by 768 with a mouse: two columns, the queue's tools on the title's line, in words.
-await sweep('laptop-tools', [[1024, 768]], toolsInWords, { touch: false });
+await sweep(
+  'laptop-tools',
+  [[1024, 768]],
+  async (page) => {
+    await toolsInWords(page);
+    await headSteady(page);
+  },
+  { touch: false },
+);
 // Touch screens as wide but short (an iPad Air held sideways under Safari's bars, an Android tablet under Chrome's):
 // one column, as a phone, since their keys are taller.
 await sweep(
@@ -1246,6 +1300,9 @@ await sweep(
     );
     if (where !== 'the right column') throw new Error(`the lyrics opened in ${where} beside two columns`);
     await toolsInWords(page);
+    await headSteady(page);
+    // The queue's foot under three rows showed a sliver of the fourth cover over the card's edge.
+    await edgesFade(page);
   },
   { touch: false },
 );
@@ -1780,6 +1837,8 @@ await sweep('add-escape', [[1440, 900]], async (page) => {
   if (await page.locator('#add-found').isVisible()) throw new Error('the first Escape left the results open');
   await page.keyboard.press('Escape');
   if ((await page.inputValue('#add-input')) !== '') throw new Error('a second Escape kept the words');
+  // "총 1시간 9분" took the head onto a second line where "총 39분" fitted on one.
+  await headSteady(page);
 });
 // A link from another window held over the page: the add card says where it goes.
 await sweep(
@@ -1796,6 +1855,8 @@ await sweep(
     });
     await page.dispatchEvent('main', 'dragenter', { dataTransfer: held });
     await page.waitForSelector('.add-card.drop-target');
+    // A queue of 23 tracks ("1 h 9 min in all"): on a phone Shuffle and the tools key took a line of their own.
+    await headSteady(page);
   },
 );
 // Likes: the playing track's heart, and the liked list beside the history (the walk logs in as the host, whose likes
