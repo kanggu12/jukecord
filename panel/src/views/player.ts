@@ -41,6 +41,7 @@ import {
   watch,
 } from '../state.ts';
 import { lengthText, rounded } from '../time.ts';
+import { fadeEdges } from '../ui/fade.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
 import { lightGlow } from './light.ts';
@@ -218,6 +219,15 @@ function heartKey(track: Track): HTMLButtonElement {
 function addedBy(id: string | null, name: string | null): string {
   if (id === 'autoplay') return t().byAutoplay;
   return id ? t().addedBy(name ?? id) : t().byHost;
+}
+
+// Who added a track, in a row's line: "by Alice" (in Korean the name first already), first after a mark like "Next",
+// so the room a phone's row lacks is taken from the time and the length, never from the person, who is the point of
+// the line (at the line's end "added by the ..." lost the name on every phone and tablet).
+function rowBy(id: string | null, name: string | null): HTMLElement {
+  const words = t();
+  const text = id === 'autoplay' ? words.rowByAutoplay : id ? words.rowBy(name ?? id) : words.rowByHost;
+  return h('span', { class: 'by' }, text);
 }
 
 /** "3 min ago", "yesterday". */
@@ -700,6 +710,8 @@ export function queueCard(): HTMLElement {
     icon('ellipsis'),
   );
   const list = h('ol', { class: 'list scroll queue-list', 'aria-live': 'off' });
+  // Its rows fade out at an edge with more beyond it (a sliver of a cover at its foot read as a mistake).
+  fadeEdges(list);
   // The queue's tools: none for a guest, who can change nothing.
   const tools = h('div', { class: 'tools' }, shuffle, turns, dedupe, save, load, clear, toolsMore);
   // What happens when the queue runs out, beside its title: the mode in words, and a list of the three to choose from.
@@ -713,9 +725,10 @@ export function queueCard(): HTMLElement {
   const card = h(
     'section',
     { class: 'card fill', 'aria-labelledby': 'queue-h' },
+    // Its lines are chosen by the card's width alone, never by the length of its words (style.css, .queue-head).
     h(
       'div',
-      { class: 'card-head' },
+      { class: 'card-head queue-head' },
       h('h2', { id: 'queue-h' }, h('span', { class: 'name' }), count),
       autoKey,
       searchField,
@@ -881,16 +894,18 @@ export function queueCard(): HTMLElement {
           { class: 'name', title: item.track.title, 'data-clip': 'ok' },
           h('a', { href: item.track.url, target: '_blank', rel: 'noopener noreferrer' }, item.track.title),
         ),
+        // Next, who added it, its length: the person before the length, so a narrow row leaves out the length.
         subLine(
           item.position === 0 ? h('span', { class: 'badge tone-load' }, words.next) : null,
+          rowBy(item.addedBy, item.addedByName),
           item.track.durationMs !== null ? h('span', { class: 'num' }, clock(item.track.durationMs)) : null,
-          h('span', null, addedBy(item.addedBy, item.addedByName)),
         ),
       ),
       // The keys that change the queue for those who may; the menu key (it holds Like) for anyone who may like too. A
-      // guest or a login that may only look has neither: no key that does nothing.
+      // guest or a login that may only look has neither: no key that does nothing. Play next before Play now, as the
+      // add card has them (from the gentlest to the one that cuts off what everyone hears), then Remove.
       control
-        ? h('div', { class: 'acts' }, jump, next, remove, more)
+        ? h('div', { class: 'acts' }, next, jump, remove, more)
         : mayLike()
           ? h('div', { class: 'acts' }, more)
           : h('div'),
@@ -1377,10 +1392,11 @@ function trackMenu(id: number): void {
     void toggleLike(item.track);
   };
   const control = mayControl();
+  // In the order of the row's keys: Play next, Play now; then the moves, Like, and Remove last.
   fill(
     box,
-    control ? choice('play', words.playNow, () => api.jump(guild(), id)) : null,
     control && item.position > 0 ? choice('arrow-up-to-line', words.playNext, () => api.move(guild(), id, 0)) : null,
+    control ? choice('play', words.playNow, () => api.jump(guild(), id)) : null,
     control && item.position > 0
       ? choice('arrow-up', words.moveUp, (position) => api.move(guild(), id, Math.max(0, position - 1)))
       : null,
@@ -1717,6 +1733,8 @@ export function addCard(): HTMLElement {
   const form = h('form', { class: 'add' }, field, add, next, now);
   // What a search found: a listbox of results, a line for the state of the search, and the keys that pick.
   const list = h('ul', { class: 'found-list', id: 'add-found', role: 'listbox' });
+  // The results fade out at an edge with more beyond it, as every list that scrolls.
+  fadeEdges(list);
   const searchState = h('p', { class: 'found-state' });
   const keysHint = h('p', { class: 'found-keys', id: 'add-found-keys' });
   const found = h('div', { class: 'found', hidden: true }, searchState, list, keysHint);
@@ -1890,13 +1908,15 @@ export function addCard(): HTMLElement {
         h('span', { class: 'name', title: result.title, 'data-clip': 'ok' }, result.title),
         sub.length > 0 ? h('span', { class: 'sub', title: sub.join(' · '), 'data-clip': 'ok' }, sub.join(' · ')) : null,
       ),
-      // For the pointer only: a screen reader hears the option, and its keys from the field's description.
+      // For the pointer only: a screen reader hears the option, and its keys from the field's description. In the order
+      // of the add card's keys above them (Add, Play next, Play now: from the gentlest to the one that cuts off what
+      // everyone hears), as every row of the panel has them; reversed under those keys, they read as the other way.
       h(
         'span',
         { class: 'picks', 'aria-hidden': 'true' },
-        pick('now', 'play', words.playNow),
-        pick('next', 'arrow-up-to-line', words.playNext),
         pick('end', 'list-plus', words.add),
+        pick('next', 'arrow-up-to-line', words.playNext),
+        pick('now', 'play', words.playNow),
       ),
     );
     // A press on a pick plays or queues it; anywhere else on the row adds it, as Enter does. The field keeps the
@@ -2194,6 +2214,8 @@ export function voiceCard(): HTMLElement {
   const leave = h('button', { class: 'key sm', type: 'button' });
   const top = h('div', { class: 'voice-now' }, icon('radio'), where, leave);
   const channels = h('ul', { class: 'channels scroll' });
+  // A server's many channels fade out at an edge with more beyond it, as every list that scrolls.
+  fadeEdges(channels);
   const listening = h('div', { class: 'listeners' });
   // Beside the people listening: inviting more of them (a listening link, or for the host a friend's login link).
   const invite = h(
@@ -2313,24 +2335,64 @@ export function voiceCard(): HTMLElement {
     presetKey.setAttribute('aria-label', presetLabel);
     presetKey.title = presetLabel;
     presetKey.disabled = !control;
-    // Who listens in browsers.
+    drawListening();
+  };
+  // Who listens in browsers: the words, as many faces as the row holds with Invite at its end (six at most), and the
+  // number of the rest. Five faces and "+1" beside the words sent Invite onto a line of its own at 1440 px.
+  let fittedWidth = -1;
+  // The row's words as drawn last, and whether Invite stands on their line (its top above their foot: a wrapped
+  // Invite starts under the line).
+  let label = h('span', { class: 'grow' });
+  const together = () => invite.getBoundingClientRect().top < label.getBoundingClientRect().bottom;
+  const drawListening = () => {
+    const words = t();
     const people = state.listeners.people;
     (invite.querySelector('.label') as HTMLElement).textContent = words.invite;
     invite.title = words.inviteToListen;
-    fill(
-      listening,
-      icon('headphones'),
-      h('span', { class: 'grow' }, words.listeningHere),
-      people.length > 0
-        ? h('span', { class: 'faces' }, ...people.slice(0, 6).map((person) => listenerFace(person)))
-        : h('span', { class: 'faint' }, words.nobody),
-      // Faces say who; a number only for the browsers beyond the six faces shown.
-      state.listeners.count > Math.min(6, people.length)
-        ? h('span', { class: 'faint num' }, `+${state.listeners.count - Math.min(6, people.length)}`)
-        : null,
-      mayInvite() ? invite : null,
-    );
+    label = h('span', { class: 'grow' }, words.listeningHere);
+    const most = Math.min(6, people.length);
+    // The faces made once, so fitting moves them rather than making them (and their pictures) again.
+    const faces = people.slice(0, most).map((person) => listenerFace(person));
+    const row = (shown: number) =>
+      fill(
+        listening,
+        icon('headphones'),
+        label,
+        shown > 0
+          ? h('span', { class: 'faces' }, ...faces.slice(0, shown))
+          : h('span', { class: 'faint' }, words.nobody),
+        // Faces say who; a number only for the browsers beyond the faces shown.
+        state.listeners.count > shown ? h('span', { class: 'faint num' }, `+${state.listeners.count - shown}`) : null,
+        mayInvite() ? invite : null,
+      );
+    row(most);
+    fittedWidth = listening.clientWidth;
+    // Nothing to give up (no Invite, one face or none), or not laid out (a hidden card): as drawn.
+    if (!mayInvite() || most <= 1 || fittedWidth === 0 || together()) return;
+    for (let shown = most - 1; shown >= 1; shown -= 1) {
+      row(shown);
+      if (together()) return;
+    }
+    // Not even one face beside it (a narrow column): every face on the first line, and Invite under them as before.
+    row(most);
   };
+  // Fitted again in the next frame (never inside the observer's own call, whose sizes it would change) when the row
+  // has another width (the window), or when Invite went under the words since the fit with faces to give up (a font
+  // came in after it and widened them). A fit that holds changes nothing, so this does not go round.
+  let refit = 0;
+  const fitSoon = () => {
+    if (refit) return;
+    refit = window.requestAnimationFrame(() => {
+      refit = 0;
+      const wrapped = mayInvite() && listening.contains(invite) && !together();
+      if (listening.clientWidth !== fittedWidth || (wrapped && listening.querySelectorAll('.faces > *').length > 1))
+        drawListening();
+    });
+  };
+  new ResizeObserver(fitSoon).observe(listening);
+  // Any of the panel's fonts coming in (a weight or a part of the alphabet first used by the faces or the count) takes
+  // another width than the row was fitted with: fitted again, with more faces too if they fit now.
+  document.fonts.addEventListener('loadingdone', () => drawListening());
   leave.onclick = () =>
     void act(leave, async () => {
       const id = guild();
@@ -2416,9 +2478,9 @@ function libraryView(): 'history' | 'liked' {
 }
 
 /**
- * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to play it now,
- * next or at the end. A narrow card, or a wide window short of height, keeps the heart and puts the rest behind one key
- * (see libraryMenu).
+ * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to add it at
+ * the end, play it next or play it now. A narrow card, or a wide window short of height, keeps the heart and puts the
+ * rest behind one key (see libraryMenu).
  */
 function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTMLElement {
   const words = t();
@@ -2466,11 +2528,13 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
       ),
       subLine(...sub),
     ),
-    h('div', { class: 'acts' }, heartKey(track), now, next, again, more),
+    // The heart, then the add card's order (Add again, Play next, Play now), then the key that lists them.
+    h('div', { class: 'acts' }, heartKey(track), again, next, now, more),
   );
 }
 
-// A history or liked row's keys as a list, on a narrow card or a short window: play now, play next, add.
+// A history or liked row's keys as a list, on a narrow card or a short window, in the order of the keys: add, play
+// next, play now.
 function libraryMenu(track: Track): void {
   const words = t();
   const box = h('div', { class: 'menu-list' });
@@ -2485,9 +2549,9 @@ function libraryMenu(track: Track): void {
   };
   fill(
     box,
-    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
-    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
     choice('list-plus', words.addAgain, async () => added(await api.add(guild(), track.url))),
+    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
+    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
   );
 }
 
@@ -2495,6 +2559,8 @@ function libraryMenu(track: Track): void {
 export function historyCard(): HTMLElement {
   const count = h('span', { class: 'count' });
   const list = h('ol', { class: 'list scroll history' });
+  // Its rows fade out at an edge with more beyond it, as the queue's.
+  fadeEdges(list);
   // The two lists, as a row of two choices; the card's heading names both, for screen readers.
   let view = libraryView();
   const choices = h('div', { class: 'seg library-seg', role: 'group' });
@@ -2567,10 +2633,11 @@ export function historyCard(): HTMLElement {
         fill(
           list,
           ...state.history.map((entry: HistoryEntry) =>
+            // Who added it, when it played, its length (left out where the column is narrow: style.css).
             libraryRow(entry.track, `${entry.playedAt}-${entry.track.id}`, [
+              rowBy(entry.addedBy, entry.addedByName),
               h('span', { dataset: { at: String(entry.playedAt) } }, ago(entry.playedAt)),
               entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
-              h('span', null, addedBy(entry.addedBy, entry.addedByName)),
             ]),
           ),
         );

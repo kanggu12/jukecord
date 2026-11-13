@@ -232,7 +232,12 @@
   --control-sm: 28px;
   --gap: 12px;
   --pad: 16px;
-  --side-w: clamp(320px, 27vw, 500px);
+  /* The right column: a share of the window, no wider than where the page reaches its widest (--page-max with its
+     20 px sides, a 1720 px window): wider there, it narrowed the column beside it as the window grew. */
+  --side-w: clamp(320px, min(27vw, (var(--page-max) + 40px) * 0.27), 500px);
+  /* The widest the pages' content grows (the cards, between the bars), standing in the middle past it: on a 2560 px
+     screen the queue's rows were 1,950 px wide, their keys 1,700 px from the titles, and the add field 1,650. */
+  --page-max: 1680px;
   /* The glass's top edge: a hairline of light along it, as glass catches it. */
   --glass-top: rgba(255, 255, 255, 0.06);
 }
@@ -422,6 +427,48 @@ img {
 .scroll::-webkit-scrollbar-thumb {
   background: var(--line-2);
   border-radius: 6px;
+}
+/* A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond (ui/fade.ts says how much)
+   up to --fade, about a row of what it holds: a row the edge cuts reads as going on out of sight, not as cut through
+   its words (the log's first record, a sliver of a cover at the queue's foot, a lyric line halved under the head's
+   rule, a dialog's list ending on a whole row with more hidden under it). With nothing to scroll there is no mask.
+   --fade is a length (registered), so what it computes to can be read as one (tests/ui/walk.mjs). */
+@property --fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 48px;
+}
+/* How much lies beyond each edge (ui/fade.ts, up to --fade): the box's own, not its rows' (set as it scrolls, they
+   would make every row's style be worked out again on each frame). */
+@property --fade-above {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --fade-below {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.scroll,
+.found-list {
+  --fade: 48px;
+}
+/* Rows of a track: the queue, the history, a search's results. A row is 56 px (a cover and its room), or its keys and
+   8 px above and below them where they are taller (a finger's 44 px keys: 60 px). */
+.list.scroll,
+.found-list {
+  --fade: max(56px, var(--control-sm) + 2 * var(--s-8));
+}
+.scroll[data-fade],
+.found-list[data-fade] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 min(var(--fade-above, 0px), var(--fade)),
+    #000 calc(100% - min(var(--fade-below, 0px), var(--fade))),
+    transparent
+  );
 }
 
 /* ---- the frame: bar, main, listening bar ------------------------------------------------------------------- */
@@ -760,9 +807,39 @@ img {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--side-w);
   gap: var(--gap);
-  padding: var(--gap) max(var(--gap), 16px, var(--safe-right)) var(--gap) max(var(--gap), 16px, var(--safe-left));
+  /* At the window's sides the room steps' gap, and past the widest the content grows (--page-max) half of what is
+     left on each side, so the columns stand in the middle (a percentage of padding is of the window's width here). */
+  padding: var(--gap) max(var(--gap), 16px, var(--safe-right), (100% - var(--page-max)) / 2) var(--gap)
+    max(var(--gap), 16px, var(--safe-left), (100% - var(--page-max)) / 2);
   min-height: 0;
   height: calc(100dvh - var(--bar-h) - var(--listen-h));
+}
+/* A guest on a window with two columns: one column in the middle, the playing card and the queue, as wide as the
+   player's column beside the lyrics; the right column only while the lyrics are open, as they live there. Who listens is
+   in the listening bar and until when the guest's link works in the menu: beside them the guest's card was a column's
+   height of glass holding one line ("Nobody is listening yet") and its link's end. */
+.main.guest {
+  grid-template-columns: minmax(0, calc(100% - var(--side-w) - var(--gap)));
+  justify-content: center;
+}
+.main.guest > .col.side:not(.lyrics-open) {
+  display: none;
+}
+.main.guest:has(> .col.side.lyrics-open) {
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+}
+/* So does a sheet hanging at the window's right (the menu): the player stands where it stands beside the lyrics, the
+   sheet over the right column's place with its edge in the gap (over the column in the middle, it cut across its
+   cards). From 2460 px the sheet hangs in the page's side, clear of the column (.sheet:not(.left)). */
+@media (width < 2460px) {
+  body:has(> .sheet:not(.left)) .main.guest {
+    grid-template-columns: minmax(0, 1fr) var(--side-w);
+  }
+}
+/* Alone in the middle, the queue ends at its last row (a card the window's height round three rows was mostly empty
+   glass); beside the lyrics it fills its column, so the two columns end together. */
+.main.guest:not(:has(> .col.side.lyrics-open)) .card.fill[aria-labelledby="queue-h"] {
+  flex: 0 1 auto;
 }
 .main.single {
   grid-template-columns: minmax(0, 1fr);
@@ -860,10 +937,6 @@ img {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
-.card-head .head-search {
-  flex: 0 1 220px;
-  margin-left: auto;
-}
 .card-head .tools {
   margin-left: auto;
   display: flex;
@@ -872,10 +945,32 @@ img {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-/* After the search, the tools take the next line when the head has no room for them on its first: there the first
-   key's pane reaches 8 px out of the head's inset, so its icon stands under the title's first letter. */
-.card-head .head-search + .tools {
+/* The queue's head: its lines are chosen by the card's width alone, never by the length of its words. A line that held
+   everything by a few pixels broke with a longer count: "총 1시간 9분" where "총 39분" had been sent the tools onto a
+   second line, moved the search 486 px and dropped the list 33 px. Each line holds the longest words it may have (a
+   count of "1000 tracks · 66 h 40 min in all", "Autoplay: past plays"), the search giving way first (140 to 220 px):
+   - by default (a laptop's card, a tablet's): the title, its count and autoplay, the search at the line's end, and the
+     tools on a line of their own under them, the first key's pane 8 px out of the head's inset so that its icon stands
+     under the title's first letter;
+   - a card of 1232 px or more (a 1920 px window, a 2560 one): all of them on one line (1,165 px of them in English,
+     the playlists' key named "Playlists", with 24 px of inset on each side);
+   - 640 px or less (a phone): the title and its count, then the search with the tools beside it (further below);
+   - windows short of height keep one line, or the tools on the title's (further below), for the queue's rows. */
+.queue-head .head-search {
+  flex: 1 1 140px;
+  max-width: 220px;
+  margin-left: auto;
+}
+.queue-head > .tools {
+  flex: 1 1 100%;
+  justify-content: flex-start;
   margin-left: calc(-1 * var(--s-8));
+}
+@container card (min-width: 1232px) {
+  .queue-head > .tools {
+    flex: none;
+    margin-left: 0;
+  }
 }
 .card-body {
   padding: var(--pad);
@@ -1675,25 +1770,37 @@ img {
     text-underline-offset: 3px;
   }
 }
-/* The line under a row's title: smaller, quieter, its parts 8 px apart on one line, the last cut short with an
-   ellipsis when the row is narrow (the whole line is its title: dom.ts subLine), so every row keeps one height. */
+/* The line under a row's title: smaller, quieter, its parts 8 px apart on one line, so every row keeps one height (the
+   whole line is its title: dom.ts subLine). A part with no room left goes whole to a second line, which is not shown:
+   a narrow row leaves out its last parts (the length, then the time) rather than cutting one through its words ("added
+   by the ..." lost who added the track). Only the person (first, or after the queue's "Next") and a liked track's
+   channel (first) are cut short, when alone they are too long. */
 .row .sub {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--ink-3);
   display: flex;
-  gap: var(--s-8);
+  flex-wrap: wrap;
+  column-gap: var(--s-8);
+  height: var(--lh-sm);
+  overflow: hidden;
   min-width: 0;
   white-space: nowrap;
 }
 .row .sub > * {
   flex: none;
 }
-.row .sub > :last-child {
-  flex: 0 1 auto;
+.row .sub > :first-child,
+.row .sub > .by {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* After the queue's "Next" (about 36 px wide in either language, and the 8 px after it), the person keeps the rest of
+   the line, so a long name is cut short beside it rather than sent away whole. */
+.row .sub > .badge + .by {
+  max-width: calc(100% - 52px);
 }
 .row .acts {
   display: flex;
@@ -2049,6 +2156,9 @@ img {
   padding: var(--s-8);
   border-radius: var(--r);
   cursor: pointer;
+  /* Brought into sight by the arrow keys, the chosen result stops 8 px clear of the listening bar on a phone (its frame
+     sat on the bar's edge) and of the list's own edges (the room it leaves is the next row's padding, no cover). */
+  scroll-margin-block: var(--s-8);
 }
 /* Under a mouse only (see .server:hover). */
 @media (hover: hover) {
@@ -2187,8 +2297,9 @@ img {
 }
 @media (forced-colors: active) {
   /* A contrast theme draws a frame round every key and row of choices: what reaches 8 px out of the head's inset on a
-     pane nobody sees (the tools after the search, the history's two words) would stand 8 px out of line, framed. */
-  .card-head .head-search + .tools,
+     pane nobody sees (the queue's tools on their own line, the history's two words) would stand 8 px out of line,
+     framed. */
+  .queue-head > .tools,
   .card-head .seg {
     margin-left: 0;
   }
@@ -2337,6 +2448,17 @@ img {
    by ..." on every row, and who added it was never read. */
 .history .row .acts > .lib-more {
   display: none;
+}
+/* A history row's words answer to their own width (its keys take more of the row on a touch screen). */
+.history .row .text {
+  container: row-text / inline-size;
+}
+/* Where they are narrow (a phone, a tablet, a laptop's side column), the history's lines leave out the track's length
+   in every row alike: who added it and when it played fit whole. */
+@container row-text (max-width: 199.5px) {
+  .history .row .sub > .num {
+    display: none;
+  }
 }
 @container card (max-width: 420px) {
   .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
@@ -2697,6 +2819,23 @@ img {
   /* Its words clear of the screen's edge it stands on (a phone held sideways has its notch there). */
   padding-right: var(--safe-right);
 }
+/* A sheet at the window's right (the menu) lies over the player's right column, its edge in the middle of the gap
+   beside it: the column, the page's side (as the player's own: wider where the page stands in the middle, past
+   --page-max) and half the gap. With 16 px for that side, past 1720 px its edge cut across the right column's cards. */
+.sheet:not(.left) {
+  width: min(
+    calc(var(--side-w) + max(var(--gap), 16px, var(--safe-right), (100vw - var(--page-max)) / 2) + var(--gap) / 2),
+    100vw
+  );
+}
+/* From 2460 px (--page-max and 390 px on either side of it: keep the two together) the page's side has room for the
+   sheet itself: it hangs there, clear of the cards, no wider than anywhere else (over the column and that side, on the
+   owner's 2560 px screen it was 890 px wide, its switches 650 px from their words). */
+@media (min-width: 2460px) {
+  .sheet:not(.left) {
+    width: min(calc((100vw - var(--page-max)) / 2 - var(--gap) / 2), calc(var(--side-w) + 16px + var(--gap) / 2));
+  }
+}
 .sheet.left {
   right: auto;
   left: 0;
@@ -2971,7 +3110,9 @@ kbd {
 
 /* ---- statistics ----------------------------------------------------------------------------------------------- */
 .page {
-  padding: var(--gap) max(var(--gap), 16px, var(--safe-right)) var(--gap) max(var(--gap), 16px, var(--safe-left));
+  /* As the player's (.main): its content no wider than --page-max, in the middle. */
+  padding: var(--gap) max(var(--gap), 16px, var(--safe-right), (100% - var(--page-max)) / 2) var(--gap)
+    max(var(--gap), 16px, var(--safe-left), (100% - var(--page-max)) / 2);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -3721,6 +3862,15 @@ kbd {
        and the page under it is where the rest of the cards are. */
     overscroll-behavior: auto;
   }
+  /* A guest's cards one under another as anyone's, the guest's card under the queue: a phone's listening bar has no
+     room for the faces of who listens (and the lyrics open as a sheet here, see lyrics.ts), with a sheet open too. */
+  .main.guest,
+  body:has(> .sheet:not(.left)) .main.guest {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .main.guest > .col.side:not(.lyrics-open) {
+    display: flex;
+  }
 }
 /* A wide window short of height, with a mouse, keeps two columns: the playing card gives up height (a smaller disc,
    less padding), so the queue under it still shows its rows. "Wider than 1100 px", not "at least 1101": a zoomed
@@ -3743,21 +3893,13 @@ kbd {
     padding-block: var(--s-8);
   }
 }
-/* A card under 980 px puts its search on a line of its own under the title, so the tools keep their words beside the
-   title (as icons alone, on a tablet's touch screen with no tooltips, "Remove duplicates", "Save" and "Load" were
-   guesses). Under 640 px Shuffle and Take turns keep theirs and the others wait behind the tools key, listed with
-   theirs (as six icons alone, Take turns and Remove duplicates could not be told); a tablet held upright (744 to 768
-   px, a card of about 710) shows them all. */
-@container (max-width: 980px) {
-  .card-head .head-search {
-    order: 3;
-    flex: 1 1 100%;
-    margin-left: 0;
-  }
-  .card-head .head-search + .tools {
-    margin-left: auto;
-  }
-}
+/* The queue's tools keep their words on their own line (as icons alone, on a tablet's touch screen with no tooltips,
+   "Remove duplicates", "Save" and "Load" were guesses). Under 640 px Shuffle and Take turns keep theirs and the others
+   wait behind the tools key, listed with theirs (as six icons alone, Take turns and Remove duplicates could not be
+   told); a tablet held upright (744 to 768 px, a card of about 710) shows them all. There (a phone) the title and its
+   count have the head's first line to themselves, as tall as its line of keys elsewhere, and the search takes the
+   second with the tools beside it: next to a count of "1 h 9 min", Shuffle and the tools key were sent onto a line of
+   their own. */
 @container (max-width: 640px) {
   .card-head
     .tools:has(> .tools-more)
@@ -3767,17 +3909,25 @@ kbd {
   .card-head .tools .tools-more {
     display: inline-flex;
   }
-}
-/* Narrower still: the search goes to its own line under the title, and a queued track has two keys, not three. */
-@container (max-width: 560px) {
-  .card-head .head-search {
-    order: 3;
+  /* The title's line as tall as a one-line head's inside (48 px less 8 above and below), so the title stands where
+     every other card's does. */
+  .queue-head > h2 {
     flex: 1 1 100%;
+    align-items: center;
+    min-height: calc(48px - 2 * var(--s-8));
+  }
+  .queue-head .head-search {
+    flex: 1 1 0;
+    max-width: none;
     margin-left: 0;
   }
-  .card-head .head-search + .tools {
-    margin-left: auto;
+  .queue-head > .tools {
+    flex: none;
+    margin-left: 0;
   }
+}
+/* Narrower still: a queued track has two keys, not three. */
+@container (max-width: 560px) {
   /* A narrow card (a phone) shows one key per queue row, which lists the others (see trackMenu). Rows without that
      key (recently played) keep theirs. */
   .row .acts:has(> .more-key) > :not(.more-key) {
@@ -3793,12 +3943,12 @@ kbd {
    all of them where the card has room for them on that line (a 1920 px screen at 150 %), Shuffle and Take turns where
    it has less (1366 by 768), Shuffle alone narrower; the others wait behind the tools key, listed with theirs. */
 @media (width > 1100px) and (max-height: 720px) and (pointer: fine) {
-  .card-head .head-search {
-    order: 0;
-    flex: 0 1 240px;
-    margin-left: auto;
+  /* The search gives way first (140 to 240 px), so the line holds the longest count beside the tools shown. */
+  .queue-head .head-search {
+    max-width: 240px;
   }
-  .card-head .head-search + .tools {
+  .queue-head > .tools {
+    flex: none;
     margin-left: 0;
   }
   @container card (max-width: 1200px) {
@@ -3830,6 +3980,29 @@ kbd {
   }
   .card-head .tools .tools-more {
     display: inline-flex;
+  }
+  /* The tools on the title's line at its end, the search across the line under them (on a card of 640 px or less too,
+     where a phone's head puts them beside the search). */
+  .queue-head > h2 {
+    flex: none;
+    min-height: 0;
+  }
+  .queue-head > .tools {
+    flex: none;
+    margin-left: auto;
+  }
+  .queue-head .head-search {
+    order: 1;
+    flex: 1 1 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+  /* Autoplay waits behind the tools key too where the line has no room for its longest words beside the longest count
+     and the tools (633 px of them in English: a card under 665 px, a window under 1021 px). */
+  @container card (max-width: 664.5px) {
+    .card-head .autoplay-key {
+      display: none;
+    }
   }
 }
 /* Shorter still (a 1920 by 1080 screen at 150 % with the browser's bars, about 1280 by 610): the gaps, the cards' heads,
@@ -3928,6 +4101,7 @@ kbd {
 }
 @media (max-width: 900px) {
   .sheet,
+  .sheet:not(.left),
   .sheet.left {
     width: 100vw;
     border-radius: 0;
@@ -3983,9 +4157,11 @@ kbd {
     --pos-w: 24px;
     grid-template-columns: var(--pos-w) 48px minmax(0, 1fr) auto;
   }
-  /* A log record on a narrow window: time, level and component on one line, the message across the line under them. */
+  /* A log record on a narrow window: time, level and component on one line, the message across the line under them.
+     Its edges fade over a record of two lines. */
   .logs {
     column-gap: var(--s-8);
+    --fade: 56px;
   }
   .log {
     row-gap: 2px;
@@ -4412,12 +4588,12 @@ kbd {
   position: relative;
   flex: 1;
   min-height: 0;
-  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane); at the top,
-     the fade's height (below), so the first line stands clear of it when the lines are at their start. */
+  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane); 24 px of room
+     over the first line. */
   padding: var(--s-24) calc(var(--pad) - var(--s-8)) var(--s-8);
-  /* The lines fade out at the box's top and bottom edges, over most of a line, rather than being cut there: cut, the
-     line above showed stubs of its letters under the head's rule, and the last one was sliced by the credit's. */
-  mask-image: linear-gradient(to bottom, transparent, #000 var(--s-24), #000 calc(100% - var(--s-32)), transparent);
+  /* The lines fade out at the box's edges as every scrolling box's do (.scroll[data-fade]), over a line and a third:
+     over 24 and 32 px, under a line's 36, a line halved by the edge still showed as half a line at both edges. */
+  --fade: 48px;
 }
 /* Room after the last line, so it too can stand a third of the way down when it is sung. */
 .lyrics-body::after {
@@ -4546,6 +4722,11 @@ button.lyric {
 }
 .listeners > .num {
   white-space: nowrap;
+}
+/* The number of the rest beside the faces it adds to, one group 4 px apart: with the 8 px of the row's other parts, a
+   laptop's narrow column (1024 px) was a pixel short of one face beside Invite. */
+.listeners > .faces + .num {
+  margin-left: calc(-1 * var(--s-4));
 }
 .listeners > .key[data-act="invite"] {
   margin-left: auto;
@@ -4786,13 +4967,12 @@ button.lyric {
   display: grid;
   gap: var(--s-8);
 }
-/* The guest's card fills the column beside the player, as the history does for members (so the two columns end
-   together), the guest's link at its foot. */
+/* The guest's link at the card's foot, under the people (the card shows in one column only, as tall as what it holds). */
 .guest-until {
   display: flex;
   align-items: flex-start;
   gap: var(--s-6);
-  margin: auto 0 0;
+  margin: 0;
   padding: var(--s-12) var(--pad);
   border-top: 1px solid var(--line);
   color: var(--ink-2);

@@ -221,17 +221,19 @@ function frame(): void {
     playerTitle.textContent = t().player;
   });
   playerTitle.textContent = t().player;
-  // A guest sees the player and the queue (and the lyrics beside them while open); everyone else the whole screen.
+  // A guest sees the player and the queue (and the lyrics beside them while open); everyone else the whole screen. On a
+  // window with two columns a guest's are one, in the middle, until the lyrics open beside it (style.css, .main.guest).
   const guest = state.me?.kind === 'guest';
   const playerScreen = h(
     'main',
-    { class: 'main' },
+    { class: guest ? 'main guest' : 'main' },
     playerTitle,
     // Adding comes right under what plays, above the queue: at the bottom of the queue it was a screen down on short
     // windows and phones, and far from "add a track" on an empty queue. A guest adds nothing.
     h('div', { class: 'col' }, nowCard(live), guest ? null : addCard(), queueCard()),
     // The right column also holds the lyrics, in place of the cards above them while they are open; a guest's has the
-    // people listening and its link, as the voice channel and the history are not a guest's to see.
+    // people listening and its link, as the voice channel and the history are not a guest's to see. That card shows on
+    // one column only (a phone's listening bar has no room for the faces); on two, the bar and the menu say the same.
     guest
       ? h('div', { class: 'col side' }, guestCard(), lyricsView(live))
       : h('div', { class: 'col side' }, voiceCard(), historyCard(), lyricsView(live)),

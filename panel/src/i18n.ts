@@ -50,6 +50,10 @@ const EN = {
   repeatQueue: 'Repeat the queue',
   addedBy: (name: string) => `added by ${name}`,
   byHost: 'added by the host',
+  // Who added a track, in a row's line under its title: first, and short, so a phone's narrow row never cuts it.
+  rowBy: (name: string) => `by ${name}`,
+  rowByHost: 'by the host',
+  rowByAutoplay: 'by Autoplay',
   couldNotPlay: (reason: string) => `Could not play: ${reason}`,
   // Queue.
   queue: 'Queue',
@@ -602,6 +606,9 @@ const KO: Strings = {
   repeatQueue: '대기열 반복',
   addedBy: (name: string) => `${name} 님이 추가`,
   byHost: '호스트가 추가',
+  rowBy: (name: string) => `${name} 님이 추가`,
+  rowByHost: '호스트가 추가',
+  rowByAutoplay: '자동 재생이 추가',
   couldNotPlay: (reason: string) => `재생하지 못함: ${reason}`,
   queue: '대기열',
   shuffle: '섞기',

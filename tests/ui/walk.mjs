@@ -36,7 +36,8 @@ const FEW = [
   [1024, 768],
   [1440, 900],
 ];
-const SHOOT = new Set([412, 390, 1440, 1366]);
+// Photographed: the phones, the laptops, and 2560 (the owner's screen, where what is stretched is seen every day).
+const SHOOT = new Set([412, 390, 1440, 1366, 2560]);
 // Only some states, for a quick look while working on one (ONLY=toast,menu tests/ui/run.sh <folder>): the other
 // states, the README's pictures and the playing-along check are skipped; ONLY=readme takes the README's pictures
 // alone, ONLY=pictures the panel's pictures and ONLY=listening the playing-along check. A whole walk leaves it unset,
@@ -139,7 +140,7 @@ async function measure(page, name, setting, errors) {
     distinct: result.distinct,
     errors: [...errors],
   });
-  if (SHOOT.has(setting.width) || (name === 'idle' && setting.width === 2560)) {
+  if (SHOOT.has(setting.width)) {
     await page.screenshot({ path: path.join(OUT, `${name}-${setting.theme}-${setting.lang}-${setting.width}.png`) });
     // The accessibility rules, on the same pages (each rule once per page, with where it failed first).
     await page.evaluate(AXE);
@@ -347,14 +348,190 @@ async function madeUpLyrics(page) {
   });
 }
 
+// ---- checks that several states share ----------------------------------------------------------------------------
+// Each throws with what it found, as a state's own checks do.
+
+// Waits for the page's next two frames: what the panel draws in a frame of its own (the edges' fades) is drawn by then.
+async function twoFrames(page) {
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
+// The queue's head is laid out by the card's width alone: with the longest count and autoplay words it may show, it is
+// as tall, and its search, tools and autoplay key stand where they stood (a count of "총 1시간 9분" where "총 39분"
+// had been sent the tools onto a second line, moved the search 486 px and dropped the list 33 px; on a phone,
+// Shuffle and the tools key took a line of their own). The search may give way: its right edge stays.
+async function headSteady(page) {
+  const moved = await page.evaluate(() => {
+    const head = document.querySelector('.queue-head');
+    if (!head?.getClientRects().length) return [];
+    const ko = document.documentElement.lang === 'ko';
+    const count = head.querySelector('h2 .count');
+    const auto = head.querySelector('.autoplay-key .label');
+    // Where each part stands: the head's height, the tops of all, the search's right edge, the tools' left.
+    const where = () => {
+      const box = (selector) => {
+        const part = head.querySelector(selector);
+        return part?.getClientRects().length ? part.getBoundingClientRect() : null;
+      };
+      const search = box('.head-search');
+      const tools = box('.tools');
+      const autoplay = box('.autoplay-key');
+      return {
+        'the head': head.getBoundingClientRect().height,
+        "the search's top": search?.top,
+        "the search's right": search?.right,
+        "the tools' top": tools?.top,
+        "the tools' left": tools?.left,
+        "autoplay's top": autoplay?.top,
+      };
+    };
+    const before = where();
+    const was = [count.textContent, auto?.textContent];
+    count.textContent = ko ? '1000곡 · 총 66시간 40분' : '1000 tracks · 66 h 40 min in all';
+    if (auto) auto.textContent = ko ? '자동 재생: 비슷한 곡' : 'Autoplay: past plays';
+    const after = where();
+    count.textContent = was[0];
+    if (auto) auto.textContent = was[1];
+    return Object.keys(before)
+      .filter((name) => before[name] !== undefined && Math.abs(before[name] - after[name]) > 0.5)
+      .map((name) => `${name} by ${(after[name] - before[name]).toFixed(1)} px`);
+  });
+  if (moved.length > 0) throw new Error(`the queue's head moves with the length of its words: ${moved.join(', ')}`);
+}
+
+// The line under each queue and history row: who added the track whole on every row (at the line's end, "added by
+// the ..." lost the name on every phone and the tablet); a part with no room left out whole, never cut through its
+// words; and the history's rows all alike, with the length or without it.
+async function rowsWhole(page) {
+  const problems = await page.evaluate(() => {
+    const found = [];
+    for (const list of document.querySelectorAll('.queue-list, .history')) {
+      if (!list.getClientRects().length) continue;
+      let rows = 0;
+      let lengths = 0;
+      for (const line of list.querySelectorAll('.row .sub')) {
+        if (!line.getClientRects().length) continue;
+        rows += 1;
+        const box = line.getBoundingClientRect();
+        for (const part of line.children) {
+          const at = part.getBoundingClientRect();
+          // On the line's own row (a part with no room goes whole to a second one, which is not shown).
+          const shown = at.width > 0 && at.top < box.bottom - 0.5;
+          if (part.matches('.by') && !shown) found.push(`who added it is left out: ${line.title}`);
+          if (shown && part.scrollWidth > part.clientWidth + 1) found.push(`"${part.textContent}" is cut`);
+          if (shown && part.matches('.num')) lengths += 1;
+        }
+      }
+      if (list.matches('.history') && lengths > 0 && lengths < rows)
+        found.push(`${lengths} of ${rows} history rows show the length`);
+    }
+    return found.slice(0, 4);
+  });
+  if (problems.length > 0) throw new Error(`the rows' lines: ${problems.join('; ')}`);
+}
+
+// A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond up to about a row of what
+// it holds (--fade): a row the edge cuts reads as going on out of sight, not as cut through its words (the log's first
+// record sliced through its letters, a sliver of a cover at the queue's foot, lyric lines halved at both edges, a
+// dialog's list ending on a whole row with two more under it and nothing to say so). With nothing to scroll, no fade.
+async function edgesFade(page) {
+  await twoFrames(page);
+  const problems = await page.evaluate(() => {
+    const found = [];
+    for (const box of document.querySelectorAll('.scroll, .found-list')) {
+      if (!box.getClientRects().length) continue;
+      const name = box.classList[0];
+      const style = getComputedStyle(box);
+      const masked = /gradient/.test(style.maskImage);
+      if (box.scrollHeight <= box.clientHeight + 1) {
+        if (masked) found.push(`${name} fades with nothing to scroll`);
+        continue;
+      }
+      if (!masked) {
+        found.push(`${name} scrolls with its edges cut, not faded`);
+        continue;
+      }
+      // The fade at its fullest (--fade) is a row of what the box holds at least (the middle one of its rows' heights).
+      const most = Number.parseFloat(style.getPropertyValue('--fade'));
+      if (!Number.isFinite(most)) {
+        found.push(`${name}'s fade is "${style.getPropertyValue('--fade')}", not a length`);
+        continue;
+      }
+      const rows = [
+        ...box.querySelectorAll(':scope > li, :scope > .log, .lyrics-lines > li:not(.pause), .menu-list > *'),
+      ]
+        .filter((row) => row.getClientRects().length)
+        .map((row) => row.getBoundingClientRect().height)
+        .sort((a, b) => a - b);
+      const row = rows[Math.floor(rows.length / 2)];
+      if (row !== undefined && most + 0.5 < row)
+        found.push(`${name} fades over ${most} px at most, its rows are ${row}`);
+      // Each edge's fade as drawn (what the page told the box, up to --fade) against what lies beyond it.
+      const drawn = (edge) => Math.min(most, Number.parseFloat(box.style.getPropertyValue(`--fade-${edge}`)) || 0);
+      const beyond = { above: box.scrollTop, below: box.scrollHeight - box.clientHeight - box.scrollTop };
+      for (const [edge, length] of Object.entries(beyond)) {
+        if (Math.abs(drawn(edge) - Math.min(most, length)) > 1)
+          found.push(`${name} fades ${edge} over ${drawn(edge)} px, ${Math.round(length)} beyond`);
+      }
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the scrolling boxes' edges: ${problems.join('; ')}`);
+}
+
+// One order for adding a track, from the gentlest to the one that cuts off what everyone hears: the add card's keys
+// (Add, Play next, Play now), a search result's picks under them, a history row's keys (after its heart, before its
+// list key), and a queued row's (Play next, Play now, then Remove). The results and the history had them reversed.
+async function oneOrder(page) {
+  const orders = await page.evaluate(() => {
+    const of = (selector, key) =>
+      [...(document.querySelector(selector)?.children ?? [])].map((element) => element.dataset[key]).join();
+    return {
+      'the add card': [of('.add', 'at'), 'end,next,now'],
+      'a result': [of('#add-found .picks', 'pick'), 'end,next,now'],
+      'a history row': [of('.history .row .acts', 'key'), 'like,again,next,now,more'],
+      'a queued row': [of('.queue-list .row:not(.next) .acts', 'key'), 'next,jump,remove,more'],
+    };
+  });
+  const wrong = Object.entries(orders)
+    .filter(([, [order, meant]]) => order !== '' && order.replace(/^,+|,+$/g, '') !== meant)
+    .map(([name, [order, meant]]) => `${name}: ${order} (${meant} meant)`);
+  if (wrong.length > 0) throw new Error(`the keys that add a track: ${wrong.join('; ')}`);
+}
+
+// Past the widest the page's content grows (1680 px), it stands in the middle at that width: on a 2560 px screen the
+// queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px.
+async function pageCentred(page) {
+  const off = await page.evaluate(() => {
+    const main = document.querySelector('.main:not([hidden])') ?? document.querySelector('.page');
+    const style = getComputedStyle(main);
+    const box = main.getBoundingClientRect();
+    const left = box.left + Number.parseFloat(style.paddingLeft);
+    const right = box.right - Number.parseFloat(style.paddingRight);
+    if (right - left > 1680.5) return `the page's content is ${Math.round(right - left)} px wide`;
+    const window = document.documentElement.clientWidth;
+    const across = left - (window - right);
+    return Math.abs(across) > 1 ? `the page's content stands ${across.toFixed(1)} px off the window's middle` : null;
+  });
+  if (off) throw new Error(off);
+}
+
 // ---- the walk ---------------------------------------------------------------------------------------------------
 await api('POST', '/guilds/local/player/stop').catch(() => {});
-await sweep('idle', SIZES);
+// Nothing playing: past the widest the page grows, its content in the middle.
+await sweep('idle', SIZES, pageCentred);
 await sweep('login', FEW);
 
 await api('POST', '/guilds/local/player/resume');
 await until('playing');
-await sweep('playing', SIZES);
+// A track playing, at every width: the queue's head steady with its longest words, every row's line whole with who
+// added the track, the lists faded at their edges, the content in the middle past its widest.
+await sweep('playing', SIZES, async (page) => {
+  await headSteady(page);
+  await rowsWhole(page);
+  await edgesFade(page);
+  await pageCentred(page);
+});
 await sweep('discord', SIZES, null, { discord: true });
 // The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
 // bar holds them on one line without the page growing wider than the screen.
@@ -422,6 +599,9 @@ await sweep(
       return found;
     });
     if (close.length > 0) throw new Error(`the voice card's keys are too close: ${close.join(', ')}`);
+    // Its finger-sized keys leave the history's words the least room of any window: who added each track whole.
+    await rowsWhole(page);
+    await headSteady(page);
   },
   { discord: true, touch: true },
 );
@@ -554,7 +734,9 @@ await sweep(
     if (new Set(places).size > 1) throw new Error(`the keys move: ${places.join(' / ')}`);
   },
 );
-await sweep('menu', FEW, async (page) => {
+// The menu, a sheet over the right column with its edge in the gap beside it, on the owner's 2560 px screen too, where
+// the page stands in the middle (with the page's 16 px for its side, the sheet's edge cut across the column's cards).
+await sweep('menu', [...FEW, [2560, 1400]], async (page) => {
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet .section');
   await page.waitForTimeout(400);
@@ -854,6 +1036,8 @@ await sweep('logs', FEW, async (page) => {
   if (!look.refresh) problems.push('Refresh shows its icon alone');
   if (look.hole > 12.5) problems.push(`${Math.round(look.hole)} px between the widest level and the component`);
   if (problems.length > 0) throw new Error(problems.join('; '));
+  // The records fade out at an edge with more beyond it (the first one in sight was sliced through its letters).
+  await edgesFade(page);
 });
 await sweep('loading', FEW, async (page) => {
   const inject = await intercept(page);
@@ -1030,6 +1214,8 @@ await sweep('wrapped-periods', FEW, async (page) => {
   await wrappedAt(page, 'last-12-months');
   await page.click('[data-act="period"]');
   await page.waitForSelector('.dialog .choice');
+  // On a phone the periods' list ended on a whole row, January and February hidden under it with nothing to say so.
+  await edgesFade(page);
 });
 await sweep(
   'wrapped-picture',
@@ -1228,11 +1414,22 @@ await sweep(
     [1280, 610],
     [1920, 700],
   ],
-  toolsInWords,
+  async (page) => {
+    await toolsInWords(page);
+    await headSteady(page);
+  },
   { touch: false },
 );
 // A laptop's 1024 by 768 with a mouse: two columns, the queue's tools on the title's line, in words.
-await sweep('laptop-tools', [[1024, 768]], toolsInWords, { touch: false });
+await sweep(
+  'laptop-tools',
+  [[1024, 768]],
+  async (page) => {
+    await toolsInWords(page);
+    await headSteady(page);
+  },
+  { touch: false },
+);
 // Touch screens as wide but short (an iPad Air held sideways under Safari's bars, an Android tablet under Chrome's):
 // one column, as a phone, since their keys are taller.
 await sweep(
@@ -1314,9 +1511,9 @@ async function openLyrics(page) {
 }
 await sweep('lyrics', SIZES, async (page) => {
   await openLyrics(page);
-  // The lines fade out at the box's edges rather than being cut there (letters' stubs under the head's rule).
-  const mask = await page.evaluate(() => getComputedStyle(document.querySelector('.lyrics-body')).maskImage);
-  if (!/gradient/.test(mask)) throw new Error("the lyrics' lines are cut at the box's edges, not faded");
+  // The lines fade out at the box's edges rather than being cut there, over a line at least: letters' stubs under the
+  // head's rule, and over 24 and 32 px half lines still showed at both edges.
+  await edgesFade(page);
   // In a sheet (one column): the sheet's close key on the centre of the lyrics' head and inside it. A head shorter
   // than a finger's key left the key hanging across the line under it.
   const off = await page.evaluate(() => {
@@ -1351,6 +1548,9 @@ await sweep(
     );
     if (where !== 'the right column') throw new Error(`the lyrics opened in ${where} beside two columns`);
     await toolsInWords(page);
+    await headSteady(page);
+    // The queue's foot under three rows showed a sliver of the fourth cover over the card's edge.
+    await edgesFade(page);
   },
   { touch: false },
 );
@@ -1595,16 +1795,47 @@ async function asGuest(page) {
   const pill = (await page.locator('.bar .pill').textContent()) ?? '';
   if (/guest|손님/i.test(pill)) throw new Error(`a guest's pill says: ${pill}`);
 }
-// A guest's card says nobody listens yet as the other cards say an empty list (a bare "Nobody" in the corner of a card
-// the column's height read as unfinished).
+// A guest's player. On a window with two columns: one column in the middle, the playing card and the queue, the queue
+// ending at its last row, and the right column only while the lyrics are open (a card of 760 px held "Nobody is
+// listening yet" and its link's end, which the listening bar and the menu say). On one column (a phone): the guest's
+// card under the queue says who listens, nobody yet as the other cards say an empty list.
+async function guestLayout(page) {
+  const problems = await page.evaluate(() => {
+    const found = [];
+    const main = document.querySelector('.main');
+    const [player, side] = main.querySelectorAll(':scope > .col');
+    const at = player.getBoundingClientRect();
+    if (side.classList.contains('lyrics-open')) return found;
+    if (side.getClientRects().length > 0) {
+      // One column: the guest's card under the player's, saying nobody listens yet when nobody does.
+      if (side.getBoundingClientRect().top < at.bottom - 0.5) found.push("the guest's card stands beside the player");
+      const people = side.querySelectorAll('.guest-people > li:not(.empty)').length;
+      if (people === 0 && !side.querySelector('.guest-people > li.empty')?.getClientRects().length)
+        found.push("the guest's card does not say nobody listens yet");
+      return found;
+    }
+    // Two columns' window: the player alone, in the middle of the window.
+    const across = at.left - (document.documentElement.clientWidth - at.right);
+    if (Math.abs(across) > 1) found.push(`the player stands ${across.toFixed(1)} px off the window's middle`);
+    // Its queue, when it scrolls not, ends at its last row (the list's 8 px and the card's edge under it).
+    const card = document.querySelector('.card[aria-labelledby="queue-h"]');
+    const list = card.querySelector('.queue-list');
+    const last = list.lastElementChild;
+    if (last && list.scrollHeight <= list.clientHeight + 1) {
+      const room = card.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+      if (room > 12) found.push(`the queue's card runs ${Math.round(room)} px past its last row`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(problems.join('; '));
+}
 await sweep(
   'guest',
   SIZES,
   async (page) => {
     await asGuest(page);
-    const people = await page.locator('.guest-people > li:not(.empty)').count();
-    if (people === 0 && !(await page.locator('.guest-people > li.empty').isVisible()))
-      throw new Error("the guest's card does not say nobody listens yet");
+    await guestLayout(page);
+    await edgesFade(page);
   },
   { login: false },
 );
@@ -1614,12 +1845,17 @@ await sweep(
   async (page) => {
     await asGuest(page);
     await openLyrics(page);
+    // Beside the player on two columns' windows (the right column only now), a sheet on one.
+    await guestLayout(page);
+    await edgesFade(page);
   },
   { login: false },
 );
+// A guest's menu: the player stands where it stands beside the lyrics while the sheet is open (over the column in the
+// middle, the sheet's edge cut across its cards).
 await sweep(
   'guest-menu',
-  FEW,
+  [...FEW, [2560, 1400]],
   async (page) => {
     await asGuest(page);
     await page.click('[data-act="menu"]');
@@ -1671,19 +1907,35 @@ await sweep(
   },
   { login: false },
 );
-// Guests among the people listening, in the made-up Discord.
-await sweep('listeners-guest', FEW, null, {
-  discord: {
-    listeners: {
-      people: [
-        ...MADE_UP.listeners.people,
-        { id: null, name: 'Guest', avatar: null, guest: true },
-        { id: null, name: 'Friend', avatar: null, friend: true },
-      ],
-      count: 6,
+// Guests among the people listening, in the made-up Discord: as many faces as the row holds with Invite at its end
+// (five faces and "+1" sent Invite onto a line of its own at 1440 px), the number of the rest beside them.
+await sweep(
+  'listeners-guest',
+  FEW,
+  async (page) => {
+    await page.waitForSelector('.listeners .faces');
+    const off = await page.evaluate(() => {
+      const row = document.querySelector('.listeners');
+      const invite = row.querySelector('[data-act="invite"]').getBoundingClientRect();
+      const words = row.querySelector('.grow').getBoundingClientRect();
+      const faces = row.querySelectorAll('.faces > *').length;
+      return invite.top < words.bottom ? null : `Invite on a line of its own beside ${faces} faces`;
+    });
+    if (off) throw new Error(off);
+  },
+  {
+    discord: {
+      listeners: {
+        people: [
+          ...MADE_UP.listeners.people,
+          { id: null, name: 'Guest', avatar: null, guest: true },
+          { id: null, name: 'Friend', avatar: null, friend: true },
+        ],
+        count: 6,
+      },
     },
   },
-});
+);
 // What another app shared, on the page that adds it: for the host, and for a guest (who only listens).
 const SHARED = `/add?title=Paper%20Boats&text=${encodeURIComponent('Listen to this https://media.example/demo005')}`;
 // What came reads as words (its name over its address, in no box like a field's), and a key leaves without a change:
@@ -1924,6 +2176,18 @@ await sweep('search', DISCOVERY, async (page) => {
     return found;
   });
   if (problems.length > 0) throw new Error(`the results: ${problems.join(', ')}`);
+  // One order for adding a track: the results' keys as the add card's above them (Add, Play next, Play now), and so
+  // the history's rows and the queue's (Play next before Play now); under those keys the results had them reversed.
+  await oneOrder(page);
+  // Brought into sight by the arrow keys on a phone, the chosen result stops clear of the listening bar (its frame sat
+  // on the bar's edge).
+  const gap = await page.evaluate(() => {
+    const chosen = document.querySelector('#add-found [aria-selected="true"]')?.getBoundingClientRect();
+    const bar = document.querySelector('.listen')?.getBoundingClientRect();
+    return chosen && bar && chosen.top < bar.top ? bar.top - chosen.bottom : null;
+  });
+  if (gap !== null && gap < 7.5) throw new Error(`the chosen result stops ${gap.toFixed(1)} px from the listening bar`);
+  await edgesFade(page);
 });
 // Nothing found for the words: the list says so.
 await sweep(
@@ -1948,6 +2212,8 @@ await sweep('add-escape', [[1440, 900]], async (page) => {
   if (await page.locator('#add-found').isVisible()) throw new Error('the first Escape left the results open');
   await page.keyboard.press('Escape');
   if ((await page.inputValue('#add-input')) !== '') throw new Error('a second Escape kept the words');
+  // "총 1시간 9분" took the head onto a second line where "총 39분" fitted on one.
+  await headSteady(page);
 });
 // A link from another window held over the page: the add card says where it goes.
 await sweep(
@@ -1964,6 +2230,8 @@ await sweep(
     });
     await page.dispatchEvent('main', 'dragenter', { dataTransfer: held });
     await page.waitForSelector('.add-card.drop-target');
+    // A queue of 23 tracks ("1 h 9 min in all"): on a phone Shuffle and the tools key took a line of their own.
+    await headSteady(page);
   },
 );
 // Likes: the playing track's heart, and the liked list beside the history (the walk logs in as the host, whose likes
@@ -1994,14 +2262,11 @@ await sweep('liked-menu', [[360, 780]], async (page) => {
 await sweep('history-keys', DISCOVERY, async (page) => {
   await page.click('.library-seg [data-view="history"]');
   await page.waitForSelector('.history .row');
-  // The line under each title (when, how long, who added it) whole on a laptop's window and wider: at 1440 px three
-  // keys beside it cut every row's to "3:00 added by ...".
-  const cut = await page.evaluate(() =>
-    [...document.querySelectorAll(window.innerWidth >= 1024 ? '.history .row .sub' : 'none')]
-      .filter((line) => line.offsetParent && line.scrollWidth > line.clientWidth + 1)
-      .map((line) => line.textContent),
-  );
-  if (cut.length > 0) throw new Error(`the history's lines are cut: ${cut.slice(0, 3).join(' | ')}`);
+  // The line under each title whole with who added the track, at every width: at 1440 px three keys beside it cut
+  // every row's to "3:00 added by ...", and on phones and the tablet the name was lost at the line's end. (Measured
+  // part by part: the whole line never overflows, as its last part cuts itself short.)
+  await rowsWhole(page);
+  await oneOrder(page);
 });
 // Autoplay from the server's plays (the seeded history: nothing to fetch). Nothing playing and nothing queued: the add
 // card says autoplay is on, and the queue's key shows it.
