@@ -399,6 +399,37 @@ async function headSteady(page) {
   if (moved.length > 0) throw new Error(`the queue's head moves with the length of its words: ${moved.join(', ')}`);
 }
 
+// The line under each queue and history row: who added the track whole on every row (at the line's end, "added by
+// the ..." lost the name on every phone and the tablet); a part with no room left out whole, never cut through its
+// words; and the history's rows all alike, with the length or without it.
+async function rowsWhole(page) {
+  const problems = await page.evaluate(() => {
+    const found = [];
+    for (const list of document.querySelectorAll('.queue-list, .history')) {
+      if (!list.getClientRects().length) continue;
+      let rows = 0;
+      let lengths = 0;
+      for (const line of list.querySelectorAll('.row .sub')) {
+        if (!line.getClientRects().length) continue;
+        rows += 1;
+        const box = line.getBoundingClientRect();
+        for (const part of line.children) {
+          const at = part.getBoundingClientRect();
+          // On the line's own row (a part with no room goes whole to a second one, which is not shown).
+          const shown = at.width > 0 && at.top < box.bottom - 0.5;
+          if (part.matches('.by') && !shown) found.push(`who added it is left out: ${line.title}`);
+          if (shown && part.scrollWidth > part.clientWidth + 1) found.push(`"${part.textContent}" is cut`);
+          if (shown && part.matches('.num')) lengths += 1;
+        }
+      }
+      if (list.matches('.history') && lengths > 0 && lengths < rows)
+        found.push(`${lengths} of ${rows} history rows show the length`);
+    }
+    return found.slice(0, 4);
+  });
+  if (problems.length > 0) throw new Error(`the rows' lines: ${problems.join('; ')}`);
+}
+
 // A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond up to about a row of what
 // it holds (--fade): a row the edge cuts reads as going on out of sight, not as cut through its words (the log's first
 // record sliced through its letters, a sliver of a cover at the queue's foot, lyric lines halved at both edges, a
@@ -473,7 +504,14 @@ await sweep('login', FEW);
 
 await api('POST', '/guilds/local/player/resume');
 await until('playing');
-await sweep('playing', SIZES);
+// A track playing, at every width: the queue's head steady with its longest words, every row's line whole with who
+// added the track, the lists faded at their edges, the content in the middle past its widest.
+await sweep('playing', SIZES, async (page) => {
+  await headSteady(page);
+  await rowsWhole(page);
+  await edgesFade(page);
+  await pageCentred(page);
+});
 await sweep('discord', SIZES, null, { discord: true });
 // The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
 // bar holds them on one line without the page growing wider than the screen.
@@ -541,6 +579,9 @@ await sweep(
       return found;
     });
     if (close.length > 0) throw new Error(`the voice card's keys are too close: ${close.join(', ')}`);
+    // Its finger-sized keys leave the history's words the least room of any window: who added each track whole.
+    await rowsWhole(page);
+    await headSteady(page);
   },
   { discord: true, touch: true },
 );

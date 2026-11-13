@@ -221,6 +221,15 @@ function addedBy(id: string | null, name: string | null): string {
   return id ? t().addedBy(name ?? id) : t().byHost;
 }
 
+// Who added a track, in a row's line: "by Alice" (in Korean the name first already), first after a mark like "Next",
+// so the room a phone's row lacks is taken from the time and the length, never from the person, who is the point of
+// the line (at the line's end "added by the ..." lost the name on every phone and tablet).
+function rowBy(id: string | null, name: string | null): HTMLElement {
+  const words = t();
+  const text = id === 'autoplay' ? words.rowByAutoplay : id ? words.rowBy(name ?? id) : words.rowByHost;
+  return h('span', { class: 'by' }, text);
+}
+
 /** "3 min ago", "yesterday". */
 export function ago(at: number): string {
   const minutes = Math.floor((Date.now() - at) / 60_000);
@@ -844,10 +853,11 @@ export function queueCard(): HTMLElement {
           { class: 'name', title: item.track.title, 'data-clip': 'ok' },
           h('a', { href: item.track.url, target: '_blank', rel: 'noopener noreferrer' }, item.track.title),
         ),
+        // Next, who added it, its length: the person before the length, so a narrow row leaves out the length.
         subLine(
           item.position === 0 ? h('span', { class: 'badge tone-load' }, words.next) : null,
+          rowBy(item.addedBy, item.addedByName),
           item.track.durationMs !== null ? h('span', { class: 'num' }, clock(item.track.durationMs)) : null,
-          h('span', null, addedBy(item.addedBy, item.addedByName)),
         ),
       ),
       // The keys that change the queue for those who may; the menu key (it holds Like) for anyone who may like too. A
@@ -2529,10 +2539,11 @@ export function historyCard(): HTMLElement {
         fill(
           list,
           ...state.history.map((entry: HistoryEntry) =>
+            // Who added it, when it played, its length (left out where the column is narrow: style.css).
             libraryRow(entry.track, `${entry.playedAt}-${entry.track.id}`, [
+              rowBy(entry.addedBy, entry.addedByName),
               h('span', { dataset: { at: String(entry.playedAt) } }, ago(entry.playedAt)),
               entry.track.durationMs !== null ? h('span', { class: 'num' }, clock(entry.track.durationMs)) : null,
-              h('span', null, addedBy(entry.addedBy, entry.addedByName)),
             ]),
           ),
         );

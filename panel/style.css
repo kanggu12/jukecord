@@ -1746,25 +1746,37 @@ img {
     text-underline-offset: 3px;
   }
 }
-/* The line under a row's title: smaller, quieter, its parts 8 px apart on one line, the last cut short with an
-   ellipsis when the row is narrow (the whole line is its title: dom.ts subLine), so every row keeps one height. */
+/* The line under a row's title: smaller, quieter, its parts 8 px apart on one line, so every row keeps one height (the
+   whole line is its title: dom.ts subLine). A part with no room left goes whole to a second line, which is not shown:
+   a narrow row leaves out its last parts (the length, then the time) rather than cutting one through its words ("added
+   by the ..." lost who added the track). Only the person (first, or after the queue's "Next") and a liked track's
+   channel (first) are cut short, when alone they are too long. */
 .row .sub {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--ink-3);
   display: flex;
-  gap: var(--s-8);
+  flex-wrap: wrap;
+  column-gap: var(--s-8);
+  height: var(--lh-sm);
+  overflow: hidden;
   min-width: 0;
   white-space: nowrap;
 }
 .row .sub > * {
   flex: none;
 }
-.row .sub > :last-child {
-  flex: 0 1 auto;
+.row .sub > :first-child,
+.row .sub > .by {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* After the queue's "Next" (about 36 px wide in either language, and the 8 px after it), the person keeps the rest of
+   the line, so a long name is cut short beside it rather than sent away whole. */
+.row .sub > .badge + .by {
+  max-width: calc(100% - 52px);
 }
 .row .acts {
   display: flex;
@@ -2401,6 +2413,17 @@ img {
    by ..." on every row, and who added it was never read. */
 .history .row .acts > .lib-more {
   display: none;
+}
+/* A history row's words answer to their own width (its keys take more of the row on a touch screen). */
+.history .row .text {
+  container: row-text / inline-size;
+}
+/* Where they are narrow (a phone, a tablet, a laptop's side column), the history's lines leave out the track's length
+   in every row alike: who added it and when it played fit whole. */
+@container row-text (max-width: 199.5px) {
+  .history .row .sub > .num {
+    display: none;
+  }
 }
 @container card (max-width: 420px) {
   .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
