@@ -587,9 +587,30 @@ const NARROW = [
   [412, 915],
   [744, 1000],
 ];
+// The strip a toast hangs in above the listening bar, on a narrow window, is solid: nothing of the page shows through
+// it (in the top bar, whose glass is its backdrop, its own blur saw nothing, and the row behind showed through its thin
+// glass in the 8 px between the toast and the bar).
+async function stripIsSolid(page) {
+  const strip = await page.evaluate(() => {
+    const element = document.querySelector('.toasts');
+    const look = getComputedStyle(element);
+    return {
+      position: look.position,
+      background: look.backgroundColor,
+      // Where it ends, and where the listening bar starts: they meet (a pixel between them showed the page).
+      bottom: element.getBoundingClientRect().bottom,
+      bar: document.querySelector('.listen').getBoundingClientRect().top,
+    };
+  });
+  if (strip.position !== 'absolute') return;
+  if (!/^rgb\(/.test(strip.background)) throw new Error(`the toast's strip is ${strip.background}`);
+  if (Math.abs(strip.bottom - strip.bar) > 0.5)
+    throw new Error(`the toast's strip ends at ${strip.bottom} px, the listening bar starts at ${strip.bar}`);
+}
 await sweep('toast', NARROW, async (page) => {
   await tool(page, 'dedupe');
   await page.waitForSelector('.toast');
+  await stripIsSolid(page);
 });
 await sweep(
   'toast-discord',
@@ -597,6 +618,7 @@ await sweep(
   async (page) => {
     await tool(page, 'dedupe');
     await page.waitForSelector('.toast');
+    await stripIsSolid(page);
   },
   { discord: true },
 );
@@ -1538,6 +1560,7 @@ await sweep(
 await sweep('take-turns', [...NARROW, [1440, 900]], async (page) => {
   await tool(page, 'turns');
   await page.waitForSelector('.toast');
+  await stripIsSolid(page);
 });
 // The voice channel's sound: the volume and a preset on, in the voice card, and the presets' dialog open over it.
 await api('PUT', '/guilds/local/voice/volume', { percent: 120 });

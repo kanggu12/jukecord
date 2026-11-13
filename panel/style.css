@@ -3823,7 +3823,7 @@ kbd {
   }
 }
 /* On a narrow window the top bar has no room for a toast: it hangs at the bottom of the window instead, right above
-   the listening bar, as a strip of the bars' own glass as wide as the window (the content passes under it as under
+   the listening bar, as a strip in the bars' own colour as wide as the window (the content passes under it as under
    the bar), and its words may take two lines. Under the top bar it lay across the playing card's head, its Lyrics and
    More keys, and over a sheet's first row and close key; above the listening bar it covers what passes under that bar
    anyway. (Placed from the top bar, which is its box: the bar's glass makes it the box of anything placed inside it,
@@ -3833,11 +3833,14 @@ kbd {
     position: absolute;
     left: 0;
     right: 0;
-    bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
+    /* Placed from the bar's box inside its 1 px line, so the line counts too: without it the strip ended a pixel above
+       the listening bar, and the page showed through that pixel. */
+    bottom: calc(var(--bar-h) - 1px + var(--listen-h) - 100dvh);
     padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
-    background: color-mix(in oklch, var(--bg) 90%, transparent);
-    backdrop-filter: var(--glass);
-    -webkit-backdrop-filter: var(--glass);
+    /* Solid: inside the top bar, whose glass is the backdrop of everything it holds, a blur of the strip's own saw
+       nothing of the page, and the row behind showed through its thin glass unblurred (1.33:1, in the 8 px between a
+       toast and the listening bar). */
+    background: var(--bg);
     border-top: 1px solid var(--line);
   }
   .toasts:empty {
