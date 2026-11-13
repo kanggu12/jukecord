@@ -799,7 +799,7 @@ const KO: Strings = {
   stay: '음성 채널에 머물기',
   stayHint: '모두 나가도 봇이 채널에 남음',
   voteSkip: '건너뛰기 투표',
-  voteSkipHint: 'DJ 역할을 정해 두면, 다른 사람이 누른 건너뛰기는 투표가 됨. 듣는 사람 절반이 찬성하면 넘어감',
+  voteSkipHint: 'DJ 역할이 없는 사람이 누른 건너뛰기는 투표가 됨. 듣는 사람 절반이 찬성하면 넘어감',
   voteSkipNoRole: '위에서 DJ 역할을 정해야 작동함. 그러면 다른 사람이 누른 건너뛰기는 투표가 됨',
   voteToSkip: '건너뛰기 투표',
   votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? '투표함' : '투표'} ${votes}/${needed}`,

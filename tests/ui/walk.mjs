@@ -244,10 +244,19 @@ const MADE_UP = {
 };
 // Options: `name`, the logged-in person's display name, and `guild`, the server's name, in place of the usual ones;
 // `view`, a person who may only look (no DJ role, no Manage Server); `listeners`, the people listening in browsers;
-// `control: false`, a person without the server's DJ role; `votes`, how a vote to skip stands in the state.
+// `control: false`, a person without the server's DJ role; `votes`, how a vote to skip stands in the state; `djRole`,
+// a server whose DJ role is chosen (the menu's settings say how Skip works then).
 async function asDiscord(
   page,
-  { name = MADE_UP.me.name, guild = MADE_UP.guild, view = false, listeners = MADE_UP.listeners, control, votes } = {},
+  {
+    name = MADE_UP.me.name,
+    guild = MADE_UP.guild,
+    view = false,
+    listeners = MADE_UP.listeners,
+    control,
+    votes,
+    djRole = false,
+  } = {},
 ) {
   await page.route(/\/api\/v1\/(status|me|guilds|guilds\/[^/]+\/settings)(\?.*)?$/, async (route) => {
     const response = await route.fetch();
@@ -259,7 +268,13 @@ async function asDiscord(
         : what === 'me'
           ? { ...body, ...MADE_UP.me, name, bot: MADE_UP.bot }
           : what === 'settings'
-            ? { ...body, roles: MADE_UP.roles, channels: MADE_UP.channels, alertsChannelId: MADE_UP.channels[0].id }
+            ? {
+                ...body,
+                roles: MADE_UP.roles,
+                channels: MADE_UP.channels,
+                alertsChannelId: MADE_UP.channels[0].id,
+                ...(djRole ? { djRoleId: MADE_UP.roles[0].id } : {}),
+              }
             : body.map((entry) => ({
                 ...entry,
                 name: guild,
@@ -1184,6 +1199,17 @@ await sweep(
     await page.waitForTimeout(400);
   },
   { discord: true },
+);
+// The same with a DJ role chosen: the vote's hint says how Skip from everyone else works.
+await sweep(
+  'menu-settings-role',
+  FEW,
+  async (page) => {
+    await page.click('[data-act="menu"]');
+    await page.waitForSelector('.sheet .settings .switch');
+    await page.waitForTimeout(400);
+  },
+  { discord: { djRole: true } },
 );
 // Take turns now from the queue's tools (its own key on a wide card, the list behind the tools key on a narrow one),
 // and the toast that says what moved.
