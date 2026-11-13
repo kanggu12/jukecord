@@ -1010,6 +1010,10 @@ await api('POST', '/guilds/local/playlists/Quiet%20hours/load', { at: 'end' });
 await api('POST', '/guilds/local/player/resume').catch(() => {});
 await until('playing');
 async function invite(page) {
+  // The links the walk made on its earlier pages go first: each page makes one, and a dozen made in the same minute is
+  // no server's list. The seed's two older ones stay, so the list shows links that differ beside the one made here.
+  for (const link of await api('GET', '/guilds/local/listen-links'))
+    if (Date.now() - link.createdAt < 3_600_000) await api('DELETE', `/guilds/local/listen-links/${link.id}`);
   await page.click('[data-act="invite"]');
   await page.waitForSelector('.dialog .invite');
 }
@@ -1022,6 +1026,22 @@ await sweep('invite', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-copy"]');
   const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
   if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
+  // The links that work: the one just made is marked (the rows read word for word the same), each row says who made it
+  // and when, and no part of the line under the date breaks inside itself (the made-by part wrapped alone after a dot).
+  await page.waitForSelector('.dialog .invite-links .channel .badge');
+  const rows = await page.$$eval('.dialog .invite-links .channel', (items) =>
+    items.map((item) => {
+      // Each part one line: no taller than one line of its words (the mark is a box of its own height).
+      const parts = [...item.querySelectorAll('.sub > :not(.badge)')];
+      const broken = parts.some(
+        (part) => part.getBoundingClientRect().height > Number.parseFloat(getComputedStyle(part).lineHeight) + 1,
+      );
+      return { marked: Boolean(item.querySelector('.badge')), broken };
+    }),
+  );
+  if (rows.filter((row) => row.marked).length !== 1 || !rows[0]?.marked)
+    throw new Error(`marked as new: ${rows.map((row) => row.marked).join(', ')}`);
+  if (rows.some((row) => row.broken)) throw new Error('a part of a link row breaks across lines');
 });
 // The question over the Invite dialog (revoking a link): the dialog under it is shaded and takes no clicks. Over a
 // dialog on top of every shade, the list's Revoke stayed bright and pressable under the question, and the two dialogs

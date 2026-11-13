@@ -6,11 +6,11 @@
  * under it, with their guests and a key to revoke each.
  */
 import { api, type ListenLink } from '../api.ts';
-import { fill, h, icon } from '../dom.ts';
+import { fill, h, icon, subLine } from '../dom.ts';
 import { type QrCode, qrCode } from '../qr.ts';
 import { mayControl, state, t } from '../state.ts';
 import { confirmDialog, problem, showDialog } from '../ui/layers.ts';
-import { act } from './player.ts';
+import { act, ago } from './player.ts';
 
 // How many browsers a listening link takes (the server's GUESTS_PER_LINK; its answers carry it too).
 const GUESTS = 25;
@@ -148,6 +148,8 @@ export function inviteDialog(): void {
   const list = h('ul', { class: 'list invite-links' });
   const guestResult = h('div');
   let days: 1 | 7 | 30 = 7;
+  // The link made last in this dialog, marked in the list (the rows were alike, and it is the one just shown above).
+  let fresh: number | null = null;
   const makeGuest = h(
     'button',
     { class: 'key primary', type: 'button', 'data-act': 'invite-make' },
@@ -157,6 +159,7 @@ export function inviteDialog(): void {
   makeGuest.onclick = async () => {
     const created = await act(makeGuest, () => api['listen-link-create'](guild.id, days));
     if (!created) return;
+    fresh = created.link.id;
     fill(guestResult, made(reachable(created.url), [words.inviteUntil(when(created.link.expiresAt))]));
     void drawLinks();
   };
@@ -198,18 +201,25 @@ export function inviteDialog(): void {
             void drawLinks();
           }
         };
-        const by = link.createdBy ? (link.createdByName ?? link.createdBy) : words.host;
+        // Who made it and when: the host as the queue's rows say it ("호스트가", no honorific on a role), anyone else
+        // by name; when, as the history says when a track played ("3 min ago").
+        const madeAgo = ago(link.createdAt);
+        const by = link.createdBy
+          ? words.inviteMadeBy(link.createdByName ?? link.createdBy, madeAgo)
+          : words.inviteMadeByHost(madeAgo);
         return h(
           'li',
           { class: 'channel', dataset: { id: String(link.id) } },
           h(
             'span',
             { class: 'name' },
-            h('b', null, words.inviteUntil(when(link.expiresAt))),
-            h(
-              'span',
-              { class: 'faint' },
-              ` · ${words.inviteGuestsIn(link.guests, link.maxGuests)} · ${words.inviteBy(by)}`,
+            h('b', null, words.inviteLinkUntil(when(link.expiresAt))),
+            // The rest on one line under it, as a queue row's line: its parts 8 px apart, the last cut short when the
+            // row is narrow (whole in the line's title). Run on after a dot, "· made by Host" wrapped alone.
+            subLine(
+              link.id === fresh ? h('span', { class: 'badge tone-load' }, words.inviteNew) : null,
+              h('span', null, words.inviteGuestsIn(link.guests, link.maxGuests)),
+              h('span', null, by),
             ),
           ),
           revoke,

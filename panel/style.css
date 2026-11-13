@@ -1864,8 +1864,9 @@ img {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
 }
-/* A playlist's count, on a line of its own under its name. */
-.channel .name:has(> .count-tag) {
+/* A playlist's count, on a line of its own under its name; a listening link's line of guests and who made it, under
+   until when it works. */
+.channel .name:has(> .count-tag, > .sub) {
   display: flex;
   flex-direction: column;
 }
@@ -4402,6 +4403,26 @@ button.lyric {
   line-height: var(--lh-sm);
   font-weight: 600;
   color: var(--ink-2);
+}
+/* A listening link's row: until when it works, over a line of the rest (the new one's mark, its guests, who made it
+   and when), its parts 8 px apart with no dots between them. One line where it fits; where it does not (a phone), a
+   whole part goes to the next line, never a word of one ("· made by Host" wrapped alone after its dot), and a part
+   longer than the row (a long name) is cut short, whole in the line's title. */
+.invite-links .sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--s-8);
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--ink-3);
+}
+.invite-links .sub > * {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* A QR code: dark on light whatever the theme (cameras read it so), on a white tile with rounded corners. */
 .qr-box {

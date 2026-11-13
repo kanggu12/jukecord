@@ -223,5 +223,25 @@ store.playlists.save(
   tracks.slice(5, 9).map((track) => track.id),
   null,
 );
+
+// Listening links made before the walk, as a server has them: one by Mina two days ago for a week, with three guests
+// on it, and one by the host this morning for a day. The Invite dialog then lists links that differ (the walk's own
+// are all made as it runs). Only a hash of a link's code is kept, and these are no code's hash: nobody can use them.
+const hour = 3_600_000;
+store.transaction(() => {
+  const link = store.db.prepare(
+    `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
+     VALUES (?, ?, ?, ?, ?, 25) RETURNING id`,
+  );
+  const minas = link.get('seeded-link-mina', GUILD, PEOPLE[0]?.id ?? null, now - 50 * hour, now + 118 * hour) as {
+    id: number;
+  };
+  link.run('seeded-link-host', GUILD, null, now - 5 * hour, now + 19 * hour);
+  const guest = store.db.prepare(
+    `INSERT INTO guest_sessions (id_hash, link_id, csrf, created_at, seen_at, expires_at)
+     VALUES (?, ?, 'seeded', ?, ?, ?)`,
+  );
+  for (const n of [1, 2, 3]) guest.run(`seeded-guest-${n}`, minas.id, now - 40 * hour, now - hour, now + 118 * hour);
+});
 store.close();
 process.stdout.write(`seeded ${dataDir}: ${tracks.length} tracks, ${items.length} queued, ${plays.length} plays\n`);
