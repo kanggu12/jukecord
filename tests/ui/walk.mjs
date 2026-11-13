@@ -899,7 +899,21 @@ async function openLyrics(page) {
   await page.waitForSelector('.lyrics .lyric.lit, .lyrics .empty, .lyrics-plain');
   await page.waitForTimeout(400);
 }
-await sweep('lyrics', SIZES, openLyrics);
+await sweep('lyrics', SIZES, async (page) => {
+  await openLyrics(page);
+  // In a sheet (one column): the sheet's close key on the centre of the lyrics' head and inside it. A head shorter
+  // than a finger's key left the key hanging across the line under it.
+  const off = await page.evaluate(() => {
+    const key = document.querySelector('.sheet .sheet-close')?.getBoundingClientRect();
+    const head = document.querySelector('.sheet .lyrics .card-head');
+    if (!key || !head) return null;
+    const title = head.firstElementChild.getBoundingClientRect();
+    const apart = Math.abs((key.top + key.bottom) / 2 - (title.top + title.bottom) / 2);
+    const below = key.bottom - head.getBoundingClientRect().bottom;
+    return apart > 0.5 || below > 0 ? `the close key ${apart.toFixed(1)} px off the head's centre` : null;
+  });
+  if (off) throw new Error(off);
+});
 // A wide window short of height, with a mouse: two columns (the shorter playing card), so the lyrics open in the right
 // column as on any window with two columns, not as a sheet over both (the lyrics' rule for one column once lacked the
 // layout's "up to 1100 px wide", and opened a sheet here).

@@ -4013,6 +4013,9 @@ button.lyric:hover {
 }
 .lyrics-sheet .card-head {
   padding-right: calc(var(--s-12) + var(--control-sm) + var(--pad));
+  /* As tall as the close key with its inset above and below (and the head's line), so the key stands on the head's
+     centre, inside it: a finger's key is 44 px, and a head of 48 left it hanging across the line under the head. */
+  min-height: calc(2 * var(--s-12) + var(--control-sm) + 1px);
 }
 @media (forced-colors: active) {
   /* The line being sung told by the system's highlight, as colour alone would vanish in a contrast theme. */
