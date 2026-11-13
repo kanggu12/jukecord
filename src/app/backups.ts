@@ -24,7 +24,7 @@ export interface Backup {
 }
 
 // When a backup was made, from its name ("jukecord-2026-11-12T14-33-24-775Z.db" is that moment in UTC): a copy keeps
-// it, where the file's own time is that of the copy.
+// it, where the file's own time is that of the copy. Null for a name jukecord does not give a backup.
 function madeAt(name: string): number | null {
   const parts = /^jukecord-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.db$/.exec(name);
   if (!parts) return null;
@@ -32,7 +32,11 @@ function madeAt(name: string): number | null {
   return Number.isNaN(at) ? null : at;
 }
 
-/** The backups in a folder, newest first (none when the folder is not there yet). */
+/**
+ * The backups in a folder, newest first (none when the folder is not there yet): jukecord's own only, by the name
+ * makeBackup gives them. A copy put there by hand under another name ("jukecord-before-the-move.db") is not one: it
+ * was taken for the newest (its name sorted first), counted against the number kept, and never removed.
+ */
 export function listBackups(dir: string): Backup[] {
   let names: string[];
   try {
@@ -42,20 +46,20 @@ export function listBackups(dir: string): Backup[] {
   }
   return (
     names
-      // jukecord's own: "jukecord-<time>.db".
-      .filter((name) => /^jukecord-.+\.db$/.test(name))
-      .sort()
-      .reverse()
       .flatMap((name) => {
+        // "jukecord-<time>.db" alone; the time it holds is when the backup was made.
+        const at = madeAt(name);
+        if (at === null) return [];
         const file = path.join(dir, name);
         try {
-          const stat = fs.statSync(file);
-          return [{ file, bytes: stat.size, at: madeAt(name) ?? stat.mtimeMs }];
+          return [{ file, bytes: fs.statSync(file).size, at }];
         } catch {
           // Removed meanwhile: not one any more.
           return [];
         }
       })
+      // Newest first.
+      .sort((a, b) => b.at - a.at)
   );
 }
 
@@ -76,7 +80,8 @@ export function pruneBackups(dir: string, keep: number, now = Date.now()): void 
     // No folder: nothing to clear.
   }
   for (const name of names) {
-    if (!/^jukecord-.*\.db\.partial$/.test(name)) continue;
+    // The unfinished copy of one of jukecord's own, "jukecord-<time>.db.partial"; any other file is left alone.
+    if (!name.endsWith('.partial') || madeAt(name.slice(0, -'.partial'.length)) === null) continue;
     const file = path.join(dir, name);
     // Gone meanwhile (another prune), or still being written: left alone.
     const changed = fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs;

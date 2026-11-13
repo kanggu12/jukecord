@@ -227,8 +227,9 @@ one back:
 
 `JUKECORD_BACKUP_AT=04:30` in `.env`, then `./jukecord up`, makes a backup every day at that time in this machine's
 time zone (`TZ` in `.env` sets another), or on the first start after that time on a day without one. The volume's
-`backups` folder keeps the newest `JUKECORD_BACKUP_KEEP` (7). `./jukecord doctor` says how old the newest backup is
-and how big the database is; a failed one is in the log and the alerts channels. To copy one out of the volume:
+`backups` folder keeps the newest `JUKECORD_BACKUP_KEEP` (7) of jukecord's own, `jukecord-<time>.db`; a file put there
+under another name is left alone and not counted. `./jukecord doctor` says how old the newest backup is and how big
+the database is; a failed one is in the log and the alerts channels. To copy one out of the volume:
 
 ```bash
 docker compose cp jukecord:/data/backups/<file> .
