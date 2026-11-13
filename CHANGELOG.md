@@ -6,9 +6,45 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-13
+
+A pass over the whole of 0.3 for bugs and awkward corners, and a panel with its colour back.
+
 ### Changed
 
+- The panel has its colour back: a deep blue-black field with the brand's blue and violet far behind the glass, the
+  brand's blue for the main keys, the page in use and the choice made, a colour of its own for each person's face, and
+  the playing card lit by its own cover. The cover's light no longer tints the whole panel.
+- Room that grows with the window: the cards' insets and the gaps between them step up on a laptop and on a wide
+  screen, and a short window keeps the small room its lists need.
+- The listening bar: Listen here is a key in words, its bars dancing while the music plays here; the sleep timer is a
+  moon, there while this browser listens; pause and skip are bare icons. On a phone the state under the title no
+  longer breaks into single letters.
+- The playing card's title is the player's state with its lamp ("● Playing"), no longer "Now playing" beside it.
 - Wrapped's picture heads its cards as the panel does, in the words as written, without spaced capitals.
+- A question over a dialog shades the dialog under it, which no longer takes clicks.
+- History and liked rows in a laptop's side column show who added each track; their keys are behind "…".
+- Autoplay from this server's plays plays on a new server too, picking one of the tracks heard longest ago.
+- The command line refuses words after a command that takes none (`stop after`, `skip 3`) and names the command likely
+  meant; it says a wrong channel or role ID, a per-person limit over 1000 or a move past the end in its own words, with
+  exit code 2; `jukecord playlist`, `jukecord token` and `jukecord help <group>` list the group's commands.
+- Refusals say what they mean: revoking a listening link cuts its guests off at once; a friend refused is told what a
+  friend may not do; a login that may only look is told it can look and listen; a guest whose link ended is told to ask
+  whoever shared it; the vote-to-skip setting says it works once a DJ role is chosen; `/clear` says what it removed.
+
+### Fixed
+
+- Each local file in a Spotify playlist got the first one's recording; each is matched on its own.
+- `/queue`, `/history`, `/likes show` and `/playlist list` failed on long titles, long addresses or many playlists; they
+  say how many more lines there are, and titles show `*`, `~`, `|` and backticks as written.
+- Lyrics hung for minutes while LRCLIB asked jukecord to wait; they are refused at once, with Retry-After.
+- `./jukecord` lost a playlist import's file when options such as `--guild` came before the command.
+- "Still connecting to Discord" and "Discord did not answer" came without Retry-After, so the command line exited 1
+  instead of 4.
+- `jukecord doctor` said "none yet" when every daily backup had failed; it warns with the reason.
+- The same search words again just after a search was stopped failed.
+- Copy that failed on a listening link spoke of a token; it says the link is selected.
+- On a phone, the lyrics sheet's close key hung across the line under its head.
 
 ## [0.3.0] - 2026-11-13
 
@@ -501,7 +537,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/kanggu12/jukecord/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kanggu12/jukecord/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kanggu12/jukecord/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kanggu12/jukecord/compare/v0.1.1...v0.2.0

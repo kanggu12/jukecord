@@ -46,14 +46,14 @@ docker buildx prune --filter description~=jukecord
 To run a released image instead of building one, set it in `.env`:
 
 ```bash
-JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.3.0
+JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.3.1
 ```
 
 This checks that GitHub signed it as built by this repository's release workflow (the chart's `.tgz` from the release
 page is checked the same way):
 
 ```bash
-gh attestation verify oci://ghcr.io/kanggu12/jukecord:0.3.0 --repo kanggu12/jukecord
+gh attestation verify oci://ghcr.io/kanggu12/jukecord:0.3.1 --repo kanggu12/jukecord
 ```
 
 ### A second copy on the same machine
