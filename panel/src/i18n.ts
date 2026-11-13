@@ -86,6 +86,8 @@ const EN = {
   noChannels: 'No voice channel the bot may join',
   listeningHere: 'Listening in browsers',
   nobody: 'Nobody',
+  // A guest's card with nobody listening in a browser yet (the guest among them once it listens).
+  nobodyListening: 'Nobody is listening yet',
   // History.
   history: 'Recently played',
   noHistory: 'Nothing has been played yet',
@@ -566,6 +568,7 @@ const KO: Strings = {
   noChannels: '봇이 들어갈 수 있는 음성 채널 없음',
   listeningHere: '브라우저로 듣는 사람',
   nobody: '없음',
+  nobodyListening: '아직 듣는 사람 없음',
   history: '최근 들은 곡',
   noHistory: '아직 들은 곡 없음',
   addAgain: '다시 추가',

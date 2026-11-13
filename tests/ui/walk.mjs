@@ -1158,7 +1158,19 @@ async function asGuest(page) {
   await page.waitForSelector('.app .card');
   await page.waitForSelector('.bar .pill.tone-idle');
 }
-await sweep('guest', SIZES, asGuest, { login: false });
+// A guest's card says nobody listens yet as the other cards say an empty list (a bare "Nobody" in the corner of a card
+// the column's height read as unfinished).
+await sweep(
+  'guest',
+  SIZES,
+  async (page) => {
+    await asGuest(page);
+    const people = await page.locator('.guest-people > li:not(.empty)').count();
+    if (people === 0 && !(await page.locator('.guest-people > li.empty').isVisible()))
+      throw new Error("the guest's card does not say nobody listens yet");
+  },
+  { login: false },
+);
 await sweep(
   'guest-lyrics',
   FEW,

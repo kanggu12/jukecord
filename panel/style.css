@@ -4377,6 +4377,12 @@ button.lyric:hover {
   gap: var(--s-6);
   min-width: 0;
 }
+/* Nobody yet: the empty state across the card, its icon over its words, as an empty queue's or history's. */
+.guest-people > li.empty {
+  flex: 1 1 100%;
+  display: grid;
+  gap: var(--s-8);
+}
 /* The guest's card fills the column beside the player, as the history does for members (so the two columns end
    together), the guest's link at its foot. */
 .guest-until {
