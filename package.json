@@ -1,6 +1,6 @@
 {
   "name": "jukecord",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A self-hosted Discord music bot: one queue, heard in a voice channel and in the browser at the same time.",
   "license": "MIT",
   "author": "J.-G. Kang",

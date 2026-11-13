@@ -6,6 +6,26 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-13
+
+A README that shows more and says less, and dialogs that use the window.
+
+### Changed
+
+- The README is shorter and has no tables: Quick start in a few commands, what it runs on in a paragraph, contributing
+  in a line pointing to CONTRIBUTING.md.
+- The README's "How it works" and the architecture guide's parts are drawn with the panel's own cards, type, icons,
+  disc and faces, in its colours; the picture of jukecord in Discord shows the server's channels, with the bot playing
+  in the voice channel among the people listening.
+- The README's phones stand in a phone's frame, and the Invite dialog in them shows the link just made.
+
+### Fixed
+
+- A tall dialog stopped at seven tenths of the window and scrolled, with a row cut in half at its foot: Invite hid its
+  Copy key on a phone, and its links on a laptop. A dialog now reaches down to 16 px above the window's foot.
+- The host's face showed "H" among the listeners and on the statistics' and Wrapped's lists, and "호" on the account
+  key in Korean: it takes its letter from the panel's word for the host everywhere.
+
 ## [0.3.1] - 2026-11-13
 
 A pass over the whole of 0.3 for bugs and awkward corners, and a panel with its colour back.
@@ -537,7 +557,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/kanggu12/jukecord/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kanggu12/jukecord/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kanggu12/jukecord/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kanggu12/jukecord/compare/v0.2.0...v0.2.1
