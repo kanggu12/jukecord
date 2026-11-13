@@ -49,7 +49,13 @@ export function addPage(navigate: (path: string) => void, chooseServer: () => vo
 
   const draw = () => {
     const words = t();
-    title.textContent = words.shareTitle;
+    // Who may not add: a guest, someone without the DJ role, a View login (known once a server is shown: before, the
+    // page would be titled for a guest a moment, then for the host). Said in words a touch screen shows too.
+    const why = state.me?.kind === 'guest' ? words.guestOnly : state.guild && !mayControl() ? lookOnlyWhy() : null;
+    // The page as what it is for the person: adding to the queue for whoever may add, the link that came for whoever
+    // may not (a guest's page was titled "Add to the queue", over the queue it would go to, and then said a guest
+    // cannot add).
+    title.textContent = why === null ? words.shareTitle : words.shareFound;
     // Back to the player, adding nothing: Cancel beside the keys that add, or for whoever may not add the one way on
     // (a guest had three keys that did nothing, and the logo to get back).
     const leave = (label: string) => {
@@ -66,8 +72,6 @@ export function addPage(navigate: (path: string) => void, chooseServer: () => vo
       return;
     }
     const server = state.guild;
-    // Who may not: a guest, someone without the DJ role. Said in words a touch screen shows too.
-    const why = state.me?.kind === 'guest' ? words.guestOnly : !mayControl() ? lookOnlyWhy() : null;
     // The keys that add, for whoever may (none that do nothing): Add first and the main key, as in the player's add
     // card, since what is shared joins a queue others hear and Play now cuts off what they hear.
     const keys =
@@ -96,7 +100,8 @@ export function addPage(navigate: (path: string) => void, chooseServer: () => vo
     const address = ADDRESS.test(input);
     fill(
       content,
-      h('p', { class: 'faint share-label' }, words.shareFound),
+      // What it is, over it: for whoever may not add, the page's title says it.
+      why === null ? h('p', { class: 'faint share-label' }, words.shareFound) : null,
       // What came, as words to read rather than a box to type in (it looked like a field that could be changed): its
       // name over its address when the app gave one, a link's mark or a search's before it.
       h(
@@ -110,13 +115,16 @@ export function addPage(navigate: (path: string) => void, chooseServer: () => vo
           h('div', { class: `share-input ${named ? 'faint' : ''}`.trim() }, input),
         ),
       ),
-      h(
-        'div',
-        { class: 'line share-server' },
-        icon('list-music'),
-        h('span', { class: 'grow' }, server ? words.shareServer(server.name) : ''),
-        other,
-      ),
+      // The queue it goes to, for whoever may add it there.
+      why === null
+        ? h(
+            'div',
+            { class: 'line share-server' },
+            icon('list-music'),
+            h('span', { class: 'grow' }, server ? words.shareServer(server.name) : ''),
+            other,
+          )
+        : null,
       why ? h('p', { class: 'look-only share-why' }, why) : null,
       h('div', { class: 'share-keys' }, leave(keys.length > 0 ? words.cancel : words.shareBack), ...keys),
     );

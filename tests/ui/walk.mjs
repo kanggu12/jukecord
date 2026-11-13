@@ -1546,6 +1546,13 @@ await sweep(
       found.map((key) => `${key.dataset.act}${key.disabled ? ' (off)' : ''}`),
     );
     if (keys.join() !== 'share-leave') throw new Error(`a guest's share keys: ${keys.join()}`);
+    // Titled as what it is for a guest, the link that came, with no queue it would go to (it was "Add to the queue",
+    // over "jukecord's queue", then said a guest cannot add).
+    const title = (await page.locator('.page.share h1').textContent()) ?? '';
+    // Any space between the words (the panel's words may keep a phrase together with no-break spaces).
+    if (/Add\sto\sthe\squeue|대기열에\s추가/.test(title)) throw new Error(`a guest's share page is titled "${title}"`);
+    if (await page.locator('.share-card .share-server').count())
+      throw new Error("a guest's share page names the queue it would go to");
   },
   { login: false },
 );
