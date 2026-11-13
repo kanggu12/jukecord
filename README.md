@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/kanggu12/jukecord/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kanggu12/jukecord/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/kanggu12/jukecord/releases"><img alt="Release v0.3.0" src="docs/assets/badges/release.svg"></a>
+  <a href="https://github.com/kanggu12/jukecord/releases"><img alt="Release v0.3.1" src="docs/assets/badges/release.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="docs/assets/badges/license.svg"></a>
   <img alt="Runs on amd64 and arm64" src="docs/assets/badges/platforms.svg">
 </p>
@@ -21,7 +21,6 @@
   <a href="#quick-start">Quick start</a> &nbsp;|&nbsp;
   <a href="#what-it-does">What it does</a> &nbsp;|&nbsp;
   <a href="#how-it-works">How it works</a> &nbsp;|&nbsp;
-  <a href="#for-contributors">For contributors</a> &nbsp;|&nbsp;
   <a href="#guides">Guides</a>
 </p>
 
@@ -107,39 +106,41 @@ JUKECORD_DISCORD_TOKEN=YOUR_BOT_TOKEN npm start
 
 ## What it does
 
-- **Listen along.** **Listen here** plays the queue in a browser in step with the voice channel; the media keys and
-  the lock screen control it.
-- **One queue, four ways in.** The panel, slash commands in English and Korean, the `jukecord` command and an
-  [HTTP API](docs/API.md), under the same rules.
-- **Guests without Discord.** A listening link for 1, 7 or 30 days, with a QR code; revoking it ends its guests at once.
-- **Logins and roles.** People log in with Discord; a DJ role decides who may change the music.
-- **Steady and small.** One process and one SQLite file; each track is fetched once, its loudness evened out.
+### In Discord
 
-### Listen together
-
-The lyrics follow the line being sung, for everyone. The light behind the glass moves with the music. On a phone the
-panel installs like an app, with a sleep timer.
+Slash commands in English and Korean, with Discord suggesting tracks as you type. The bot says what it added, and
+keeps one card of the track playing up to date, with keys to pause, skip (a vote, where a DJ role is set) and open
+the panel.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phones-dark.webp">
-    <img alt="The panel on a phone, three screens. The player listening along, in time with the others, with the keys under the track and the bar at the bottom. The queue, where each track's keys wait behind its menu key. The statistics: plays, time listened, tracks and people, then plays per day." src="docs/assets/phones-light.webp" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/discord-dark.webp">
+    <img alt="jukecord in a Discord channel. Joon used /add, and the bot answers that Morning Light was added as the third track. Below, the bot's card of the track playing: Paper Boats on the River, added by Mina, its progress at 1:12 of 3:00, autoplay on from this server's plays and one of two votes to skip, with the keys Pause, Skip (1 of 2) and Open the panel. Under the chat, Discord suggests jukecord's commands: /play, /add, /listen, /lyrics and /share." src="docs/assets/discord-light.webp" width="100%">
   </picture>
 </p>
 
-### Find music, keep it
+### In any browser, in step
 
-Search as you type, autoplay from the server's own plays when the queue runs out, likes, playlists as files, and links
-from Deezer, Spotify and Apple Music.
+**Listen here** plays the queue in the browser in step with the voice channel, for a friend at work or on a phone. The
+lyrics follow the line being sung, a search shows what YouTube found as you type, and a listening link with its QR code
+lets anyone without a Discord account listen along.
 
-### Fair in a crowd
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phones-features-dark.webp">
+    <img alt="The panel on a phone, three screens. The lyrics of the track playing, the line being sung lit. A search for paper boats, with what YouTube found under the add field, each to play now, next or later. The Invite dialog with a listening link for seven days and its QR code." src="docs/assets/phones-features-light.webp" width="100%">
+  </picture>
+</p>
 
-With a DJ role, a skip from anyone else is a vote. People can take turns and be held to a number of tracks. The voice
-channel has a volume and sounds to choose, which browsers listening along hear too.
+### And the rest
 
-### Wrapped
-
-A server's year in music, or a month, saved as a picture for a story or a post.
+- **One queue, four ways in:** the panel, slash commands, the `jukecord` command and an [HTTP API](docs/API.md), under
+  the same rules; a DJ role decides who may change the music.
+- **Fair in a crowd:** votes to skip, people taking turns, a limit per person, and a voice channel's volume and sounds
+  that browsers hear too.
+- **Autoplay, likes and playlists** as files, and links from Deezer, Spotify and Apple Music.
+- **Wrapped:** a server's year in music, saved as a picture for a story or a post.
+- **Steady and small:** one process and one SQLite file, tracks fetched once with their loudness evened out.
 
 <p align="center">
   <picture>
@@ -168,26 +169,6 @@ Everything stays in jukecord's data folder: one SQLite file and the tracks it fe
 hashes, and nothing is sent as telemetry. jukecord talks to Discord, to the sites the tracks come from and, for lyrics,
 to LRCLIB ([what leaves your computer](docs/FAQ.md#privacy)).
 
-## For contributors
-
-jukecord is MIT licensed and built in the open. The tests need no Discord bot and reach no site: yt-dlp and Discord
-have stand-ins, and the panel is checked in a browser against a seeded server. [CONTRIBUTING.md](CONTRIBUTING.md) has
-the setup and the checks.
-
-| Path                     | What it is                                                                               |
-| :----------------------- | :--------------------------------------------------------------------------------------- |
-| `src/app/`               | The actions, one function per thing a person can do, and who may do it                   |
-| `src/core/`              | Each server's queue and player, the clock, the words the bot and the panel share         |
-| `src/media/`             | yt-dlp and ffmpeg, the cache, covers, lyrics, links of other services, the address guard |
-| `src/web/`               | The HTTP API, the logins and the live updates                                            |
-| `src/discord/`           | The bot: slash commands, cards and the voice channel                                     |
-| `src/cli/`, `src/store/` | The `jukecord` command; SQLite and its migrations                                        |
-| `panel/`                 | The web panel: TypeScript and one stylesheet                                             |
-| `deploy/`, `tests/`      | The image, the Helm chart and its kind check; the tests and the panel's walk             |
-
-Report a bug or ask for a feature in [Issues](https://github.com/kanggu12/jukecord/issues/new/choose); see what changed
-in [CHANGELOG.md](CHANGELOG.md), and report a security problem through [SECURITY.md](.github/SECURITY.md).
-
 ## What it runs on
 
 |                    | Needs                                                                                                                                   |
@@ -200,28 +181,11 @@ in [CHANGELOG.md](CHANGELOG.md), and report a security problem through [SECURITY
 
 ## Guides
 
-### For listeners
-
-| Guide                                | What it covers                                                                       |
-| :----------------------------------- | :----------------------------------------------------------------------------------- |
-| [Using jukecord](docs/README.md)     | The panel, the slash commands, the `jukecord` command, who may do what, the settings |
-| [Questions and answers](docs/FAQ.md) | Listening with friends, what it takes to run, what leaves your computer              |
-
-### For hosts
-
-| Guide                                      | What it covers                                                                            |
-| :----------------------------------------- | :---------------------------------------------------------------------------------------- |
-| [Installing](docs/INSTALL.md)              | Docker Compose, friends on other machines, logging in with Discord, everyday use, updates |
-| [Kubernetes](docs/KUBERNETES.md)           | The Helm chart: its values, the Ingress, the NetworkPolicy, k3s                           |
-| [Without internet](docs/OFFLINE.md)        | Moving the image and the data to a machine without internet access                        |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | YouTube's bot check, a silent bot or browser, logins, a port in use                       |
-
-### For contributors
-
-| Guide                                                                                              | What it covers                                                                        |
-| :------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| [The API](docs/API.md)                                                                             | Every operation over HTTP, beside its command and slash command, and the live updates |
-| [Architecture](docs/ARCHITECTURE.md) · [Decisions](docs/DECISIONS.md) · [Testing](docs/TESTING.md) | How it is built, why, and how it is checked                                           |
+- [Using jukecord](docs/README.md): the panel, the slash commands, the `jukecord` command, who may do what, the settings
+- [Installing](docs/INSTALL.md), [Kubernetes](docs/KUBERNETES.md) and [without internet](docs/OFFLINE.md), for hosts
+- [Questions and answers](docs/FAQ.md) and [troubleshooting](docs/TROUBLESHOOTING.md)
+- [Contributing](CONTRIBUTING.md): the setup, the map of the code and the checks; [the API](docs/API.md),
+  [architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md) and [testing](docs/TESTING.md)
 
 ## License
 

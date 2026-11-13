@@ -19,6 +19,17 @@ npm start          # browser-only, with its data in ./data
 
 ## How the code is laid out
 
+| Path                     | What it is                                                                               |
+| :----------------------- | :--------------------------------------------------------------------------------------- |
+| `src/app/`               | The actions, one function per thing a person can do, and who may do it                   |
+| `src/core/`              | Each server's queue and player, the clock, the words the bot and the panel share         |
+| `src/media/`             | yt-dlp and ffmpeg, the cache, covers, lyrics, links of other services, the address guard |
+| `src/web/`               | The HTTP API, the logins and the live updates                                            |
+| `src/discord/`           | The bot: slash commands, cards and the voice channel                                     |
+| `src/cli/`, `src/store/` | The `jukecord` command; SQLite and its migrations                                        |
+| `panel/`                 | The web panel: TypeScript and one stylesheet                                             |
+| `deploy/`, `tests/`      | The image, the Helm chart and its kind check; the tests and the panel's walk             |
+
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) has the parts and how they talk; [DECISIONS.md](docs/DECISIONS.md) says why.
 The rule that shapes most changes: a feature is an action in `src/app/actions.ts`, offered by all four ways in (the
 panel, a slash command, the API table in `src/web/api.ts`, a CLI command). The compiler and the parity tests point at
