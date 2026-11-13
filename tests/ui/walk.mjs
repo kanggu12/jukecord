@@ -687,7 +687,16 @@ for (let i = 0; i < 16; i += 1) await api('POST', '/guilds/local/playlists/Frida
 await sweep('long-queue', FEW);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
-await sweep('empty', FEW);
+// Nothing playing and nothing queued: the playing card has no key that would do nothing (Lyrics for no track, More
+// offering to stop after it, a disabled Play the width of a phone's card).
+await sweep('empty', FEW, async (page) => {
+  const live = await page.evaluate(() =>
+    [...document.querySelectorAll('.now .keys, [data-act="lyrics"], [data-act="now-more"]')]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => element.dataset.act ?? 'the transport keys'),
+  );
+  if (live.length > 0) throw new Error(`with nothing to play, the playing card shows ${live.join(', ')}`);
+});
 
 // Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
 // choose from, the picture to save, and the page in a contrast theme.
@@ -951,15 +960,43 @@ await sweep('lyrics-none', FEW, async (page) => {
   await openLyrics(page);
 });
 await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
-// The playing card's More menu, and the card while the player is to stop after this track.
+// The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it), and the
+// card while the player is to stop after this track.
 await sweep('now-more', FEW, async (page) => {
   await page.click('[data-act="now-more"]');
   await page.waitForSelector('.dialog [data-choice="stop-after"]');
+  const [title, track] = await page.evaluate(() => [
+    document.querySelector('.dialog h2')?.textContent,
+    document.querySelector('.now .title')?.textContent,
+  ]);
+  if (title !== track) throw new Error(`the playing track's More is titled "${title}", not "${track}"`);
+  if ((await page.locator('.dialog [data-choice="drop"]').count()) === 0) throw new Error('More has no Remove');
 });
 // From the top of the track, so it does not end (and stop) while these pages are looked at.
 await api('POST', '/guilds/local/player/seek', { positionMs: 0 });
 await api('PUT', '/guilds/local/player/stop-after', { on: true });
-await sweep('stops-after', FEW);
+// The head keeps one line: the words are under the track (beside the state they pushed Lyrics and More onto a second
+// line of a phone's head), with the key that plays on after it, which asks for that (answered here, so the server
+// stops after the track for every page of the state).
+await sweep('stops-after', FEW, async (page) => {
+  await page.waitForSelector('.now .stop-note:not([hidden])');
+  const off = await page.evaluate(() => {
+    const head = document.querySelector('.card[aria-labelledby="now-h"] > .card-head');
+    const keys = head.querySelector('.head-keys').getBoundingClientRect();
+    const title = head.querySelector('#now-h').getBoundingClientRect();
+    return Math.abs((keys.top + keys.bottom) / 2 - (title.top + title.bottom) / 2);
+  });
+  if (off > 0.5)
+    throw new Error(`the playing card's head takes two lines (its keys ${off.toFixed(1)} px off its title)`);
+  const asked = [];
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/player\/stop-after$/, async (route) => {
+    asked.push(route.request().postDataJSON());
+    await route.fulfill({ json: await api('GET', '/guilds/local/player') });
+  });
+  await page.click('.now [data-act="keep-playing"]');
+  await page.waitForTimeout(300);
+  if (asked[0]?.on !== false) throw new Error(`Keep playing asked for ${JSON.stringify(asked[0] ?? null)}`);
+});
 await api('PUT', '/guilds/local/player/stop-after', { on: false });
 // Playing again if the track ended meanwhile (it stopped after it).
 await api('POST', '/guilds/local/player/resume').catch(() => {});

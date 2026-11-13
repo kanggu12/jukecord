@@ -1324,6 +1324,24 @@ img {
   gap: var(--s-6);
   align-items: flex-start;
 }
+/* What the player will do when this track ends (stop): its icon in the colour of a held state, as the head's lamp for
+   Paused, its words, and beside them the key that plays on after it. On one line with the key, centred on it; on a
+   narrow card the key may go under the words. */
+.now .stop-note {
+  margin-top: var(--s-8);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-4) var(--s-6);
+  color: var(--ink-2);
+}
+.now .stop-note > .icon {
+  color: var(--pause);
+}
+/* The key a little apart from the words it answers (12 px, as a key from the words beside it in a row). */
+.now .stop-note > .key {
+  margin-left: var(--s-6);
+}
 .now .live-note {
   margin-top: var(--s-8);
   display: flex;
@@ -1356,6 +1374,11 @@ img {
      down). The row of keys, not the whole column: the progress bar's four-a-second tick lays the column out, and a
      container there was asked again each time. */
   container: now-keys / inline-size;
+}
+/* Skip alone, for someone without the DJ role whose Skip is a vote: its own width at the row's start (the narrow
+   cards' rules share a row out among several keys, and gave a lone key the card's whole width). */
+.now .keys:not(:has(> .key.primary:not([hidden]))) > .key {
+  flex: none;
 }
 
 /* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
@@ -4035,6 +4058,13 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--s-4);
+}
+/* A finger's keys are taller than the head's least height: the playing card's head keeps their height while they are
+   not there (nothing playing), so the card does not jump by it as tracks start and stop. */
+@media (pointer: coarse) {
+  .card[aria-labelledby="now-h"] > .card-head {
+    min-height: calc(var(--control-sm) + 2 * var(--s-8) + 1px);
+  }
 }
 /* The right column while the lyrics are open: the lyrics in place of the voice channel and the history. */
 .col.side.lyrics-open > :not(.lyrics-card) {
