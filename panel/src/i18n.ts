@@ -447,7 +447,7 @@ const EN = {
   voteSkipNoRole: 'Works once a DJ role is chosen above: then Skip from anyone else is a vote',
   voteToSkip: 'Vote to skip',
   // The count of a vote to skip on the Skip key, saying what it counts and whether this person's vote is in it.
-  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? 'voted' : 'votes'} ${votes}/${needed}`,
+  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? 'vote cast' : 'votes'} ${votes}/${needed}`,
   // The count in words, after the key's name ("Vote to skip: 1 of 2 votes").
   skipVotes: (votes: number, needed: number) => `${votes} of ${needed} votes`,
   votedToSkip: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
@@ -909,9 +909,9 @@ const KO: Strings = {
   voteSkipHint: 'DJ 역할이 없는 사람이 누른 건너뛰기는 투표가 됨. 듣는 사람 절반이 찬성하면 넘어감',
   voteSkipNoRole: '위에서 DJ 역할을 정해야 작동함. 그러면 다른 사람이 누른 건너뛰기는 투표가 됨',
   voteToSkip: '건너뛰기 투표',
-  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? '투표함' : '투표'} ${votes}/${needed}`,
+  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? '투표 완료' : '투표'} ${votes}/${needed}`,
   skipVotes: (votes: number, needed: number) => `${needed}표 중 ${votes}표`,
-  votedToSkip: (votes: number, needed: number) => `건너뛰기에 투표함: ${needed}표 중 ${votes}표`,
+  votedToSkip: (votes: number, needed: number) => `건너뛰기 투표 완료: ${needed}표 중 ${votes}표`,
   takeTurns: '번갈아 재생',
   takeTurnsHint: '추가하는 곡이 사람마다 번갈아 들어감',
   takeTurnsNow: '지금 번갈아 재생',

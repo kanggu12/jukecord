@@ -90,12 +90,12 @@ describe('the playing card and the votes to skip', () => {
     await handlers(bot).onButton(press.interaction);
     // The card keeps the language it was made in; the count reads as a count, not a half ("1/2표").
     assert.match(press.shown[0]?.text ?? '', /\[Skip \(votes 1\/2\) jukecord:skip:en:\d+\]/);
-    assert.equal(press.shown[1]?.text, '건너뛰기에 투표함: 2표 중 1표');
+    assert.equal(press.shown[1]?.text, '건너뛰기 투표 완료: 2표 중 1표');
     // Pressed again: the vote stands as it was, and the presser hears so again.
     const again = interaction('button', `jukecord:skip:ko:${track}`, {}, { locale: 'ko' });
     await handlers(bot).onButton(again.interaction);
     assert.match(again.shown[0]?.text ?? '', /\[건너뛰기 \(투표 1\/2\) jukecord:skip:ko:\d+\]/);
-    assert.equal(again.shown[1]?.text, '건너뛰기에 투표함: 2표 중 1표');
+    assert.equal(again.shown[1]?.text, '건너뛰기 투표 완료: 2표 중 1표');
     await bot.client.destroy();
   });
 });

@@ -109,4 +109,13 @@ describe('one name for one thing', () => {
     for (const lang of ['en', 'ko'] as const)
       assert.equal(words(lang).presets.night, words(lang).presetsShort.night, lang);
   });
+
+  it('says on Skip that the vote is cast in words apart from the count before it, and no "투표함" (a ballot box)', () => {
+    for (const lang of ['en', 'ko'] as const) {
+      const before = words(lang).votesCount(1, 2, false);
+      const after = words(lang).votesCount(1, 2, true);
+      assert.ok(after.split(' ').length > before.split(' ').length, `${lang}: "${before}" / "${after}"`);
+    }
+    assert.ok(!lines(words('ko')).some((line) => line.includes('투표함')));
+  });
 });

@@ -1480,7 +1480,7 @@ async function skipSays(page, voted) {
       rows: [...tops.values()],
     };
   });
-  const want = lang === 'ko' ? `${voted ? '투표함' : '투표'} 1/2` : `${voted ? 'voted' : 'votes'} 1/2`;
+  const want = lang === 'ko' ? `${voted ? '투표 완료' : '투표'} 1/2` : `${voted ? 'vote cast' : 'votes'} 1/2`;
   if (text !== want) throw new Error(`Skip's count says "${text}", not "${want}"`);
   if (rows.length > 2 || (rows.length === 2 && rows[0] !== 1)) throw new Error(`the keys lie in rows of ${rows}`);
 }

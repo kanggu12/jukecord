@@ -106,7 +106,7 @@ const TEXT = {
   // Told to the person whose press of Skip was a vote, alone: the card is everyone's and cannot say whose vote it was.
   voted: {
     en: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
-    ko: (votes: number, needed: number) => `건너뛰기에 투표함: ${needed}표 중 ${votes}표`,
+    ko: (votes: number, needed: number) => `건너뛰기 투표 완료: ${needed}표 중 ${votes}표`,
   },
   votesLine: {
     en: (votes: number, needed: number) => `Votes to skip: ${votes} of ${needed}`,
