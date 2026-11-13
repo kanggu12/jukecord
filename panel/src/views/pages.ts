@@ -311,8 +311,9 @@ export function statsPage(): HTMLElement {
           h(
             'span',
             { class: 'who' },
-            // The host has no picture; its initial is "H", not the initials of the words "the host".
-            face(entry.name ?? 'Host', avatarUrl(entry.userId, entry.avatar), 'sm'),
+            // The host has no picture: its letter is the account key's, from the panel's word for the host ("H",
+            // "호"), not the initials of the words "the host".
+            face(entry.name ?? words.host, avatarUrl(entry.userId, entry.avatar), 'sm'),
             entry.name ?? words.theHost,
           ),
           h('span', { class: 'n' }, entry.plays),

@@ -2634,7 +2634,10 @@ img {
   top: 18vh;
   translate: -50% 0;
   width: min(440px, calc(100vw - 32px));
-  max-height: 70vh;
+  /* Down to 16 px above the window's foot: a tall dialog (Invite with its QR code and its links) scrolls only when the
+     window has no more room, rather than stopping at seven tenths of it with a row cut in half. Its top stays put, so
+     a dialog that grows while open (a link made) grows downwards. */
+  max-height: calc(100dvh - 18vh - var(--s-16));
   display: flex;
   flex-direction: column;
   background: var(--panel-solid);

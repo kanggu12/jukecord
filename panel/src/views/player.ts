@@ -2394,9 +2394,12 @@ export function historyCard(): HTMLElement {
   return card;
 }
 
-/** A listener's name as the panel says it: a guest and a friend in the person's language, anyone else by name. */
-export function listenerName(person: { name: string; guest?: boolean; friend?: boolean }): string {
+/** A listener's name as the panel says it: a guest, a friend and the host in the person's language, anyone else by
+ * name. The host has no Discord name (the server says "Host"): in the panel's words, its face's letter is the account
+ * key's ("호" in Korean, where the server's word made it "H"). */
+export function listenerName(person: { id: string | null; name: string; guest?: boolean; friend?: boolean }): string {
   if (person.guest) return t().guest;
   if (person.friend) return t().friend;
+  if (person.id === null) return t().host;
   return person.name;
 }
