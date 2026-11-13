@@ -1004,6 +1004,13 @@ await sweep(
   'view-only',
   FEW,
   async (page) => {
+    // "View only" is what the login may do, no state of the music: its lamp unlit (in the pause colour it read as
+    // "paused").
+    await page.waitForFunction(() =>
+      /View\sonly|보기\s전용/.test(document.querySelector('.bar .pill')?.textContent ?? ''),
+    );
+    const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
+    if (!lamp.includes('tone-idle')) throw new Error(`the bar's "View only" is ${lamp}`);
     await tool(page, 'load');
     await page.waitForSelector('.dialog .channel');
   },
@@ -1493,7 +1500,10 @@ await sweep(
   async (page) => {
     await skipSays(page, false);
     const said = (await page.locator('.bar .pill').textContent()) ?? '';
-    if (/View only|보기 전용/.test(said)) throw new Error(`the bar says "${said}" while Skip is a vote`);
+    if (/View\sonly|보기\s전용/.test(said)) throw new Error(`the bar says "${said}" while Skip is a vote`);
+    // What a login may do is no state of the music: its lamp unlit (in the pause colour it read as "paused").
+    const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
+    if (!lamp.includes('tone-idle')) throw new Error(`the bar's "${said}" is ${lamp}`);
   },
   { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } } },
 );
