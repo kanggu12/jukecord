@@ -1887,6 +1887,11 @@ img {
   .col:has(> .add-card.found-fit .result) > .card.fill > .queue-list {
     display: none;
   }
+  /* And its own search, which would look through rows not shown: on a card under 980 px it took a line of the head,
+     and a laptop's 1024 by 768 had two whole results. */
+  .col:has(> .add-card.found-fit .result) > .card.fill .head-search {
+    display: none;
+  }
   .add-card.found-fit:has(.result) {
     flex: 1 1 auto;
   }
