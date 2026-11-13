@@ -1184,8 +1184,18 @@ await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
 await api('POST', '/guilds/local/player/resume').catch(() => {});
 await until('playing');
 // Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
-// count stays on the key when a narrow row shows icons alone).
-await sweep('vote-skip', SIZES, null, { discord: { control: false, votes: { on: true, votes: 1, needed: 2 } } });
+// count stays on the key when a narrow row shows icons alone), and the bar does not call them "View only" while their
+// Skip works.
+await sweep(
+  'vote-skip',
+  SIZES,
+  async (page) => {
+    await page.waitForSelector('.now [data-act="skip"] .votes');
+    const said = (await page.locator('.bar .pill').textContent()) ?? '';
+    if (/View only|보기 전용/.test(said)) throw new Error(`the bar says "${said}" while Skip is a vote`);
+  },
+  { discord: { control: false, votes: { on: true, votes: 1, needed: 2 } } },
+);
 // The menu of someone who manages the server, with the server's settings under the DJ role.
 await sweep(
   'menu-settings',
