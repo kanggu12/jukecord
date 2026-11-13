@@ -2347,6 +2347,10 @@ img {
   background: var(--scrim);
   animation: fade 160ms ease-out;
 }
+/* A dialog's shade covers everything, the bar too. A dialog and its shade share one level, so the page's order stacks
+   them: a dialog opened over another (a question over the Invite dialog or the playlists) has its shade over the one
+   below, which then reads as under it and takes no clicks (on a level above every shade, the dialog below stayed
+   bright and pressable, and the two looked like one box cut in half). */
 .scrim.full {
   inset: 0;
   z-index: 40;
@@ -2513,7 +2517,7 @@ img {
 }
 .dialog {
   position: fixed;
-  z-index: 41;
+  z-index: 40;
   left: 50%;
   top: 18vh;
   translate: -50% 0;

@@ -985,6 +985,24 @@ await sweep('invite', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-make"]');
   await page.waitForSelector('.dialog .qr');
 });
+// The question over the Invite dialog (revoking a link): the dialog under it is shaded and takes no clicks. Over a
+// dialog on top of every shade, the list's Revoke stayed bright and pressable under the question, and the two dialogs
+// read as one box cut across.
+await sweep('invite-revoke', FEW, async (page) => {
+  await invite(page);
+  await page.click('.dialog [data-act="invite-make"]');
+  await page.waitForSelector('.dialog .invite-links [data-key="revoke"]');
+  await page.locator('.dialog .invite-links [data-key="revoke"]').first().click();
+  await page.waitForSelector('.dialog .key.danger');
+  await page.waitForTimeout(300);
+  const under = await page.evaluate(() => {
+    const below = document.querySelector('.dialog [data-act="invite-make"]');
+    const box = below.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return below.contains(hit) ? 'the Invite dialog under the question takes clicks' : null;
+  });
+  if (under) throw new Error(under);
+});
 await sweep('invite-friend', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog .invite-tabs button:nth-child(2)');
