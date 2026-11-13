@@ -313,7 +313,15 @@ function wrappedPeriod(words: Words): { period?: string } {
   if (year !== undefined && (year === true || !/^\d{4}$/.test(year)))
     throw new UsageError('--year takes a year (2026)');
   if (month === undefined) return year === undefined ? {} : { period: String(year) };
-  if (month !== true && /^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { period: month };
+  if (month !== true && /^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    // A month with its year names the year itself: another one in --year is a contradiction, said rather than one of
+    // the two left out unseen (the month won). The same year twice is no contradiction.
+    if (typeof year === 'string' && year !== month.slice(0, 4))
+      throw new UsageError(
+        `--month ${month} is not in ${year}: say --month ${month} alone, or --year ${year} --month ${Number(month.slice(5))}`,
+      );
+    return { period: month };
+  }
   if (month === true || !/^(0?[1-9]|1[0-2])$/.test(month))
     throw new UsageError('--month takes a month (3) or a year and a month (2026-03)');
   // A month alone is of the year given, or of this year here.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type ActionContext, ActionError } from '../../src/app/actions.ts';
 import { COMMANDS } from '../../src/cli/commands.ts';
-import { parseLine } from '../../src/cli/main.ts';
+import { parseLine, run } from '../../src/cli/main.ts';
 import { AUTOPLAY } from '../../src/core/types.ts';
 import { relativePeriod, wrappedCard } from '../../src/discord/cards.ts';
 import { HISTORY_KEEP } from '../../src/store/store.ts';
@@ -270,6 +270,27 @@ describe('Wrapped in the jukecord command', () => {
     assert.equal(request('--last').query.period, 'last-12-months');
     for (const wrong of ['--year 26', '--month 13', '--month 2026-3', '--last --year 2025'])
       assert.throws(() => request(wrong), /--/, wrong);
+  });
+
+  it('refuses a year and a month of another year, and says which to keep, before anything is asked', async () => {
+    // The month with its own year won, unseen: "2025-03 in music" for --year 2026.
+    assert.throws(
+      () => request('--year 2026 --month 2025-03'),
+      (error: Error) =>
+        error.name === 'UsageError' &&
+        error.message === '--month 2025-03 is not in 2026: say --month 2025-03 alone, or --year 2026 --month 3',
+    );
+    // The same year twice says one thing.
+    assert.equal(request('--year 2025 --month 2025-03').query.period, '2025-03');
+    // A typing mistake: exit code 2, with no jukecord to ask (nothing listens at this address).
+    const printed: string[] = [];
+    const code = await run(
+      ['wrapped', '--year', '2026', '--month', '2025-03'],
+      { JUKECORD_URL: 'http://127.0.0.1:9', JUKECORD_TOKEN: 'jkc_unused' },
+      (text) => printed.push(text),
+    );
+    assert.equal(code, 2);
+    assert.match(printed.join('\n'), /^jukecord wrapped: --month 2025-03 is not in 2026: say --month 2025-03 alone/);
   });
 
   it('shows the time as lines of text, and says when nothing played', () => {
