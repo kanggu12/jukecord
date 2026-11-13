@@ -3,6 +3,7 @@
  * and the menu can pick either. Both tables have the same keys (the Korean one is typed against the English one), so
  * a missing translation fails the type check instead of showing a key on screen.
  */
+import { together } from '../../src/core/say.ts';
 
 // The months' short names, for a day ("Nov 22"); a time's own name says its month whole ("November 2025").
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -237,7 +238,7 @@ const EN = {
     failed: 'Discord did not let the login through: try again',
     'not-a-member': 'You are not in a server that jukecord is in',
     link: 'That login link was used already or has expired',
-    'too-many': 'Too many failed logins from here: try again in ten minutes',
+    'too-many': 'Too many failed logins from here: try again in 10 minutes',
     'no-discord-login': 'Logging in with Discord is not set up here',
     connecting: 'jukecord is still connecting to Discord: try again in a moment',
     'listen-link': 'That listening link has ended or does not exist',
@@ -991,6 +992,26 @@ const KO: Strings = {
   leftNotFound: (n: number) => `${n}곡은 YouTube에서 못 찾아 뺌`,
 };
 
+/**
+ * A table's words as the panel shows them, kept whole where a line wraps (core/say.ts together(): "10 minutes",
+ * "Nov 14", "쓸 수 있음" never split): each string, each line a function gives (with what was put in it), and the
+ * lists and records inside. Done to the whole table, so a line added later is kept too.
+ */
+function kept<T>(value: T): T {
+  if (typeof value === 'string') return together(value) as T;
+  // A function's line is kept when it is made: its values (a name, a count) are part of the line.
+  if (typeof value === 'function')
+    return ((...args: unknown[]) => kept((value as (...args: unknown[]) => unknown)(...args))) as T;
+  if (Array.isArray(value)) return value.map((item) => kept(item)) as T;
+  if (value && typeof value === 'object')
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, kept(item)])) as T;
+  return value;
+}
+
+// The two tables as shown, made once.
+const EN_SHOWN = kept(EN);
+const KO_SHOWN = kept(KO);
+
 /** The languages. */
 export type Lang = 'en' | 'ko';
 
@@ -1002,7 +1023,7 @@ export function pickLang(choice: string | null): Lang {
 
 /** The words of a language. */
 export function words(lang: Lang): Strings {
-  return lang === 'ko' ? KO : (EN as unknown as Strings);
+  return lang === 'ko' ? KO_SHOWN : (EN_SHOWN as unknown as Strings);
 }
 
 export type Words = Strings;

@@ -6,6 +6,10 @@ import { REASONS } from '../../src/core/reasons.ts';
 import { sayError, sayFailure, sayNotice, translate } from '../../src/core/say.ts';
 import { sayError as sayInDiscord } from '../../src/discord/errors.ts';
 
+// The words keep a no-break space where a wrapped line must not break (core/say.ts together(): a number with its unit,
+// a month with its day, Korean's "할 수 있음"): an expected text writes it as "⍽", so it can be seen.
+const kept = (text: string) => text.replaceAll('⍽', String.fromCharCode(0xa0));
+
 // Every file under src, for the messages the actions can give.
 function sources(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -42,12 +46,12 @@ describe('sayError', () => {
   });
 
   it('says a place in the track for a seek before its start, not a place in the queue', () => {
-    assert.equal(sayError('the position must be 0 or more', 'ko'), '재생 위치는 0초 이상이어야 함');
+    assert.equal(sayError('the position must be 0 or more', 'ko'), kept('재생 위치는 0초⍽이상이어야 함'));
   });
 
   it('has Korean for pausing what is paused, playing on what gets ready, and the MP3 copy being made', () => {
     assert.equal(sayError('it is already paused', 'ko'), '이미 일시정지됨');
-    assert.equal(sayError('the track is getting ready', 'ko'), '곡을 준비하는 중');
+    assert.equal(sayError('the track is getting ready', 'ko'), kept('곡을 준비하는⍽중'));
     assert.equal(sayError('it is already paused', 'en'), 'It is already paused');
     assert.notEqual(
       sayError('jukecord is making the MP3 copy of this track; try again in a moment', 'ko'),
@@ -74,11 +78,11 @@ describe('sayError', () => {
   it('translates the messages with values, and every short reason', () => {
     assert.equal(sayError('the queue is full (1000 tracks)', 'ko'), '대기열이 가득 참(1000곡)');
     assert.equal(sayError('there is no playlist named "Road trip"', 'ko'), '"Road trip" 플레이리스트 없음');
-    assert.equal(sayError('the site answered 404', 'ko'), '사이트가 404 오류로 응답함');
+    assert.equal(sayError('the site answered 404', 'ko'), kept('사이트가 404⍽오류로 응답함'));
     assert.equal(sayError('position 9 is outside the queue (0-3)', 'ko'), '대기열 범위를 벗어난 위치(0~3)');
     assert.equal(
       sayError('Discord did not answer: timed out', 'ko'),
-      '디스코드가 응답하지 않음: 잠시 뒤 다시 시도하세요',
+      kept('디스코드가 응답하지 않음: 잠시⍽뒤 다시 시도하세요'),
     );
     for (const reason of Object.values(REASONS))
       assert.notEqual(sayError(reason, 'ko'), sayError(reason, 'en'), reason);
@@ -86,7 +90,7 @@ describe('sayError', () => {
     // (the site's answer above has its particle after 오류, not after the number).
     assert.equal(
       sayError('"half past" is not a time in the track (examples: 83, 1:23, 1m23s)', 'ko'),
-      '시간으로 읽을 수 없음: "half past"(예: 83, 1:23, 1m23s)',
+      kept('시간으로 읽을⍽수⍽없음: "half past"(예: 83, 1:23, 1m23s)'),
     );
     // English is the message as a sentence; an unknown message stays English in Korean too.
     assert.equal(sayError('nothing is playing', 'en'), 'Nothing is playing');
@@ -96,11 +100,11 @@ describe('sayError', () => {
     assert.equal(sayError('this needs an admin token', 'ko'), 'admin 권한이 있는 토큰이 필요함');
     assert.equal(
       sayError('a friend who may only look and listen cannot change the music', 'ko'),
-      '보기만 하는 친구 로그인으로는 음악을 바꿀 수 없음',
+      kept('보기만 하는 친구 로그인으로는 음악을 바꿀⍽수⍽없음'),
     );
     assert.equal(
       sayError("a friend cannot change the server's settings or tokens", 'ko'),
-      '친구 로그인으로는 서버 설정이나 토큰을 바꿀 수 없음',
+      kept('친구 로그인으로는 서버 설정이나 토큰을 바꿀⍽수⍽없음'),
     );
     assert.equal(sayError('no such address: GET /api/v1/nothing', 'ko'), '없는 주소: GET /api/v1/nothing');
     // jukecord's name keeps its small letter at the start of a sentence, as everywhere else.
@@ -113,16 +117,19 @@ describe('sayError', () => {
   it('gives a reason as it is for the middle of a sentence, and the bot the same words as the panel', () => {
     // No capital: "Could not play: no such site".
     assert.equal(translate('no such site', 'en'), 'no such site');
-    assert.equal(translate('no such site', 'ko'), '사이트를 찾을 수 없음');
+    assert.equal(translate('no such site', 'ko'), kept('사이트를 찾을⍽수⍽없음'));
     assert.equal(translate('something new', 'ko'), 'something new');
     // The bot's door leads to the same table.
     assert.equal(sayInDiscord, sayError);
   });
 
   it('translates the reason of a failed track and leaves its title alone', () => {
-    assert.equal(sayFailure('Neon Rain: the site answered 404', 'ko'), 'Neon Rain: 사이트가 404 오류로 응답함');
+    assert.equal(sayFailure('Neon Rain: the site answered 404', 'ko'), kept('Neon Rain: 사이트가 404⍽오류로 응답함'));
     // A title with a colon of its own: only what follows the last one is the reason.
-    assert.equal(sayFailure('Part II: The Valley: no such site', 'ko'), 'Part II: The Valley: 사이트를 찾을 수 없음');
+    assert.equal(
+      sayFailure('Part II: The Valley: no such site', 'ko'),
+      kept('Part II: The Valley: 사이트를 찾을⍽수⍽없음'),
+    );
     assert.equal(sayFailure('Neon Rain: no such site', 'en'), 'Neon Rain: no such site');
     // Every reason a player can give ends a failure this way.
     for (const reason of Object.values(REASONS))
