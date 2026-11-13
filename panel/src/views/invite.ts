@@ -96,7 +96,7 @@ function made(url: string, notes: string[]): HTMLElement {
       selection?.removeAllRanges();
       selection?.addRange(range);
       result.className = 'copy-result text-bad';
-      fill(result, icon('circle-alert'), words.notCopied);
+      fill(result, icon('circle-alert'), words.linkNotCopied);
     }
   };
   return h(

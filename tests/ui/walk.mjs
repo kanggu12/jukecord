@@ -984,6 +984,11 @@ await sweep('invite', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
   await page.waitForSelector('.dialog .qr');
+  // Copy on a page over plain http (a LAN address), where browsers give no clipboard: the link is selected instead,
+  // and the line says so (it said "the token is selected", the tokens' words).
+  await page.click('.dialog [data-act="invite-copy"]');
+  const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
+  if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
 });
 // The question over the Invite dialog (revoking a link): the dialog under it is shaded and takes no clicks. Over a
 // dialog on top of every shade, the list's Revoke stayed bright and pressable under the question, and the two dialogs
