@@ -4081,8 +4081,12 @@ kbd {
   position: relative;
   flex: 1;
   min-height: 0;
-  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane). */
-  padding: var(--s-8) calc(var(--pad) - var(--s-8));
+  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane); at the top,
+     the fade's height (below), so the first line stands clear of it when the lines are at their start. */
+  padding: var(--s-24) calc(var(--pad) - var(--s-8)) var(--s-8);
+  /* The lines fade out at the box's top and bottom edges, over most of a line, rather than being cut there: cut, the
+     line above showed stubs of its letters under the head's rule, and the last one was sliced by the credit's. */
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--s-24), #000 calc(100% - var(--s-32)), transparent);
 }
 /* Room after the last line, so it too can stand a third of the way down when it is sung. */
 .lyrics-body::after {

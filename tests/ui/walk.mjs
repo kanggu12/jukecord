@@ -940,6 +940,9 @@ async function openLyrics(page) {
 }
 await sweep('lyrics', SIZES, async (page) => {
   await openLyrics(page);
+  // The lines fade out at the box's edges rather than being cut there (letters' stubs under the head's rule).
+  const mask = await page.evaluate(() => getComputedStyle(document.querySelector('.lyrics-body')).maskImage);
+  if (!/gradient/.test(mask)) throw new Error("the lyrics' lines are cut at the box's edges, not faded");
   // In a sheet (one column): the sheet's close key on the centre of the lyrics' head and inside it. A head shorter
   // than a finger's key left the key hanging across the line under it.
   const off = await page.evaluate(() => {
@@ -981,9 +984,16 @@ await sweep('lyrics-plain', FEW, async (page) => {
   page.lyricsKind = 'plain';
   await openLyrics(page);
 });
+// No lyrics found: the Lyrics key opens nothing (a card the column's height, or a whole sheet on a phone, held one
+// line), and a toast says so.
 await sweep('lyrics-none', FEW, async (page) => {
   page.lyricsKind = 'none';
-  await openLyrics(page);
+  await page.click('[data-act="lyrics"]');
+  await page.waitForSelector('.toast');
+  const opened = await page.evaluate(() =>
+    Boolean(document.querySelector('.sheet .lyrics, .lyrics-card:not([hidden])')),
+  );
+  if (opened) throw new Error('the lyrics opened to say there are none');
 });
 await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
 // The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it), and the

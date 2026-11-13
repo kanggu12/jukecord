@@ -286,7 +286,19 @@ export function nowCard(live: Live): HTMLElement {
     icon('mic-vocal'),
     h('span', { class: 'label' }),
   );
-  lyricsKey.onclick = () => toggleLyrics();
+  // Opening looks the lyrics up first (LRCLIB may take a moment): the key is busy meanwhile, its icon turning; a lookup
+  // that fails says why in a toast, as any key's refusal does.
+  lyricsKey.onclick = () =>
+    void act(lyricsKey, async () => {
+      const mic = lyricsKey.firstElementChild;
+      const turning = icon('loader-circle', 'spin');
+      mic?.replaceWith(turning);
+      try {
+        await toggleLyrics();
+      } finally {
+        turning.replaceWith(mic ?? icon('mic-vocal'));
+      }
+    });
   whenLyricsChange(() => lyricsKey.setAttribute('aria-expanded', String(lyricsOpen())));
   // More for the playing track, as a list titled with it (stop after it, invite, remove it).
   const moreKey = h(
