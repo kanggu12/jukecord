@@ -1258,6 +1258,23 @@ await sweep('search', DISCOVERY, async (page) => {
   // The keyboard on the second result.
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
+  // The list shows three whole results at least (at 1440 by 900 the queue's rows left it two), and ends on whole rows:
+  // the one its foot cuts shows half of itself or more, or none of itself (a few pixels of the next cover, or its ring
+  // alone, sat over the line of keys).
+  const problems = await page.evaluate(() => {
+    const list = document.querySelector('#add-found');
+    const box = list.getBoundingClientRect();
+    const rows = [...list.querySelectorAll('[role="option"]')].map((row) => row.getBoundingClientRect());
+    const whole = rows.filter((row) => row.top >= box.top - 0.5 && row.bottom <= box.bottom + 0.5).length;
+    const found = whole < 3 ? [`${whole} whole results in sight`] : [];
+    for (const row of rows) {
+      if (row.top >= box.bottom - 0.5 || row.bottom <= box.bottom + 0.5) continue;
+      const shown = box.bottom - row.top;
+      if (shown < row.height / 2) found.push(`${shown.toFixed(1)} px of a result at the foot`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the results: ${problems.join(', ')}`);
 });
 // Nothing found for the words: the list says so.
 await sweep(

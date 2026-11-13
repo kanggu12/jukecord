@@ -1846,14 +1846,17 @@ img {
   min-height: 190px;
   contain: size;
 }
-/* A column too short for both (a laptop's window under 880 px). Nothing found yet (or nothing at all): the line takes
-   what it needs and the queue keeps the rest; giving up its rows for it left one line over an empty box. */
-@media (max-height: 880px) {
+/* A column too short for both (a laptop's window up to 960 px tall: at 900, three of the queue's rows left the results
+   two). Nothing found yet (or nothing at all): the line takes what it needs and the queue keeps the rest; giving up
+   its rows for it left one line over an empty box. */
+@media (max-height: 960px) {
   .col:has(> .add-card.found-fit) > .card.fill > .queue-list {
     min-height: 0;
   }
   /* Any result: the queue keeps its head with its count and gives the room of its rows to the results, which sit
-     against the field (beside them, what was left of the rows was one row or a sliver of one). */
+     against the field (beside them, what was left of the rows was one row or a sliver of one). The results' part of
+     the card takes the room, the line of keys at its foot: a list that shows whole rows only (see fitFound) ends
+     above it with the room it leaves. */
   .col:has(> .add-card.found-fit .result) > .card.fill {
     flex: none;
     min-height: 0;
@@ -1864,8 +1867,15 @@ img {
   .add-card.found-fit:has(.result) {
     flex: 1 1 auto;
   }
+  .add-card.found-fit:has(.result) .found {
+    flex: 1 1 auto;
+  }
   .add-card.found-fit:has(.result) .found-list {
+    flex: 0 1 auto;
     max-height: none;
+  }
+  .add-card.found-fit:has(.result) .found-keys {
+    margin-top: auto;
   }
 }
 .found-list:empty {

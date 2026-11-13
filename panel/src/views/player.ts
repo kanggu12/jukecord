@@ -1668,9 +1668,38 @@ export function addCard(): HTMLElement {
   const close = () => {
     found.hidden = true;
     card.classList.remove('found-fit');
+    list.style.maxHeight = '';
+    list.style.marginBottom = '';
     input.setAttribute('aria-expanded', 'false');
     setActive(-1);
   };
+
+  // The list ends on whole rows: the row its foot cuts shows at least half of itself (which says there is more to
+  // scroll to), or none of it: the list stops at the row before it, with the room of its own padding under it (a few
+  // pixels of a cover's top edge over the line of keys read as a mistake, and so did the cover's ring alone). Measured
+  // with the list's top at its start; asked again whenever the room may have changed (the results, the window, the
+  // cards around it).
+  const fitFound = () => {
+    list.style.maxHeight = '';
+    list.style.marginBottom = '';
+    if (found.hidden || results.length === 0) return;
+    const room = list.clientHeight;
+    if (list.scrollHeight <= room + 1) return;
+    // Where the list's rows start when it is scrolled to its top, on the screen.
+    const origin = list.getBoundingClientRect().top + list.clientTop - list.scrollTop;
+    for (const row of list.children) {
+      const box = row.getBoundingClientRect();
+      const start = box.top - origin;
+      // Whole in the list, or cut but showing at least half of itself: nothing to change.
+      if (box.bottom - origin <= room + 0.5) continue;
+      if (room - start >= box.height / 2) return;
+      // Its padding at the foot scrolls with the rows: the same room under the last whole row is a margin instead.
+      list.style.maxHeight = `${start}px`;
+      list.style.marginBottom = getComputedStyle(list).paddingBottom;
+      return;
+    }
+  };
+  window.addEventListener('resize', fitFound);
 
   // Opens the list under the field, in the card, so the field stays where it is. In two columns, where the page does
   // not scroll, the list shares its column with the queue under the card (found-fit, in the style): it gives way to
@@ -1682,6 +1711,7 @@ export function addCard(): HTMLElement {
     card.classList.toggle('found-fit', !pageScrolls && !window.matchMedia(ONE_COLUMN).matches);
     found.hidden = false;
     input.setAttribute('aria-expanded', 'true');
+    fitFound();
   };
 
   // One result as an option: its cover, title, channel and length, and the three picks a pointer can press (the
@@ -1743,6 +1773,8 @@ export function addCard(): HTMLElement {
     said.textContent = results.length > 0 ? words.foundCount(results.length) : words.foundNone;
     setActive(-1);
     open();
+    // Open already (new words), the rows changed: the list ends on whole rows again.
+    fitFound();
   };
 
   // Asks jukecord what YouTube finds for the words; an older question still under way is dropped.
@@ -1988,6 +2020,9 @@ export function addCard(): HTMLElement {
   });
 
   watch(['lang', 'guild', 'me', 'player', 'queue'], draw);
+  // The cards above and below may change their height (a title of two lines, the queue's head), and with them the
+  // results' room.
+  watch(['player', 'queue'], fitFound);
   // Another server: its results are its own to look up.
   watch(['guild'], () => {
     asking?.abort();
