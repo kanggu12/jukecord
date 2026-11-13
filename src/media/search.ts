@@ -109,8 +109,12 @@ export class Search {
       return (await this.waitFor(flight.promise, ask.signal)).slice(0, limit);
     } finally {
       flight.waiters -= 1;
-      // Nobody waits any more: the search stops, and its slot is free for the next one.
-      if (flight.waiters === 0 && !flight.done) flight.stop.abort();
+      // Nobody waits any more: the search stops, and its slot is free for the next one. It is no longer shared at once:
+      // yt-dlp takes a moment to end, and the same words asked again meanwhile would wait for it and fail with it.
+      if (flight.waiters === 0 && !flight.done) {
+        flight.stop.abort();
+        if (this.flights.get(key) === flight) this.flights.delete(key);
+      }
     }
   }
 

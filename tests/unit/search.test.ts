@@ -129,6 +129,33 @@ describe('Search', () => {
     assert.equal(calls[1]?.signal?.aborted, true);
   });
 
+  it('starts the same words afresh after a search nobody waited for was stopped, before it has ended', async () => {
+    // yt-dlp ends a stopped search a moment after it is told (its process has to exit), as the real one does.
+    const calls: { signal: AbortSignal | undefined; finish: () => void }[] = [];
+    const ytdlp = {
+      search: (_words: string, limit: number, signal?: AbortSignal) =>
+        new Promise<NewTrack[]>((resolve, reject) => {
+          calls.push({ signal, finish: () => resolve(tracksFromInfo(LISTING, limit)) });
+          signal?.addEventListener('abort', () => setTimeout(() => reject(new Error('cancelled')), 20), {
+            once: true,
+          });
+        }),
+    } as unknown as YtDlp;
+    const search = new Search({ ytdlp, slots: slots(), log });
+    const typed = new AbortController();
+    const first = search.find('neon rain', { signal: typed.signal });
+    await flush();
+    typed.abort();
+    await assert.rejects(first);
+    // The same words asked again at once (Discord asks again as the field changes focus): a search of their own,
+    // not the one being stopped.
+    const again = search.find('neon rain');
+    await flush();
+    assert.equal(calls.length, 2);
+    calls[1]?.finish();
+    assert.equal((await again).length, 8);
+  });
+
   it('does not keep a failure, and is counted in the lookup slots', async () => {
     const { ytdlp, calls } = fakeYtDlp();
     const resolver = slots();
