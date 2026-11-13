@@ -919,6 +919,12 @@ async function wrappedIsTrue(page, period) {
       song: Boolean(song),
       side: Boolean(song && first && song.getBoundingClientRect().top === first.getBoundingClientRect().top),
       fill: row && first && head ? row.offsetHeight / (first.offsetHeight - head.offsetHeight) : 1,
+      // The first track's card's share of the page's width, on a window wide enough for two columns.
+      wide:
+        first && window.innerWidth > 1100
+          ? first.getBoundingClientRect().width /
+            (document.querySelector('.wrapped .page-body')?.getBoundingClientRect().width ?? 1)
+          : 0,
     };
   }, period);
   const { wrapped } = facts;
@@ -935,6 +941,9 @@ async function wrappedIsTrue(page, period) {
     problems.push(`${wrapped.days} days of at most ${facts.longest} min under ${facts.total}`);
   if (facts.side && facts.fill < 0.5)
     problems.push(`the first track's row fills ${Math.round(facts.fill * 100)} % of its card`);
+  // Its column's width, with or without the song beside it (alone across the row, a laptop's card was 1,408 px wide
+  // with its row in the first 360).
+  if (facts.wide > 0.5) problems.push(`the first track's card is ${Math.round(facts.wide * 100)} % of the row wide`);
   problems.push(...(await placesShared(page)));
   if (problems.length > 0) throw new Error(`Wrapped says what is not true: ${problems.join('; ')}`);
 }
@@ -948,7 +957,12 @@ async function wrappedChecked(page, period) {
 }
 await sweep('wrapped', SIZES, (page) => wrappedChecked(page, 'last-12-months'), { discord: true });
 await sweep('wrapped-few', FEW, (page) => wrappedChecked(page, firstMonth), { discord: true });
-await sweep('wrapped-empty', FEW, (page) => wrappedAt(page, '2020'));
+// A time with no plays: nothing to save, so no key for it (a filled slab half a phone wide that did nothing).
+await sweep('wrapped-empty', FEW, async (page) => {
+  await wrappedAt(page, '2020');
+  if (await page.locator('[data-act="picture"]').isVisible())
+    throw new Error('Save as picture shows with nothing to save');
+});
 await sweep('wrapped-periods', FEW, async (page) => {
   await wrappedAt(page, 'last-12-months');
   await page.click('[data-act="period"]');

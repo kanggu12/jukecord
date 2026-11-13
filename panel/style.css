@@ -3251,10 +3251,22 @@ kbd {
 .wrapped-first .row {
   grid-template-columns: 48px minmax(0, 1fr);
 }
-/* The song's card alone in its row (a time with no song: every track played once) or the first track's alone: across
-   the row. */
+/* A card alone in the row (a song with no first track, which a time with plays does not have): across it. */
 .wrapped-hero > :only-child {
   grid-column: 1 / -1;
+}
+/* A time with no song (every track played once): the totals in the song's place, two by two, beside the first track in
+   its own column (alone across the row, its card was 1,408 px wide on a laptop with its row in the first 360). */
+@media (min-width: 1101px) {
+  .wrapped-hero > .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* The first track as a tile among the totals: its row under the tile's name, its words at the tile's inset, the pane
+   under the pointer reaching 8 px out as a list's rows' do. */
+.tile.wrapped-first .list {
+  margin: var(--s-4) calc(-1 * var(--s-8)) 0;
+  padding: 0;
 }
 /* Beside the song, on a wide window, the first track is a smaller record of its own: its album made bigger with its
    words beside it, in the middle of the card's room as the song's record is in its own. As a row under the card's
