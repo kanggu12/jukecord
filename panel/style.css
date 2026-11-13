@@ -294,6 +294,17 @@ body {
   font-feature-settings: "ss06";
   -webkit-font-smoothing: antialiased;
   overflow-wrap: anywhere;
+  /* Words that wrap are split into lines of about one length, so a word or two is never left alone on the last line
+     ("voice", "없음", "is none" read as a slip). Inherited by every text that wraps (a key's words do not wrap); a line
+     that fits is left as it is. Balanced, not "pretty": Chromium's pretty left "voice" alone under a full line, and two
+     short Korean words. The panel's texts are short; past six lines a browser wraps them as usual. */
+  text-wrap: balance;
+}
+/* A link, a token or what is typed has no words to balance: it fills each line as it goes (balanced, a link in its box
+   stood as a narrow column with a third of the box empty beside it). */
+.secret,
+textarea {
+  text-wrap: wrap;
 }
 /* The light behind the glass: the cover of the track playing, blurred far out of shape and toned for the theme
    (dimmed on the dark field, brightened on the pale one), fading in and out as tracks change. Two layers take turns.

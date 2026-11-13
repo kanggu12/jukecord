@@ -26,6 +26,7 @@
  * - sticky: on a touch screen (no hover), a :hover rule in effect: the browser keeps :hover on what was tapped last,
  *   so a key stays boxed or a row lit after a tap;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
+ * - lone-word: words that wrap with a word or two alone on their last line (a fifth of their longest line or less);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
  *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
@@ -1124,6 +1125,45 @@ window.__audit = () => {
       if (Math.max(...bases) - Math.min(...bases) > HALF)
         add('baseline', row, `baselines ${px(Math.max(...bases) - Math.min(...bases))} px apart: ${names(line)}`);
     }
+  }
+
+  // Words that wrap keep more than a word or two on their last line: a dialog's text, a hint, a toast ("voice",
+  // "없음", "is none" alone under a full line read as a slip). A paragraph is the box its words are laid out in (the
+  // first one round them that is not inline), and its lines are the lines of its own words (a box inside it with words
+  // of its own is a paragraph of its own). Not held to it: words cut short (a title held to two lines shows no last
+  // line), an address (no spaces to break at), and a narrow box (a chart's label).
+  const paragraphs = new Map();
+  const paragraphOf = (element) => {
+    let box = element;
+    while (box.parentElement && getComputedStyle(box).display === 'inline') box = box.parentElement;
+    return box;
+  };
+  for (const element of texts) {
+    if (element.closest('.secret, .sr, svg')) continue;
+    const box = paragraphOf(element);
+    if (!paragraphs.has(box)) paragraphs.set(box, []);
+    for (const node of element.childNodes)
+      if (node.nodeType === 3 && node.textContent.trim()) paragraphs.get(box).push(node);
+  }
+  for (const [box, nodes] of paragraphs) {
+    if (!seen(box) || box.scrollHeight > box.clientHeight + 2) continue;
+    const rects = [];
+    for (const node of nodes) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) if (rect.width >= 0.5 && rect.height >= 0.5) rects.push(rect);
+    }
+    // Its lines, top to bottom: the rects sharing half their height are one line.
+    const lines = bands(rects.map((rect) => ({ box: rect }))).map((line) => ({
+      top: Math.min(...line.map((item) => item.box.top)),
+      width: Math.max(...line.map((item) => item.box.right)) - Math.min(...line.map((item) => item.box.left)),
+    }));
+    if (lines.length < 2) continue;
+    lines.sort((a, b) => a.top - b.top);
+    const longest = Math.max(...lines.map((line) => line.width));
+    const last = lines.at(-1).width;
+    if (longest >= 120 && last <= longest / 5)
+      add('lone-word', box, `its last line ${px(last)} px wide under lines of ${px(longest)}`);
   }
 
   // The space between things comes from one scale. Read as the stylesheet resolved it (the typed object model gives
