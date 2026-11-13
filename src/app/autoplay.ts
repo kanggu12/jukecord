@@ -2,7 +2,8 @@
  * Autoplay: when a server's queue is about to run out, one more track, picked by the server's own mode.
  *
  * - history: one of the tracks the server played (within the history kept), drawn at random with more weight for
- *   the ones played more and liked by more people, none of the last thirty plays, none queued, not the one playing.
+ *   the ones played more and liked by more people, none of the last thirty plays (when every track is among them, none
+ *   of the newer half of them), none queued, not the one playing.
  * - related: the first track of YouTube's mix of the track playing (one yt-dlp listing, kept for a while) that was not
  *   played lately; the server's history when the track is not on YouTube or the mix has nothing new.
  *
@@ -190,10 +191,13 @@ export class Autoplay {
   // The track to queue for the server's mode, or null.
   private async pick(guildId: string, snapshot: PlayerSnapshot, signal: AbortSignal): Promise<Track | null> {
     const current = snapshot.track;
-    // Clear of the newest plays, of what waits (nothing, but a person may add meanwhile), and of the track playing.
-    const avoid = new Set(this.options.store.history.recentTrackIds(guildId, AUTOPLAY_RECENT));
-    for (const item of this.options.queue.list(guildId)) avoid.add(item.track.id);
-    if (current) avoid.add(current.id);
+    // Never what waits (nothing, but a person may add meanwhile) nor the track playing.
+    const taken = new Set<number>();
+    for (const item of this.options.queue.list(guildId)) taken.add(item.track.id);
+    if (current) taken.add(current.id);
+    // The tracks of the newest plays, newest first, each once: clear of them as well.
+    const recent = this.options.store.history.recentTrackIds(guildId, AUTOPLAY_RECENT);
+    const avoid = new Set([...taken, ...recent]);
     if (snapshot.autoplay === 'related' && current) {
       try {
         const related = await this.related(guildId, current, avoid, signal);
@@ -207,7 +211,13 @@ export class Autoplay {
         });
       }
     }
-    return this.fromHistory(guildId, avoid);
+    // A server whose every track is among its newest plays (a new one, or one that plays the same few tracks) had
+    // nothing to pick, and its music stopped with the queue: clear of the newer half of those tracks only, it plays on
+    // with the ones heard longest ago (with two tracks, the other one).
+    return (
+      this.fromHistory(guildId, avoid) ??
+      this.fromHistory(guildId, new Set([...taken, ...recent.slice(0, Math.floor(recent.length / 2))]))
+    );
   }
 
   /** A track drawn from the server's plays, weighted by how often it played and how many liked it; null for none. */

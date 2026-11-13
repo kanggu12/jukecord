@@ -88,27 +88,46 @@ describe('autoplay from the history', () => {
     const tracks = addTracks(store, 3);
     const [old, , last] = tracks;
     assert.ok(old && last);
-    // Played long ago (not among the newest thirty, which this short history is all of, but the track playing and
-    // the other one are left out anyway).
-    played(store, [old]);
+    // Thirty-one plays: the oldest one is far enough back to be picked.
+    const many = addTracks(store, 31, 'h');
+    played(store, [old, ...many]);
     actions.autoplay(DJ, 'history');
     queue.add(GUILD, [last.id], 'end', ALICE);
     players.get(GUILD).play();
-    await settle(clock);
-    const waiting = queue.list(GUILD);
-    assert.equal(waiting.length, 0, 'the newest plays are left out: nothing old enough to pick');
-    // A longer history: thirty-one plays, the oldest one far enough back to be picked.
-    const many = addTracks(store, 31, 'h');
-    played(store, many);
-    // A new start of a track (the next one): one pick for it.
-    queue.add(GUILD, [old.id], 'end', ALICE);
-    players.get(GUILD).skip();
     await settle(clock);
     const items = queue.list(GUILD);
     assert.equal(items.length, 1);
     assert.equal(items[0]?.addedBy, AUTOPLAY);
     // The only one clear of the newest thirty plays, the track playing and the queue: the oldest of the thirty-one.
-    assert.equal(items[0]?.track.id, many[0]?.id);
+    assert.equal(items[0]?.track.id, old.id);
+  });
+
+  it('picks from the older half of a short history, so a new server’s autoplay plays too', async () => {
+    const { clock, store, queue, players, actions, media } = setup();
+    // A server that played three tracks so far: every one of them is among its newest thirty plays.
+    const [first, second, third] = addTracks(store, 3);
+    assert.ok(first && second && third);
+    played(store, [first, second]);
+    actions.autoplay(DJ, 'history');
+    queue.add(GUILD, [third.id], 'end', ALICE);
+    const player = players.get(GUILD);
+    player.play();
+    await settle(clock);
+    // Not the track playing, nor the newest play: the one played longest ago.
+    assert.deepEqual(
+      queue.list(GUILD).map((item) => [item.track.id, item.addedBy]),
+      [[first.id, AUTOPLAY]],
+    );
+    // The music goes on: when the pick starts, the next pick is again one played longest ago, not the one just heard.
+    media.finish(180_000);
+    await flush();
+    await clock.advance(180_000);
+    await settle(clock);
+    assert.equal(player.snapshot().track?.id, first.id);
+    assert.deepEqual(
+      queue.list(GUILD).map((item) => item.track.id),
+      [second.id],
+    );
   });
 
   it('weighs a track by its plays and its likes', () => {

@@ -38,7 +38,8 @@ address ([who may do what](#who-may-do-what)).
 | Related to the last track | a track from YouTube's mix of it, or this server's plays when there is none       |
 
 Autoplay queues one track when the last one starts ("added by Autoplay"). A track you add at the end goes before it,
-**Stop** ends autoplay until a track starts again, and autoplay waits while a repeat is on.
+**Stop** ends autoplay until a track starts again, and autoplay waits while a repeat is on. A server whose every track
+is among its last 30 plays gets one of the tracks it heard longest ago.
 
 ### Adding tracks
 

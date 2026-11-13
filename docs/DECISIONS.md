@@ -303,9 +303,10 @@ combobox and listbox, so the keyboard and screen readers move through it from th
 
 When the queue runs out, a recommender service would know what plays and when; jukecord already knows what each server
 played and liked. "This server's plays" draws a track from its history, more often the ones played more and liked by
-more people, none of the last thirty plays, so it sounds like that server and asks nobody. "Related to the last track"
-asks YouTube (through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a server that
-wants something new, and falls back to the history. One track is queued when the last one starts, so it is fetched in
+more people, none of the last thirty plays, so it sounds like that server and asks nobody; a server whose every track
+is among those plays (a new one) gets one of the older half of them, so its music goes on too. "Related to the last
+track" asks YouTube (through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a
+server that wants something new, and falls back to the history. One track is queued when the last one starts, so it is fetched in
 time; its row says Autoplay, people's tracks added at the end go before it, and statistics and Wrapped leave it out of
 who added most. It is nobody's turn when people take turns (its tracks stay after people's), and the limit of tracks per
 person does not count it. A Stop ends it until a track starts again: the music does not start by itself after someone
