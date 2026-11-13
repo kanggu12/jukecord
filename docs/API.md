@@ -116,7 +116,7 @@ playlist) so a program does not need to ask again.
 | `stop` Stop playing; the queue stays | `POST /api/v1/guilds/{guild}/player/stop` | control | `jukecord stop` | `/stop` |
 | `lyrics` The lyrics of the track playing, timed when they can be (from LRCLIB, kept once found) | `GET /api/v1/guilds/{guild}/lyrics` | read | `jukecord lyrics` | `/lyrics` |
 | `stop-after` Stop when the current track ends (on), or play on after it (off); the queue stays | `PUT /api/v1/guilds/{guild}/player/stop-after` | control | `jukecord stop-after` | `/stop` |
-| `autoplay` When the queue runs out: nothing, a track from this server's plays, or one related to the last track | `PUT /api/v1/guilds/{guild}/player/autoplay` | control | `jukecord autoplay` | `/autoplay` |
+| `autoplay` When the queue runs out: nothing, a track from past plays, or one related to the last track | `PUT /api/v1/guilds/{guild}/player/autoplay` | control | `jukecord autoplay` | `/autoplay` |
 
 ### Queue
 

@@ -95,8 +95,8 @@ const TEXT = {
   // the sound being off).
   sound: { en: 'Sound', ko: '음향 효과' },
   presets: {
-    en: { off: 'original', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
-    ko: { off: '효과 없음', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
+    en: { off: 'original', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'night mode' },
+    ko: { off: '효과 없음', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤 모드' },
   },
   // The Skip button while a vote is under way: what the count is of, as a count ("1/2표" read as a half).
   skipVotes: {
@@ -115,7 +115,7 @@ const TEXT = {
   likes: { en: 'Liked', ko: '좋아요 한 곡' },
   noLikes: { en: 'No liked tracks yet', ko: '아직 좋아요 한 곡 없음' },
   autoplay: { en: 'Autoplay', ko: '자동 재생' },
-  autoplayHistory: { en: "Autoplay: this server's plays", ko: '자동 재생: 이 서버에서 들은 곡' },
+  autoplayHistory: { en: 'Autoplay: past plays', ko: '자동 재생: 들은 곡' },
   autoplayRelated: { en: 'Autoplay: related to the last track', ko: '자동 재생: 마지막 곡과 비슷한 곡' },
 } as const;
 

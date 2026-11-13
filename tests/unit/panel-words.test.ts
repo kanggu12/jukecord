@@ -89,3 +89,24 @@ describe('lines that wrap keep what reads as one', () => {
     assert.ok(words('ko').inviteFriendHint.includes(kept('쓸⍽수⍽있음')));
   });
 });
+
+describe('one name for one thing', () => {
+  it('names the autoplay mode from past plays the same on its key and in its dialog, and never repeats the name in its hint', () => {
+    for (const lang of ['en', 'ko'] as const) {
+      const said = words(lang);
+      const name = said.autoplayHistory.toLowerCase();
+      assert.ok(said.autoplayKey.history?.toLowerCase().endsWith(name), `${lang}: ${said.autoplayKey.history}`);
+      assert.ok(!said.autoplayHistoryHint.toLowerCase().includes(name), `${lang}: ${said.autoplayHistoryHint}`);
+    }
+    // Off is a state beside the other states, not a verb ("끄기"); the key says it as "반복 끔" does.
+    assert.equal(words('ko').autoplayOff, '끔');
+    assert.equal(words('ko').autoplayKey.off, '자동 재생 끔');
+    // What the 30 are.
+    assert.ok(words('en').autoplayHistoryHint.includes(kept('the last 30⍽played')));
+  });
+
+  it('names the night sound the same on the voice card and in the sound dialog', () => {
+    for (const lang of ['en', 'ko'] as const)
+      assert.equal(words(lang).presets.night, words(lang).presetsShort.night, lang);
+  });
+});

@@ -172,7 +172,7 @@ function showPlayer(answer: unknown): string {
     (player.repeat === 'off' ? '' : `\nRepeating ${player.repeat === 'track' ? 'this track' : 'the queue'}`) +
     // Autoplay, when it is on, on a line of its own after the repeat.
     (player.autoplay && player.autoplay !== 'off'
-      ? `\nAutoplay: ${player.autoplay === 'history' ? "from this server's plays" : 'related to the last track'}`
+      ? `\nAutoplay: ${player.autoplay === 'history' ? 'past plays' : 'related to the last track'}`
       : '');
   // What the player did by itself (a track taken out of the loop), on a line of its own.
   const notice = player.notice ? `\n${sayNotice(player.notice, 'en')}` : '';
@@ -226,7 +226,7 @@ const PRESET_NAMES: Readonly<Record<string, string>> = {
   bass: 'more bass',
   voices: 'clearer voices',
   bright: 'brighter',
-  night: 'softer at night',
+  night: 'night mode',
 };
 
 // A voice channel's sound: "Voice volume 80%, sound: more bass".
@@ -1025,7 +1025,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   autoplay: {
     name: 'autoplay',
     usage: '<off|history|related>',
-    summary: "When the queue runs out: nothing, this server's plays, or related tracks",
+    summary: 'When the queue runs out: nothing, past plays, or related tracks',
     request: (words) => {
       const mode = words.args[0];
       if (mode !== 'off' && mode !== 'history' && mode !== 'related')
