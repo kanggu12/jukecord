@@ -25,17 +25,20 @@ async function playing(queued: number[] = [0, 1, 2]) {
   const bus = new Bus();
   const queue = new QueueService(store.queue, bus);
   const media = new FakeMedia();
-  const player = new Player({
-    guildId: GUILD,
-    queue,
-    media,
-    history: store.history,
-    state: store.playerState,
-    bus,
-    clock,
-    log: createLogger({ level: 'error', sinks: [] }),
-    fetchTimeoutMs: 60_000,
-  });
+  // The server's player; made again as jukecord makes it when it starts again (see the restart below).
+  const make = () =>
+    new Player({
+      guildId: GUILD,
+      queue,
+      media,
+      history: store.history,
+      state: store.playerState,
+      bus,
+      clock,
+      log: createLogger({ level: 'error', sinks: [] }),
+      fetchTimeoutMs: 60_000,
+    });
+  const player = make();
   const tracks = addTracks(store, 3);
   queue.add(
     GUILD,
@@ -49,7 +52,7 @@ async function playing(queued: number[] = [0, 1, 2]) {
   // What a panel is sent, as it gets it (the panel's own type: the same fields, read the same way).
   const sent: Snapshot[] = [];
   bus.on('player', (snapshot) => sent.push(snapshot as unknown as Snapshot));
-  return { clock, media, player, sent, first: player.snapshot() as unknown as Snapshot };
+  return { clock, media, player, sent, make, first: player.snapshot() as unknown as Snapshot };
 }
 
 // Reads the snapshots one by one as the sleep timer does, from the play `first` was of: the index of the snapshot by
@@ -111,6 +114,17 @@ describe('the end of a play, from the snapshots', () => {
     after.player.setStopAfter(true);
     await after.clock.advance(SONG + 1000);
     assert.notEqual(endedAt(after.first, after.sent), -1);
+  });
+
+  it('is not taken from jukecord starting again: the track comes back where it was, made ready again', async () => {
+    const { clock, player, make, first, sent } = await playing();
+    await clock.advance(85_000);
+    // A while later jukecord starts again, and its new player brings the track back where it was (as it does, paused).
+    await clock.advance(20_000);
+    const restarted = make();
+    restarted.restore(player.snapshot().track, 'u1', 85_000);
+    assert.equal(restarted.snapshot().status, 'loading');
+    assert.equal(endedAt(first, sent.slice(-1)), -1);
   });
 
   it('is not taken from a seek, back to the start or forward, a pause or a resume', async () => {

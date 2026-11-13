@@ -25,8 +25,9 @@ export function playEnded(last: Player, next: Player | null): boolean {
   const length = last.durationMs ?? track.durationMs ?? Number.POSITIVE_INFINITY;
   const since = last.status === 'playing' ? Math.max(0, next.at - last.at) : 0;
   const reached = Math.min(last.positionMs + since, length);
-  // Not moved back: the same play.
-  if (next.positionMs >= reached - SLACK_MS) return false;
+  // Not back at the start, or not moved back at all: the same play (a restart of jukecord brings the track back where
+  // it was, made ready again: still the same play).
+  if (next.positionMs > SLACK_MS || next.positionMs >= reached - SLACK_MS) return false;
   // Back at the start after the end (repeat one), or a new play being made ready (the same track next in the queue).
   // Anything else is a seek back, which plays on.
   return reached >= length - SLACK_MS || (next.status === 'loading' && last.status !== 'loading');
