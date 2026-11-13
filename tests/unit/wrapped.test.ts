@@ -254,6 +254,7 @@ describe('Wrapped in the jukecord command', () => {
   const request = (line: string) =>
     COMMANDS.wrapped.request(parseLine(line.split(' ').filter(Boolean)), {
       queueItemId: async () => 0,
+      queueSize: async () => 0,
       currentTrackId: async () => 0,
       likedTrackId: async () => 0,
     }) as {

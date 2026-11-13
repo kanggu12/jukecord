@@ -130,6 +130,52 @@ export function commandHelp(command: Command): string {
   return `Usage: jukecord ${typed}\n  ${command.summary}`;
 }
 
+/**
+ * The commands of a group, for words that are the start of several command names and no command of their own
+ * ("playlist" for playlist save, load ...; "token" for token list, create, revoke); none for any other words.
+ */
+export function groupOf(typed: readonly string[]): OperationName[] {
+  if (typed.length === 0) return [];
+  const start = `${typed.join(' ')} `;
+  return OPERATIONS.filter((operation) => COMMANDS[operation].name.startsWith(start));
+}
+
+/** A group's help: how its commands are typed, then each with its arguments and what it does. */
+export function groupHelp(typed: readonly string[], operations: readonly OperationName[]): string {
+  // The words after the group's name, as the choice to make: "playlist <save|load|...> ...".
+  const choices = operations.map((operation) => COMMANDS[operation].name.split(' ')[typed.length]);
+  return [`Usage: jukecord ${typed.join(' ')} <${choices.join('|')}> ...`, ...listing(operations)].join('\n');
+}
+
+// Commands with their arguments and summaries in two columns while they fit an 80-column terminal; a long command
+// line puts its summary on the next line.
+function listing(operations: readonly OperationName[]): string[] {
+  const width = Math.max(
+    ...operations.map((operation) => COMMANDS[operation].name.length + COMMANDS[operation].usage.length),
+  );
+  const column = Math.min(width + 2, 34);
+  const lines: string[] = [];
+  for (const operation of operations) {
+    const command = COMMANDS[operation];
+    const left = `${command.name}${command.usage ? ` ${command.usage}` : ''}`;
+    if (left.length + 2 <= column) lines.push(`  ${left.padEnd(column)}${command.summary}`);
+    else lines.push(`  ${left}`, `  ${' '.repeat(column)}${command.summary}`);
+  }
+  return lines;
+}
+
+// The refusal of words after a command that takes none, with what was likely meant where a word reads as an
+// argument: "stop after" stopped the music at once, and "skip 3" skipped one track instead of playing the third.
+function noWords(operation: OperationName, rest: readonly string[]): UsageError {
+  const hint =
+    operation === 'stop' && rest[0] === 'after'
+      ? ' (to stop when this track ends: jukecord stop-after)'
+      : operation === 'skip' && /^\d+$/.test(rest[0] ?? '')
+        ? ` (to play number ${rest[0]} now: jukecord jump ${rest[0]})`
+        : '';
+  return new UsageError(`takes nothing after it${hint}`);
+}
+
 // Checks the options typed for a command against what the API takes for them, so a wrong one is said in the option's
 // own words, before jukecord is asked (the API's own answer named the validator's path, four times over).
 function checkOptions(operation: OperationName, request: Request, flags: ReadonlyMap<string, string | true>): void {
@@ -145,23 +191,13 @@ function checkOptions(operation: OperationName, request: Request, flags: Readonl
 
 /** The help text: every command with its arguments, grouped as the API document groups them. */
 export function helpText(): string {
-  const width = Math.max(
-    ...OPERATIONS.map((operation) => COMMANDS[operation].name.length + COMMANDS[operation].usage.length),
-  );
   const lines = [
     'jukecord: one queue, heard in a Discord voice channel and in the browser.',
     '',
     'Usage: jukecord [--url URL] [--token TOKEN] [--guild ID] [--json] <command>',
     '',
+    ...listing(OPERATIONS),
   ];
-  // Two columns while they fit an 80-column terminal; a long command line puts its summary on the next line.
-  const column = Math.min(width + 2, 34);
-  for (const operation of OPERATIONS) {
-    const command = COMMANDS[operation];
-    const left = `${command.name}${command.usage ? ` ${command.usage}` : ''}`;
-    if (left.length + 2 <= column) lines.push(`  ${left.padEnd(column)}${command.summary}`);
-    else lines.push(`  ${left}`, `  ${' '.repeat(column)}${command.summary}`);
-  }
   lines.push(
     '',
     'Settings: JUKECORD_URL, JUKECORD_TOKEN, JUKECORD_GUILD (or the options above).',
@@ -287,6 +323,12 @@ export async function run(
   const asked = words.args[0] === 'help' ? words.args.slice(1) : words.flags.has('help') ? words.args : [];
   if (asked.length > 0) {
     const found = findCommand(asked);
+    // A group's name alone ("help playlist"): its commands, which "there is no command" hid.
+    const group = found ? [] : groupOf(asked);
+    if (group.length > 0) {
+      print(groupHelp(asked, group));
+      return 0;
+    }
     if (!found) return mistake(`there is no command "${asked.join(' ')}" (see jukecord --help)`);
     print(commandHelp(found.command));
     return 0;
@@ -304,7 +346,18 @@ export async function run(
     if (SWITCHES.has(name) && value !== true) return mistake(`--${name} takes no value`);
   }
   const found = findCommand(words.args);
-  if (!found) return mistake(`there is no command "${words.args.join(' ')}" (see jukecord --help)`);
+  if (!found) {
+    // A group's name with no command of it ("jukecord token"): which ones there are, as the mistake it is.
+    const group = groupOf(words.args);
+    if (group.length > 0) {
+      const lines = groupHelp(words.args, group).split('\n').slice(1);
+      // Under --json the message alone; the list is for people.
+      if (words.flags.has('json')) return mistake(`${words.args.join(' ')}: say which one`);
+      print([`jukecord ${words.args.join(' ')}: say which one`, ...lines].join('\n'), true);
+      return 2;
+    }
+    return mistake(`there is no command "${words.args.join(' ')}" (see jukecord --help)`);
+  }
   const { operation, command, rest } = found;
   const { url, token } = connection(words.flags, env);
   const client = new Client(url, token);
@@ -314,23 +367,33 @@ export async function run(
     print(json ? JSON.stringify({ error: { code, message } }, null, 2) : text, true);
   };
   try {
+    // Words after a command that takes none were left out, and the command did what it does alone.
+    if (command.usage === '' && rest.length > 0) throw noWords(operation, rest);
     // The server is asked for only when something needs it, so a typing mistake is said before any connection.
     let guild: string | null = null;
     const guildOf = async (): Promise<string> => {
       guild ??= await chooseGuild(client, words.flags, env);
       return guild;
     };
+    // The queue as it is now, asked once for a command that looks at it twice (move: the track and the new place).
+    let queued: Promise<{ items: { id: number }[] }> | null = null;
+    const queueNow = async () => {
+      queued ??= guildOf().then(
+        (id) => client.call('queue', { params: { guild: id } }) as Promise<{ items: { id: number }[] }>,
+      );
+      return queued;
+    };
     const lookups = {
       // The queue as it is now, to turn a 1-based number into an item ID.
       queueItemId: async (position: number) => {
-        const queue = (await client.call('queue', { params: { guild: await guildOf() } })) as {
-          items: { id: number }[];
-        };
+        const queue = await queueNow();
         const item = queue.items[position - 1];
         if (!item)
           throw new UsageError(`there is no track number ${position} in the queue (it has ${queue.items.length})`);
         return item.id;
       },
+      // How many tracks are queued, to check a new place in the numbers people typed.
+      queueSize: async () => (await queueNow()).items.length,
       // The track playing now, for liking it.
       currentTrackId: async () => {
         const player = (await client.call('now-playing', { params: { guild: await guildOf() } })) as {

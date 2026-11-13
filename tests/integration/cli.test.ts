@@ -185,6 +185,70 @@ describe('the jukecord command', () => {
     for (const word of ['np', 'add', 'playlist save', 'token create', 'doctor', 'link'])
       assert.ok(help.out.includes(`  ${word}`), word);
   });
+
+  it('refuses words after a command that takes none, rather than doing what the command alone does', async () => {
+    const extra = { JUKECORD_GUILD: GUILD };
+    await cli('add three', extra);
+    // The player as it is, to see that nothing was asked of it.
+    const was = JSON.parse((await cli('np --json', extra)).out);
+    // "stop after" stopped the music at once; "skip 3" skipped one track instead of going to the third.
+    const stop = await cli('stop after', extra);
+    assert.equal(stop.code, 2);
+    assert.match(
+      stop.out,
+      /^jukecord stop: takes nothing after it \(to stop when this track ends: jukecord stop-after\)$/m,
+    );
+    const skip = await cli('skip 3', extra);
+    assert.equal(skip.code, 2);
+    assert.match(skip.out, /^jukecord skip: takes nothing after it \(to play number 3 now: jukecord jump 3\)$/m);
+    const queue = await cli('queue everything', extra);
+    assert.equal(queue.code, 2);
+    assert.match(queue.out, /^jukecord queue: takes nothing after it$/m);
+    assert.match(queue.out, /^Usage: jukecord queue$/m);
+    const now = JSON.parse((await cli('np --json', extra)).out);
+    assert.deepEqual([now.status, now.track?.id], [was.status, was.track?.id]);
+  });
+
+  it('says a wrong ID or number in words, before asking jukecord', async () => {
+    const extra = { JUKECORD_GUILD: GUILD };
+    const join = await cli('join abc', extra);
+    assert.equal(join.code, 2);
+    assert.match(join.out, /^jukecord join: say a voice channel ID \(see jukecord channels\)$/m);
+    const dj = await cli('dj abc', extra);
+    assert.equal(dj.code, 2);
+    assert.match(dj.out, /^jukecord dj: say a role ID \(see jukecord settings\) or none$/m);
+    const alerts = await cli('alerts abc', extra);
+    assert.equal(alerts.code, 2);
+    assert.match(alerts.out, /^jukecord alerts: say a channel ID \(see jukecord settings\) or none$/m);
+    const limit = await cli('limit 99999', extra);
+    assert.equal(limit.code, 2);
+    assert.match(limit.out, /^jukecord limit: say how many tracks, 0 to 1000 \(0 for no limit\)$/m);
+    // A new place past the queue's end, in the numbers people typed (the API's answer counted from 0).
+    await cli('add three', extra);
+    const size = JSON.parse((await cli('queue --json', extra)).out).items.length;
+    const move = await cli(`move 1 ${size + 5}`, extra);
+    assert.equal(move.code, 2);
+    assert.match(
+      move.out,
+      new RegExp(`^jukecord move: there is no number ${size + 5} in the queue \\(it has ${size}\\)$`, 'm'),
+    );
+  });
+
+  it("lists a group's commands for the group's name alone", async () => {
+    const help = await cli('help playlist');
+    assert.equal(help.code, 0);
+    assert.match(help.out, /^Usage: jukecord playlist <save\|load\|rename\|delete\|export\|import> \.\.\.$/m);
+    assert.match(help.out, /^ {2}playlist save <name> +Save the current track and the queue$/m);
+    assert.match(help.out, /^ {2}playlist import <name> <file>/m);
+    // Typed as a command, the same list, as the typing mistake it is.
+    const typed = await cli('token');
+    assert.equal(typed.code, 2);
+    assert.match(typed.out, /^jukecord token: say which one$/m);
+    assert.match(typed.out, /^ {2}token create <name> \[--scope read\|control\|admin\]$/m);
+    assert.match(typed.out, /^ +Make an API token \(shown once\)$/m);
+    // The start of a word is no group: "tok" is not "token".
+    assert.match((await cli('help tok')).out, /there is no command "tok"/);
+  });
 });
 
 describe('the jukecord command without a Discord bot', () => {

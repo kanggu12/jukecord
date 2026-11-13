@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import { sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
+import { Snowflake } from '../web/schemas.ts';
 
 /** The words after the command name, with the options pulled out ("--next", "--limit 20"). */
 export interface Words {
@@ -27,6 +28,8 @@ export interface Request {
 /** What a command may ask before building its request: the queue, to turn a number into an item. */
 export interface Lookups {
   queueItemId(position: number): Promise<number>;
+  /** How many tracks are queued now. */
+  queueSize(): Promise<number>;
   /** The track playing now (for `like`); a refusal when nothing is. */
   currentTrackId(): Promise<number>;
   /** The track at a 1-based number of `jukecord likes` (for `unlike`). */
@@ -118,6 +121,18 @@ function number(text: string | undefined, what: string): number {
   if (!text || !/^\d+$/.test(text) || Number(text) < 1) throw new UsageError(`say ${what} (1 or more)`);
   return Number(text);
 }
+
+// A Discord ID (a channel's, a role's) as the API takes one, checked here so a wrong one is said in words: the API's
+// answer was its pattern ("channelId must match pattern ...").
+const DISCORD_ID = new RegExp((Snowflake as { pattern?: string }).pattern ?? '^\\d{17,20}$');
+function discordId(text: string, what: string): string {
+  if (!DISCORD_ID.test(text)) throw new UsageError(what);
+  return text;
+}
+
+// The most tracks one person may have queued, as the API takes it.
+const PERSON_LIMIT_MAX =
+  (API['person-limit'].body?.properties as { tracks?: { maximum?: number } } | undefined)?.tracks?.maximum ?? 1000;
 
 // "on" or "off", for the settings that are one or the other.
 function onOff(text: string | undefined): boolean {
@@ -451,10 +466,14 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     name: 'move',
     usage: '<number> <new number>',
     summary: 'Move a track in the queue',
-    request: async (words, lookups) => ({
-      params: { item: await lookups.queueItemId(number(words.args[0], 'the number')) },
-      body: { index: number(words.args[1], 'the new number') - 1 },
-    }),
+    request: async (words, lookups) => {
+      const item = await lookups.queueItemId(number(words.args[0], 'the number'));
+      const to = number(words.args[1], 'the new number');
+      // Past the end, said in the numbers typed: the API counts places from 0 ("position 8 is outside the queue").
+      const size = await lookups.queueSize();
+      if (to > size) throw new UsageError(`there is no number ${to} in the queue (it has ${size})`);
+      return { params: { item }, body: { index: to - 1 } };
+    },
     show: showOk,
   },
   jump: {
@@ -571,7 +590,11 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     name: 'join',
     usage: '[channel ID]',
     summary: 'Join a voice channel',
-    request: (words) => ({ body: words.args[0] ? { channelId: words.args[0] } : {} }),
+    request: (words) => ({
+      body: words.args[0]
+        ? { channelId: discordId(words.args[0], 'say a voice channel ID (see jukecord channels)') }
+        : {},
+    }),
     show: (answer) => {
       const voice = answer as { current: { name: string } | null };
       return voice.current ? `Joined ${voice.current.name || 'a channel you cannot see'}` : 'Not in a voice channel';
@@ -598,8 +621,9 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'Who may change the music (none: everyone)',
     request: (words) => {
       const role = words.args[0];
-      if (!role) throw new UsageError('say a role ID (see jukecord settings) or none');
-      return { body: { roleId: role === 'none' ? null : role } };
+      const what = 'say a role ID (see jukecord settings) or none';
+      if (!role) throw new UsageError(what);
+      return { body: { roleId: role === 'none' ? null : discordId(role, what) } };
     },
     show: showSettings,
   },
@@ -772,8 +796,9 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'Where jukecord tells this server about trouble (none: nowhere)',
     request: (words) => {
       const channel = words.args[0];
-      if (!channel) throw new UsageError('say a channel ID (see jukecord settings) or none');
-      return { body: { channelId: channel === 'none' ? null : channel } };
+      const what = 'say a channel ID (see jukecord settings) or none';
+      if (!channel) throw new UsageError(what);
+      return { body: { channelId: channel === 'none' ? null : discordId(channel, what) } };
     },
     show: showSettings,
   },
@@ -906,7 +931,9 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'The most tracks one person may have queued',
     request: (words) => {
       const text = words.args[0];
-      if (!text || !/^\d+$/.test(text)) throw new UsageError('say how many tracks (0 for no limit)');
+      // The most the API takes, said here rather than as its field's range ("tracks is 0 to 1000") after asking.
+      if (!text || !/^\d+$/.test(text) || Number(text) > PERSON_LIMIT_MAX)
+        throw new UsageError(`say how many tracks, 0 to ${PERSON_LIMIT_MAX} (0 for no limit)`);
       return { body: { tracks: Number(text) } };
     },
     show: (answer) => {
