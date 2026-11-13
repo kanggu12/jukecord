@@ -1676,6 +1676,13 @@ img {
   padding: 0;
   margin-inline: calc(-1 * var(--s-8));
 }
+/* On a touch screen its rows' keys are a finger's height: 4 px more above and below each row keeps them apart (2 px
+   apart, the playlists' Load keys stood as one column of boxes). */
+@media (pointer: coarse) {
+  .dialog-content .channel {
+    padding-block: var(--s-4);
+  }
+}
 /* A row's keys as a list (trackMenu), in a dialog. */
 .menu-list {
   display: grid;
@@ -1861,6 +1868,13 @@ img {
 .channel .name:has(> .count-tag) {
   display: flex;
   flex-direction: column;
+}
+/* The name on one line, cut short when long (its title has it whole): a name of two lines made its row taller than the
+   next. */
+.playlist-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .count-tag {
   font-size: var(--fs-sm);
@@ -2196,11 +2210,22 @@ img {
     line-height: var(--lh-input);
   }
 }
+/* A field with its name over it (the name stays when the field is filled): the name in the size and ink of a section's
+   heading, 6 px over its field. */
+.labelled {
+  display: grid;
+  gap: var(--s-6);
+}
+.field-label {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+/* The key that fills the list from a file, under the list at its start (Import is the dialog's, beside Close). */
 .import-keys {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--s-8);
+  margin-top: var(--s-2);
 }
 
 /* ---- likes ------------------------------------------------------------------------------------------------------ */

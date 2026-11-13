@@ -149,6 +149,8 @@ const EN = {
   delete: 'Delete',
   deleteTitle: (name: string) => `Delete "${name}"?`,
   deleteText: 'The playlist is gone for good; the queue does not change.',
+  // A playlist's other keys, behind one key on its row.
+  playlistMenu: 'More for this playlist',
   revokeTitle: (name: string) => `Revoke "${name}"?`,
   revokeText: 'Scripts using this token stop working at once.',
   newName: 'New name',
@@ -467,6 +469,8 @@ const EN = {
     'Addresses one per line, an M3U, or a file exported from jukecord. A line that is not an address is searched on YouTube.',
   importPaste: 'The list, or a file chosen below',
   chooseFile: 'Choose a file',
+  // The import dialog's list, over its field.
+  importList: 'Tracks',
   importing: 'Importing',
   imported: (name: string, n: number, left: number) =>
     `Imported "${name}": ${n === 1 ? '1 track' : `${n} tracks`}${left > 0 ? ` · ${left} left out` : ''}`,
@@ -621,6 +625,7 @@ const KO: Strings = {
   delete: '지우기',
   deleteTitle: (name: string) => `"${name}" 플레이리스트를 지울까요?`,
   deleteText: '플레이리스트가 완전히 지워짐. 대기열은 그대로.',
+  playlistMenu: '이 플레이리스트 메뉴',
   revokeTitle: (name: string) => `"${name}" 토큰을 폐기할까요?`,
   revokeText: '이 토큰을 쓰는 스크립트가 바로 멈춤.',
   newName: '새 이름',
@@ -873,6 +878,7 @@ const KO: Strings = {
   importText: '한 줄에 주소 하나, M3U, jukecord에서 내보낸 파일을 받음. 주소가 아닌 줄은 YouTube에서 찾음.',
   importPaste: '목록을 붙여 넣거나 아래에서 파일을 고르세요',
   chooseFile: '파일 고르기',
+  importList: '곡 목록',
   importing: '가져오는 중',
   imported: (name: string, n: number, left: number) => `"${name}" 가져옴: ${n}곡${left > 0 ? ` · ${left}곡 빠짐` : ''}`,
   fileTooLarge: '파일이 1MiB보다 큼',

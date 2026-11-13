@@ -497,9 +497,28 @@ await sweep('clear-dialog', FEW, async (page) => {
   await tool(page, 'clear');
   await page.waitForSelector('.dialog');
 });
+// The saved playlists: each row one line of name over its count, Load, and one key for the rest. With three bare icons
+// beside Load a phone's names wrapped ("Quiet / hours") and the rows were of different heights.
 await sweep('playlists', FEW, async (page) => {
   await tool(page, 'load');
   await page.waitForSelector('.dialog .channel');
+  const rows = await page.$$eval('.dialog .channel', (items) =>
+    items.map((item) => {
+      // The name's lines: one box each for the words of a line.
+      const name = document.createRange();
+      name.selectNodeContents(item.querySelector('.name > b'));
+      return { height: item.getBoundingClientRect().height, lines: name.getClientRects().length };
+    }),
+  );
+  if (new Set(rows.map((row) => Math.round(row.height))).size > 1)
+    throw new Error(`playlist rows of different heights: ${rows.map((row) => row.height).join(', ')}`);
+  if (rows.some((row) => row.lines > 1)) throw new Error('a playlist name wraps');
+});
+// A playlist's other keys, behind its row's key: rename, export and delete in words.
+await sweep('playlist-menu', FEW, async (page) => {
+  await tool(page, 'load');
+  await page.locator('.dialog .channel [data-key="more"]').first().click();
+  await page.waitForSelector('.dialog .choice[data-choice="delete"]');
 });
 await sweep('shortcuts', FEW, async (page) => {
   await page.keyboard.press('?');
@@ -1381,7 +1400,8 @@ await sweep(
   ],
   async (page) => {
     await tool(page, 'load');
-    await page.locator('.dialog .channel [data-key="export"]').first().click();
+    await page.locator('.dialog .channel [data-key="more"]').first().click();
+    await page.click('.dialog .choice[data-choice="export"]');
     await page.waitForSelector('.dialog .choice[data-format="m3u"]');
   },
 );
@@ -1403,6 +1423,19 @@ await sweep(
       .fill(
         ['https://media.example/demo001', 'https://media.example/demo002', 'Example Band - Velvet Hours'].join('\n'),
       );
+    // Filled, each field still shows its name (a placeholder alone went with the first letter), and Import is the
+    // dialog's own key beside Close (it stood in the body, Close alone on a row under it).
+    const named = await page.$$eval('.dialog .import-form .field-label', (labels) =>
+      labels
+        .filter((label) => label.getClientRects().length > 0 && label.textContent.trim())
+        .map((label) => label.htmlFor),
+    );
+    if (named.join() !== 'import-name,import-list') throw new Error(`the filled fields' names shown: ${named.join()}`);
+    // The keys of the dialog on top (the last in the page; the playlists' own lie under it).
+    const keys = await page.$$eval('.dialog', (dialogs) =>
+      [...dialogs.at(-1).querySelectorAll('.dialog-keys .key')].map((key) => key.dataset.act ?? ''),
+    );
+    if (keys.join() !== 'import-go,') throw new Error(`the dialog's keys: ${keys.join()}`);
   },
 );
 // The queue's tools behind their key on a phone, autoplay among them with its mode.
