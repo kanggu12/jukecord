@@ -193,9 +193,12 @@ keeps the newest `JUKECORD_BACKUP_KEEP` (7).
 ```bash
 pod=$(kubectl -n jukecord get pod -l app.kubernetes.io/instance=jukecord,app.kubernetes.io/component=server \
   -o jsonpath='{.items[0].metadata.name}')
-file=$(kubectl -n jukecord exec "$pod" -- jukecord backup --json | sed -n 's/.*"file": *"\([^"]*\)".*/\1/p')
-kubectl -n jukecord cp "$pod:$file" "./${file##*/}"
+out=$(kubectl -n jukecord exec "$pod" -- jukecord backup) && file=${out%% (*} &&
+  kubectl -n jukecord cp "$pod:$file" "./${file##*/}"
 ```
+
+`jukecord backup` prints the copy's path and size (`/data/backups/jukecord-<time>.db (412 KiB)`); when it cannot make
+one, it says why and nothing is copied.
 
 To put a copy back, stop jukecord, start a pod of the same image on the volume, swap the database there, and start
 jukecord again. The claim is named after the release (`jukecord`), or is your `existingClaim`. The database it
