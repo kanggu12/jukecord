@@ -303,7 +303,6 @@ export function nowCard(live: Live): HTMLElement {
   const draw = () => {
     const player = state.player;
     const words = t();
-    (card.querySelector('#now-h') as HTMLElement).textContent = words.nowPlaying;
     // The Lyrics key says its name, and is there only where lyrics are looked up (JUKECORD_LYRICS).
     (lyricsKey.querySelector('.label') as HTMLElement).textContent = words.lyrics;
     lyricsKey.hidden = !state.status?.lyrics;
@@ -323,6 +322,8 @@ export function nowCard(live: Live): HTMLElement {
       // The glow behind the disc takes the cover's colours.
       const cover = player?.track ? coverUrl(guild(), player.track) : null;
       art.style.setProperty('--cover', cover ? cssUrl(cover) : 'none');
+      // And the card itself, whose light behind its glass is the cover's (style.css).
+      card.style.setProperty('--cover', cover ? cssUrl(cover) : 'none');
       // Another track (not the first drawing): it comes in from below.
       if (drawnTrack !== undefined && trackId !== drawnTrack && trackId !== null) {
         body.classList.remove('leaving');
@@ -335,8 +336,9 @@ export function nowCard(live: Live): HTMLElement {
     const status = player?.status ?? 'idle';
     const tone = { playing: 'play', paused: 'pause', loading: 'load', idle: 'idle' }[status];
     pill.className = `pill tone-${tone}`;
-    // Idle says itself in the title; a label saying it again would be noise.
-    pill.hidden = status === 'idle';
+    // The card's title is the state itself, its lamp before it ("Now playing" beside "Playing" said it twice, and beside
+    // "Paused" said two things): the separate label stays hidden.
+    pill.hidden = true;
     // A fetch waiting for its turn among every server's fetches says so: "Getting ready" with no progress said nothing.
     const label =
       status === 'loading' && player?.waiting
@@ -347,6 +349,12 @@ export function nowCard(live: Live): HTMLElement {
             ? words.idle
             : { playing: words.playing, paused: words.paused, loading: words.loading }[status];
     refill(pill, label, h('span', { class: 'dot' }), label);
+    refill(
+      card.querySelector('#now-h') as HTMLElement,
+      `${tone}|${status === 'idle' ? words.nowPlaying : label}`,
+      h('span', { class: `dot tone-${tone}` }),
+      status === 'idle' ? words.nowPlaying : label,
+    );
     // The track. Everything below is redrawn only when what it shows changes (refill): the title link and the keys
     // must stay the same elements while snapshots arrive, or a click on them is lost.
     const track = player?.track ?? null;

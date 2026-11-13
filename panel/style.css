@@ -22,17 +22,20 @@
 /* ---- tokens: dark (the default) ----------------------------------------------------------------------------- */
 :root {
   color-scheme: dark;
-  /* The field: one neutral grey, a step lighter at the top of the window (no coloured pools of light: the light behind
-     the glass is the cover's, while a track plays). */
-  --bg: #0d0e12;
-  --bg-top: #111318;
+  /* The field: a deep blue-black, a step lighter at the top of the window, with the brand's two lights far behind the
+     glass (blue from the top left, violet from the bottom right, as the first panel had them, much softer); the cover
+     of the track playing lights it from the top. */
+  --bg: #0b0d17;
+  --bg-top: #121627;
+  --glow-a: rgba(70, 104, 255, 0.15);
+  --glow-b: rgba(146, 84, 230, 0.11);
   --ambient: 0.24;
   --ambient-tone: saturate(0.45) brightness(0.7);
   /* The glass of the cards: one flat translucent pane (the field's light shows through it). */
-  --panel: rgba(30, 32, 39, 0.55);
-  --panel-solid: rgba(22, 23, 29, 0.96);
+  --panel: rgba(26, 30, 48, 0.58);
+  --panel-solid: rgba(19, 22, 36, 0.96);
   /* The same, with nothing showing through (less transparency). */
-  --panel-opaque: #16171d;
+  --panel-opaque: #151a2b;
   --edge: rgba(255, 255, 255, 0.085);
   --glass: blur(24px);
   /* One soft shadow under what floats over the field: a card, a sheet, a dialog. */
@@ -49,9 +52,13 @@
      faint ink 3.6:1), and as far apart as before. */
   --ink-2: #c2c6d1;
   --ink-3: #a7acba;
-  --key: #eef0f4;
-  --key-hi: #ffffff;
-  --key-ink: #0d0e12;
+  /* The brand's blue: the main key, the page in use, the choice made. One colour for "this is what you act on",
+     beside the colours of what things are (play, pause, load, a problem) and the mark's rainbow. */
+  --accent: #7c95ff;
+  --accent-soft: rgba(110, 138, 255, 0.17);
+  --key: #4762ee;
+  --key-hi: #3e58e0;
+  --key-ink: #ffffff;
   --play: oklch(0.79 0.15 152);
   --load: oklch(0.79 0.12 244);
   --pause: oklch(0.83 0.13 82);
@@ -74,14 +81,17 @@
 /* ---- tokens: light -------------------------------------------------------------------------------------------- */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #eef0f4;
-  --bg-top: #f6f7f9;
+  --bg: #f1f3fa;
+  --bg-top: #f9faff;
+  --glow-a: rgba(84, 116, 255, 0.11);
+  --glow-b: rgba(160, 96, 235, 0.08);
   --ambient: 0.16;
   --ambient-tone: saturate(0.45) brightness(1.2);
   --panel: rgba(255, 255, 255, 0.62);
   --panel-solid: rgba(255, 255, 255, 0.97);
   --panel-opaque: #ffffff;
   --edge: rgba(255, 255, 255, 0.75);
+  --glass-top: rgba(255, 255, 255, 0.95);
   --shadow: 0 12px 32px -20px rgba(30, 35, 60, 0.28);
   --raised: rgba(255, 255, 255, 0.7);
   --raised-2: rgba(255, 255, 255, 0.95);
@@ -92,8 +102,10 @@
   --ink: #14161d;
   --ink-2: #464b5c;
   --ink-3: #5b6174;
-  --key: #16181f;
-  --key-hi: #2a2d36;
+  --accent: #3d5bea;
+  --accent-soft: rgba(61, 91, 234, 0.11);
+  --key: #3d5bea;
+  --key-hi: #3450d4;
   --key-ink: #ffffff;
   --play: oklch(0.46 0.13 152);
   --load: oklch(0.46 0.13 250);
@@ -112,14 +124,17 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
-    --bg: #eef0f4;
-    --bg-top: #f6f7f9;
+    --bg: #f1f3fa;
+    --bg-top: #f9faff;
+    --glow-a: rgba(84, 116, 255, 0.11);
+    --glow-b: rgba(160, 96, 235, 0.08);
     --ambient: 0.16;
     --ambient-tone: saturate(0.45) brightness(1.2);
     --panel: rgba(255, 255, 255, 0.62);
     --panel-solid: rgba(255, 255, 255, 0.97);
     --panel-opaque: #ffffff;
     --edge: rgba(255, 255, 255, 0.75);
+    --glass-top: rgba(255, 255, 255, 0.95);
     --shadow: 0 12px 32px -20px rgba(30, 35, 60, 0.28);
     --raised: rgba(255, 255, 255, 0.7);
     --raised-2: rgba(255, 255, 255, 0.95);
@@ -130,8 +145,10 @@
     --ink: #14161d;
     --ink-2: #464b5c;
     --ink-3: #5b6174;
-    --key: #16181f;
-    --key-hi: #2a2d36;
+    --accent: #3d5bea;
+    --accent-soft: rgba(61, 91, 234, 0.11);
+    --key: #3d5bea;
+    --key-hi: #3450d4;
     --key-ink: #ffffff;
     --play: oklch(0.46 0.13 152);
     --load: oklch(0.46 0.13 250);
@@ -213,6 +230,23 @@
   --gap: 12px;
   --pad: 16px;
   --side-w: clamp(320px, 27vw, 500px);
+  /* The glass's top edge: a hairline of light along it, as glass catches it. */
+  --glass-top: rgba(255, 255, 255, 0.06);
+}
+/* Room that grows with the window, in the scale's own steps: a laptop's cards breathe more than a phone's, a wide
+   screen's more again, so the panel keeps its proportions instead of the same 12 and 16 px on every width. A short
+   window keeps the small room, which its lists need for their rows. */
+@media (min-width: 1280px) and (min-height: 860px) {
+  :root {
+    --gap: 16px;
+    --pad: 20px;
+  }
+}
+@media (min-width: 1800px) and (min-height: 900px) {
+  :root {
+    --gap: 20px;
+    --pad: 24px;
+  }
 }
 @media (pointer: coarse) {
   /* Fingers need 44px, the small controls included. */
@@ -250,7 +284,10 @@ body {
   margin: 0;
   /* The field: its own grey, a step lighter under the bar, fixed to the window. What the glass shows over it is the
      cover's light (.ambient, below) while a track plays; with nothing playing, the glass rests on the plain grey. */
-  background: linear-gradient(180deg, var(--bg-top), var(--bg) 320px) fixed var(--bg);
+  background:
+    radial-gradient(70vw 62vh at 8% 4%, var(--glow-a), transparent 72%) fixed,
+    radial-gradient(64vw 58vh at 96% 96%, var(--glow-b), transparent 72%) fixed,
+    linear-gradient(180deg, var(--bg-top), var(--bg) 320px) fixed var(--bg);
   color: var(--ink);
   /* The panel's words: the type scale's middle size, on the line height that centres them. */
   font: 400 var(--fs-md) / var(--lh-md) var(--font);
@@ -499,6 +536,12 @@ img {
   white-space: nowrap;
   color: var(--ink-2);
 }
+/* The playing card's title: the player's state, its lamp before it. */
+#now-h {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-8);
+}
 /* The lamp: lit in the state's colour (its own soft light round it, as a lamp has), unlit grey when nothing goes on. */
 .dot {
   width: 8px;
@@ -565,7 +608,8 @@ img {
   right: var(--s-12);
   bottom: calc((var(--bar-base) - var(--control)) / -2);
   height: 2px;
-  background: var(--ink);
+  border-radius: 1px;
+  background: var(--accent);
   pointer-events: none;
 }
 .account {
@@ -601,13 +645,15 @@ img {
   border-radius: 50%;
   flex: none;
   object-fit: cover;
-  background: var(--raised-2);
+  /* A person's letters on a colour of their own, picked from their name (dom.ts face), so people tell each other
+     apart at a glance; white letters on a tone dark enough for them. */
+  background: oklch(0.5 0.12 var(--hue, 265));
   display: grid;
   place-items: center;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
-  color: var(--ink-2);
+  color: #fff;
   overflow: hidden;
 }
 .avatar.sm {
@@ -670,7 +716,7 @@ img {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--side-w);
   gap: var(--gap);
-  padding: var(--gap) max(16px, var(--safe-right)) var(--gap) max(16px, var(--safe-left));
+  padding: var(--gap) max(var(--gap), 16px, var(--safe-right)) var(--gap) max(var(--gap), 16px, var(--safe-left));
   min-height: 0;
   height: calc(100dvh - var(--bar-h) - var(--listen-h));
 }
@@ -686,6 +732,30 @@ img {
 }
 
 /* ---- cards ----------------------------------------------------------------------------------------------------- */
+/* The playing card carries its track's colours: the cover, blurred far out of shape, behind the card's glass from the
+   disc's side, fading out across the card. The page around stays neutral; only the card of the music has its colour. */
+.card[aria-labelledby="now-h"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--cover, none) 20% 50% / cover no-repeat;
+  filter: blur(40px);
+  opacity: var(--card-cover, 0.42);
+  mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.55) 45%, transparent 85%);
+  clip-path: inset(0 round var(--r-lg));
+  transition: opacity 0.8s ease;
+  pointer-events: none;
+}
+:root[data-theme="light"] .card[aria-labelledby="now-h"] {
+  --card-cover: 0.3;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .card[aria-labelledby="now-h"] {
+    --card-cover: 0.3;
+  }
+}
 .card {
   /* Cards answer to their own width (the queue's tools lose their words when the card is narrow). */
   container: card / inline-size;
@@ -698,7 +768,9 @@ img {
   background: var(--panel);
   border: 1px solid var(--edge);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow);
+  box-shadow:
+    var(--shadow),
+    inset 0 1px 0 var(--glass-top);
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -971,9 +1043,9 @@ img {
   color: var(--ink);
 }
 .seg button[aria-pressed="true"] {
-  background: var(--raised-2);
+  background: var(--accent-soft);
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--line-2);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 45%, transparent);
 }
 /* A field in a head is of the head's small size, as its keys are. */
 .card-head .field {
@@ -1411,6 +1483,11 @@ img {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
+}
+/* In a card, a list's rows put their words at the card's inset, as its head's are, however wide the inset grows with
+   the window (each row's own 8 px, under its hover pane, plus the list's side). */
+.card .list {
+  padding-inline: calc(var(--pad) - var(--s-8));
 }
 /* A list that scrolls must not squeeze its rows to fit: each keeps the height of what it holds. */
 .list > * {
@@ -2151,7 +2228,7 @@ img {
 .channels {
   list-style: none;
   margin: 0;
-  padding: 0 var(--s-8);
+  padding: 0 calc(var(--pad) - var(--s-8));
   max-height: 214px;
 }
 .channel {
@@ -2218,9 +2295,34 @@ img {
   border-top: 1px solid var(--line);
   box-shadow: 0 -6px 24px -18px rgba(0, 0, 0, 0.6);
 }
+/* The way into listening here, the bar's one call to act: the brand's blue, in words, as the main keys are. Listening,
+   it rests in a soft blue with its bars dancing before the words that stop it. */
+.listen .key[data-act="listen"] {
+  background: var(--key);
+  border-color: transparent;
+  color: var(--key-ink);
+  font-weight: 600;
+  border-radius: var(--r-round);
+  padding: 0 var(--s-16);
+}
+.listen .key[data-act="listen"]:hover {
+  background: var(--key-hi);
+  border-color: transparent;
+}
 .listen .key[data-act="listen"][aria-pressed="true"] {
-  background: color-mix(in oklch, var(--load) 16%, transparent);
-  border-color: color-mix(in oklch, var(--load) 42%, transparent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  color: var(--ink);
+}
+/* The player's own keys on the bar, and the sleep timer: bare icons, a tint under the pointer. */
+.listen .key.bare,
+.listen .key.sleep {
+  background: none;
+  border-color: transparent;
+}
+.listen .key.bare:hover,
+.listen .key.sleep:hover {
+  background: var(--hover-tint);
 }
 /* Three bars that dance while the browser listens, standing still while the sound waits. Each bar is a box of its
    own scaled from its foot: the browser animates a scale without laying anything out or drawing it again (the
@@ -2231,8 +2333,8 @@ img {
   gap: 2px;
   width: 13px;
   height: 12px;
-  margin-left: 2px;
-  color: color-mix(in oklch, var(--load) 80%, var(--ink));
+  margin-right: 2px;
+  color: var(--accent);
 }
 .listen .key[data-act="listen"][aria-pressed="true"] .eq {
   display: flex;
@@ -2310,6 +2412,9 @@ img {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .listen .mini {
   display: none;
@@ -2436,6 +2541,11 @@ img {
 }
 .sheet .sheet-body > :first-child {
   padding-right: calc(var(--s-12) + var(--control-sm) + var(--pad));
+}
+/* A sheet floats over the page at its own size: its inset stays the phone's and the laptop's 16 px on any window (the
+   page's grows with the window's width; a sheet's room for its close key, 12 + 28 + 16, stays on the scale). */
+.sheet {
+  --pad: 16px;
 }
 /* A section of a sheet: its heading and what it holds at the card inset, a rule under it. */
 .section {
@@ -2615,7 +2725,7 @@ kbd {
 
 /* ---- statistics ----------------------------------------------------------------------------------------------- */
 .page {
-  padding: var(--gap) max(16px, var(--safe-right)) var(--gap) max(16px, var(--safe-left));
+  padding: var(--gap) max(var(--gap), 16px, var(--safe-right)) var(--gap) max(var(--gap), 16px, var(--safe-left));
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -3420,6 +3530,19 @@ kbd {
     width: var(--control);
     padding: 0;
   }
+  /* Icons alone, the keys are bare, as a player's own transport keys are (a row of boxed icons read as a toolbar); the
+     main key stays solid, and a key that is on (Repeat) shows it in the brand's soft blue. */
+  .now .keys .key:not(.primary) {
+    background: none;
+    border-color: transparent;
+  }
+  .now .keys .key:not(.primary):hover {
+    background: var(--hover-tint);
+  }
+  .now .keys .key:not(.primary)[aria-pressed="true"] {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
 }
 /* On the narrowest cards (phones up to about 400 wide) the five keys do not fit one row, and the last one alone on
    a second row read as "close". There the main key takes a row of its own and the other four share the next. The
@@ -3572,12 +3695,24 @@ kbd {
   }
   .listen .volume,
   .listen .faces-box,
-  .listen .key .label {
+  .listen .key.sleep .label {
     display: none;
   }
-  .listen > .key {
+  .listen > .key.sleep {
     width: var(--control);
     padding: 0;
+  }
+  .listen > .key[data-act="listen"] {
+    padding: 0 var(--s-12);
+  }
+  /* Listening, the key is its dancing bars alone (its words, "Stop listening here", name it to a screen reader and in
+     its tooltip): the title and the state beside it keep the bar's room. */
+  .listen > .key[data-act="listen"][aria-pressed="true"] {
+    width: var(--control);
+    padding: 0;
+  }
+  .listen > .key[data-act="listen"][aria-pressed="true"] .label {
+    display: none;
   }
   /* Nothing playing leaves the bar room: the Listen key says its name, the way into listening in the browser. */
   .listen.idle > .key[data-act="listen"] {
@@ -3918,7 +4053,8 @@ kbd {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: var(--s-8);
+  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane). */
+  padding: var(--s-8) calc(var(--pad) - var(--s-8));
 }
 /* Room after the last line, so it too can stand a third of the way down when it is sung. */
 .lyrics-body::after {

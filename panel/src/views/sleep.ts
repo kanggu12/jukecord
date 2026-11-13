@@ -38,7 +38,7 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
     const sign = `${set}|${label}`;
     if (key.dataset.sign !== sign) {
       key.dataset.sign = sign;
-      fill(key, icon('timer'), h('span', { class: set && afterTrack === null ? 'label num' : 'label' }, label));
+      fill(key, icon('moon'), h('span', { class: set && afterTrack === null ? 'label num' : 'label' }, label));
     }
     key.setAttribute('aria-pressed', String(set));
     const named = set ? `${words.sleep}: ${afterTrack !== null ? words.sleepEnd : words.sleepLeft(left)}` : words.sleep;

@@ -168,6 +168,8 @@ export function guildIconUrl(id: string, hash: string | null, size = 64): string
 /** A round picture with the person's initials behind it, shown when the picture is missing or fails to load. */
 export function face(name: string, url: string | null, extra = ''): HTMLElement {
   const box = h('span', { class: `avatar ${extra}`.trim(), title: name }, initials(name));
+  // The colour behind the letters: a hue from the name, the same for a person everywhere (style.css .avatar).
+  box.style.setProperty('--hue', String(hueOf(name)));
   if (url) {
     // Not lazy: the picture is not in the page until it has loaded, and a lazy picture outside the page never loads.
     const img = h('img', { src: url, alt: '', referrerpolicy: 'no-referrer' });
@@ -175,6 +177,13 @@ export function face(name: string, url: string | null, extra = ''): HTMLElement 
     img.onload = () => box.replaceChildren(img);
   }
   return box;
+}
+
+/** A hue (0 to 359) for a name: the same name always gets the same, and different names are spread round the wheel. */
+export function hueOf(name: string): number {
+  let hash = 0;
+  for (const char of name) hash = (Math.imul(hash, 31) + (char.codePointAt(0) ?? 0)) >>> 0;
+  return hash % 360;
 }
 
 /** One or two letters for a name ("Alice" A, "Blue Sky" BS, "한강 산책" 한산). */

@@ -1473,9 +1473,10 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
 
 // ---- the cover's light ---------------------------------------------------------------------------------------------
 // The light behind the glass is the cover's, and a soft light, not a tint: with the boldest covers playing (a green, an
-// amber, and the seed's most saturated, a purple), the field and a card's face stay near grey, measured on the page's
-// picture in OKLCH. 0.3.0 washed the whole panel in the cover's colour (the field's chroma up to 0.107, a card's face
-// up to 0.039, with the green cover of the README's picture); and the light must still be seen near the top.
+// amber, and the seed's most saturated, a purple), what the light adds to the field's colour and to a card's stays
+// small, measured on the page's picture in OKLab against the same places with the light off (the field and the glass
+// have a blue of their own). 0.3.0 washed the whole panel in the cover's colour (the field's chroma up to 0.107, a
+// card's face up to 0.039, with the green cover of the README's picture); and the light must still be seen at the top.
 const COVER_LIGHT = { covers: ['demo002', 'demo014', 'demo006'], field: 0.03, face: 0.02, lift: 0.01 };
 // A colour (0 to 255 each) in OKLab: lightness and the two axes, whose length is the chroma.
 function oklab([r, g, b]) {
@@ -1493,7 +1494,6 @@ function oklab([r, g, b]) {
     0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
   ];
 }
-const chroma = ([, a, b]) => Math.hypot(a, b);
 // The mean colour of some boxes ([x, y, width, height]) of the page as it is drawn, read from its picture on a blank
 // page's canvas (the panel's own page refuses pictures from data: addresses, rightly).
 async function drawn(page, boxes) {
@@ -1551,18 +1551,23 @@ await sweep(
         ];
       });
       const [top, gap, face] = (await drawn(page, where)).map(oklab);
-      // The same top of the field without the light: how much the light shows there.
+      // The same places without the light: what the light adds there, apart from the panel's own colours (its field
+      // and its glass have a blue of their own, which is not the cover's).
       await page.evaluate(() => {
         document.querySelector('.ambient').style.visibility = 'hidden';
       });
-      const [bare] = (await drawn(page, [where[0]])).map(oklab);
+      const [bareTop, bareGap, bareFace] = (await drawn(page, where)).map(oklab);
       await page.evaluate(() => {
         document.querySelector('.ambient').style.visibility = '';
       });
-      const lift = Math.hypot(...top.map((value, at) => value - bare[at]));
-      const field = Math.max(chroma(top), chroma(gap));
-      if (field > COVER_LIGHT.field) problems.push(`${cover}: the field's chroma ${field.toFixed(3)}`);
-      if (chroma(face) > COVER_LIGHT.face) problems.push(`${cover}: a card's chroma ${chroma(face).toFixed(3)}`);
+      // The colour the light adds: how far it moves a place's colour, its lightness aside.
+      const tint = (lit, bare) => Math.hypot(lit[1] - bare[1], lit[2] - bare[2]);
+      const lift = Math.hypot(...top.map((value, at) => value - bareTop[at]));
+      const field = Math.max(tint(top, bareTop), tint(gap, bareGap));
+      if (field > COVER_LIGHT.field)
+        problems.push(`${cover}: the light adds ${field.toFixed(3)} of colour to the field`);
+      if (tint(face, bareFace) > COVER_LIGHT.face)
+        problems.push(`${cover}: the light adds ${tint(face, bareFace).toFixed(3)} of colour to a card`);
       if (lift < COVER_LIGHT.lift) problems.push(`${cover}: the light shows ${lift.toFixed(3)} at the top`);
     }
     if (problems.length > 0) throw new Error(`the cover's light tints the panel: ${problems.join('; ')}`);

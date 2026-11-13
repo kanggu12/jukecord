@@ -49,8 +49,9 @@ export function listenBar(live: Live): HTMLElement {
   // moves (the browser does that without drawing anything again).
   const eq = h('span', { class: 'eq', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
   // Pause and skip, made once and kept: keys rebuilt on every snapshot would lose a click and the keyboard focus.
-  const pauseKey = h('button', { class: 'key square', type: 'button' });
-  const skipKey = h('button', { class: 'key square', type: 'button' }, icon('skip-forward'));
+  // Bare icons on the bar, as a player's own keys are: no box round each (a row of boxed icons read as a toolbar).
+  const pauseKey = h('button', { class: 'key square bare', type: 'button' });
+  const skipKey = h('button', { class: 'key square bare', type: 'button' }, icon('skip-forward'));
   const mini = h('div', { class: 'mini' }, pauseKey, skipKey);
   const art = h('div');
   const what = h('div', { class: 'what' });
@@ -257,12 +258,12 @@ export function listenBar(live: Live): HTMLElement {
 
   // A key's icon and words, changed only when they differ: replacing the inside of a key while it is being pressed
   // can lose the click.
-  const label = (key: HTMLButtonElement, name: Parameters<typeof icon>[0], words: string, text: boolean) => {
+  const label = (key: HTMLButtonElement, name: Parameters<typeof icon>[0] | null, words: string, text: boolean) => {
     const sign = `${name}|${words}|${text}`;
     if (key.dataset.sign === sign) return;
     key.dataset.sign = sign;
-    // The Listen key keeps its dancing bars (style.css shows them while it is pressed).
-    fill(key, icon(name), text ? h('span', { class: 'label' }, words) : null, key === toggle ? eq : null);
+    // The Listen key says what it does in words, its dancing bars before them while it is pressed (style.css).
+    fill(key, key === toggle ? eq : null, name ? icon(name) : null, text ? h('span', { class: 'label' }, words) : null);
     key.title = words;
     key.setAttribute('aria-label', words);
   };
@@ -275,7 +276,9 @@ export function listenBar(live: Live): HTMLElement {
     toggle.setAttribute('aria-pressed', String(state.listening && !retry));
     // The key's bars dance only while sound plays here (in time), and rest while paused or catching up.
     toggle.classList.toggle('sounding', state.listening && sync === 'in-sync' && player?.status === 'playing');
-    label(toggle, 'headphones', state.listening && !retry ? words.stopListening : words.listenHere, true);
+    label(toggle, null, state.listening && !retry ? words.stopListening : words.listenHere, true);
+    // The sleep timer stops this browser's listening: there only while it listens.
+    sleep.hidden = !state.listening;
     // What plays, with this browser's state under it.
     // Not listening here, the line says nothing: the Listen key beside it says what it does (a line telling people to
     // press it was a hint nobody needed).
