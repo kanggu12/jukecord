@@ -39,10 +39,19 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
     const set = until !== null || afterPlay !== null;
     const left = until === null ? '' : clockLeft(until - Date.now());
     const label = afterPlay !== null ? words.sleepEnd : set ? left : words.sleep;
-    const sign = `${set}|${label}`;
+    // And in short words, for a narrow bar (style.css picks one): "Sleep", the time left, "Track end".
+    const short = afterPlay !== null ? words.sleepEndShort : set ? left : words.sleepShort;
+    const sign = `${set}|${label}|${short}`;
     if (key.dataset.sign !== sign) {
       key.dataset.sign = sign;
-      fill(key, icon('moon'), h('span', { class: set && afterPlay === null ? 'label num' : 'label' }, label));
+      // The time in figures of one width: the key keeps its width as it counts down.
+      const figures = set && afterPlay === null ? ' num' : '';
+      fill(
+        key,
+        icon('moon'),
+        h('span', { class: `label long${figures}` }, label),
+        h('span', { class: `label short${figures}` }, short),
+      );
     }
     key.setAttribute('aria-pressed', String(set));
     const named = set ? `${words.sleep}: ${afterPlay !== null ? words.sleepEnd : words.sleepLeft(left)}` : words.sleep;

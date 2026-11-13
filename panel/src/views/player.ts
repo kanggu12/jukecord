@@ -265,7 +265,8 @@ export function nowCard(live: Live): HTMLElement {
   const now = h('span', { class: 'num' }, '0:00');
   const end = h('span', { class: 'num' }, '');
   const progress = h('div', { class: 'progress' }, bar, h('div', { class: 'times' }, now, end));
-  const pause = h('button', { class: 'key primary', type: 'button', 'data-act': 'pause' });
+  // The main key holds its three faces in one place (see draw), each shown in turn.
+  const pause = h('button', { class: 'key primary faces', type: 'button', 'data-act': 'pause' });
   const skip = h('button', { class: 'key', type: 'button', 'data-act': 'skip' });
   const stop = h('button', { class: 'key', type: 'button', 'data-act': 'stop' });
   const repeat = h('button', { class: 'key square', type: 'button', 'data-act': 'repeat' });
@@ -467,10 +468,41 @@ export function nowCard(live: Live): HTMLElement {
     // The key that has the keyboard focus now, to hand it on if it is not drawn any more (below).
     const focused = keys.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
     keys.hidden = keySet === 'none';
+    // Skip alone (a vote) is a key with its words and its face at every width: the narrow cards' row of bare icons is
+    // for the whole transport (style.css).
+    keys.classList.toggle('alone', keySet === 'skip');
     for (const key of [pause, stop, repeat]) key.hidden = keySet !== 'all';
     skip.hidden = keySet === 'none';
-    const pauseWords = moving ? words.pause : status === 'paused' ? words.resume : words.play;
-    refill(pause, `${moving}|${pauseWords}`, icon(moving ? 'pause' : 'play'), pauseWords);
+    // The main key: Pause while the music plays or gets ready, Resume while paused, Play with nothing playing. Its three
+    // faces share one place, the two not shown hidden in it, so the key is as wide as its widest face whatever it says:
+    // Skip, Stop and Repeat after it stay put when the music pauses (Resume was 11 px wider than Pause, 14 in Korean,
+    // and moved them).
+    const face = moving ? 'pause' : status === 'paused' ? 'resume' : 'play';
+    // While the track gets ready (waiting for its turn to download, or downloading) the key is at work, as a key whose
+    // press is under way is: the loader turning in place of its icon, and presses let go (see pause.onclick). Pause
+    // then only marked the track to start paused, which nothing showed, and a second press was told "it is already
+    // paused" under a key that still said Pause.
+    const getting = status === 'loading';
+    const faceWords = { pause: words.pause, resume: words.resume, play: words.play };
+    refill(
+      pause,
+      `${face}|${getting}|${Object.values(faceWords).join('|')}`,
+      ...(['pause', 'resume', 'play'] as const).map((name) =>
+        h(
+          'span',
+          // The faces not shown are hidden from screen readers too: the key's name is the one it shows.
+          { class: 'face', 'aria-hidden': name === face ? null : 'true' },
+          name === face && getting ? icon('loader-circle', 'spin') : icon(name === 'pause' ? 'pause' : 'play'),
+          faceWords[name],
+        ),
+      ),
+    );
+    // At work while the track gets ready, said to screen readers as a busy key's is (aria-disabled keeps the keyboard's
+    // focus on it, where disabled would drop it); a press under way (act()) sets and clears it itself.
+    if (!pause.classList.contains('busy')) {
+      if (getting) pause.setAttribute('aria-disabled', 'true');
+      else pause.removeAttribute('aria-disabled');
+    }
     // A key turned off with the focus on it hands it to the main key, or with that off too, to the add field.
     const addField = document.getElementById('add-input');
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
@@ -491,6 +523,10 @@ export function nowCard(live: Live): HTMLElement {
     // Its name says the same in words, the count too ("1/2" is read out as a half).
     skip.title = skipTitle();
     skip.setAttribute('aria-label', skip.title);
+    // A vote cast shows as a key that is on, as Repeat on does (the count's words alone changed by a letter or two):
+    // it stays cast until the track goes, a second press changing nothing. A Skip that is no vote has no such state.
+    if (skipIsVote()) skip.setAttribute('aria-pressed', String(votes.voted));
+    else skip.removeAttribute('aria-pressed');
     setOff(skip, !maySkip() || !track, pause, addField);
     refill(stop, words.stop, icon('square'), h('span', { class: 'label' }, words.stop));
     stop.title = words.stop;
@@ -587,8 +623,13 @@ export function nowCard(live: Live): HTMLElement {
 
   pause.onclick = () => {
     const status = state.player?.status ?? 'idle';
-    // Paused or idle: play on (or start the queue). Playing or loading: pause.
-    void act(pause, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
+    // The track getting ready: nothing to pause yet, the key at work (see draw).
+    if (status === 'loading') return;
+    // Paused or idle: play on (or start the queue). Playing: pause. Drawn again once answered: the press's busy look
+    // gone, the key shows whether the track is getting ready by then (starting the queue gets one ready).
+    void act(pause, () =>
+      status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild()),
+    ).finally(draw);
   };
   skip.onclick = () => {
     // A press while the last skip is under way asks nothing more (act() would refuse it): nor does the card move, or the

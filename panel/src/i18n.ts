@@ -110,6 +110,10 @@ const EN = {
   listenFailed: 'This browser cannot play the track',
   volume: 'Volume',
   listeners: (n: number) => (n === 1 ? '1 listening' : `${n} listening`),
+  // The bar's Stop and sleep timer keys in short words, where the bar is narrow (their whole words are their names).
+  stopListeningShort: 'Stop',
+  sleepShort: 'Sleep',
+  sleepEndShort: 'Track end',
   // Menu.
   theme: 'Theme',
   themeSystem: 'Auto',
@@ -652,6 +656,9 @@ const KO: Strings = {
   listenFailed: '이 브라우저는 이 곡을 틀 수 없음',
   volume: '음량',
   listeners: (n: number) => `${n}명 듣는 중`,
+  stopListeningShort: '끄기',
+  sleepShort: '타이머',
+  sleepEndShort: '이 곡까지',
   theme: '테마',
   themeSystem: '자동',
   themeLight: '라이트',

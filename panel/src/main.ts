@@ -308,7 +308,8 @@ function frame(): void {
     // One label for the state of the connection, then whether this login may only look. A guest's is the connection's
     // alone: its account key and menu say it is a guest ("Guest" here as well made three in the bar, beside a lamp
     // that told no state). Someone without the DJ role whose Skip is a vote may do more than look: the label says that
-    // (it said "View only" beside a Skip key that worked).
+    // (it said "View only" beside a Skip key that worked). What a login may do is no state of the music or the
+    // connection: its lamp is unlit, as Browser only's is (in the pause colour it read as "paused").
     const guestLogin = state.me?.kind === 'guest';
     const limited = Boolean(guild) && !mayControl();
     const voter = limited && maySkip();
@@ -324,7 +325,7 @@ function frame(): void {
               : state.status && !state.status.discord
                 ? ['bad', words.discordDown]
                 : limited
-                  ? ['pause', voter ? words.skipByVote : words.lookOnly]
+                  ? ['idle', voter ? words.skipByVote : words.lookOnly]
                   : ['play', words.connected];
     pill.className = `pill tone-${tone}`;
     pill.title =
@@ -628,6 +629,8 @@ function shortcuts(): void {
     const keyboardKey = target.closest('button, a, [role="slider"]')?.matches(':focus-visible') ?? false;
     if (event.key === ' ' && !keyboardKey) {
       event.preventDefault();
+      // The track getting ready: nothing to pause yet, as the main key (at work then) says.
+      if (player.status === 'loading') return;
       void act(null, () => (player.status === 'paused' ? api.resume(guild) : api.pause(guild)));
     } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && !target.closest('[role="slider"]')) {
       event.preventDefault();

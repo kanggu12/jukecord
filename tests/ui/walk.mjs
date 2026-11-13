@@ -520,6 +520,40 @@ if (!ONLY || ONLY.has('listening')) {
 await api('POST', '/guilds/local/player/pause');
 await until('paused');
 await sweep('paused', SIZES);
+// The keys after the main key stay put as the music plays, pauses and stops (Resume was 11 px wider than Pause, 14 in
+// Korean on a phone, and moved Skip, Stop and Repeat): the main key keeps one width whichever of its words it shows.
+await sweep(
+  'keys-stay',
+  [
+    [390, 844],
+    [412, 915],
+    [1440, 900],
+  ],
+  async (page) => {
+    const inject = await intercept(page);
+    await page.reload();
+    await page.waitForSelector('.now .keys:not([hidden])');
+    const now = await api('GET', '/guilds/local/player');
+    const places = [];
+    for (const [step, change] of [
+      { status: 'playing' },
+      { status: 'idle', track: null },
+      { status: 'paused' },
+    ].entries()) {
+      inject({ type: 'player', player: { ...now, ...change, version: now.version + 1000 + step } });
+      await page.waitForTimeout(250);
+      places.push(
+        await page.evaluate(() =>
+          [...document.querySelectorAll('.now .keys > .key')]
+            .filter((key) => key.getClientRects().length > 0)
+            .map((key) => `${key.dataset.act} ${Math.round(key.getBoundingClientRect().left * 2) / 2}`)
+            .join(', '),
+        ),
+      );
+    }
+    if (new Set(places).size > 1) throw new Error(`the keys move: ${places.join(' / ')}`);
+  },
+);
 await sweep('menu', FEW, async (page) => {
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet .section');
@@ -587,9 +621,30 @@ const NARROW = [
   [412, 915],
   [744, 1000],
 ];
+// The strip a toast hangs in above the listening bar, on a narrow window, is solid: nothing of the page shows through
+// it (in the top bar, whose glass is its backdrop, its own blur saw nothing, and the row behind showed through its thin
+// glass in the 8 px between the toast and the bar).
+async function stripIsSolid(page) {
+  const strip = await page.evaluate(() => {
+    const element = document.querySelector('.toasts');
+    const look = getComputedStyle(element);
+    return {
+      position: look.position,
+      background: look.backgroundColor,
+      // Where it ends, and where the listening bar starts: they meet (a pixel between them showed the page).
+      bottom: element.getBoundingClientRect().bottom,
+      bar: document.querySelector('.listen').getBoundingClientRect().top,
+    };
+  });
+  if (strip.position !== 'absolute') return;
+  if (!/^rgb\(/.test(strip.background)) throw new Error(`the toast's strip is ${strip.background}`);
+  if (Math.abs(strip.bottom - strip.bar) > 0.5)
+    throw new Error(`the toast's strip ends at ${strip.bottom} px, the listening bar starts at ${strip.bar}`);
+}
 await sweep('toast', NARROW, async (page) => {
   await tool(page, 'dedupe');
   await page.waitForSelector('.toast');
+  await stripIsSolid(page);
 });
 await sweep(
   'toast-discord',
@@ -597,6 +652,7 @@ await sweep(
   async (page) => {
     await tool(page, 'dedupe');
     await page.waitForSelector('.toast');
+    await stripIsSolid(page);
   },
   { discord: true },
 );
@@ -1044,9 +1100,23 @@ await sweep('notice', FEW, async (page) => {
   });
   await page.waitForSelector('.now .player-note:not([hidden])');
 });
-// A track whose fetch waits for its turn among every server's fetches.
+// A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so the main key and the
+// listening bar's are at work, as a key whose press is under way is: the loader turning in place of Pause, and presses
+// let go (Pause there only marked the track to start paused, which nothing showed: a big Pause over "Waiting to
+// download" at 0:00).
 await sweep('waiting', FEW, async (page) => {
   await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
+  const keys = await page.evaluate(() =>
+    ['.now [data-act="pause"]', '.listen .mini > .key:first-child']
+      .map((selector) => document.querySelector(selector))
+      .filter((key) => key?.getClientRects().length)
+      .map((key) => ({
+        busy: key.getAttribute('aria-disabled') === 'true',
+        turning: [...key.querySelectorAll('svg.spin')].some((icon) => icon.getClientRects().length > 0),
+      })),
+  );
+  if (keys.length === 0 || keys.some((key) => !key.busy || !key.turning))
+    throw new Error(`the keys while the track waits: ${JSON.stringify(keys)}`);
 });
 // The server's choices in the menu: their names start at one place, whatever stands before them (Everyone's people icon
 // and the roles' dots: the dots were 6 px narrower, and the roles' names 6 px left of Everyone), and the choice made is
@@ -1114,6 +1184,13 @@ await sweep(
   'view-only',
   FEW,
   async (page) => {
+    // "View only" is what the login may do, no state of the music: its lamp unlit (in the pause colour it read as
+    // "paused").
+    await page.waitForFunction(() =>
+      /View\sonly|보기\s전용/.test(document.querySelector('.bar .pill')?.textContent ?? ''),
+    );
+    const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
+    if (!lamp.includes('tone-idle')) throw new Error(`the bar's "View only" is ${lamp}`);
     await tool(page, 'load');
     await page.waitForSelector('.dialog .channel');
   },
@@ -1350,21 +1427,53 @@ await sweep('sleep-menu', FEW, async (page) => {
   const icons = await page.locator('.dialog .choice > svg:not(.check)').count();
   if (icons > 0) throw new Error(`the timer's choices carry ${icons} icons`);
 });
-await sweep('sleep', [...NARROW, ...FEW], async (page) => {
+// The listening bar while this browser listens, as a person sees it: what its Stop and timer keys say, what the timer's
+// key looks like, and how far its parts reach.
+async function listeningBar(page) {
+  return page.evaluate(() => {
+    const words = (key) =>
+      [...(key?.querySelectorAll('.label') ?? [])]
+        .filter((label) => label.getClientRects().length > 0)
+        .map((label) => label.textContent.trim())
+        .join(' ');
+    const sleep = document.querySelector('.listen [data-act="sleep"]');
+    const parts = [...document.querySelectorAll('.listen > *')].filter((part) => part.getClientRects().length > 0);
+    return {
+      stop: words(document.querySelector('.listen [data-act="listen"]')),
+      sleep: words(sleep),
+      face: sleep ? getComputedStyle(sleep).backgroundColor : '',
+      right: Math.max(...parts.map((part) => part.getBoundingClientRect().right)),
+      width: window.innerWidth,
+    };
+  });
+}
+// The timer set for thirty minutes, from the bar: its key shows it is on and the time left, beside Stop in words, at
+// every width (a phone showed a moon that looked the same set or not, and the Stop key as a circle of bars).
+async function sleepSet(page) {
   await listenHere(page);
+  const before = await listeningBar(page);
   await page.click('[data-act="sleep"]');
   await page.click('.dialog [data-sleep="30"]');
   await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
-});
+  // The press's own tint under the pointer gone, as a person sees the key a moment later.
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const after = await listeningBar(page);
+  const problems = [];
+  if (!before.stop || !before.sleep) problems.push(`the keys say "${before.stop}" and "${before.sleep}"`);
+  if (!/^\d+:\d\d$/.test(after.sleep)) problems.push(`the set timer's key says "${after.sleep}", not the time left`);
+  if (after.face === before.face) problems.push('the set timer looks as one not set');
+  for (const bar of [before, after])
+    if (bar.right > bar.width + 0.5) problems.push(`the bar reaches ${Math.round(bar.right)} px of ${bar.width}`);
+  if (problems.length > 0) throw new Error(problems.join('; '));
+}
+// Phones, a small tablet's width between them and the tablets (at 561 to 680 px the bar ran past the window's edge
+// while listening), the tablets and the laptops.
+await sweep('sleep', [...NARROW, [600, 960], ...FEW], sleepSet);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 // Listening with nothing playing, the timer set: the bar keeps to the phone's width.
-await sweep('sleep-idle', NARROW, async (page) => {
-  await listenHere(page);
-  await page.click('[data-act="sleep"]');
-  await page.click('.dialog [data-sleep="30"]');
-  await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
-});
+await sweep('sleep-idle', NARROW, sleepSet);
 
 // Inviting: a listening link for guests with its QR code and the links that work, and the host's login link for a
 // friend. The key beside the listeners opens it.
@@ -1624,7 +1733,7 @@ await until('playing');
 async function skipSays(page, voted) {
   // The count comes with the live state, a moment after the page: waited for (and said missing below if it never came).
   await page.waitForSelector('.now [data-act="skip"] .votes', { timeout: 10000 }).catch(() => {});
-  const { text, lang, rows } = await page.evaluate(() => {
+  const { text, lang, rows, word, box, pressed } = await page.evaluate(() => {
     const row = document.querySelector('.now .keys');
     const tops = new Map();
     for (const key of row?.querySelectorAll(':scope > .key') ?? []) {
@@ -1632,26 +1741,40 @@ async function skipSays(page, voted) {
       const top = Math.round(key.getBoundingClientRect().top);
       tops.set(top, (tops.get(top) ?? 0) + 1);
     }
+    const skip = row?.querySelector('[data-act="skip"]');
+    const look = skip ? getComputedStyle(skip) : null;
+    const seen = (colour) => colour && !/^rgba\(\d+, \d+, \d+, 0\)$/.test(colour) && colour !== 'transparent';
     return {
-      text: row?.querySelector('[data-act="skip"] .votes')?.textContent ?? '',
+      text: skip?.querySelector('.votes')?.textContent ?? '',
       lang: document.documentElement.lang,
       rows: [...tops.values()],
+      // The key's own word and its box, as a person sees them.
+      word: skip?.querySelector('.label')?.getClientRects().length ? skip.querySelector('.label').textContent : '',
+      box: Boolean(look && (seen(look.backgroundColor) || seen(look.borderTopColor))),
+      pressed: skip?.getAttribute('aria-pressed') ?? null,
     };
   });
   const want = lang === 'ko' ? `${voted ? '투표 완료' : '투표'} 1/2` : `${voted ? 'vote cast' : 'votes'} 1/2`;
   if (text !== want) throw new Error(`Skip's count says "${text}", not "${want}"`);
   if (rows.length > 2 || (rows.length === 2 && rows[0] !== 1)) throw new Error(`the keys lie in rows of ${rows}`);
+  // A key that looks like one and says what it does, at every width (on a phone it was its count beside a bare icon,
+  // which read as a line of status), and the vote cast shown as a key that is on (before and after differed by a
+  // letter).
+  if (!word || !box) throw new Error(`the vote's Skip key says "${word}"${box ? '' : ' with no box round it'}`);
+  if (pressed !== String(voted)) throw new Error(`the vote's Skip key is pressed: ${pressed}, voted: ${voted}`);
 }
-// Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
-// count stays on the key when a narrow row shows icons alone), and the bar does not call them "View only" while their
-// Skip works.
+// Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width a key
+// with its word, its box and its count, and the bar does not call them "View only" while their Skip works.
 await sweep(
   'vote-skip',
   SIZES,
   async (page) => {
     await skipSays(page, false);
     const said = (await page.locator('.bar .pill').textContent()) ?? '';
-    if (/View only|보기 전용/.test(said)) throw new Error(`the bar says "${said}" while Skip is a vote`);
+    if (/View\sonly|보기\s전용/.test(said)) throw new Error(`the bar says "${said}" while Skip is a vote`);
+    // What a login may do is no state of the music: its lamp unlit (in the pause colour it read as "paused").
+    const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
+    if (!lamp.includes('tone-idle')) throw new Error(`the bar's "${said}" is ${lamp}`);
   },
   { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } } },
 );
@@ -1690,6 +1813,7 @@ await sweep(
 await sweep('take-turns', [...NARROW, [1440, 900]], async (page) => {
   await tool(page, 'turns');
   await page.waitForSelector('.toast');
+  await stripIsSolid(page);
 });
 // The voice channel's sound: the volume and a preset on, in the voice card, and the presets' dialog open over it.
 await api('PUT', '/guilds/local/voice/volume', { percent: 120 });

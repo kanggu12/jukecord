@@ -1449,9 +1449,27 @@ img {
   container: now-keys / inline-size;
 }
 /* Skip alone, for someone without the DJ role whose Skip is a vote: its own width at the row's start (the narrow
-   cards' rules share a row out among several keys, and gave a lone key the card's whole width). */
-.now .keys:not(:has(> .key.primary:not([hidden]))) > .key {
+   cards' rules share a row out among several keys, and gave a lone key the card's whole width). It keeps its face,
+   its words and its count at every width: the narrow cards' bare icons below are for the whole row of transport keys
+   (bare, with the count beside its icon, a phone's lone vote key read as a line of status). */
+.now .keys.alone > .key {
   flex: none;
+}
+/* The main key's three faces (Pause, Resume, Play) in one place, the one shown across it with its icon and words in
+   the middle, the others hidden there: the key is as wide as its widest face in every state, so the keys after it
+   stay put when the music pauses. */
+.key.faces {
+  display: inline-grid;
+}
+.key.faces > .face {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-6);
+}
+.key.faces > .face[aria-hidden="true"] {
+  visibility: hidden;
 }
 
 /* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
@@ -2483,12 +2501,26 @@ img {
   background: none;
   border-color: transparent;
 }
+/* The sleep timer's key is round, as the Listen key beside it is: set, it is on as that key is (its soft blue and its
+   rim), with the time left or the end of the track in its words. Bare while set, it looked like a key not set. */
+.listen .key.sleep {
+  border-radius: var(--r-round);
+}
 /* Under a mouse only (see .server:hover). */
 @media (hover: hover) {
   .listen .key.bare:hover,
   .listen .key.sleep:hover {
     background: var(--hover-tint);
   }
+}
+.listen .key.sleep[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--ink);
+}
+/* A key's short words, for a narrow bar (below): its whole words elsewhere. */
+.listen .label.short {
+  display: none;
 }
 /* Three bars that dance while the browser listens, standing still while the sound waits. Each bar is a box of its
    own scaled from its foot: the browser animates a scale without laying anything out or drawing it again (the
@@ -2581,6 +2613,15 @@ img {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* With no track over it ("Waiting for a track"), the line has the bar's height to itself: on a phone's narrow bar it
+   takes a second line rather than being cut, and past two it is cut (its whole words are its title). */
+.listen .what span:only-child {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
 }
 .listen .mini {
   display: none;
@@ -3531,30 +3572,30 @@ kbd {
    has them do (the widest row of keys with words, Korean while paused by touch, takes 519 px with the count). Skip
    keeps its count, and the room for it. */
 @container now-keys (max-width: 540px) {
-  .now .keys:has(.votes) .key:has(.label) .label {
+  .now .keys:not(.alone):has(.votes) .key:has(.label) .label {
     display: none;
   }
-  .now .keys:has(.votes) .key:has(.label) {
+  .now .keys:not(.alone):has(.votes) .key:has(.label) {
     width: var(--control);
     padding: 0;
   }
-  .now .keys .key[data-act="skip"]:has(.votes) {
+  .now .keys:not(.alone) .key[data-act="skip"]:has(.votes) {
     width: auto;
     padding: 0 var(--s-12);
   }
   /* Its word hidden, the count leads the key and starts with a capital as a key's words do ("Voted 1/2"); beside the
      word it reads on from it ("Skip voted 1/2"). */
-  .now .keys .key .votes::first-letter {
+  .now .keys:not(.alone) .key .votes::first-letter {
     text-transform: uppercase;
   }
 }
 /* Narrower, the five keys with the count do not fit one row (a phone's card): the main key takes a row of its own and
    the other four share the next, as on the narrowest cards. */
 @container now-keys (max-width: 400px) {
-  .now .keys:has(.votes) .key.primary {
+  .now .keys:not(.alone):has(.votes) .key.primary {
     flex: 1 1 100%;
   }
-  .now .keys:has(.votes) .key:not(.primary) {
+  .now .keys:not(.alone):has(.votes) .key:not(.primary) {
     flex: 1 1 0;
     width: auto;
   }
@@ -3821,26 +3862,26 @@ kbd {
    the disc, in two columns up to a window about 1,060 px wide, the card was wide enough by the old rule and the last
    key went alone onto a second row. */
 @container now-keys (max-width: 480px) {
-  .now .keys .key:has(.label) .label {
+  .now .keys:not(.alone) .key:has(.label) .label {
     display: none;
   }
-  .now .keys .key:has(.label) {
+  .now .keys:not(.alone) .key:has(.label) {
     width: var(--control);
     padding: 0;
   }
   /* Icons alone, the keys are bare, as a player's own transport keys are (a row of boxed icons read as a toolbar); the
      main key stays solid, and a key that is on (Repeat) shows it in the brand's soft blue. */
-  .now .keys .key:not(.primary) {
+  .now .keys:not(.alone) .key:not(.primary) {
     background: none;
     border-color: transparent;
   }
   /* Under a mouse only (see .server:hover). */
   @media (hover: hover) {
-    .now .keys .key:not(.primary):hover {
+    .now .keys:not(.alone) .key:not(.primary):hover {
       background: var(--hover-tint);
     }
   }
-  .now .keys .key:not(.primary)[aria-pressed="true"] {
+  .now .keys:not(.alone) .key:not(.primary)[aria-pressed="true"] {
     background: var(--accent-soft);
     color: var(--ink);
   }
@@ -3852,13 +3893,13 @@ kbd {
   .now .keys .key.primary {
     flex: 1 1 100%;
   }
-  .now .keys .key:not(.primary) {
+  .now .keys:not(.alone) .key:not(.primary) {
     flex: 1 1 0;
     width: auto;
   }
 }
 /* On a narrow window the top bar has no room for a toast: it hangs at the bottom of the window instead, right above
-   the listening bar, as a strip of the bars' own glass as wide as the window (the content passes under it as under
+   the listening bar, as a strip in the bars' own colour as wide as the window (the content passes under it as under
    the bar), and its words may take two lines. Under the top bar it lay across the playing card's head, its Lyrics and
    More keys, and over a sheet's first row and close key; above the listening bar it covers what passes under that bar
    anyway. (Placed from the top bar, which is its box: the bar's glass makes it the box of anything placed inside it,
@@ -3868,11 +3909,14 @@ kbd {
     position: absolute;
     left: 0;
     right: 0;
-    bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
+    /* Placed from the bar's box inside its 1 px line, so the line counts too: without it the strip ended a pixel above
+       the listening bar, and the page showed through that pixel. */
+    bottom: calc(var(--bar-h) - 1px + var(--listen-h) - 100dvh);
     padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
-    background: color-mix(in srgb, var(--bg) 90%, transparent);
-    backdrop-filter: var(--glass);
-    -webkit-backdrop-filter: var(--glass);
+    /* Solid: inside the top bar, whose glass is the backdrop of everything it holds, a blur of the strip's own saw
+       nothing of the page, and the row behind showed through its thin glass unblurred (1.33:1, in the 8 px between a
+       toast and the listening bar). */
+    background: var(--bg);
     border-top: 1px solid var(--line);
   }
   .toasts:empty {
@@ -3920,6 +3964,14 @@ kbd {
   .listen .volume input {
     width: 84px;
   }
+  /* Stop and the sleep timer's key in short words ("Stop", "Sleep"): beside their whole words and the player's keys the
+     title had no room at 600 px, and 82 px at 744. The whole words stay their names and titles. */
+  .listen .label.long {
+    display: none;
+  }
+  .listen .label.short {
+    display: inline;
+  }
   .row .grip {
     display: none;
   }
@@ -3946,6 +3998,13 @@ kbd {
   /* A phone's bar: its parts closer together, and its sides at the cards' edges under it, as on any window. */
   .bar {
     gap: var(--s-8);
+  }
+}
+/* A narrow window's listening bar has no room for the volume beside the keys' words and the title (at 561 px it ran
+   past the window's edge while listening): the system's volume serves there, as on a phone. */
+@media (max-width: 680px) {
+  .listen .volume {
+    display: none;
   }
 }
 /* The log's head on a window too narrow for its tools on one line (the levels, a filter of 260 px and Refresh): the
@@ -4001,34 +4060,22 @@ kbd {
   .account .name {
     display: none;
   }
-  .listen .volume,
-  .listen .faces-box,
-  .listen .key.sleep .label {
-    display: none;
-  }
-  .listen > .key.sleep {
-    width: var(--control);
-    padding: 0;
+  /* A phone's listening bar: its parts 8 px apart, as the top bar's are. */
+  .listen {
+    gap: var(--s-8);
   }
   .listen > .key[data-act="listen"] {
     padding: 0 var(--s-12);
   }
-  /* Listening, the key is its dancing bars alone (its words, "Stop listening here", name it to a screen reader and in
-     its tooltip): the title and the state beside it keep the bar's room. */
-  .listen > .key[data-act="listen"][aria-pressed="true"] {
-    width: var(--control);
-    padding: 0;
+  /* Listening, Stop and the timer's key say theirs in short words with 8 px inside them, and the small disc gives its
+     room to them and the title (with the disc, a Korean title kept 3 px at 360). Before, the two keys were a circle of
+     bars and a moon that said nothing: a set timer's moon looked like one not set. */
+  .listen > .key[data-act="listen"][aria-pressed="true"],
+  .listen > .key.sleep {
+    padding: 0 var(--s-8);
   }
-  .listen > .key[data-act="listen"][aria-pressed="true"] .label {
+  .listen.here .disc-box {
     display: none;
-  }
-  /* Nothing playing leaves the bar room: the Listen key says its name, the way into listening in the browser. */
-  .listen.idle > .key[data-act="listen"] {
-    width: auto;
-    padding: 0 var(--s-12);
-  }
-  .listen.idle > .key[data-act="listen"] .label {
-    display: inline;
   }
   .tiles {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -4173,7 +4220,8 @@ kbd {
   }
   .seg button[aria-pressed="true"],
   .key[aria-pressed="true"],
-  .listen .key[data-act="listen"][aria-pressed="true"] {
+  .listen .key[data-act="listen"][aria-pressed="true"],
+  .listen .key.sleep[aria-pressed="true"] {
     forced-color-adjust: none;
     background: Highlight;
     border-color: Highlight;
@@ -4483,17 +4531,6 @@ button.lyric {
   /* A line is a finger's height to choose. */
   button.lyric {
     min-height: 44px;
-  }
-}
-@media (max-width: 560px) {
-  /* Listening already, with nothing playing: the key shows its icon alone as at any other time, leaving the room to
-     the sleep timer beside it (its words, to stop listening, are its name for screen readers and its tooltip). */
-  .listen.idle > .key[data-act="listen"][aria-pressed="true"] {
-    width: var(--control);
-    padding: 0;
-  }
-  .listen.idle > .key[data-act="listen"][aria-pressed="true"] .label {
-    display: none;
   }
 }
 
