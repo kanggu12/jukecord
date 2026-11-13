@@ -43,6 +43,8 @@ export interface DoctorOptions {
   readonly discordLogin: boolean;
   /** The newest yt-dlp release, or null when it cannot be found out (offline). Tests pass a fixed answer. */
   readonly latestYtDlp?: () => Promise<string | null>;
+  /** The daily backup's last failure since it last worked (see BackupSchedule); null or absent when none. */
+  readonly backupFailure?: () => { at: number; reason: string } | null;
 }
 
 // Below this much free space the cache cannot take new tracks for long.
@@ -168,6 +170,18 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       ? `daily at ${timeOfDay(config.backups.at)}, keeping ${config.backups.keep}`
       : 'no daily backup (JUKECORD_BACKUP_AT)';
     const newest = backups[0];
+    // The daily backup failed after the newest one there is (or before any was made): the data has no fresh copy, said
+    // with the reason, as the log and the alerts channels said it. A backup made since (by hand) settles it.
+    const failure = options.backupFailure?.() ?? null;
+    if (failure && (!newest || failure.at > newest.at)) {
+      const kept = newest
+        ? `the newest ${ago(Math.max(0, Date.now() - newest.at))} (${formatSize(newest.bytes)}), ${backups.length} kept`
+        : 'none made yet';
+      return {
+        status: 'warn',
+        detail: `the scheduled backup failed ${ago(Math.max(0, Date.now() - failure.at))}: ${failure.reason}; ${kept}; ${schedule}`,
+      };
+    }
     if (!newest) return { status: 'ok', detail: `none yet; ${schedule}` };
     const age = Math.max(0, Date.now() - newest.at);
     // A daily backup that has not run for two days did not run when it should have.

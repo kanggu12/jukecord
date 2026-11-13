@@ -19,6 +19,8 @@ function setup(options: {
   token?: boolean;
   ready?: boolean;
   env?: Record<string, string>;
+  /** The daily backup's last failure, as the schedule keeps it. */
+  failure?: { at: number; reason: string };
 }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-doctor-'));
   const config = loadConfig(
@@ -49,6 +51,7 @@ function setup(options: {
         directory: () => directory,
         discordLogin: false,
         latestYtDlp: async () => (options.latest === undefined ? '2026.10.26' : options.latest),
+        backupFailure: () => options.failure ?? null,
       }),
   };
 }
@@ -134,6 +137,53 @@ describe('runDoctor', () => {
       );
     } finally {
       fs.rmSync(daily.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('warns when the daily backup failed after the newest one there is, or before any was made', async () => {
+    const env = { JUKECORD_BACKUP_AT: '04:30' };
+    const failure = { at: Date.now() - 2 * 3_600_000, reason: 'ENOSPC: no space left on device' };
+    // Daily backups on, none made yet, the first one failed: "none yet" is no "ok".
+    const none = setup({ env, failure });
+    try {
+      const check = (await none.run()).checks.find((entry) => entry.name === 'backups');
+      assert.deepEqual(
+        [check?.status, check?.detail],
+        [
+          'warn',
+          'the scheduled backup failed 2 h ago: ENOSPC: no space left on device; none made yet; daily at 04:30, keeping 7',
+        ],
+      );
+    } finally {
+      fs.rmSync(none.dir, { recursive: true, force: true });
+    }
+    // One made a day ago, then today's failed: the newest is said with the failure.
+    const older = setup({ env, failure });
+    try {
+      fs.mkdirSync(path.join(older.dir, 'backups'));
+      const made = new Date(Date.now() - 86_400_000).toISOString().replace(/[:.]/g, '-');
+      fs.writeFileSync(path.join(older.dir, 'backups', `jukecord-${made}.db`), Buffer.alloc(2048));
+      const check = (await older.run()).checks.find((entry) => entry.name === 'backups');
+      assert.deepEqual(
+        [check?.status, check?.detail],
+        [
+          'warn',
+          'the scheduled backup failed 2 h ago: ENOSPC: no space left on device; the newest 24 h ago (2.0 KiB), 1 kept; daily at 04:30, keeping 7',
+        ],
+      );
+    } finally {
+      fs.rmSync(older.dir, { recursive: true, force: true });
+    }
+    // A backup made since the failure (by hand, or the next day's): all is well again.
+    const since = setup({ env, failure });
+    try {
+      fs.mkdirSync(path.join(since.dir, 'backups'));
+      const made = new Date(Date.now() - 3_600_000).toISOString().replace(/[:.]/g, '-');
+      fs.writeFileSync(path.join(since.dir, 'backups', `jukecord-${made}.db`), Buffer.alloc(2048));
+      const check = (await since.run()).checks.find((entry) => entry.name === 'backups');
+      assert.equal(check?.status, 'ok');
+    } finally {
+      fs.rmSync(since.dir, { recursive: true, force: true });
     }
   });
 });

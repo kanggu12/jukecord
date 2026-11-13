@@ -135,6 +135,8 @@ export class BackupSchedule {
   private timer: TimerHandle | null = null;
   // The backup being written now, if one is.
   private running: Promise<void> | null = null;
+  // The last scheduled backup that failed, until one works again (for `jukecord doctor`).
+  private failure: { at: number; reason: string } | null = null;
 
   constructor(options: BackupScheduleOptions) {
     this.options = options;
@@ -151,6 +153,11 @@ export class BackupSchedule {
   stop(): void {
     if (this.timer !== null) this.options.clock.clearTimeout(this.timer);
     this.timer = null;
+  }
+
+  /** The last scheduled backup that failed, when, and why; null when the last one worked (or none ran yet). */
+  lastFailure(): { at: number; reason: string } | null {
+    return this.failure;
   }
 
   /** Settles once no backup is being written (at once when none is); for a stop that waits for it, and for tests. */
@@ -179,9 +186,13 @@ export class BackupSchedule {
     try {
       const made = await makeBackup(store, dir, keep, now);
       log.info('made the scheduled backup', { file: made.file, bytes: made.bytes, kept: keep });
+      // Working again: an earlier failure is no longer news.
+      this.failure = null;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log.error('the scheduled backup failed', { reason });
+      // Kept for `jukecord doctor`, which otherwise said "none yet" as if all were well.
+      this.failure = { at: now.getTime(), reason };
       this.options.alerts?.raise({
         kind: 'backup',
         guildId: null,

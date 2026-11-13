@@ -359,6 +359,8 @@ async function main(): Promise<number> {
           discordReady: () => bot?.ready() ?? false,
           directory,
           discordLogin: auth.discordLogin,
+          // Asked when doctor runs, long after the schedule below is made.
+          backupFailure: () => schedule?.lastFailure() ?? null,
         }),
     },
   });

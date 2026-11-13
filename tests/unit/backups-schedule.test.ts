@@ -101,9 +101,18 @@ describe('the daily backup', () => {
     assert.equal(sink.records.filter((record) => record.msg === 'the scheduled backup failed').length, 1);
     assert.equal(alerts.length, 1);
     assert.match(alerts[0]?.en ?? '', /^The scheduled backup failed: /);
+    // Kept for `jukecord doctor`, with when it failed: within the hour just gone by.
+    const failed = schedule.lastFailure();
+    assert.ok(failed && failed.at > clock.now() - 3_600_000 && failed.at <= clock.now());
+    assert.match(failed.reason, /\S/);
     await clock.advance(86_400_000);
     await schedule.idle();
     assert.equal(alerts.length, 2);
+    // The folder can be made again: the next day's backup works, and nothing failed since.
+    fs.rmSync(path.join(dir, 'backups'));
+    await clock.advance(86_400_000);
+    await schedule.idle();
+    assert.equal(schedule.lastFailure(), null);
     schedule.stop();
     store.close();
   });
