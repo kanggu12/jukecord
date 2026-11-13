@@ -1529,7 +1529,7 @@ await until('playing');
 async function skipSays(page, voted) {
   // The count comes with the live state, a moment after the page: waited for (and said missing below if it never came).
   await page.waitForSelector('.now [data-act="skip"] .votes', { timeout: 10000 }).catch(() => {});
-  const { text, lang, rows } = await page.evaluate(() => {
+  const { text, lang, rows, word, box, pressed } = await page.evaluate(() => {
     const row = document.querySelector('.now .keys');
     const tops = new Map();
     for (const key of row?.querySelectorAll(':scope > .key') ?? []) {
@@ -1537,19 +1537,30 @@ async function skipSays(page, voted) {
       const top = Math.round(key.getBoundingClientRect().top);
       tops.set(top, (tops.get(top) ?? 0) + 1);
     }
+    const skip = row?.querySelector('[data-act="skip"]');
+    const look = skip ? getComputedStyle(skip) : null;
+    const seen = (colour) => colour && !/^rgba\(\d+, \d+, \d+, 0\)$/.test(colour) && colour !== 'transparent';
     return {
-      text: row?.querySelector('[data-act="skip"] .votes')?.textContent ?? '',
+      text: skip?.querySelector('.votes')?.textContent ?? '',
       lang: document.documentElement.lang,
       rows: [...tops.values()],
+      // The key's own word and its box, as a person sees them.
+      word: skip?.querySelector('.label')?.getClientRects().length ? skip.querySelector('.label').textContent : '',
+      box: Boolean(look && (seen(look.backgroundColor) || seen(look.borderTopColor))),
+      pressed: skip?.getAttribute('aria-pressed') ?? null,
     };
   });
   const want = lang === 'ko' ? `${voted ? '투표함' : '투표'} 1/2` : `${voted ? 'voted' : 'votes'} 1/2`;
   if (text !== want) throw new Error(`Skip's count says "${text}", not "${want}"`);
   if (rows.length > 2 || (rows.length === 2 && rows[0] !== 1)) throw new Error(`the keys lie in rows of ${rows}`);
+  // A key that looks like one and says what it does, at every width (on a phone it was its count beside a bare icon,
+  // which read as a line of status), and the vote cast shown as a key that is on (before and after differed by a
+  // letter).
+  if (!word || !box) throw new Error(`the vote's Skip key says "${word}"${box ? '' : ' with no box round it'}`);
+  if (pressed !== String(voted)) throw new Error(`the vote's Skip key is pressed: ${pressed}, voted: ${voted}`);
 }
-// Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
-// count stays on the key when a narrow row shows icons alone), and the bar does not call them "View only" while their
-// Skip works.
+// Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width a key
+// with its word, its box and its count, and the bar does not call them "View only" while their Skip works.
 await sweep(
   'vote-skip',
   SIZES,

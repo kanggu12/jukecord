@@ -1443,8 +1443,10 @@ img {
   container: now-keys / inline-size;
 }
 /* Skip alone, for someone without the DJ role whose Skip is a vote: its own width at the row's start (the narrow
-   cards' rules share a row out among several keys, and gave a lone key the card's whole width). */
-.now .keys:not(:has(> .key.primary:not([hidden]))) > .key {
+   cards' rules share a row out among several keys, and gave a lone key the card's whole width). It keeps its face,
+   its words and its count at every width: the narrow cards' bare icons below are for the whole row of transport keys
+   (bare, with the count beside its icon, a phone's lone vote key read as a line of status). */
+.now .keys.alone > .key {
   flex: none;
 }
 /* The main key's three faces (Pause, Resume, Play) in one place, the one shown across it with its icon and words in
@@ -3512,30 +3514,30 @@ kbd {
    has them do (the widest row of keys with words, Korean while paused by touch, takes 519 px with the count). Skip
    keeps its count, and the room for it. */
 @container now-keys (max-width: 540px) {
-  .now .keys:has(.votes) .key:has(.label) .label {
+  .now .keys:not(.alone):has(.votes) .key:has(.label) .label {
     display: none;
   }
-  .now .keys:has(.votes) .key:has(.label) {
+  .now .keys:not(.alone):has(.votes) .key:has(.label) {
     width: var(--control);
     padding: 0;
   }
-  .now .keys .key[data-act="skip"]:has(.votes) {
+  .now .keys:not(.alone) .key[data-act="skip"]:has(.votes) {
     width: auto;
     padding: 0 var(--s-12);
   }
   /* Its word hidden, the count leads the key and starts with a capital as a key's words do ("Voted 1/2"); beside the
      word it reads on from it ("Skip voted 1/2"). */
-  .now .keys .key .votes::first-letter {
+  .now .keys:not(.alone) .key .votes::first-letter {
     text-transform: uppercase;
   }
 }
 /* Narrower, the five keys with the count do not fit one row (a phone's card): the main key takes a row of its own and
    the other four share the next, as on the narrowest cards. */
 @container now-keys (max-width: 400px) {
-  .now .keys:has(.votes) .key.primary {
+  .now .keys:not(.alone):has(.votes) .key.primary {
     flex: 1 1 100%;
   }
-  .now .keys:has(.votes) .key:not(.primary) {
+  .now .keys:not(.alone):has(.votes) .key:not(.primary) {
     flex: 1 1 0;
     width: auto;
   }
@@ -3802,26 +3804,26 @@ kbd {
    the disc, in two columns up to a window about 1,060 px wide, the card was wide enough by the old rule and the last
    key went alone onto a second row. */
 @container now-keys (max-width: 480px) {
-  .now .keys .key:has(.label) .label {
+  .now .keys:not(.alone) .key:has(.label) .label {
     display: none;
   }
-  .now .keys .key:has(.label) {
+  .now .keys:not(.alone) .key:has(.label) {
     width: var(--control);
     padding: 0;
   }
   /* Icons alone, the keys are bare, as a player's own transport keys are (a row of boxed icons read as a toolbar); the
      main key stays solid, and a key that is on (Repeat) shows it in the brand's soft blue. */
-  .now .keys .key:not(.primary) {
+  .now .keys:not(.alone) .key:not(.primary) {
     background: none;
     border-color: transparent;
   }
   /* Under a mouse only (see .server:hover). */
   @media (hover: hover) {
-    .now .keys .key:not(.primary):hover {
+    .now .keys:not(.alone) .key:not(.primary):hover {
       background: var(--hover-tint);
     }
   }
-  .now .keys .key:not(.primary)[aria-pressed="true"] {
+  .now .keys:not(.alone) .key:not(.primary)[aria-pressed="true"] {
     background: var(--accent-soft);
     color: var(--ink);
   }
@@ -3833,7 +3835,7 @@ kbd {
   .now .keys .key.primary {
     flex: 1 1 100%;
   }
-  .now .keys .key:not(.primary) {
+  .now .keys:not(.alone) .key:not(.primary) {
     flex: 1 1 0;
     width: auto;
   }

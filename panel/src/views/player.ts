@@ -468,6 +468,9 @@ export function nowCard(live: Live): HTMLElement {
     // The key that has the keyboard focus now, to hand it on if it is not drawn any more (below).
     const focused = keys.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
     keys.hidden = keySet === 'none';
+    // Skip alone (a vote) is a key with its words and its face at every width: the narrow cards' row of bare icons is
+    // for the whole transport (style.css).
+    keys.classList.toggle('alone', keySet === 'skip');
     for (const key of [pause, stop, repeat]) key.hidden = keySet !== 'all';
     skip.hidden = keySet === 'none';
     // The main key: Pause while the music plays or gets ready, Resume while paused, Play with nothing playing. Its three
@@ -509,6 +512,10 @@ export function nowCard(live: Live): HTMLElement {
     // Its name says the same in words, the count too ("1/2" is read out as a half).
     skip.title = skipTitle();
     skip.setAttribute('aria-label', skip.title);
+    // A vote cast shows as a key that is on, as Repeat on does (the count's words alone changed by a letter or two):
+    // it stays cast until the track goes, a second press changing nothing. A Skip that is no vote has no such state.
+    if (skipIsVote()) skip.setAttribute('aria-pressed', String(votes.voted));
+    else skip.removeAttribute('aria-pressed');
     setOff(skip, !maySkip() || !track, pause, addField);
     refill(stop, words.stop, icon('square'), h('span', { class: 'label' }, words.stop));
     stop.title = words.stop;
