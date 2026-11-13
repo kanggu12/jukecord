@@ -748,6 +748,13 @@ await sweep('stats', SIZES, async (page) => {
   if (bare > 0) problems.push(`${bare} counts in the ranks with no unit`);
   problems.push(...(await placesShared(page)));
   await noLostHue(page).catch((error) => problems.push(error.message));
+  // Wrapped stands on the title's line, at every width (on a phone it stood alone on a third line of the head).
+  const apart = await page.evaluate(() => {
+    const title = document.querySelector('.stats-head h1')?.getBoundingClientRect();
+    const key = document.querySelector('.stats-head [data-route="wrapped"]')?.getBoundingClientRect();
+    return title && key ? Math.abs(title.top + title.height / 2 - (key.top + key.height / 2)) : 0;
+  });
+  if (apart > 1) problems.push(`Wrapped stands ${Math.round(apart)} px off the title's line`);
   if (problems.length > 0) throw new Error(problems.join('; '));
 });
 await sweep('stats-tip', FEW, async (page) => {

@@ -3955,8 +3955,7 @@ kbd {
   .page-head .page-tools {
     flex-wrap: wrap;
   }
-  /* The title takes half the line at least, so the levels go under it and Refresh stays beside it. The statistics'
-     head, a title and one choice of range, keeps them on one line. */
+  /* The title takes half the line at least, so the levels go under it and Refresh stays beside it. */
   .page-head:has(.log-filter) h1 {
     flex: 1 1 0;
     min-width: 50%;
@@ -3975,6 +3974,17 @@ kbd {
     order: 3;
     flex: 1 1 100%;
     width: auto;
+  }
+  /* The statistics' head: the title with Wrapped at the line's end, the range of days under them (the range and
+     Wrapped side by side under the title left Wrapped alone on a third line of a phone's head). */
+  .page-head.stats-head h1 {
+    flex: 1 1 0;
+  }
+  .page-head.stats-head .page-tools {
+    display: contents;
+  }
+  .page-head.stats-head .seg {
+    order: 1;
   }
 }
 @media (max-width: 400px) {

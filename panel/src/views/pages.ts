@@ -145,7 +145,7 @@ export function statsPage(): HTMLElement {
   const page = h(
     'main',
     { class: 'page' },
-    h('div', { class: 'page-head' }, title, h('div', { class: 'page-tools' }, range, wrapped)),
+    h('div', { class: 'page-head stats-head' }, title, h('div', { class: 'page-tools' }, range, wrapped)),
     content,
   );
 
@@ -344,7 +344,7 @@ export function statsPage(): HTMLElement {
     );
   };
 
-  // Each request is numbered: only the latest one draws (pressing "A year" then "7 days" shows the 7 days).
+  // Each request is numbered: only the latest one draws (pressing "12 months" then "7 days" shows the 7 days).
   let asked = 0;
   const load = async () => {
     const guild = state.guild?.id;
