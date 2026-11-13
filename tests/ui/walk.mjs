@@ -36,7 +36,8 @@ const FEW = [
   [1024, 768],
   [1440, 900],
 ];
-const SHOOT = new Set([412, 390, 1440, 1366]);
+// Photographed: the phones, the laptops, and 2560 (the owner's screen, where what is stretched is seen every day).
+const SHOOT = new Set([412, 390, 1440, 1366, 2560]);
 // Only some states, for a quick look while working on one (ONLY=toast,menu tests/ui/run.sh <folder>): the other
 // states, the README's pictures and the playing-along check are skipped; ONLY=readme takes the README's pictures
 // alone, ONLY=pictures the panel's pictures and ONLY=listening the playing-along check. A whole walk leaves it unset,
@@ -139,7 +140,7 @@ async function measure(page, name, setting, errors) {
     distinct: result.distinct,
     errors: [...errors],
   });
-  if (SHOOT.has(setting.width) || (name === 'idle' && setting.width === 2560)) {
+  if (SHOOT.has(setting.width)) {
     await page.screenshot({ path: path.join(OUT, `${name}-${setting.theme}-${setting.lang}-${setting.width}.png`) });
     // The accessibility rules, on the same pages (each rule once per page, with where it failed first).
     await page.evaluate(AXE);
@@ -404,9 +405,27 @@ async function edgesFade(page) {
   if (problems.length > 0) throw new Error(`the scrolling boxes' edges: ${problems.join('; ')}`);
 }
 
+// Past the widest the page's content grows (1680 px), it stands in the middle at that width: on a 2560 px screen the
+// queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px.
+async function pageCentred(page) {
+  const off = await page.evaluate(() => {
+    const main = document.querySelector('.main:not([hidden])') ?? document.querySelector('.page');
+    const style = getComputedStyle(main);
+    const box = main.getBoundingClientRect();
+    const left = box.left + Number.parseFloat(style.paddingLeft);
+    const right = box.right - Number.parseFloat(style.paddingRight);
+    if (right - left > 1680.5) return `the page's content is ${Math.round(right - left)} px wide`;
+    const window = document.documentElement.clientWidth;
+    const across = left - (window - right);
+    return Math.abs(across) > 1 ? `the page's content stands ${across.toFixed(1)} px off the window's middle` : null;
+  });
+  if (off) throw new Error(off);
+}
+
 // ---- the walk ---------------------------------------------------------------------------------------------------
 await api('POST', '/guilds/local/player/stop').catch(() => {});
-await sweep('idle', SIZES);
+// Nothing playing: past the widest the page grows, its content in the middle.
+await sweep('idle', SIZES, pageCentred);
 await sweep('login', FEW);
 
 await api('POST', '/guilds/local/player/resume');
@@ -577,7 +596,9 @@ if (!ONLY || ONLY.has('listening')) {
 await api('POST', '/guilds/local/player/pause');
 await until('paused');
 await sweep('paused', SIZES);
-await sweep('menu', FEW, async (page) => {
+// The menu, a sheet over the right column with its edge in the gap beside it, on the owner's 2560 px screen too, where
+// the page stands in the middle (with the page's 16 px for its side, the sheet's edge cut across the column's cards).
+await sweep('menu', [...FEW, [2560, 1400]], async (page) => {
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet .section');
   await page.waitForTimeout(400);

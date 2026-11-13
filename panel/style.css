@@ -229,7 +229,12 @@
   --control-sm: 28px;
   --gap: 12px;
   --pad: 16px;
-  --side-w: clamp(320px, 27vw, 500px);
+  /* The right column: a share of the window, no wider than where the page reaches its widest (--page-max with its
+     20 px sides, a 1720 px window): wider there, it narrowed the column beside it as the window grew. */
+  --side-w: clamp(320px, min(27vw, (var(--page-max) + 40px) * 0.27), 500px);
+  /* The widest the pages' content grows (the cards, between the bars), standing in the middle past it: on a 2560 px
+     screen the queue's rows were 1,950 px wide, their keys 1,700 px from the titles, and the add field 1,650. */
+  --page-max: 1680px;
   /* The glass's top edge: a hairline of light along it, as glass catches it. */
   --glass-top: rgba(255, 255, 255, 0.06);
 }
@@ -798,7 +803,10 @@ img {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--side-w);
   gap: var(--gap);
-  padding: var(--gap) max(var(--gap), 16px, var(--safe-right)) var(--gap) max(var(--gap), 16px, var(--safe-left));
+  /* At the window's sides the room steps' gap, and past the widest the content grows (--page-max) half of what is
+     left on each side, so the columns stand in the middle (a percentage of padding is of the window's width here). */
+  padding: var(--gap) max(var(--gap), 16px, var(--safe-right), (100% - var(--page-max)) / 2) var(--gap)
+    max(var(--gap), 16px, var(--safe-left), (100% - var(--page-max)) / 2);
   min-height: 0;
   height: calc(100dvh - var(--bar-h) - var(--listen-h));
 }
@@ -2684,6 +2692,23 @@ img {
   /* Its words clear of the screen's edge it stands on (a phone held sideways has its notch there). */
   padding-right: var(--safe-right);
 }
+/* A sheet at the window's right (the menu) lies over the player's right column, its edge in the middle of the gap
+   beside it: the column, the page's side (as the player's own: wider where the page stands in the middle, past
+   --page-max) and half the gap. With 16 px for that side, past 1720 px its edge cut across the right column's cards. */
+.sheet:not(.left) {
+  width: min(
+    calc(var(--side-w) + max(var(--gap), 16px, var(--safe-right), (100vw - var(--page-max)) / 2) + var(--gap) / 2),
+    100vw
+  );
+}
+/* From 2460 px (--page-max and 390 px on either side of it: keep the two together) the page's side has room for the
+   sheet itself: it hangs there, clear of the cards, no wider than anywhere else (over the column and that side, on the
+   owner's 2560 px screen it was 890 px wide, its switches 650 px from their words). */
+@media (min-width: 2460px) {
+  .sheet:not(.left) {
+    width: min(calc((100vw - var(--page-max)) / 2 - var(--gap) / 2), calc(var(--side-w) + 16px + var(--gap) / 2));
+  }
+}
 .sheet.left {
   right: auto;
   left: 0;
@@ -2949,7 +2974,9 @@ kbd {
 
 /* ---- statistics ----------------------------------------------------------------------------------------------- */
 .page {
-  padding: var(--gap) max(var(--gap), 16px, var(--safe-right)) var(--gap) max(var(--gap), 16px, var(--safe-left));
+  /* As the player's (.main): its content no wider than --page-max, in the middle. */
+  padding: var(--gap) max(var(--gap), 16px, var(--safe-right), (100% - var(--page-max)) / 2) var(--gap)
+    max(var(--gap), 16px, var(--safe-left), (100% - var(--page-max)) / 2);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -3891,6 +3918,7 @@ kbd {
 }
 @media (max-width: 900px) {
   .sheet,
+  .sheet:not(.left),
   .sheet.left {
     width: 100vw;
     border-radius: 0;
