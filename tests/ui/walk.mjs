@@ -1064,6 +1064,20 @@ await sweep(
   },
   { login: false },
 );
+// A friend let in to look only (the View link): the add card says why its keys are off, in this login's terms. It
+// said only the DJ role could change the music, on a jukecord with no Discord and no roles at all.
+await sweep(
+  'friend-view',
+  FEW,
+  async (page) => {
+    const link = await api('POST', '/login-links?scope=read');
+    await page.goto(link.url.replace(new URL(link.url).origin, BASE));
+    await page.waitForSelector('.add-card .look-only:not([hidden])');
+    const why = (await page.locator('.add-card .look-only').textContent()) ?? '';
+    if (/DJ/.test(why)) throw new Error(`a View login is told: ${why}`);
+  },
+  { login: false },
+);
 // Guests among the people listening, in the made-up Discord.
 await sweep('listeners-guest', FEW, null, {
   discord: {

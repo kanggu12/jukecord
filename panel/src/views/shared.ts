@@ -7,7 +7,7 @@
  */
 import { api } from '../api.ts';
 import { fill, h, icon } from '../dom.ts';
-import { mayControl, state, t, watch } from '../state.ts';
+import { lookOnlyWhy, mayControl, state, t, watch } from '../state.ts';
 import { toast } from '../ui/layers.ts';
 import { act } from './player.ts';
 
@@ -41,7 +41,7 @@ export function addPage(navigate: (path: string) => void, chooseServer: () => vo
     }
     const server = state.guild;
     // Who may not: a guest, someone without the DJ role. Said in words a touch screen shows too.
-    const why = state.me?.kind === 'guest' ? words.guestOnly : !mayControl() ? words.lookOnlyHint : null;
+    const why = state.me?.kind === 'guest' ? words.guestOnly : !mayControl() ? lookOnlyWhy() : null;
     const keys = (['end', 'next', 'now'] as const).map((at) => {
       const key = h(
         'button',

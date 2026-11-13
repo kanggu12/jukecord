@@ -159,6 +159,14 @@ export function mayControl(): boolean {
   return Boolean(state.guild?.mayControl) && state.me?.scope !== 'read';
 }
 
+/**
+ * Why the person may not change the music: a login that may only look (a friend's View link, a read token), or a server
+ * whose DJ role they lack. (A View login was told about the DJ role, even in a jukecord without Discord.)
+ */
+export function lookOnlyWhy(): string {
+  return state.me?.scope === 'read' ? t().viewOnlyHint : t().lookOnlyHint;
+}
+
 /** Whether the person may press Skip: to skip, or (without the DJ role, where Skip is a vote) to vote. */
 export function maySkip(): boolean {
   return mayControl() || (state.votes.on && state.me?.scope !== 'read');

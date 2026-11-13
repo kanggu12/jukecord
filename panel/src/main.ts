@@ -13,6 +13,7 @@ import {
   collect,
   keep,
   liveWhy,
+  lookOnlyWhy,
   mayControl,
   maySkip,
   NO_VOTES,
@@ -331,7 +332,7 @@ function frame(): void {
                 new Date(state.me.guest.expiresAt).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-US'),
               )
             : guild && !mayControl()
-              ? words.lookOnlyHint
+              ? lookOnlyWhy()
               : '';
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them

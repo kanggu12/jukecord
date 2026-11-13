@@ -20,6 +20,7 @@ const EN = {
   discordDown: 'Discord not connected',
   lookOnly: 'View only',
   lookOnlyHint: 'Only the DJ role can change the music in this server',
+  viewOnlyHint: 'This login can look and listen, not change the music',
   // Now playing.
   nowPlaying: 'Now playing',
   playing: 'Playing',
@@ -495,6 +496,7 @@ const KO: Strings = {
   discordDown: '디스코드 끊김',
   lookOnly: '보기 전용',
   lookOnlyHint: '이 서버에서는 DJ 역할이 있는 사람만 음악을 바꿀 수 있음',
+  viewOnlyHint: '이 로그인은 보고 듣기만 할 수 있음',
   nowPlaying: '지금 재생',
   playing: '재생 중',
   paused: '일시정지',

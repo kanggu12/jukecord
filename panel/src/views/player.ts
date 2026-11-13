@@ -24,7 +24,19 @@ import { ONE_COLUMN } from '../columns.ts';
 import { avatarUrl, clock, cssUrl, face, fill, h, icon, keepingFocus, refill, setOff, subLine } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import type { Live } from '../live.ts';
-import { isLiked, keep, liveWhy, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
+import {
+  isLiked,
+  keep,
+  liveWhy,
+  lookOnlyWhy,
+  mayControl,
+  maySkip,
+  positionNow,
+  state,
+  t,
+  update,
+  watch,
+} from '../state.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
 import { lightGlow } from './light.ts';
@@ -1603,9 +1615,9 @@ export function addCard(): HTMLElement {
       if (busy !== null) key.setAttribute('aria-disabled', 'true');
       else key.removeAttribute('aria-disabled');
     }
-    field.title = control ? '' : words.lookOnlyHint;
+    field.title = control ? '' : lookOnlyWhy();
     why.hidden = control || !state.guild;
-    why.textContent = words.lookOnlyHint;
+    why.textContent = lookOnlyWhy();
     list.setAttribute('aria-label', words.foundLabel);
     keysHint.textContent = words.foundKeys;
     // Autoplay on and the queue empty: the card says what happens when it runs out.
