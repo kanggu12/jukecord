@@ -1346,6 +1346,60 @@ await sweep(
 );
 await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
 
+// The README's second row of phone pictures, beside the first (the player, the queue, the statistics): the lyrics, a
+// search's results and a listening link's QR code, in each theme, with a Discord bot, while a track plays. The link's
+// words are an example address: the walk's own is its container's name and a code from a throwaway server.
+for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
+  await api('POST', '/guilds/local/player/resume').catch(() => {});
+  await until('playing');
+  const context = await browser.newContext({
+    viewport: { width: 412, height: 915 },
+    deviceScaleFactor: 2,
+    colorScheme: theme,
+    locale: 'en-US',
+    isMobile: true,
+    hasTouch: true,
+  });
+  await context.addInitScript(() => localStorage.setItem('jukecord.lang', 'en'));
+  const page = await context.newPage();
+  await madeUpLyrics(page);
+  await asDiscord(page);
+  const link = await api('POST', '/login-links');
+  await page.goto(link.url.replace(new URL(link.url).origin, BASE));
+  await page.waitForSelector('.history .row');
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.evaluate(() => document.fonts.ready);
+  const shot = async (n) => {
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: path.join(OUT, `readme-phone-${n}-${theme}.png`) });
+  };
+  // The lyrics, as the sheet a phone opens.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await openLyrics(page);
+  await shot(4);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  // What a search found, under the add field.
+  await page.locator('#add-input').scrollIntoViewIfNeeded();
+  await searchFor(page, 'paper boats');
+  await page.evaluate(() => document.querySelector('.add-card')?.scrollIntoView({ block: 'start' }));
+  await shot(5);
+  await page.keyboard.press('Escape');
+  await page.fill('#add-input', '');
+  // A listening link and its QR code.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await invite(page);
+  await page.click('.dialog [data-act="invite-make"]');
+  await page.waitForSelector('.dialog .qr');
+  await page.evaluate(() => {
+    const url = document.querySelector('.dialog .invite-url');
+    if (url) url.textContent = 'https://music.example.com/listen#7Kq2vX9pL4mN8wR3tY6bZ1cF5hJ0sD';
+    document.querySelector('.dialog .qr')?.scrollIntoView({ block: 'center' });
+  });
+  await shot(6);
+  await context.close();
+}
+
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 
