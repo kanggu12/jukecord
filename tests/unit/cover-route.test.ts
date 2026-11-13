@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
+import { sayError } from '../../src/core/say.ts';
 import { CoverError } from '../../src/media/covers.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import {
@@ -294,6 +295,36 @@ describe("search results' pictures through jukecord", () => {
       assert.equal((await inject({ method: 'GET', url: picture(found.url) })).statusCode, 401);
       // The one fetch was the first one's: the refusals asked nothing of the site.
       assert.equal(server.pictureRequests.length, 1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('says each of its refusals in words the panel has in Korean too', async () => {
+    const server = await serverWithPictures({ searched: { 'paper boats': [found, bare] } });
+    const inject = (options: InjectOptions) => server.web.app.inject(options);
+    try {
+      // Each refusal the route gives, as it answers it: no search found the address, a result with no picture, no
+      // login, a login that may not search, and a server's member without its DJ role.
+      const said = async (headers: Record<string, string>, address = found.url) =>
+        (await inject({ method: 'GET', url: picture(address), headers })).json().error.message as string;
+      const messages = [await said(asHost)];
+      await searchFor(server, asHost);
+      messages.push(await said(asHost, bare.url), await said({}));
+      const created = await inject({
+        method: 'POST',
+        url: api('/tokens'),
+        headers: asHost,
+        payload: { name: 'reader', scope: 'read' },
+      });
+      messages.push(await said({ authorization: `Bearer ${created.json().token}` }));
+      server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      messages.push(await said({ cookie: sessionFor(server, ALICE).cookie }));
+      assert.equal(new Set(messages).size, 5, messages.join('\n'));
+      // The panel shows a refusal in the reader's language from the same table as the bot (src/core/say.ts).
+      for (const message of messages) assert.notEqual(sayError(message, 'ko'), sayError(message, 'en'), message);
+      assert.equal(sayError('no search found that address lately', 'ko'), '최근 검색 결과에 없는 주소');
+      assert.equal(sayError('that search result has no picture', 'ko'), '이미지가 없는 검색 결과');
     } finally {
       await server.close();
     }
