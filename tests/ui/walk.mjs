@@ -1476,8 +1476,9 @@ await sweep(
   },
   { login: false },
 );
-// A friend let in to look only (the View link): the add card says why its keys are off, in this login's terms. It
-// said only the DJ role could change the music, on a jukecord with no Discord and no roles at all.
+// A friend let in to look only (the View link): the add card says what this login may do, in its terms (it said only
+// the DJ role could change the music, on a jukecord with no Discord and no roles at all), and shows no field or key it
+// cannot use (a field that looked usable and three dim keys, Add the loudest thing on the card).
 await sweep(
   'friend-view',
   FEW,
@@ -1487,6 +1488,11 @@ await sweep(
     await page.waitForSelector('.add-card .look-only:not([hidden])');
     const why = (await page.locator('.add-card .look-only').textContent()) ?? '';
     if (/DJ/.test(why)) throw new Error(`a View login is told: ${why}`);
+    const unusable = await page.$$eval(
+      '.add-card :is(input, .key)',
+      (found) => found.filter((element) => element.getClientRects().length > 0).length,
+    );
+    if (unusable > 0) throw new Error(`a View login's add card shows ${unusable} field and keys it cannot use`);
   },
   { login: false },
 );

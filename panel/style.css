@@ -1864,6 +1864,14 @@ img {
   line-height: var(--lh-sm);
   color: var(--ink-3);
 }
+/* What someone who may only look may do, alone in the add card in place of the field and its keys: an icon and the
+   words in the second ink, as the card's other lines (a faint footnote under no field read as a stray caption). */
+.add-card > .look-only {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-6);
+  color: var(--ink-2);
+}
 /* Why the last add did not go through, under the field it came from. */
 .add-failed {
   margin: 0;

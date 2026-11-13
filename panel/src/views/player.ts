@@ -1679,8 +1679,9 @@ export function addCard(): HTMLElement {
   const found = h('div', { class: 'found', hidden: true }, searchState, list, keysHint);
   // How many were found, said to screen readers as the list changes.
   const said = h('p', { class: 'sr', role: 'status' });
-  // Why the keys are off for someone who may only look, in words a touch screen shows too (a title it does not).
-  const why = h('p', { class: 'look-only', hidden: true });
+  // What someone who may only look may do, in place of the field and its keys (a field that looked usable and three
+  // dim keys, Add the loudest thing on the card, read as an add card that was broken). Words a touch screen shows too.
+  const why = h('p', { class: 'look-only', hidden: true }, icon('headphones'), h('span'));
   // Why the last add from the field did not go through, under the field (the bar is far from it on a desktop). It is
   // said here alone, out loud too: a toast saying the same in the bar showed the reason twice.
   const failed = h('p', { class: 'add-failed', role: 'alert', hidden: true });
@@ -1726,8 +1727,12 @@ export function addCard(): HTMLElement {
       else key.removeAttribute('aria-disabled');
     }
     field.title = control ? '' : lookOnlyWhy();
-    why.hidden = control || !state.guild;
-    why.textContent = lookOnlyWhy();
+    // Known to only look (a server is shown and they may not change its music): no field and no keys they cannot
+    // press, the line saying what they may do instead. Before a server is shown, the field stays as it is.
+    const lookOnly = !control && Boolean(state.guild);
+    form.hidden = lookOnly;
+    why.hidden = !lookOnly;
+    (why.lastElementChild as HTMLElement).textContent = lookOnlyWhy();
     list.setAttribute('aria-label', words.foundLabel);
     keysHint.textContent = words.foundKeys;
     // Autoplay on and the queue empty: the card says what happens when it runs out.
