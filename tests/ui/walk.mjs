@@ -1325,6 +1325,31 @@ async function invite(page) {
   await page.click('[data-act="invite"]');
   await page.waitForSelector('.dialog .invite');
 }
+// A link made and shown: Copy is the dialog's one filled key (with Make the link filled too, the step done was as loud
+// as the next, and a second press made a second link), whole in the dialog's room, and the dialog's body where it
+// began (under a phone's fold, a press on Copy scrolled it by 6 px and cut the top off the choices under the title).
+async function linkShown(page) {
+  const shown = await page.evaluate(() => {
+    const dialog = document.querySelector('.dialog:not([hidden])');
+    const body = dialog.querySelector('.dialog-content');
+    const filled = [...dialog.querySelectorAll('.key.primary')]
+      .filter((key) => key.getClientRects().length > 0)
+      .map((key) => key.dataset.act);
+    const copy = [...dialog.querySelectorAll('[data-act="invite-copy"]')].find((key) => key.getClientRects().length);
+    const key = copy?.getBoundingClientRect();
+    const room = body.getBoundingClientRect();
+    return {
+      filled,
+      scrolled: body.scrollTop,
+      cut: !key || key.top < room.top - 0.5 || key.bottom > room.bottom + 0.5,
+    };
+  });
+  const problems = [];
+  if (shown.filled.join() !== 'invite-copy') problems.push(`filled keys: ${shown.filled.join(', ')}`);
+  if (shown.scrolled > 0) problems.push(`the dialog's body scrolled by ${shown.scrolled} px`);
+  if (shown.cut) problems.push("Copy is cut by the dialog's room");
+  if (problems.length > 0) throw new Error(`with a link shown: ${problems.join('; ')}`);
+}
 await sweep('invite', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
@@ -1334,6 +1359,7 @@ await sweep('invite', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-copy"]');
   const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
   if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
+  await linkShown(page);
   // The links that work: the one just made is marked (the rows read word for word the same), each row says who made it
   // and when, and no part of the line under the date breaks inside itself (the made-by part wrapped alone after a dot).
   await page.waitForSelector('.dialog .invite-links .channel .badge');
@@ -1382,6 +1408,7 @@ await sweep('invite-friend', FEW, async (page) => {
   await page.click('.dialog .invite-tabs button:nth-child(2)');
   await page.click('.dialog [data-act="invite-friend"]');
   await page.waitForSelector('.dialog [data-pane="friend"] .qr');
+  await linkShown(page);
 });
 // Listening links made by the host, for the guests' states below: each guest's page takes one of a link's 25 places, so
 // a new link every twenty pages (a server keeps at most fifty links).

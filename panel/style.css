@@ -4519,6 +4519,38 @@ button.lyric {
 .invite-url {
   user-select: all;
 }
+/* A phone: the QR code and Copy side by side (the note over Copy at the code's top, Copy at its foot), and the link and
+   until when it works across the dialog under them. Stacked, the code over the link pushed Copy, the key to press
+   next, under the dialog's fold, and a press on it scrolled the dialog by a few pixels, cutting off the top of the
+   choices under its title. */
+@media (max-width: 560px) {
+  .invite-made:has(> .qr-box) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--s-8) var(--pad);
+  }
+  /* The link's column gives its parts to the grid. */
+  .invite-made:has(> .qr-box) > .invite-link {
+    display: contents;
+  }
+  .invite-made:has(> .qr-box) > .qr-box {
+    grid-area: 1 / 1 / 3 / 2;
+  }
+  .invite-made:has(> .qr-box) .invite-note:first-child {
+    grid-area: 1 / 2;
+  }
+  .invite-made:has(> .qr-box) .invite-link > .line {
+    grid-area: 2 / 2;
+    align-self: end;
+  }
+  .invite-made:has(> .qr-box) .invite-url {
+    grid-area: 3 / 1 / 4 / -1;
+  }
+  /* What Copy did, and until when the link works: across, in their order under the link. */
+  .invite-made:has(> .qr-box) .invite-link > :is(.copy-result, .invite-note:not(:first-child)) {
+    grid-column: 1 / -1;
+  }
+}
 .invite h3 {
   margin: var(--pad) 0 var(--s-8);
   font-size: var(--fs-sm);

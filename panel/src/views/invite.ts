@@ -7,6 +7,7 @@
  */
 import { api, type ListenLink } from '../api.ts';
 import { fill, h, icon, subLine } from '../dom.ts';
+import type { IconName } from '../icons.ts';
 import { type QrCode, qrCode } from '../qr.ts';
 import { mayControl, state, t } from '../state.ts';
 import { clockTime, momentText } from '../time.ts';
@@ -112,6 +113,13 @@ function made(url: string, notes: string[]): HTMLElement {
   );
 }
 
+// The key that makes a link, once one is shown: quiet, saying it makes another. Copy, beside the link shown, is the
+// main key then: with both filled, the step done was as loud as the next one, and a second press made a second link.
+function another(key: HTMLButtonElement, name: IconName): void {
+  key.classList.remove('primary');
+  fill(key, icon(name), t().inviteMakeAnother);
+}
+
 // A row of choices where one is on (the link's length, a friend's rights), named for screen readers.
 function choices<T extends string | number>(
   options: [T, string][],
@@ -158,6 +166,7 @@ export function inviteDialog(): void {
     if (!created) return;
     fresh = created.link.id;
     fill(guestResult, made(reachable(created.url), [words.inviteUntil(when(created.link.expiresAt))]));
+    another(makeGuest, 'user-plus');
     void drawLinks();
   };
   // The links that still work: the person's own, or every one for people who can manage the server.
@@ -263,7 +272,9 @@ export function inviteDialog(): void {
   );
   makeFriend.onclick = async () => {
     const created = await act(makeFriend, () => api['login-link'](scope));
-    if (created) fill(friendResult, made(reachable(created.url), [words.inviteOnce(when(created.expiresAt, true))]));
+    if (!created) return;
+    fill(friendResult, made(reachable(created.url), [words.inviteOnce(when(created.expiresAt, true))]));
+    another(makeFriend, 'key-round');
   };
   fill(
     friend,

@@ -407,6 +407,8 @@ const EN = {
   inviteLength: 'How long it works',
   inviteDays: (n: number) => (n === 1 ? '1 day' : `${n} days`),
   inviteMake: 'Make the link',
+  // The same key once a link is shown, quiet beside the link's Copy.
+  inviteMakeAnother: 'Make another',
   inviteShownOnce: 'Shown once: copy it now, or scan it with a phone',
   inviteUntil: (date: string) => `Works until ${date}`,
   inviteOnce: (time: string) => `Works once, until ${time}`,
@@ -877,6 +879,7 @@ const KO: Strings = {
   inviteLength: '쓸 수 있는 기간',
   inviteDays: (n: number) => `${n}일`,
   inviteMake: '링크 만들기',
+  inviteMakeAnother: '하나 더 만들기',
   inviteShownOnce: '한 번만 보임: 지금 복사하거나 휴대폰으로 스캔하세요',
   inviteUntil: (date: string) => `${date}까지 쓸 수 있음`,
   inviteOnce: (time: string) => `${time}까지 한 번 쓸 수 있음`,
