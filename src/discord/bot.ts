@@ -585,7 +585,14 @@ export class Bot implements Directory, AlertSink {
         }
         case 'clear': {
           const removed = actions.clear(context);
-          await interaction.editReply({ embeds: [note(lang, `Removed ${removed} tracks`, `${removed}곡 뺌`)] });
+          await interaction.editReply({
+            embeds: [
+              // Nothing to take out is said as such: "Removed 0 tracks" read as if something had gone wrong.
+              removed === 0
+                ? note(lang, 'The queue is empty already', '대기열이 이미 비어 있음')
+                : note(lang, removed === 1 ? 'Removed 1 track' : `Removed ${removed} tracks`, `${removed}곡 뺌`),
+            ],
+          });
           return;
         }
         case 'history':

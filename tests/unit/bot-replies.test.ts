@@ -116,6 +116,24 @@ describe('the bot answers commands', () => {
       await bot.client.destroy();
     }
   });
+
+  it('counts what /clear took out in words, one track and none too', async () => {
+    const { bot, queue } = await playing();
+    // The two queued after the one playing: one is taken out first, so one is left for /clear.
+    const [first] = queue.list('100000000000000001');
+    assert.ok(first);
+    queue.remove('100000000000000001', first.id);
+    const one = interaction('command', 'clear');
+    await handlers(bot).onCommand(one.interaction);
+    assert.equal(one.shown[0]?.text, 'Removed 1 track');
+    const none = interaction('command', 'clear');
+    await handlers(bot).onCommand(none.interaction);
+    assert.equal(none.shown[0]?.text, 'The queue is empty already');
+    const korean = interaction('command', 'clear', {}, { locale: 'ko' });
+    await handlers(bot).onCommand(korean.interaction);
+    assert.equal(korean.shown[0]?.text, '대기열이 이미 비어 있음');
+    await bot.client.destroy();
+  });
 });
 
 describe('the now-playing card in the channel', () => {

@@ -494,7 +494,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
               .setName('number')
               .setDescription('Its number in /share list')
               .setNameLocalizations({ ko: '번호' })
-              .setDescriptionLocalizations({ ko: '/공유 목록 의 번호' })
+              .setDescriptionLocalizations({ ko: '/공유 목록에 나오는 번호' })
               .setRequired(true)
               .setMinValue(1),
           ),
@@ -636,7 +636,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
               .setName('position')
               .setDescription('Its number in /likes show')
               .setNameLocalizations({ ko: '번호' })
-              .setDescriptionLocalizations({ ko: '/좋아요목록 보기 의 번호' })
+              .setDescriptionLocalizations({ ko: '/좋아요목록 보기에 나오는 번호' })
               .setRequired(true)
               .setMinValue(1),
           ),
