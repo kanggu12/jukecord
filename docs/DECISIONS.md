@@ -259,7 +259,7 @@ page any site can send a browser to must not change the queue by itself.
 ## The voice channel's sound: ffmpeg only while it is not plain
 
 The cached file goes to Discord as it is: that costs no processor and loses nothing (see Ogg Opus through to
-Discord). A volume other than 100 % or a sound (more bass, clearer voices, brighter, softer at night) changes the sound
+Discord). A volume other than 100 % or a sound (more bass, clearer voices, brighter, night mode) changes the sound
 itself, which has to be decoded, filtered and encoded again. ffmpeg does that, for that server's voice stream only and
 only while its sound is not plain, from the place the track is: the process a seek already starts, with the sound's
 filters added. @discordjs/voice can change a volume itself, but only of sound it decodes and encodes again in the
@@ -302,7 +302,7 @@ combobox and listbox, so the keyboard and screen readers move through it from th
 ## Autoplay from the server's own plays
 
 When the queue runs out, a recommender service would know what plays and when; jukecord already knows what each server
-played and liked. "This server's plays" draws a track from its history, more often the ones played more and liked by
+played and liked. "Past plays" draws a track from its history, more often the ones played more and liked by
 more people, none of the last thirty plays, so it sounds like that server and asks nobody; a server whose every track
 is among those plays (a new one) gets one of the older half of them, so its music goes on too. "Related to the last
 track" asks YouTube (through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a

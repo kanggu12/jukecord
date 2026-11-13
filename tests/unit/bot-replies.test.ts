@@ -9,6 +9,10 @@ import { fakeBot, handlers, interaction } from '../support/discord.ts';
 import { flush } from '../support/fakes.ts';
 import { addTracks } from '../support/store.ts';
 
+// The words keep a no-break space where a wrapped line must not break (core/say.ts together()): an expected text
+// writes it as "⍽", so it can be seen.
+const kept = (text: string) => text.replaceAll('⍽', String.fromCharCode(0xa0));
+
 describe('the bot answers', () => {
   it('draws an old card again from what plays now when its key would do nothing, instead of refusing', async () => {
     const { store, queue, players, media, bot } = fakeBot();
@@ -264,7 +268,7 @@ describe('the alerts channel in Discord', () => {
     const refused = interaction('command', 'alerts', { sub: 'clear' }, { locale: 'ko' });
     await handlers(bot).onCommand(refused.interaction);
     assert.equal(refused.shown.at(-1)?.ephemeral, true);
-    assert.equal(refused.shown.at(-1)?.text, '서버 관리 권한이 있어야 알림 채널을 정할 수 있음');
+    assert.equal(refused.shown.at(-1)?.text, kept('서버 관리 권한이 있어야 알림 채널을 정할⍽수⍽있음'));
     await bot.client.destroy();
   });
 

@@ -3,6 +3,7 @@
  * and the menu can pick either. Both tables have the same keys (the Korean one is typed against the English one), so
  * a missing translation fails the type check instead of showing a key on screen.
  */
+import { together } from '../../src/core/say.ts';
 
 // The months' short names, for a day ("Nov 22"); a time's own name says its month whole ("November 2025").
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -237,7 +238,7 @@ const EN = {
     failed: 'Discord did not let the login through: try again',
     'not-a-member': 'You are not in a server that jukecord is in',
     link: 'That login link was used already or has expired',
-    'too-many': 'Too many failed logins from here: try again in ten minutes',
+    'too-many': 'Too many failed logins from here: try again in 10 minutes',
     'no-discord-login': 'Logging in with Discord is not set up here',
     connecting: 'jukecord is still connecting to Discord: try again in a moment',
     'listen-link': 'That listening link has ended or does not exist',
@@ -365,7 +366,7 @@ const EN = {
   // An add that did not go through, under the field (the reason after it, in the panel's language).
   couldNotAdd: (reason: string) => `Could not add: ${reason}`,
   // The empty queue: what to add, and where.
-  queueEmptyHint: 'Add a link (YouTube, SoundCloud and more) or the name of a song above',
+  queueEmptyHint: 'Search for a song above, or paste a link from YouTube, SoundCloud and more',
   // The queue search's clear key.
   clearSearch: 'Clear the search',
   // Why the playlists' keys are off for someone who may only look.
@@ -410,7 +411,7 @@ const EN = {
   inviteShownOnce: 'Shown once: copy it now, or scan it with a phone',
   inviteUntil: (date: string) => `Works until ${date}`,
   inviteOnce: (time: string) => `Works once, until ${time}`,
-  inviteLinks: 'Listening links that work',
+  inviteLinks: 'Active links',
   inviteNoLinks: 'No listening links',
   inviteGuestsIn: (n: number, max: number) => `${n} of ${max} guests`,
   // A listening link's row: until when it works, then the new one marked, its guests, and who made it when.
@@ -446,7 +447,7 @@ const EN = {
   voteSkipNoRole: 'Works once a DJ role is chosen above: then Skip from anyone else is a vote',
   voteToSkip: 'Vote to skip',
   // The count of a vote to skip on the Skip key, saying what it counts and whether this person's vote is in it.
-  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? 'voted' : 'votes'} ${votes}/${needed}`,
+  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? 'vote cast' : 'votes'} ${votes}/${needed}`,
   // The count in words, after the key's name ("Vote to skip: 1 of 2 votes").
   skipVotes: (votes: number, needed: number) => `${votes} of ${needed} votes`,
   votedToSkip: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
@@ -462,14 +463,14 @@ const EN = {
   leftLimit: (n: number) => `${n} left out: your limit in the queue`,
   voiceVolume: 'Voice volume',
   soundName: 'Sound',
-  soundHint: 'The voice channel and the browsers listening along hear it',
+  soundHint: 'Everyone hears it: the voice channel and every browser listening along',
   // The presets are effects on the sound; the plain one is the track as it is ("Off" read as the sound being off).
   presets: {
     off: 'Original',
     bass: 'More bass',
     voices: 'Clearer voices',
     bright: 'Brighter',
-    night: 'Softer at night',
+    night: 'Night mode',
   } as Record<string, string>,
   // On the key, short; "Night" alone named a time, not a sound.
   presetsShort: {
@@ -509,15 +510,15 @@ const EN = {
   >,
   autoplayOff: 'Off',
   autoplayOffHint: 'The music stops when the queue runs out',
-  autoplayHistory: "This server's plays",
+  autoplayHistory: 'Past plays',
   autoplayHistoryHint:
-    'A track played here: picked more often the more it was played and liked, never one of the last 30',
+    'Picks from tracks played here, more often the more they were played and liked; never one of the last 30 played',
   autoplayRelated: 'Related to the last track',
-  autoplayRelatedHint: "From YouTube's mix of the last track; this server's plays when there is none",
+  autoplayRelatedHint: "Picks from YouTube's mix of the last track, or from past plays when there is no mix",
   autoplayRepeat: 'While a repeat is on, the queue does not run out',
   // Shown while the queue is empty, also with nothing playing: what follows the last track, not "when it runs out".
   autoplayNote: {
-    history: "Autoplay is on: after the last track, one of this server's past plays follows",
+    history: 'Autoplay is on: after the last track, one from past plays follows',
     related: 'Autoplay is on: after the last track, a related one follows',
   } as Record<string, string>,
   byAutoplay: 'added by Autoplay',
@@ -599,7 +600,7 @@ const KO: Strings = {
   shuffle: '섞기',
   dedupe: '중복 제거',
   save: '저장',
-  load: '불러오기',
+  load: '추가',
   clear: '비우기',
   searchQueue: '대기열에서 찾기',
   queueEmpty: '대기열이 비어 있음',
@@ -649,7 +650,7 @@ const KO: Strings = {
   volume: '음량',
   listeners: (n: number) => `${n}명 듣는 중`,
   theme: '테마',
-  themeSystem: '시스템',
+  themeSystem: '자동',
   themeLight: '라이트',
   themeDark: '다크',
   language: '언어',
@@ -717,7 +718,7 @@ const KO: Strings = {
   tileTracks: '곡 수',
   tilePeople: '추가한 사람',
   perDay: '일별 재생',
-  perHour: '시간대별 재생(내 시간대 기준)',
+  perHour: '시간별 재생(내 시간대 기준)',
   perWeek: '주별 재생',
   table: '표',
   tableHint: '표로 보기',
@@ -818,7 +819,7 @@ const KO: Strings = {
   monthOf: (year: number, month: number) => `${year}년 ${month}월`,
   momentsLabel: '많이 들은 때',
   byWeekday: '요일별 재생',
-  byHour: '시간대별 재생',
+  byHour: '시간별 재생',
   keptFrom: (day: string, kept: string) => `기록은 ${day}부터 남아 있음: 서버마다 최근 ${kept}회까지 남김`,
   savePicture: '이미지로 저장',
   pictureShape: '모양',
@@ -840,9 +841,9 @@ const KO: Strings = {
   alertsHint: 'jukecord가 이 서버에 문제를 알릴 채널: YouTube 차단, 다시 시작, 디스크 부족 등',
   alertsOff: '알리지 않음',
   couldNotAdd: (reason: string) => `추가하지 못함: ${reason}`,
-  queueEmptyHint: '위에서 링크(유튜브, 사운드클라우드 등)나 노래 제목으로 추가하세요',
+  queueEmptyHint: '위에서 곡을 검색하거나 YouTube, SoundCloud 등의 링크를 붙여 넣으세요',
   clearSearch: '검색어 지우기',
-  playlistsLookOnly: '이 서버에서는 DJ 역할이 있는 사람만 플레이리스트를 불러오거나 바꿀 수 있음',
+  playlistsLookOnly: '이 서버에서는 DJ 역할이 있는 사람만 플레이리스트를 대기열에 추가하거나 바꿀 수 있음',
   lyrics: '가사',
   lyricsClose: '가사 닫기',
   lyricsLooking: '가사를 찾는 중',
@@ -879,7 +880,7 @@ const KO: Strings = {
   inviteShownOnce: '한 번만 보임: 지금 복사하거나 휴대폰으로 스캔하세요',
   inviteUntil: (date: string) => `${date}까지 쓸 수 있음`,
   inviteOnce: (time: string) => `${time}까지 한 번 쓸 수 있음`,
-  inviteLinks: '쓸 수 있는 듣기 링크',
+  inviteLinks: '유효한 링크',
   inviteNoLinks: '듣기 링크 없음',
   inviteGuestsIn: (n: number, max: number) => `손님 ${n}/${max}명`,
   inviteLinkUntil: (date: string) => `${date}까지`,
@@ -908,9 +909,9 @@ const KO: Strings = {
   voteSkipHint: 'DJ 역할이 없는 사람이 누른 건너뛰기는 투표가 됨. 듣는 사람 절반이 찬성하면 넘어감',
   voteSkipNoRole: '위에서 DJ 역할을 정해야 작동함. 그러면 다른 사람이 누른 건너뛰기는 투표가 됨',
   voteToSkip: '건너뛰기 투표',
-  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? '투표함' : '투표'} ${votes}/${needed}`,
+  votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? '투표 완료' : '투표'} ${votes}/${needed}`,
   skipVotes: (votes: number, needed: number) => `${needed}표 중 ${votes}표`,
-  votedToSkip: (votes: number, needed: number) => `건너뛰기에 투표함: ${needed}표 중 ${votes}표`,
+  votedToSkip: (votes: number, needed: number) => `건너뛰기 투표 완료: ${needed}표 중 ${votes}표`,
   takeTurns: '번갈아 재생',
   takeTurnsHint: '추가하는 곡이 사람마다 번갈아 들어감',
   takeTurnsNow: '지금 번갈아 재생',
@@ -928,7 +929,7 @@ const KO: Strings = {
     bass: '저음 강조',
     voices: '목소리 또렷하게',
     bright: '밝게',
-    night: '밤에 부드럽게',
+    night: '밤 모드',
   },
   presetsShort: {
     off: '효과 없음',
@@ -958,16 +959,16 @@ const KO: Strings = {
   noLiked: '아직 좋아요 한 곡 없음',
   addAll: '모두 추가',
   autoplay: '자동 재생',
-  autoplayKey: { off: '자동 재생 꺼짐', history: '자동 재생: 들은 곡', related: '자동 재생: 비슷한 곡' },
-  autoplayOff: '끄기',
+  autoplayKey: { off: '자동 재생 끔', history: '자동 재생: 들은 곡', related: '자동 재생: 비슷한 곡' },
+  autoplayOff: '끔',
   autoplayOffHint: '대기열이 비면 음악이 멈춤',
-  autoplayHistory: '이 서버에서 들은 곡',
-  autoplayHistoryHint: '이 서버에서 들은 곡 중에서 고름. 많이 듣고 좋아요 한 곡일수록 자주 나오고, 최근 30곡은 빠짐',
+  autoplayHistory: '들은 곡',
+  autoplayHistoryHint: '이 서버의 재생 기록에서 고름. 많이 듣고 좋아요를 누른 곡일수록 자주 나오고, 최근 30곡은 빠짐',
   autoplayRelated: '마지막 곡과 비슷한 곡',
-  autoplayRelatedHint: '마지막 곡의 YouTube 믹스에서 고름. 믹스가 없으면 이 서버에서 들은 곡에서 고름',
+  autoplayRelatedHint: '마지막 곡의 YouTube 믹스에서 고르고, 믹스가 없으면 들은 곡에서 고름',
   autoplayRepeat: '반복이 켜져 있으면 대기열이 비지 않음',
   autoplayNote: {
-    history: '자동 재생 켜짐: 마지막 곡 뒤에 이 서버에서 들은 곡이 이어짐',
+    history: '자동 재생 켜짐: 마지막 곡 뒤에 들은 곡 중 하나가 이어짐',
     related: '자동 재생 켜짐: 마지막 곡 뒤에 그 곡과 비슷한 곡이 이어짐',
   },
   byAutoplay: '자동 재생이 추가',
@@ -981,7 +982,7 @@ const KO: Strings = {
   formatJsonHint: '제목, 채널, 길이, 커버까지 담음. jukecord로 다시 가져올 수 있음',
   importKey: '가져오기',
   importTitle: '플레이리스트 가져오기',
-  importText: '주소를 한 줄에 하나씩 붙여 넣거나 M3U·jukecord 파일을 고르세요. 주소가 아닌 줄은 YouTube에서 찾음.',
+  importText: '주소를 한 줄에 하나씩 붙여 넣거나 M3U·jukecord 파일을 고르면 됨. 주소가 아닌 줄은 YouTube에서 찾음.',
   importPaste: '목록을 붙여 넣거나 아래에서 파일을 고르세요',
   chooseFile: '파일 고르기',
   importList: '곡 목록',
@@ -990,6 +991,26 @@ const KO: Strings = {
   fileTooLarge: '파일이 1MiB보다 큼',
   leftNotFound: (n: number) => `${n}곡은 YouTube에서 못 찾아 뺌`,
 };
+
+/**
+ * A table's words as the panel shows them, kept whole where a line wraps (core/say.ts together(): "10 minutes",
+ * "Nov 14", "쓸 수 있음" never split): each string, each line a function gives (with what was put in it), and the
+ * lists and records inside. Done to the whole table, so a line added later is kept too.
+ */
+function kept<T>(value: T): T {
+  if (typeof value === 'string') return together(value) as T;
+  // A function's line is kept when it is made: its values (a name, a count) are part of the line.
+  if (typeof value === 'function')
+    return ((...args: unknown[]) => kept((value as (...args: unknown[]) => unknown)(...args))) as T;
+  if (Array.isArray(value)) return value.map((item) => kept(item)) as T;
+  if (value && typeof value === 'object')
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, kept(item)])) as T;
+  return value;
+}
+
+// The two tables as shown, made once.
+const EN_SHOWN = kept(EN);
+const KO_SHOWN = kept(KO);
 
 /** The languages. */
 export type Lang = 'en' | 'ko';
@@ -1002,7 +1023,7 @@ export function pickLang(choice: string | null): Lang {
 
 /** The words of a language. */
 export function words(lang: Lang): Strings {
-  return lang === 'ko' ? KO : (EN as unknown as Strings);
+  return lang === 'ko' ? KO_SHOWN : (EN_SHOWN as unknown as Strings);
 }
 
 export type Words = Strings;

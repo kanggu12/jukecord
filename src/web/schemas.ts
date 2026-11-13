@@ -117,7 +117,7 @@ export const PlayerSchema = Type.Object(
     waiting: Type.Boolean({ description: 'Whether the loading track waits for its turn among the fetches' }),
     stopAfter: Type.Boolean({ description: 'Whether the player stops when the current track ends' }),
     autoplay: Type.Union([Type.Literal('off'), Type.Literal('history'), Type.Literal('related')], {
-      description: "When the queue runs out: nothing, a track from this server's plays, or one related to the last",
+      description: 'When the queue runs out: nothing, a track from past plays, or one related to the last track',
     }),
   },
   { title: 'Player' },
@@ -283,7 +283,7 @@ export const WrappedSchema = Type.Object(
  */
 export const SoundPresetSchema = Type.Union(
   [Type.Literal('off'), Type.Literal('bass'), Type.Literal('voices'), Type.Literal('bright'), Type.Literal('night')],
-  { description: 'off, more bass, clearer voices, brighter, or softer at night' },
+  { description: 'off, more bass, clearer voices, brighter, or night mode' },
 );
 
 export const SettingsSchema = Type.Object(

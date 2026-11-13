@@ -254,12 +254,53 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['that search result has no picture', '이미지가 없는 검색 결과'],
 ];
 
+// The no-break space: a line that wraps never breaks at it. Made from its code, so no editor turns it into a plain space
+// unseen (Pretendard's subset that holds the space holds it too).
+const NBSP = String.fromCharCode(0xa0);
+
+// Where a wrapped line must not break, as a pattern and what it becomes ($1: the part before the space, kept). A panel
+// wrapped "within 10 / minutes" and "쓸 / 수 있음": a unit or a bound word alone at the start of a line reads as a slip.
+const TOGETHER: readonly (readonly [RegExp, string])[] = [
+  // A number and the word after it, in either language: "10 minutes", "3 min", "2 votes", "MP3 사본".
+  [/(\d) (?=\p{L})/gu, `$1${NBSP}`],
+  // A month and its day or year: "Nov 14", "Nov 2025", "November 2026" (\b: not the start of a longer word).
+  [
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?) (?=\d)/g,
+    `$1${NBSP}`,
+  ],
+  // "ago" with its time: "15 h ago".
+  [/ ago\b/g, `${NBSP}ago`],
+  // Korean words that never start a line, kept with the word before: 수 of "쓸 수 있음" and "바꿀 수 없음" (with what
+  // follows it too), ...
+  [/ 수 (?=[있없])/g, `${NBSP}수${NBSP}`],
+  // ... 님 after a name ("Mina 님이 추가"), ...
+  [/ (?=님(?:[이의께을은도]|\s|$))/g, NBSP],
+  // ... and 중 of a thing under way or among others ("찾는 중", "재생 중인", "곡 중에서"), not a word that starts with
+  // it ("중복 제거").
+  [/ (?=중(?:[이인에]|[\s:.,·)]|$))/g, NBSP],
+  // A time and what it counts from or up to: "5분 전", "10초 뒤로", "10분 안에", "1분 미만", "0초 이상", "잠시 뒤".
+  [/(\d(?:초|분|시간|일|주|개월|년)|잠시) (?=전|뒤|후|안에|미만|이상|이하)/g, `$1${NBSP}`],
+  // A total and its figure ("총 39분"), and a date's year and month and day ("2025년 11월 14일").
+  [/(총|\d년|\d월) (?=\d)/g, `$1${NBSP}`],
+];
+
+/**
+ * A line as people read it wherever it wraps: no-break spaces where a break would split what reads as one (a number
+ * and its unit, a month and its day, Korean's 수 of "쓸 수 있음"). Running it again changes nothing.
+ */
+export function together(text: string): string {
+  let kept = text;
+  for (const [pattern, replacement] of TOGETHER) kept = kept.replace(pattern, replacement);
+  return kept;
+}
+
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */
 export function translate(message: string, lang: Lang): string {
   if (lang === 'ko') {
     for (const [english, korean] of KOREAN) {
       if (typeof english === 'string' ? english === message : english.test(message)) {
-        return typeof english === 'string' ? korean : message.replace(english, korean);
+        // Read by people: a line that wraps keeps "할 수 있음" whole.
+        return together(typeof english === 'string' ? korean : message.replace(english, korean));
       }
     }
   }
@@ -289,7 +330,8 @@ export function sayError(message: string, lang: Lang): string {
   const said = translate(message, lang);
   // Korean has no capitals: a translation is shown as it is, and a word in Latin letters at its start keeps its case.
   if (said !== message) return said;
-  // English (or Korean without an entry): the message as a sentence, with its capital; jukecord's name has none.
-  if (said.startsWith('jukecord')) return said;
-  return said.charAt(0).toUpperCase() + said.slice(1);
+  // English (or Korean without an entry): the message as a sentence, with its capital; jukecord's name has none. Read
+  // by people as a translation is: a number keeps its unit on its line ("500 tracks").
+  if (said.startsWith('jukecord')) return together(said);
+  return together(said.charAt(0).toUpperCase() + said.slice(1));
 }

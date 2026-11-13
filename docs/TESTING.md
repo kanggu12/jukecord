@@ -109,7 +109,7 @@ pace, from `/proc`. In the image on two cores of a desktop processor (`docker ru
 | Plain, from the top (the cached file as it is)      | none                          | none                                 |
 | From the middle (a seek: decoded and encoded again) | 14.6 ms                       | 1.7 %                                |
 | More bass                                           | 16.1 ms                       | 1.9 %                                |
-| Softer at night, at 80 %                            | 20.2 ms                       | 2.4 %                                |
+| Night mode, at 80 %                                 | 20.2 ms                       | 2.4 %                                |
 | Clearer voices, at 150 % (with the limiter)         | 22.5 ms                       | 2.9 %                                |
 
 A stream with a sound has its first sound ready 21 ms after it starts (the median of five), so a change of volume or

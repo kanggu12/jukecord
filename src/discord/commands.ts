@@ -92,7 +92,7 @@ function inputOption(option: SlashCommandStringOption): SlashCommandStringOption
     .setName('input')
     .setDescription('An address (YouTube, SoundCloud, a playlist...) or words to search for')
     .setNameLocalizations({ ko: '입력' })
-    .setDescriptionLocalizations({ ko: '링크(유튜브, 사운드클라우드, 재생목록 등) 또는 검색어' })
+    .setDescriptionLocalizations({ ko: '링크(YouTube, SoundCloud, 플레이리스트 등) 또는 검색어' })
     .setRequired(true)
     .setMaxLength(500)
     .setAutocomplete(true);
@@ -479,9 +479,9 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       .addSubcommand((sub) =>
         sub
           .setName('list')
-          .setDescription('The listening links that still work')
+          .setDescription('The active listening links')
           .setNameLocalizations({ ko: '목록' })
-          .setDescriptionLocalizations({ ko: '아직 쓸 수 있는 듣기 링크' }),
+          .setDescriptionLocalizations({ ko: '유효한 듣기 링크' }),
       )
       .addSubcommand((sub) =>
         sub
@@ -584,7 +584,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           { name: 'More bass', value: 'bass', name_localizations: { ko: '저음 강조' } },
           { name: 'Clearer voices', value: 'voices', name_localizations: { ko: '목소리 또렷하게' } },
           { name: 'Brighter', value: 'bright', name_localizations: { ko: '밝게' } },
-          { name: 'Softer at night', value: 'night', name_localizations: { ko: '밤에 부드럽게' } },
+          { name: 'Night mode', value: 'night', name_localizations: { ko: '밤 모드' } },
         ),
     ),
     command(
@@ -647,13 +647,13 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       (option) =>
         option
           .setName('mode')
-          .setDescription('Off, a track from this server’s plays, or one related to the last track')
+          .setDescription('Off, a track from past plays, or one related to the last track')
           .setNameLocalizations({ ko: '방식' })
-          .setDescriptionLocalizations({ ko: '끄기, 이 서버에서 들은 곡, 마지막 곡과 비슷한 곡' })
+          .setDescriptionLocalizations({ ko: '끄기, 들은 곡, 마지막 곡과 비슷한 곡' })
           .setRequired(true)
           .addChoices(
             { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
-            { name: "This server's plays", value: 'history', name_localizations: { ko: '이 서버에서 들은 곡' } },
+            { name: 'Past plays', value: 'history', name_localizations: { ko: '들은 곡' } },
             {
               name: 'Related to the last track',
               value: 'related',

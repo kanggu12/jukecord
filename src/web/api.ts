@@ -724,7 +724,7 @@ export const API = {
   autoplay: op({
     method: 'PUT',
     path: '/guilds/{guild}/player/autoplay',
-    summary: "When the queue runs out: nothing, a track from this server's plays, or one related to the last track",
+    summary: 'When the queue runs out: nothing, a track from past plays, or one related to the last track',
     tag: 'player',
     access: 'control',
     params: InGuild,

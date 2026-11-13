@@ -81,10 +81,10 @@ describe('the DJ card', () => {
     const text = djCard(settings, 'en').toJSON().description ?? '';
     assert.match(text, /^Everyone in the server may change the music\n\n/);
     assert.match(text, /Vote to skip: on\nTake turns: off\nTracks per person: 3\nStay in voice: on/);
-    assert.match(text, /Voice volume: 80%\nSound: softer at night$/);
+    assert.match(text, /Voice volume: 80%\nSound: night mode$/);
     const korean = djCard({ ...settings, personLimit: 0 }, 'ko').toJSON().description ?? '';
     assert.match(korean, /한 사람당 곡 수: 제한 없음/);
-    assert.match(korean, /음향 효과: 밤에 부드럽게$/);
+    assert.match(korean, /음향 효과: 밤 모드$/);
   });
 });
 

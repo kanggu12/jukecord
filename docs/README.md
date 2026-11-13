@@ -31,11 +31,11 @@ address ([who may do what](#who-may-do-what)).
 - The list shows a hundred tracks at a time; its search covers the whole queue.
 - **Autoplay** (**∞**, beside the queue's title) chooses what plays when the queue runs out:
 
-| Mode                      | Plays                                                                             |
-| :------------------------ | :-------------------------------------------------------------------------------- |
-| Off                       | nothing                                                                           |
-| This server's plays       | a track played here before, none of the last 30; more plays and likes, more often |
-| Related to the last track | a track from YouTube's mix of it, or this server's plays when there is none       |
+| Mode                      | Plays                                                                                    |
+| :------------------------ | :--------------------------------------------------------------------------------------- |
+| Off                       | nothing                                                                                  |
+| Past plays                | a track played here before, none of the last 30 played; more plays and likes, more often |
+| Related to the last track | a track from YouTube's mix of it, or from past plays when there is no mix                |
 
 Autoplay queues one track when the last one starts ("added by Autoplay"). A track you add at the end goes before it,
 **Stop** ends autoplay until a track starts again, and autoplay waits while a repeat is on. A server whose every track
@@ -56,7 +56,7 @@ search words. A link pasted anywhere on the page, or dropped on it, is added too
 ### Likes, playlists and statistics
 
 - **Liked**, beside **Recently played**: likes are each login's own, in every server it opens. **Add all** queues them.
-- **Saved playlists** (**Load**) export as a text file of addresses, an M3U, or jukecord's own file, which keeps
+- **Saved playlists** (**Playlists**) export as a text file of addresses, an M3U, or jukecord's own file, which keeps
   titles, lengths and pictures. **Import** takes any of those, or a pasted list: a line that is not an address is
   searched on YouTube, up to a hundred lines.
 - **Statistics** (top bar) cover 7, 30 or 90 days or a year, and each chart has a table view.
@@ -139,7 +139,7 @@ People who can manage the server, and the host, change these in the panel's menu
 ## The voice channel's sound
 
 The voice card sets the voice channel's **volume**, 0 to 200 % (100 % is the track as it is), and its **sound**: more
-bass, clearer voices, brighter, or softer at night (less low end, gentler highs, 4 dB quieter). So do `/volume`,
+bass, clearer voices, brighter, or night mode (less low end, gentler highs, 4 dB quieter). So do `/volume`,
 `/sound`, `jukecord volume 80` and `jukecord sound night`, for whoever may change the music. A change is heard within a
 moment, from the same place in the track. Browsers listening along apply the same sound, each at its own volume.
 
@@ -162,7 +162,7 @@ and encodes it again
 | `/queue`                                     | the queue, ten to a page                                                  |
 | `/jump` `/remove` `/move`                    | a queued track by its number: play it now, remove it, move it             |
 | `/shuffle` `/dedupe` `/clear`                | the whole queue                                                           |
-| `/autoplay`                                  | when the queue runs out: off, this server's plays, related tracks         |
+| `/autoplay`                                  | when the queue runs out: off, past plays, related tracks                  |
 | `/history`                                   | recently played                                                           |
 | `/playlist save, load, list, rename, delete` | saved playlists                                                           |
 | `/playlist export, import`                   | a saved playlist as a file, and a playlist from an attached file          |

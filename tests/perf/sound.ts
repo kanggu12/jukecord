@@ -104,7 +104,7 @@ async function firstSound(args: string[]): Promise<number> {
 const cases: [string, string[]][] = [
   ['from the middle (a seek: decoded and encoded again)', ffmpeg.seekArgs(track, 60_000)],
   ['more bass', ffmpeg.soundArgs(track, 0, { volume: 100, preset: 'bass' } satisfies Sound, false)],
-  ['softer at night at 80 %', ffmpeg.soundArgs(track, 0, { volume: 80, preset: 'night' }, false)],
+  ['night mode at 80 %', ffmpeg.soundArgs(track, 0, { volume: 80, preset: 'night' }, false)],
   ['clearer voices at 150 % (the limiter too)', ffmpeg.soundArgs(track, 0, { volume: 150, preset: 'voices' }, false)],
 ];
 console.log(`ffmpeg: ${execFileSync(program, ['-hide_banner', '-version'], { encoding: 'utf8' }).split('\n')[0]}`);
