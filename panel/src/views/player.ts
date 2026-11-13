@@ -949,7 +949,9 @@ export function queueCard(): HTMLElement {
       [turns, words.takeTurnsKey],
       [dedupe, words.dedupe],
       [save, words.save],
-      [load, words.load],
+      // Named for what it opens, the saved playlists, which anyone may look at ("Load" stayed lit for someone who
+      // could not load); their rows load.
+      [load, words.playlists],
       [clear, words.clear],
     ] as const) {
       (button.querySelector('.label') as HTMLElement).textContent = label;
@@ -961,8 +963,8 @@ export function queueCard(): HTMLElement {
     turns.setAttribute('aria-label', words.takeTurnsNow);
     toolsMore.title = words.queueTools;
     toolsMore.setAttribute('aria-label', words.queueTools);
-    // Open for everyone: Load is in it on a phone, and anyone may look at the saved playlists (the tools in it keep
-    // their own states).
+    // Open for everyone: Playlists is in it on a phone, and anyone may look at the saved playlists (the tools in it
+    // keep their own states).
     toolsMore.disabled = !state.queue;
     // A tool turned off with the focus on it (Clear, Remove duplicates with nothing left to remove) hands it to the
     // queue's search, or the add field: the list may be empty now.
@@ -1150,7 +1152,7 @@ export function queueCard(): HTMLElement {
       choice(turns, 'users', words.takeTurnsNow),
       choice(dedupe, 'list-x', words.dedupe),
       choice(save, 'save', words.save),
-      choice(load, 'folder-open', words.load),
+      choice(load, 'folder-open', words.playlists),
       choice(clear, 'trash-2', words.clear, true),
     );
   };
@@ -1394,7 +1396,7 @@ async function playlistsDialog(): Promise<void> {
   // as a queue row's does: three bare icons beside Load left a phone's name 60 px (it wrapped, and rows differed in
   // height), and the export's arrow read as a second Load. Each key has a data-key, so the focus can find it again.
   const playlistRow = (playlist: { id: number; name: string; size: number }) => {
-    // The same icon as the queue's Load, which opens this list.
+    // The same icon as the queue's Playlists key, which opens this list.
     const loadKey = h(
       'button',
       { class: 'key sm', type: 'button', dataset: { key: 'load' } },

@@ -92,7 +92,7 @@ function inputOption(option: SlashCommandStringOption): SlashCommandStringOption
     .setName('input')
     .setDescription('An address (YouTube, SoundCloud, a playlist...) or words to search for')
     .setNameLocalizations({ ko: '입력' })
-    .setDescriptionLocalizations({ ko: '링크(유튜브, 사운드클라우드, 재생목록 등) 또는 검색어' })
+    .setDescriptionLocalizations({ ko: '링크(YouTube, SoundCloud, 플레이리스트 등) 또는 검색어' })
     .setRequired(true)
     .setMaxLength(500)
     .setAutocomplete(true);
@@ -479,9 +479,9 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       .addSubcommand((sub) =>
         sub
           .setName('list')
-          .setDescription('The listening links that still work')
+          .setDescription('The active listening links')
           .setNameLocalizations({ ko: '목록' })
-          .setDescriptionLocalizations({ ko: '아직 쓸 수 있는 듣기 링크' }),
+          .setDescriptionLocalizations({ ko: '유효한 듣기 링크' }),
       )
       .addSubcommand((sub) =>
         sub

@@ -110,6 +110,16 @@ describe('one name for one thing', () => {
       assert.equal(words(lang).presets.night, words(lang).presetsShort.night, lang);
   });
 
+  it('calls following the device the same for the theme and the language', () => {
+    for (const lang of ['en', 'ko'] as const) assert.equal(words(lang).themeSystem, words(lang).languageAuto, lang);
+  });
+
+  it('writes YouTube and SoundCloud in Latin letters in Korean too, and the empty queue without brackets', () => {
+    const korean = lines(words('ko')).join('\n');
+    assert.ok(!/유튜브|사운드클라우드/.test(korean));
+    for (const lang of ['en', 'ko'] as const) assert.ok(!/[()]/.test(words(lang).queueEmptyHint), lang);
+  });
+
   it('says on Skip that the vote is cast in words apart from the count before it, and no "투표함" (a ballot box)', () => {
     for (const lang of ['en', 'ko'] as const) {
       const before = words(lang).votesCount(1, 2, false);

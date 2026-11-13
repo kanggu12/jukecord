@@ -56,7 +56,7 @@ search words. A link pasted anywhere on the page, or dropped on it, is added too
 ### Likes, playlists and statistics
 
 - **Liked**, beside **Recently played**: likes are each login's own, in every server it opens. **Add all** queues them.
-- **Saved playlists** (**Load**) export as a text file of addresses, an M3U, or jukecord's own file, which keeps
+- **Saved playlists** (**Playlists**) export as a text file of addresses, an M3U, or jukecord's own file, which keeps
   titles, lengths and pictures. **Import** takes any of those, or a pasted list: a line that is not an address is
   searched on YouTube, up to a hundred lines.
 - **Statistics** (top bar) cover 7, 30 or 90 days or a year, and each chart has a table view.
