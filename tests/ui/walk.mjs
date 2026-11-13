@@ -1141,9 +1141,37 @@ await api('POST', '/guilds/local/player/stop').catch(() => {});
 await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
 await api('POST', '/guilds/local/player/resume').catch(() => {});
 await until('playing');
+// The Skip key of someone whose Skip is a vote: it says what its count is of, as a count ("votes 1/2", "투표 1/2"; the
+// old "1/2표" read as a half), and once their vote is in, that they voted. The row of keys stays one line, or the main
+// key alone over the other four, at every width (a longer count once left a key alone on a second line).
+async function skipSays(page, voted) {
+  const { text, lang, rows } = await page.evaluate(() => {
+    const row = document.querySelector('.now .keys');
+    const tops = new Map();
+    for (const key of row?.querySelectorAll(':scope > .key') ?? []) {
+      if (key.hidden || !key.offsetParent) continue;
+      const top = Math.round(key.getBoundingClientRect().top);
+      tops.set(top, (tops.get(top) ?? 0) + 1);
+    }
+    return {
+      text: row?.querySelector('[data-act="skip"] .votes')?.textContent ?? '',
+      lang: document.documentElement.lang,
+      rows: [...tops.values()],
+    };
+  });
+  const want = lang === 'ko' ? `${voted ? '투표함' : '투표'} 1/2` : `${voted ? 'voted' : 'votes'} 1/2`;
+  if (text !== want) throw new Error(`Skip's count says "${text}", not "${want}"`);
+  if (rows.length > 2 || (rows.length === 2 && rows[0] !== 1)) throw new Error(`the keys lie in rows of ${rows}`);
+}
 // Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
 // count stays on the key when a narrow row shows icons alone).
-await sweep('vote-skip', SIZES, null, { discord: { control: false, votes: { on: true, votes: 1, needed: 2 } } });
+await sweep('vote-skip', SIZES, (page) => skipSays(page, false), {
+  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } },
+});
+// The same person once their vote is in: the key says they voted.
+await sweep('vote-skip-voted', SIZES, (page) => skipSays(page, true), {
+  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } },
+});
 // The menu of someone who manages the server, with the server's settings under the DJ role.
 await sweep(
   'menu-settings',

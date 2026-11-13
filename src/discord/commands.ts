@@ -510,7 +510,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       .addStringOption(modeOption),
     command(
       'voteskip',
-      'Whether Skip from someone without the DJ role is a vote (half of the listeners skip)',
+      'Whether Skip from someone without the DJ role is a vote (it skips when half of the listeners agree)',
       '건너뛰기투표',
       'DJ 역할이 없는 사람의 건너뛰기를 투표로 받기(듣는 사람 절반이 찬성하면 넘어감)',
     )

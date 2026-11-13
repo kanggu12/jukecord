@@ -32,6 +32,8 @@ import {
   mayControl,
   maySkip,
   positionNow,
+  skipIsVote,
+  skipTitle,
   state,
   t,
   update,
@@ -142,9 +144,14 @@ function guild(): string {
 export async function skipOrVote(button: HTMLButtonElement | null): Promise<boolean | undefined> {
   // The track shown now: pressed together with others, the press does not go on to the next one.
   const track = state.player?.track?.id;
-  const answer = await act(button, () => api.skip(guild(), track));
+  const id = guild();
+  const answer = await act(button, () => api.skip(id, track));
   if (!answer) return undefined;
-  if (answer.votes) toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'pause', 'skip-forward');
+  if (answer.votes) {
+    // The vote is in: Skip says "voted" at once, before the live update that says the same to every page of theirs.
+    if (state.guild?.id === id) update({ votes: { on: true, ...answer.votes, voted: true } });
+    toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'pause', 'skip-forward');
+  }
   return answer.votes === null;
 }
 
@@ -418,11 +425,12 @@ export function nowCard(live: Live): HTMLElement {
     const addField = document.getElementById('add-input');
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
     setOff(pause, !player || !control || (!track && !queued), addField);
-    // Skip, or a vote to skip for someone without the DJ role where Skip is one. A vote under way puts its count on
-    // the key, beside the word, where it stays when a narrow row of keys shows their icons alone.
+    // Skip, or a vote to skip for someone without the DJ role where Skip is one. Beside the word the key says the vote
+    // and its count ("votes 1/2", "voted 1/2" once the person's vote is in): always to the people it is a vote for,
+    // and to everyone while one is under way. The count stays when a narrow row of keys shows their icons alone.
     const votes = state.votes;
-    const counting = votes.on && votes.votes > 0 && Boolean(track);
-    const count = counting ? words.votesCount(votes.votes, votes.needed) : '';
+    const counting = votes.on && Boolean(track) && (votes.votes > 0 || votes.voted || skipIsVote());
+    const count = counting ? words.votesCount(votes.votes, votes.needed, votes.voted) : '';
     refill(
       skip,
       `${words.skip}|${count}`,
@@ -430,8 +438,8 @@ export function nowCard(live: Live): HTMLElement {
       h('span', { class: 'label' }, words.skip),
       counting ? h('span', { class: 'votes num', 'aria-hidden': 'true' }, count) : null,
     );
-    const voting = !control && votes.on;
-    skip.title = counting ? words.skipVotes(votes.votes, votes.needed) : voting ? words.voteToSkip : words.skip;
+    // Its name says the same in words, the count too ("1/2" is read out as a half).
+    skip.title = skipTitle();
     skip.setAttribute('aria-label', skip.title);
     setOff(skip, !maySkip() || !track, pause, addField);
     refill(stop, words.stop, icon('square'), h('span', { class: 'label' }, words.stop));

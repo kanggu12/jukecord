@@ -13,7 +13,7 @@ import { api, coverUrl, type Player } from '../api.ts';
 import { avatarUrl, face, fill, h, icon, refill, setOff } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { SoundGraph } from '../sound.ts';
-import { keep, mayControl, maySkip, positionNow, state, t, update, watch } from '../state.ts';
+import { keep, mayControl, maySkip, positionNow, skipTitle, state, t, update, watch } from '../state.ts';
 import { followMusic } from './light.ts';
 import { act, disc, listenerName, skipOrVote } from './player.ts';
 import { sleepKey } from './sleep.ts';
@@ -311,14 +311,9 @@ export function listenBar(live: Live): HTMLElement {
     const queued = (state.queue?.items.length ?? 0) > 0;
     const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
     label(pauseKey, moving ? 'pause' : 'play', pauseWords, false);
-    // Skip, or a vote to skip without the DJ role where Skip is one, named with the count of a vote under way.
-    const votes = state.votes;
-    skipKey.title =
-      votes.on && votes.votes > 0
-        ? words.skipVotes(votes.votes, votes.needed)
-        : votes.on && !mayControl()
-          ? words.voteToSkip
-          : words.skip;
+    // Skip, or a vote to skip without the DJ role where Skip is one, named with the count of a vote under way and,
+    // once the person's vote is in, that they voted (as the playing card's Skip is).
+    skipKey.title = skipTitle();
     skipKey.setAttribute('aria-label', skipKey.title);
     // A key turned off with the focus on it (Skip on the last track) hands it to the other key, or to Listen here.
     setOff(pauseKey, !player || !mayControl() || (!player.track && !queued), toggle);

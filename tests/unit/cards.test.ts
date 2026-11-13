@@ -48,10 +48,11 @@ function labels(card: ReturnType<typeof nowCard>): string[] {
 describe('the playing card', () => {
   it('puts a vote under way on its Skip button and under the bar, and nothing when there is none', () => {
     const voting = nowCard(playing, 'en', null, { votes: 1, needed: 3 });
-    assert.deepEqual(labels(voting), ['Pause', 'Skip (1 of 3)']);
+    assert.deepEqual(labels(voting), ['Pause', 'Skip (votes 1/3)']);
     assert.equal(voting.embeds[0]?.toJSON().footer?.text, 'Votes to skip: 1 of 3');
     const korean = nowCard({ ...playing, repeat: 'queue' }, 'ko', null, { votes: 2, needed: 3 });
-    assert.deepEqual(labels(korean), ['일시정지', '건너뛰기 (2/3)']);
+    // A count of votes, said as one: "2/3표" read as two thirds.
+    assert.deepEqual(labels(korean), ['일시정지', '건너뛰기 (투표 2/3)']);
     assert.equal(korean.embeds[0]?.toJSON().footer?.text, '대기열 반복 · 건너뛰기 투표: 3표 중 2표');
     const plain = nowCard(playing, 'en', null);
     assert.deepEqual(labels(plain), ['Pause', 'Skip']);

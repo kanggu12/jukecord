@@ -63,6 +63,7 @@ import {
   relativePeriod,
   soundCard,
   statsCard,
+  votedNote,
   wrappedCard,
 } from './cards.ts';
 import { commandDefinitions } from './commands.ts';
@@ -938,15 +939,26 @@ export class Bot implements Directory, AlertSink {
     const track = shown && /^\d+$/.test(shown) ? Number(shown) : undefined;
     const cardLang: Lang = made === 'ko' || made === 'en' ? made : langOf(interaction.locale);
     try {
-      const snapshot =
+      // Skip may be a vote the track does not go by: its answer says how the vote stands then.
+      const answer =
         action === 'pause'
-          ? actions.pause(context)
+          ? { snapshot: actions.pause(context), votes: null }
           : action === 'resume'
-            ? actions.resume(context)
-            : actions.skip(context, track).snapshot;
+            ? { snapshot: actions.resume(context), votes: null }
+            : actions.skip(context, track);
       // The card itself is updated in place, so the channel does not fill with copies; it is the card people use now,
       // so it is the one kept current. Its Skip says how a vote stands.
-      await this.updateCard(interaction, snapshot, cardLang);
+      await this.updateCard(interaction, answer.snapshot, cardLang);
+      // The card is everyone's and cannot say whose the vote was: the presser alone is told theirs counted, in their
+      // own language (a second press of theirs changes nothing, and without this said nothing either).
+      if (answer.votes) {
+        await interaction
+          .followUp({
+            embeds: [votedNote(answer.votes.votes, answer.votes.needed, langOf(interaction.locale))],
+            flags: MessageFlags.Ephemeral,
+          })
+          .catch((failure: unknown) => this.options.log.debug('could not say a vote was cast', { error: failure }));
+      }
     } catch (error) {
       // A card out of date (paused since, another track, nothing playing now): its key did nothing because the player
       // is that way already. The card is drawn again from what plays now; a refusal left it wrong, and told the person
