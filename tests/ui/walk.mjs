@@ -540,9 +540,28 @@ await sweep('clear-dialog', FEW, async (page) => {
   await tool(page, 'clear');
   await page.waitForSelector('.dialog');
 });
+// The saved playlists: each row one line of name over its count, Load, and one key for the rest. With three bare icons
+// beside Load a phone's names wrapped ("Quiet / hours") and the rows were of different heights.
 await sweep('playlists', FEW, async (page) => {
   await tool(page, 'load');
   await page.waitForSelector('.dialog .channel');
+  const rows = await page.$$eval('.dialog .channel', (items) =>
+    items.map((item) => {
+      // The name's lines: one box each for the words of a line.
+      const name = document.createRange();
+      name.selectNodeContents(item.querySelector('.name > b'));
+      return { height: item.getBoundingClientRect().height, lines: name.getClientRects().length };
+    }),
+  );
+  if (new Set(rows.map((row) => Math.round(row.height))).size > 1)
+    throw new Error(`playlist rows of different heights: ${rows.map((row) => row.height).join(', ')}`);
+  if (rows.some((row) => row.lines > 1)) throw new Error('a playlist name wraps');
+});
+// A playlist's other keys, behind its row's key: rename, export and delete in words.
+await sweep('playlist-menu', FEW, async (page) => {
+  await tool(page, 'load');
+  await page.locator('.dialog .channel [data-key="more"]').first().click();
+  await page.waitForSelector('.dialog .choice[data-choice="delete"]');
 });
 await sweep('shortcuts', FEW, async (page) => {
   await page.keyboard.press('?');
@@ -1243,6 +1262,10 @@ await api('POST', '/guilds/local/playlists/Quiet%20hours/load', { at: 'end' });
 await api('POST', '/guilds/local/player/resume').catch(() => {});
 await until('playing');
 async function invite(page) {
+  // The links the walk made on its earlier pages go first: each page makes one, and a dozen made in the same minute is
+  // no server's list. The seed's two older ones stay, so the list shows links that differ beside the one made here.
+  for (const link of await api('GET', '/guilds/local/listen-links'))
+    if (Date.now() - link.createdAt < 3_600_000) await api('DELETE', `/guilds/local/listen-links/${link.id}`);
   await page.click('[data-act="invite"]');
   await page.waitForSelector('.dialog .invite');
 }
@@ -1255,6 +1278,22 @@ await sweep('invite', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-copy"]');
   const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
   if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
+  // The links that work: the one just made is marked (the rows read word for word the same), each row says who made it
+  // and when, and no part of the line under the date breaks inside itself (the made-by part wrapped alone after a dot).
+  await page.waitForSelector('.dialog .invite-links .channel .badge');
+  const rows = await page.$$eval('.dialog .invite-links .channel', (items) =>
+    items.map((item) => {
+      // Each part one line: no taller than one line of its words (the mark is a box of its own height).
+      const parts = [...item.querySelectorAll('.sub > :not(.badge)')];
+      const broken = parts.some(
+        (part) => part.getBoundingClientRect().height > Number.parseFloat(getComputedStyle(part).lineHeight) + 1,
+      );
+      return { marked: Boolean(item.querySelector('.badge')), broken };
+    }),
+  );
+  if (rows.filter((row) => row.marked).length !== 1 || !rows[0]?.marked)
+    throw new Error(`marked as new: ${rows.map((row) => row.marked).join(', ')}`);
+  if (rows.some((row) => row.broken)) throw new Error('a part of a link row breaks across lines');
 });
 // The question over the Invite dialog (revoking a link): the dialog under it is shaded and takes no clicks. Over a
 // dialog on top of every shade, the list's Revoke stayed bright and pressable under the question, and the two dialogs
@@ -1292,11 +1331,15 @@ async function guestLink() {
   links.used += 1;
   return links.hash;
 }
-// A guest's panel: in with a listening link, the player and the queue, the lyrics, the menu.
+// A guest's panel: in with a listening link, the player and the queue, the lyrics, the menu. The bar says it is a guest
+// once, on the account key: its pill says the connection as anyone's does (it said "Guest" as well, by a lamp that told
+// no state).
 async function asGuest(page) {
   await page.goto(`${BASE}/listen${await guestLink()}`);
   await page.waitForSelector('.app .card');
-  await page.waitForSelector('.bar .pill.tone-idle');
+  await page.waitForSelector('.bar .pill.tone-play');
+  const pill = (await page.locator('.bar .pill').textContent()) ?? '';
+  if (/guest|손님/i.test(pill)) throw new Error(`a guest's pill says: ${pill}`);
 }
 // A guest's card says nobody listens yet as the other cards say an empty list (a bare "Nobody" in the corner of a card
 // the column's height read as unfinished).
@@ -1383,9 +1426,17 @@ await sweep('listeners-guest', FEW, null, {
 });
 // What another app shared, on the page that adds it: for the host, and for a guest (who only listens).
 const SHARED = `/add?title=Paper%20Boats&text=${encodeURIComponent('Listen to this https://media.example/demo005')}`;
+// What came reads as words (its name over its address, in no box like a field's), and a key leaves without a change:
+// Cancel beside the keys that add; for a guest, who may not add, no key that does nothing, and one back to the player
+// (it had three dead keys and the logo for a way back).
 await sweep('share', FEW, async (page) => {
   await page.goto(`${BASE}${SHARED}`);
   await page.waitForSelector('.share-card .share-input');
+  if ((await page.locator('.share-card .share-name').textContent()) !== 'Paper Boats')
+    throw new Error('the shared title is not shown');
+  if (await page.locator('.share-card .secret').count()) throw new Error('what was shared sits in a box like a field');
+  const keys = await page.$$eval('.share-keys .key', (found) => found.map((key) => key.dataset.act));
+  if (keys.join() !== 'share-leave,share-end,share-next,share-now') throw new Error(`the share keys: ${keys.join()}`);
 });
 await sweep(
   'share-guest',
@@ -1394,6 +1445,10 @@ await sweep(
     await asGuest(page);
     await page.goto(`${BASE}${SHARED}`);
     await page.waitForSelector('.share-card .share-why');
+    const keys = await page.$$eval('.share-keys .key', (found) =>
+      found.map((key) => `${key.dataset.act}${key.disabled ? ' (off)' : ''}`),
+    );
+    if (keys.join() !== 'share-leave') throw new Error(`a guest's share keys: ${keys.join()}`);
   },
   { login: false },
 );
@@ -1716,7 +1771,8 @@ await sweep(
   ],
   async (page) => {
     await tool(page, 'load');
-    await page.locator('.dialog .channel [data-key="export"]').first().click();
+    await page.locator('.dialog .channel [data-key="more"]').first().click();
+    await page.click('.dialog .choice[data-choice="export"]');
     await page.waitForSelector('.dialog .choice[data-format="m3u"]');
   },
 );
@@ -1738,6 +1794,19 @@ await sweep(
       .fill(
         ['https://media.example/demo001', 'https://media.example/demo002', 'Example Band - Velvet Hours'].join('\n'),
       );
+    // Filled, each field still shows its name (a placeholder alone went with the first letter), and Import is the
+    // dialog's own key beside Close (it stood in the body, Close alone on a row under it).
+    const named = await page.$$eval('.dialog .import-form .field-label', (labels) =>
+      labels
+        .filter((label) => label.getClientRects().length > 0 && label.textContent.trim())
+        .map((label) => label.htmlFor),
+    );
+    if (named.join() !== 'import-name,import-list') throw new Error(`the filled fields' names shown: ${named.join()}`);
+    // The keys of the dialog on top (the last in the page; the playlists' own lie under it).
+    const keys = await page.$$eval('.dialog', (dialogs) =>
+      [...dialogs.at(-1).querySelectorAll('.dialog-keys .key')].map((key) => key.dataset.act ?? ''),
+    );
+    if (keys.join() !== 'import-go,') throw new Error(`the dialog's keys: ${keys.join()}`);
   },
 );
 // The queue's tools behind their key on a phone, autoplay among them with its mode.

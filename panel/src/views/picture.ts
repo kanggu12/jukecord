@@ -47,9 +47,15 @@ export interface PictureContent {
   /** The moments' head, and the moments: the busiest day and hour (where they are habits), the longest day. */
   readonly momentsLabel: string;
   readonly moments: readonly { readonly label: string; readonly value: string }[];
-  /** Whose picks played most: up to three, each with a face and the plays of what they added. */
+  /** Whose picks played most: up to three, each with a face and the plays of what they added (a role, the host, with a
+   * person for a face). */
   readonly peopleLabel: string;
-  readonly people: readonly { readonly name: string; readonly picture: string | null; readonly plays: string }[];
+  readonly people: readonly {
+    readonly name: string;
+    readonly picture: string | null;
+    readonly plays: string;
+    readonly role?: boolean;
+  }[];
 }
 
 // The size of each shape, in the picture's own pixels.
@@ -526,7 +532,8 @@ function album(
   cover(ctx, look, image, x, y, size, size * 0.08);
 }
 
-// A face: the picture in a circle, or the initials on the panel's raised glass.
+// A face: the picture in a circle, or the initials on the panel's raised glass; a role (the host: no account, so no
+// name to take letters from) has a person there, as the panel's own faces show it.
 function face(
   ctx: CanvasRenderingContext2D,
   look: Look,
@@ -536,6 +543,7 @@ function face(
   cx: number,
   cy: number,
   radius: number,
+  role = false,
 ): void {
   ctx.save();
   // A circle, everything inside it.
@@ -547,6 +555,22 @@ function face(
   ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
   if (image) {
     ctx.drawImage(image, cx - radius, cy - radius, radius * 2, radius * 2);
+  } else if (role) {
+    // The raised glass, and the panel's person icon (Lucide's user, 24 units a side) in the second ink, seven tenths of
+    // the face across with lines of 2.4 units, as the panel's own role faces have it (style.css .avatar.role).
+    ctx.fillStyle = look.raised;
+    ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    const side = radius * 2 * 0.7;
+    ctx.translate(cx - side / 2, cy - side / 2);
+    ctx.scale(side / 24, side / 24);
+    ctx.strokeStyle = look.ink2;
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke(new Path2D('M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2'));
+    ctx.beginPath();
+    ctx.arc(12, 7, 4, 0, Math.PI * 2);
+    ctx.stroke();
   } else {
     // As the panel's .avatar: the raised glass, the initials in the second ink, in the middle.
     ctx.fillStyle = look.raised;
@@ -900,7 +924,17 @@ function peopleRows(ink: Ink, content: PictureContent, faces: readonly (HTMLImag
     text: person.name,
     count: person.plays,
     draw: (x: number, y: number, size: number) =>
-      face(ink.ctx, ink.look, ink, faces[index] ?? null, person.name, x + size / 2, y + size / 2, size / 2),
+      face(
+        ink.ctx,
+        ink.look,
+        ink,
+        faces[index] ?? null,
+        person.name,
+        x + size / 2,
+        y + size / 2,
+        size / 2,
+        person.role,
+      ),
   }));
 }
 

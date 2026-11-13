@@ -9,7 +9,7 @@
  * - overlap: two pieces of text drawn over each other;
  * - contrast: text below 4.5:1 against what is really behind it (translucent layers composited), 3:1 when large;
  * - align: the controls of one row (keys, fields, pickers, rows of choices, menus) at different heights, or with the
- *   labels and words standing in that row, at different centres;
+ *   labels and words standing in that row, at different centres; a sheet's close key off the centre of its first row;
  * - icon: an icon (or a lamp, a face, a swatch) off the centre of the line of words beside it;
  * - label: the words of a key, a pill, a badge or a face off the middle of their frame: upright their capitals (Korean,
  *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are;
@@ -23,7 +23,10 @@
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
  *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest;
  * - small-target: on a touch screen, a control smaller than 44 x 44;
+ * - sticky: on a touch screen (no hover), a :hover rule in effect: the browser keeps :hover on what was tapped last,
+ *   so a key stays boxed or a row lit after a tap;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
+ * - lone-word: words that wrap with a word or two alone on their last line (a fifth of their longest line or less);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
  *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
@@ -454,6 +457,31 @@ window.__audit = () => {
     }
   }
 
+  // On a screen without hover (a touch screen) no :hover rule may be in effect: the browser keeps :hover on what was
+  // tapped last, and a key stayed boxed or a row lit after a tap (the sleep timer's choice left the queue row under it
+  // lit and its title underlined). Read from the stylesheets: a rule is in effect when every @media round it holds
+  // here (one inside a @container may hold on any card, so it counts).
+  if (matchMedia('(hover: none)').matches) {
+    const sticky = new Set();
+    const visit = (rules, holds) => {
+      for (const rule of rules) {
+        if (rule instanceof CSSMediaRule) visit(rule.cssRules, holds && matchMedia(rule.conditionText).matches);
+        else if (rule instanceof CSSGroupingRule) visit(rule.cssRules, holds);
+        else if (holds && rule instanceof CSSStyleRule && /:hover\b/.test(rule.selectorText))
+          sticky.add(rule.selectorText);
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      try {
+        visit(sheet.cssRules, true);
+      } catch {
+        // Another site's stylesheet cannot be read (the panel loads none).
+      }
+    }
+    for (const selector of sticky)
+      findings.push({ kind: 'sticky', where: selector, detail: 'a :hover outside @media (hover: hover)' });
+  }
+
   // The listen bar stands at the foot of the window in every layout (the page scrolls under it on a phone).
   const listen = document.querySelector('.listen');
   if (listen && shown(listen)) {
@@ -726,6 +754,18 @@ window.__audit = () => {
     if (!outer || !seen(inner) || outer.matches('.seg') || inner.matches('input, select, textarea')) continue;
     const off = middle(inner.getBoundingClientRect()) - middle(outer.getBoundingClientRect());
     if (Math.abs(off) > HALF) add('align', inner, `${px(off)} px off the middle of ${describe(outer)}`);
+  }
+  // A sheet's close key, in its corner, stands on the centre of the sheet's first row: the menu's who, the lyrics'
+  // head (fixed 12 px from the top, it stood 12 px above the menu's first row at 1440). Measured with the sheet at its
+  // top, as it opens.
+  for (const close of document.querySelectorAll('.sheet > .sheet-close')) {
+    const body = close.parentElement.querySelector('.sheet-body');
+    const head = body?.firstElementChild;
+    if (!head || !seen(close) || body.scrollTop > 0) continue;
+    // The head's first row: a line of words and controls, or the head itself (a card's head is one).
+    const row = head.matches('.card-head') ? head : (head.querySelector('.line, .card-head') ?? head);
+    const off = middle(close.getBoundingClientRect()) - middle(row.getBoundingClientRect());
+    if (Math.abs(off) > HALF) add('align', close, `${px(off)} px off the centre of ${describe(row)}`);
   }
 
   // An icon and its words: the mark's centre on the centre of the line beside it (the first line, when the words take
@@ -1086,6 +1126,45 @@ window.__audit = () => {
       if (Math.max(...bases) - Math.min(...bases) > HALF)
         add('baseline', row, `baselines ${px(Math.max(...bases) - Math.min(...bases))} px apart: ${names(line)}`);
     }
+  }
+
+  // Words that wrap keep more than a word or two on their last line: a dialog's text, a hint, a toast ("voice",
+  // "없음", "is none" alone under a full line read as a slip). A paragraph is the box its words are laid out in (the
+  // first one round them that is not inline), and its lines are the lines of its own words (a box inside it with words
+  // of its own is a paragraph of its own). Not held to it: words cut short (a title held to two lines shows no last
+  // line), an address (no spaces to break at), and a narrow box (a chart's label).
+  const paragraphs = new Map();
+  const paragraphOf = (element) => {
+    let box = element;
+    while (box.parentElement && getComputedStyle(box).display === 'inline') box = box.parentElement;
+    return box;
+  };
+  for (const element of texts) {
+    if (element.closest('.secret, .sr, svg')) continue;
+    const box = paragraphOf(element);
+    if (!paragraphs.has(box)) paragraphs.set(box, []);
+    for (const node of element.childNodes)
+      if (node.nodeType === 3 && node.textContent.trim()) paragraphs.get(box).push(node);
+  }
+  for (const [box, nodes] of paragraphs) {
+    if (!seen(box) || box.scrollHeight > box.clientHeight + 2) continue;
+    const rects = [];
+    for (const node of nodes) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) if (rect.width >= 0.5 && rect.height >= 0.5) rects.push(rect);
+    }
+    // Its lines, top to bottom: the rects sharing half their height are one line.
+    const lines = bands(rects.map((rect) => ({ box: rect }))).map((line) => ({
+      top: Math.min(...line.map((item) => item.box.top)),
+      width: Math.max(...line.map((item) => item.box.right)) - Math.min(...line.map((item) => item.box.left)),
+    }));
+    if (lines.length < 2) continue;
+    lines.sort((a, b) => a.top - b.top);
+    const longest = Math.max(...lines.map((line) => line.width));
+    const last = lines.at(-1).width;
+    if (longest >= 120 && last <= longest / 5)
+      add('lone-word', box, `its last line ${px(last)} px wide under lines of ${px(longest)}`);
   }
 
   // The space between things comes from one scale. Read as the stylesheet resolved it (the typed object model gives

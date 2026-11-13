@@ -99,14 +99,14 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   const me = state.me;
   if (!me) return;
   // The host has no Discord name: one line, "Host" in the panel's language; a friend and a guest the same, a guest with
-  // until when its link works. A Discord login: the name, and how.
+  // until when its link works (not "as a guest" again under "Guest"). A Discord login: the name, and how.
   const host = me.kind === 'host';
   const named = host ? words.host : me.kind === 'friend' ? words.friend : me.kind === 'guest' ? words.guest : me.name;
   const how =
     me.kind === 'user'
       ? words.discordLogin
       : me.kind === 'guest' && me.guest
-        ? words.guestUntil(when(me.guest.expiresAt))
+        ? words.guestCanListen(when(me.guest.expiresAt))
         : null;
   const who = h(
     'div',
@@ -114,8 +114,16 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     h(
       'div',
       { class: 'line' },
-      face(named, avatarUrl(me.id, me.avatar)),
-      h('div', { class: 'grow' }, h('b', null, named), how ? h('div', { class: 'faint' }, how) : null),
+      // A role (the host, a friend, a guest) has no account: a person in its face, as on the account key.
+      face(named, avatarUrl(me.id, me.avatar), '', me.kind !== 'user'),
+      h(
+        'div',
+        { class: 'grow' },
+        // The name on one line, cut short when long (a Discord name can be 32 letters), whole in its title: the sheet's
+        // head is as tall as its close key, and a name of two lines would stand below the key.
+        h('b', { class: 'who-name', title: named, 'data-clip': 'ok' }, named),
+        how ? h('div', { class: 'faint' }, how) : null,
+      ),
     ),
   );
   // The pages, for narrow windows where the bar has no room for them.

@@ -13,6 +13,7 @@ import {
   api,
   coverUrl,
   type HistoryEntry,
+  type Listener,
   type Player,
   type PlaylistFile,
   type QueueItem,
@@ -1389,7 +1390,9 @@ async function playlistsDialog(): Promise<void> {
       closeKey,
     );
   };
-  // One playlist: its name and size, and its keys (each with a data-key, so the focus can find it again).
+  // One playlist: its name and size, Load, and one key for the rest (rename, export, delete), which lists them in words
+  // as a queue row's does: three bare icons beside Load left a phone's name 60 px (it wrapped, and rows differed in
+  // height), and the export's arrow read as a second Load. Each key has a data-key, so the focus can find it again.
   const playlistRow = (playlist: { id: number; name: string; size: number }) => {
     // The same icon as the queue's Load, which opens this list.
     const loadKey = h(
@@ -1398,41 +1401,19 @@ async function playlistsDialog(): Promise<void> {
       icon('folder-open'),
       words.load,
     );
-    const renameKey = h(
+    const moreKey = h(
       'button',
       {
         class: 'key sm square quiet',
         type: 'button',
-        title: words.rename,
-        'aria-label': `${words.rename}: ${playlist.name}`,
-        dataset: { key: 'rename' },
+        title: words.playlistMenu,
+        // Which playlist, for screen readers: the key's name alone would not say.
+        'aria-label': `${words.playlistMenu}: ${playlist.name}`,
+        'aria-haspopup': 'dialog',
+        dataset: { key: 'more' },
       },
-      icon('pencil'),
+      icon('ellipsis'),
     );
-    const deleteKey = h(
-      'button',
-      {
-        class: 'key sm square quiet bad',
-        type: 'button',
-        title: words.delete,
-        'aria-label': `${words.delete}: ${playlist.name}`,
-        dataset: { key: 'delete' },
-      },
-      icon('trash-2'),
-    );
-    // The playlist as a file, of the kind chosen next.
-    const exportKey = h(
-      'button',
-      {
-        class: 'key sm square quiet',
-        type: 'button',
-        title: words.exportKey,
-        'aria-label': `${words.exportKey}: ${playlist.name}`,
-        dataset: { key: 'export' },
-      },
-      icon('download'),
-    );
-    exportKey.onclick = () => exportDialog(playlist.name);
     loadKey.onclick = async () => {
       const result = await act(loadKey, () => api['playlist-load'](guild(), playlist.name));
       if (result) {
@@ -1440,30 +1421,8 @@ async function playlistsDialog(): Promise<void> {
         dialog.close();
       }
     };
-    renameKey.onclick = async () => {
-      const next = await askDialog({
-        title: words.rename,
-        placeholder: words.newName,
-        value: playlist.name,
-        ok: words.rename,
-      });
-      if (next && next !== playlist.name) {
-        // Not made busy: a disabled key drops the keyboard focus, which the drawing after must keep.
-        if ((await act(null, () => api['playlist-rename'](guild(), playlist.name, next))) !== undefined) {
-          void draw();
-        }
-      }
-    };
-    deleteKey.onclick = async () => {
-      const ok = await confirmDialog({
-        title: words.deleteTitle(playlist.name),
-        text: words.deleteText,
-        ok: words.delete,
-        danger: true,
-      });
-      if (ok && (await act(null, () => api['playlist-delete'](guild(), playlist.name))) !== undefined) void draw();
-    };
-    // Someone who may only look sees the list without its keys (the dialog says why, above it).
+    moreKey.onclick = () => playlistMenu(playlist.name, () => void draw());
+    // Someone who may only look has no Load (the dialog says why, above the list); the rest's key holds Export alone.
     const control = mayControl();
     return h(
       'li',
@@ -1471,21 +1430,66 @@ async function playlistsDialog(): Promise<void> {
       h(
         'span',
         { class: 'name' },
-        h('b', null, playlist.name),
+        // One line, cut short when long (its title has it whole).
+        h('b', { class: 'playlist-name', title: playlist.name, 'data-clip': 'ok' }, playlist.name),
         // The count on a line of its own under the name: after a dot on the same line, a phone broke the line between
         // the dot and the count, or put the dot first on the next one.
         h('span', { class: 'faint count-tag' }, words.tracks(playlist.size)),
       ),
-      control ? renameKey : null,
-      control ? deleteKey : null,
-      exportKey,
       control ? loadKey : null,
+      moreKey,
     );
   };
   await draw();
   // The list came after the dialog opened on its Close key: the keyboard starts at the first playlist's Load instead,
   // unless it has moved on meanwhile.
   if (document.activeElement === closeKey()) box.querySelector<HTMLElement>('[data-key="load"]')?.focus();
+}
+
+// A playlist's keys besides Load, as a list in words (as a queue row's): rename, export, and delete last in the bad
+// colour, under the playlist's name. Someone who may only look has Export alone. Each choice closes the list first, so
+// what it opens (a question, the file kinds) stands over the playlists, and the keyboard comes back to the row's key.
+// `changed` draws the playlists again after a rename or a deletion.
+function playlistMenu(name: string, changed: () => void): void {
+  const words = t();
+  const box = h('div', { class: 'menu-list' });
+  const dialog = showDialog(name, box);
+  const choice = (key: string, glyph: IconName, text: string, run: () => void, bad = false) => {
+    const button = h(
+      'button',
+      { class: `choice ${bad ? 'text-bad' : ''}`.trim(), type: 'button', dataset: { choice: key } },
+      icon(glyph),
+      h('span', { class: 'grow' }, text),
+    );
+    button.onclick = () => {
+      dialog.close();
+      run();
+    };
+    return button;
+  };
+  const rename = async () => {
+    const next = await askDialog({ title: words.rename, placeholder: words.newName, value: name, ok: words.rename });
+    // Not made busy: a disabled key drops the keyboard focus, which the drawing after must keep.
+    if (next && next !== name && (await act(null, () => api['playlist-rename'](guild(), name, next))) !== undefined)
+      changed();
+  };
+  const remove = async () => {
+    const ok = await confirmDialog({
+      title: words.deleteTitle(name),
+      text: words.deleteText,
+      ok: words.delete,
+      danger: true,
+    });
+    if (ok && (await act(null, () => api['playlist-delete'](guild(), name))) !== undefined) changed();
+  };
+  const control = mayControl();
+  fill(
+    box,
+    control ? choice('rename', 'pencil', words.rename, () => void rename()) : null,
+    // The playlist as a file, of the kind chosen next.
+    choice('export', 'download', words.exportKey, () => exportDialog(name)),
+    control ? choice('delete', 'trash-2', words.delete, () => void remove(), true) : null,
+  );
 }
 
 // A playlist as a file: the three kinds to choose from, each with what it holds; the choice is saved by the browser.
@@ -1532,35 +1536,45 @@ function exportDialog(name: string): void {
 // `done` redraws the playlists under it.
 function importDialog(done: () => void): void {
   const words = t();
-  const name = h('input', {
-    type: 'text',
-    maxlength: '100',
-    placeholder: words.playlistName,
-    'aria-label': words.playlistName,
-  });
-  const paste = h('textarea', {
-    class: 'paste',
-    rows: '7',
-    placeholder: words.importPaste,
-    'aria-label': words.importPaste,
-  });
+  // Each field with its name over it, which stays once the field is filled: a placeholder alone went with the first
+  // letter typed, and a filled dialog showed two boxes with no names. One import dialog is open at a time, so the ids
+  // the names point at are the page's only ones.
+  const name = h('input', { type: 'text', maxlength: '100', id: 'import-name' });
+  const paste = h('textarea', { class: 'paste', rows: '7', placeholder: words.importPaste, id: 'import-list' });
   const picker = h('input', {
     type: 'file',
     accept: '.txt,.m3u,.m3u8,.json,text/plain,application/json,audio/x-mpegurl',
     hidden: true,
   });
+  // Choosing a file fills the list, so its key stands under the list; Import is the dialog's main key, beside Close as
+  // in every dialog (it stood in the body beside this one, with Close alone on a row under it).
   const choose = h('button', { class: 'key', type: 'button' }, icon('folder-open'), words.chooseFile);
-  const go = h('button', { class: 'key primary', type: 'button' }, icon('upload'), words.importKey);
+  const go = h(
+    'button',
+    { class: 'key primary', type: 'button', 'data-act': 'import-go' },
+    icon('upload'),
+    words.importKey,
+  );
   const box = h(
     'div',
     { class: 'import-form' },
     h('p', { class: 'import-text' }, words.importText),
-    h('label', { class: 'field' }, name),
-    paste,
+    h(
+      'div',
+      { class: 'labelled' },
+      h('label', { class: 'field-label', for: 'import-name' }, words.playlistName),
+      h('label', { class: 'field' }, name),
+    ),
+    h(
+      'div',
+      { class: 'labelled' },
+      h('label', { class: 'field-label', for: 'import-list' }, words.importList),
+      paste,
+      h('div', { class: 'import-keys' }, choose),
+    ),
     picker,
-    h('div', { class: 'import-keys' }, choose, go),
   );
-  const dialog = showDialog(words.importTitle, box);
+  const dialog = showDialog(words.importTitle, box, [go]);
   choose.onclick = () => picker.click();
   picker.onchange = async () => {
     const file = picker.files?.[0];
@@ -2260,13 +2274,7 @@ export function voiceCard(): HTMLElement {
       icon('headphones'),
       h('span', { class: 'grow' }, words.listeningHere),
       people.length > 0
-        ? h(
-            'span',
-            { class: 'faces' },
-            ...people
-              .slice(0, 6)
-              .map((person) => face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm')),
-          )
+        ? h('span', { class: 'faces' }, ...people.slice(0, 6).map((person) => listenerFace(person)))
         : h('span', { class: 'faint' }, words.nobody),
       // Faces say who; a number only for the browsers beyond the six faces shown.
       state.listeners.count > Math.min(6, people.length)
@@ -2534,11 +2542,17 @@ export function historyCard(): HTMLElement {
 }
 
 /** A listener's name as the panel says it: a guest, a friend and the host in the person's language, anyone else by
- * name. The host has no Discord name (the server says "Host"): in the panel's words, its face's letter is the account
- * key's ("호" in Korean, where the server's word made it "H"). */
-export function listenerName(person: { id: string | null; name: string; guest?: boolean; friend?: boolean }): string {
+ * name (the host has no Discord name: the server says "Host"). */
+export function listenerName(person: Omit<Listener, 'avatar'>): string {
   if (person.guest) return t().guest;
   if (person.friend) return t().friend;
   if (person.id === null) return t().host;
   return person.name;
+}
+
+/** A listener's face, small: a Discord picture or initials, and for a role (a guest, a friend, the host: no account,
+ * no id) a person, as the account key shows it. */
+export function listenerFace(person: Listener): HTMLElement {
+  const role = Boolean(person.guest || person.friend || person.id === null);
+  return face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm', role);
 }

@@ -10,12 +10,12 @@
  * a moment when the music is paused); the position is set once the file is known.
  */
 import { api, coverUrl, type Player } from '../api.ts';
-import { avatarUrl, face, fill, h, icon, refill, setOff } from '../dom.ts';
+import { fill, h, icon, refill, setOff } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { SoundGraph } from '../sound.ts';
 import { keep, mayControl, maySkip, positionNow, skipTitle, state, t, update, watch } from '../state.ts';
 import { followMusic } from './light.ts';
-import { act, disc, listenerName, skipOrVote } from './player.ts';
+import { act, disc, listenerFace, skipOrVote } from './player.ts';
 import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
@@ -327,7 +327,7 @@ export function listenBar(live: Live): HTMLElement {
     refill(
       faces,
       JSON.stringify(people.map((person) => [person.id, person.name, person.avatar])),
-      ...people.map((person) => face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm')),
+      ...people.map((person) => listenerFace(person)),
     );
     count.textContent = state.listeners.count > 0 ? words.listeners(state.listeners.count) : '';
     slider.value = String(Math.round(state.volume * 100));

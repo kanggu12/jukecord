@@ -3,10 +3,10 @@
  * listening link works. It takes the right column's place that the voice channel and the history have for members,
  * whose channels and plays a guest does not see.
  */
-import { avatarUrl, face, fill, h, icon } from '../dom.ts';
+import { fill, h, icon } from '../dom.ts';
 import { state, t, watch } from '../state.ts';
 import { when } from './invite.ts';
-import { listenerName } from './player.ts';
+import { listenerFace, listenerName } from './player.ts';
 
 /** The card: the people listening, then the guest's link. */
 export function guestCard(): HTMLElement {
@@ -33,12 +33,7 @@ export function guestCard(): HTMLElement {
       ...(state.listeners.people.length === 0
         ? [h('li', { class: 'empty' }, icon('headphones'), words.nobodyListening)]
         : state.listeners.people.map((person) =>
-            h(
-              'li',
-              null,
-              face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm'),
-              h('span', { class: 'name' }, listenerName(person)),
-            ),
+            h('li', null, listenerFace(person), h('span', { class: 'name' }, listenerName(person))),
           )),
     );
     const link = state.me?.guest;

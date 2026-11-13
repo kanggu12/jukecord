@@ -247,9 +247,9 @@ export function wrappedPage(): HTMLElement {
           h(
             'span',
             { class: 'who' },
-            // The host has no picture: its letter is the account key's, from the panel's word for the host ("H",
-            // "호"), not the initials of the words "the host".
-            face(entry.name ?? words.host, avatarUrl(entry.userId, entry.avatar), 'sm'),
+            // The host has no picture and no name: a person for a face, as on the account key (its word's letter,
+            // "호", read as a name).
+            face(entry.name ?? words.host, avatarUrl(entry.userId, entry.avatar), 'sm', entry.userId === null),
             entry.name ?? words.theHost,
           ),
           // Plays, with their unit: they add up to the time's plays, and a bare number read as tracks added.
@@ -606,10 +606,11 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
     ],
     peopleLabel: words.picksPlayed,
     people: wrapped.topPeople.slice(0, 3).map((entry) => ({
-      // The host has no picture and no Discord name: "Host" in the panel's words.
+      // The host has no picture and no Discord name: "Host" in the panel's words, a person for a face.
       name: entry.name ?? words.theHost,
       picture: avatarUrl(entry.userId, entry.avatar, 128),
       plays: words.playsCount(entry.plays),
+      role: entry.userId === null,
     })),
   };
 }

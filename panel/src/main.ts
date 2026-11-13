@@ -24,7 +24,6 @@ import {
   update,
   watch,
 } from './state.ts';
-import { momentText } from './time.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { guestCard } from './views/guest.ts';
 import { lightField } from './views/light.ts';
@@ -306,9 +305,10 @@ function frame(): void {
       'hidden',
       state.guilds.length <= 1,
     );
-    // One label for the state of the connection, then whether this login may only look (a guest says it is one). Someone
-    // without the DJ role whose Skip is a vote may do more than look: the label says that (it said "View only" beside
-    // a Skip key that worked).
+    // One label for the state of the connection, then whether this login may only look. A guest's is the connection's
+    // alone: its account key and menu say it is a guest ("Guest" here as well made three in the bar, beside a lamp
+    // that told no state). Someone without the DJ role whose Skip is a vote may do more than look: the label says that
+    // (it said "View only" beside a Skip key that worked).
     const guestLogin = state.me?.kind === 'guest';
     const limited = Boolean(guild) && !mayControl();
     const voter = limited && maySkip();
@@ -318,7 +318,7 @@ function frame(): void {
         : state.live !== 'open'
           ? ['pause', everOpen ? words.reconnecting : words.connectingLive]
           : guestLogin
-            ? ['idle', words.guest]
+            ? ['play', words.connected]
             : state.status?.mode === 'browser-only'
               ? ['idle', words.browserOnly]
               : state.status && !state.status.discord
@@ -332,14 +332,11 @@ function frame(): void {
         ? words.wrongAddress
         : state.live !== 'open' && state.liveWaiting !== null
           ? (liveWhy() ?? '')
-          : guestLogin && state.me?.guest
-            ? // When the link stops working, as the panel writes moments ("Nov 20, 21:41").
-              words.guestUntil(momentText(state.me.guest.expiresAt, state.lang))
-            : limited
-              ? voter
-                ? words.skipByVoteHint
-                : lookOnlyWhy()
-              : '';
+          : !guestLogin && limited
+            ? voter
+              ? words.skipByVoteHint
+              : lookOnlyWhy()
+            : '';
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them
     // must survive the status and guild updates.
@@ -384,7 +381,8 @@ function frame(): void {
       refill(
         account,
         `${me.id}|${name}|${me.avatar}`,
-        face(name, avatarUrl(me.id, me.avatar), 'sm'),
+        // The host, a friend and a guest have no account: a person in their face, not the letter of a word.
+        face(name, avatarUrl(me.id, me.avatar), 'sm', me.kind !== 'user'),
         // Cut short when long (a Discord name can be 32 letters), with the whole name as its title.
         h('span', { class: 'name', title: name, 'data-clip': 'ok' }, name),
         icon('menu'),
