@@ -192,7 +192,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [/^each person may have (\d+) tracks in the queue here$/, '이 서버에서는 한 사람이 대기열에 $1곡까지 추가할 수 있음'],
   [/^the limit is 0 \(none\) to (\d+) tracks$/, '제한은 0(없음)부터 $1곡까지'],
   [/^the volume is 0 to (\d+) percent$/, '음량은 0부터 $1퍼센트까지'],
-  [/^the sound is one of (.+)$/, '음색은 $1 중 하나'],
+  [/^the sound is one of (.+)$/, '음향 효과는 $1 중 하나'],
   // Searching (the add field's list, Discord's suggestions, the API).
   ['searching is not set up here', '여기서는 검색을 쓸 수 없음'],
   ['nothing to search for', '찾을 말이 없음'],

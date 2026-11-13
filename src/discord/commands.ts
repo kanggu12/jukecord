@@ -568,17 +568,19 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
     command(
       'sound',
       "The voice channel's sound (browsers listening apply it too)",
-      '음색',
-      '음성 채널 음색(브라우저로 듣는 사람에게도 적용)',
+      // The panel's word for it: effects on the sound (without the space, which a command's name cannot have).
+      '음향효과',
+      '음성 채널 음향 효과(브라우저로 듣는 사람에게도 적용)',
     ).addStringOption((option) =>
       option
         .setName('preset')
         .setDescription('How it sounds')
         .setNameLocalizations({ ko: '종류' })
-        .setDescriptionLocalizations({ ko: '음색 종류' })
+        .setDescriptionLocalizations({ ko: '음향 효과 종류' })
         .setRequired(true)
         .addChoices(
-          { name: 'Off', value: 'off', name_localizations: { ko: '끄기' } },
+          // The track as it is ("Off" read as the sound being off).
+          { name: 'Original', value: 'off', name_localizations: { ko: '효과 없음' } },
           { name: 'More bass', value: 'bass', name_localizations: { ko: '저음 강조' } },
           { name: 'Clearer voices', value: 'voices', name_localizations: { ko: '목소리 또렷하게' } },
           { name: 'Brighter', value: 'bright', name_localizations: { ko: '밝게' } },

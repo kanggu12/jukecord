@@ -87,10 +87,12 @@ const TEXT = {
   noLimit: { en: 'no limit', ko: '제한 없음' },
   stay: { en: 'Stay in voice', ko: '음성 채널에 머물기' },
   volume: { en: 'Voice volume', ko: '음성 채널 음량' },
-  sound: { en: 'Sound', ko: '음색' },
+  // The panel's words: the presets are effects on the sound, and the plain one is the track as it is ("off" read as
+  // the sound being off).
+  sound: { en: 'Sound', ko: '음향 효과' },
   presets: {
-    en: { off: 'off', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
-    ko: { off: '끔', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
+    en: { off: 'original', bass: 'more bass', voices: 'clearer voices', bright: 'brighter', night: 'softer at night' },
+    ko: { off: '효과 없음', bass: '저음 강조', voices: '목소리 또렷하게', bright: '밝게', night: '밤에 부드럽게' },
   },
   // The Skip button while a vote is under way: what the count is of, as a count ("1/2표" read as a half).
   skipVotes: {
@@ -414,7 +416,7 @@ export function soundCard(sound: Sound, lang: Lang): EmbedBuilder {
   return note(
     lang,
     `Voice volume ${sound.volume}%, sound: ${TEXT.presets.en[sound.preset]}`,
-    `음성 채널 음량 ${sound.volume}%, 음색: ${TEXT.presets.ko[sound.preset]}`,
+    `음성 채널 음량 ${sound.volume}%, 음향 효과: ${TEXT.presets.ko[sound.preset]}`,
   );
 }
 

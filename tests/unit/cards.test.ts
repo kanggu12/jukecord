@@ -84,7 +84,7 @@ describe('the DJ card', () => {
     assert.match(text, /Voice volume: 80%\nSound: softer at night$/);
     const korean = djCard({ ...settings, personLimit: 0 }, 'ko').toJSON().description ?? '';
     assert.match(korean, /한 사람당 곡 수: 제한 없음/);
-    assert.match(korean, /음색: 밤에 부드럽게$/);
+    assert.match(korean, /음향 효과: 밤에 부드럽게$/);
   });
 });
 
