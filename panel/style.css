@@ -3357,9 +3357,11 @@ kbd {
   flex: 1;
   min-width: 0;
 }
-/* The presets' dialog: each choice says what it does under its name. */
+/* A line over a dialog's choices (who hears the presets, what the sleep timer stops). */
 .dialog-note {
   margin: 0 0 8px;
+  /* A line of two that ends with a word alone reads as cut off: the lines are evened out. */
+  text-wrap: pretty;
 }
 .choice .hint {
   display: block;

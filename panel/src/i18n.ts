@@ -344,6 +344,7 @@ const EN = {
   sleepLeft: (time: string) => `${time} left`,
   sleepMinutes: (n: number) => `${n} minutes`,
   sleepEndChoice: 'When this track ends',
+  sleepHint: 'Only this browser stops listening; the music plays on for everyone else',
   sleepOff: 'Turn the timer off',
   sleepStopped: 'Sleep timer: stopped listening here',
   // Inviting: a listening link for guests, a login link for a friend; guests and friends in the panel.
@@ -766,6 +767,7 @@ const KO: Strings = {
   sleepLeft: (time: string) => `${time} 남음`,
   sleepMinutes: (n: number) => `${n}분`,
   sleepEndChoice: '이 곡이 끝나면',
+  sleepHint: '이 브라우저만 듣기를 멈추고, 다른 사람에게는 음악이 계속 나옴',
   sleepOff: '타이머 끄기',
   sleepStopped: '취침 타이머로 여기서 듣기를 멈춤',
   invite: '초대',

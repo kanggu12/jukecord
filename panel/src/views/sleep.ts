@@ -1,12 +1,15 @@
 /**
- * The sleep timer: this browser stops listening after 15, 30 or 60 minutes, or when the track playing now ends. It is
- * this browser's alone (the music goes on for everyone else), it is not kept across a reload, and it shows only while
- * this browser listens. The last seconds fade the sound out rather than cutting it.
+ * The sleep timer: this browser stops listening after 15, 30 or 60 minutes, or when the play of the track playing now
+ * ends (repeated by repeat one or not). It is this browser's alone (the music goes on for everyone else, which its
+ * dialog says), it is not kept across a reload, and it shows only while this browser listens. The last seconds fade
+ * the sound out rather than cutting it.
  *
  * While no timer is set nothing runs; while one is, a timer once a second counts down the key's minutes and starts
  * the fade near the end.
  */
+import type { Player } from '../api.ts';
 import { fill, h, icon } from '../dom.ts';
+import { playEnded } from '../plays.ts';
 import { state, t, watch } from '../state.ts';
 import { showDialog, toast } from '../ui/layers.ts';
 
@@ -24,24 +27,25 @@ export interface SleepHooks {
 /** The sleep timer's key for the listening bar. */
 export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
   const key = h('button', { class: 'key sleep', type: 'button', 'data-act': 'sleep', 'aria-haspopup': 'dialog' });
-  // When the music is to stop here (a time on this browser's clock), or the track it stops after; neither: no timer.
+  // When the music is to stop here (a time on this browser's clock), or the play it stops after (the last snapshot seen
+  // of it: the track's number alone stays the same when the track repeats); neither: no timer.
   let until: number | null = null;
-  let afterTrack: number | null = null;
+  let afterPlay: Player | null = null;
   let ticking = 0;
 
   // The key: its icon, and what is set (the time left, or the end of the track); its words say both.
   const draw = () => {
     const words = t();
-    const set = until !== null || afterTrack !== null;
+    const set = until !== null || afterPlay !== null;
     const left = until === null ? '' : clockLeft(until - Date.now());
-    const label = afterTrack !== null ? words.sleepEnd : set ? left : words.sleep;
+    const label = afterPlay !== null ? words.sleepEnd : set ? left : words.sleep;
     const sign = `${set}|${label}`;
     if (key.dataset.sign !== sign) {
       key.dataset.sign = sign;
-      fill(key, icon('moon'), h('span', { class: set && afterTrack === null ? 'label num' : 'label' }, label));
+      fill(key, icon('moon'), h('span', { class: set && afterPlay === null ? 'label num' : 'label' }, label));
     }
     key.setAttribute('aria-pressed', String(set));
-    const named = set ? `${words.sleep}: ${afterTrack !== null ? words.sleepEnd : words.sleepLeft(left)}` : words.sleep;
+    const named = set ? `${words.sleep}: ${afterPlay !== null ? words.sleepEnd : words.sleepLeft(left)}` : words.sleep;
     key.title = named;
     key.setAttribute('aria-label', named);
     // Only while this browser listens: there is nothing to stop otherwise.
@@ -51,7 +55,7 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
   // No timer any more: the sound back as chosen, the counting stopped.
   const clear = () => {
     until = null;
-    afterTrack = null;
+    afterPlay = null;
     window.clearInterval(ticking);
     ticking = 0;
     hooks.fade(1);
@@ -80,9 +84,9 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
   const set = (minutes: number | 'track') => {
     clear();
     if (minutes === 'track') {
-      afterTrack = state.player?.track?.id ?? null;
+      afterPlay = state.player?.track ? state.player : null;
       // Nothing playing to wait for the end of: nothing is set.
-      if (afterTrack === null) return;
+      if (afterPlay === null) return;
     } else {
       until = Date.now() + minutes * 60_000;
       // Faster near the end, for a smooth fade; a second otherwise is plenty for minutes.
@@ -94,13 +98,17 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
   key.onclick = () => {
     const words = t();
     const box = h('div', { class: 'menu-list' });
-    const dialog = showDialog(words.sleep, box);
-    const current = afterTrack !== null ? 'track' : until !== null ? 'time' : 'off';
+    // What stops: this browser's listening alone, the music going on for everyone else (in the voice channel too).
+    const dialog = showDialog(
+      words.sleep,
+      h('div', null, h('p', { class: 'faint dialog-note' }, words.sleepHint), box),
+    );
+    const current = afterPlay !== null ? 'track' : until !== null ? 'time' : 'off';
+    // Each choice in words alone, as the presets' and autoplay's are (one timer icon on every row said nothing).
     const choice = (value: number | 'track' | 'off', text: string, pressed: boolean) => {
       const button = h(
         'button',
         { class: 'choice', type: 'button', 'aria-pressed': String(pressed), dataset: { sleep: String(value) } },
-        icon(value === 'off' ? 'x' : 'timer'),
         h('span', { class: 'grow' }, text),
         icon('check', 'check'),
       );
@@ -121,12 +129,15 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
     );
   };
 
-  // The track it waited for has ended (another one, or none): the end. Listening stopped by the person: no timer.
+  // The play it waited for has ended (another track, none, or the same one again from the top): the end. Otherwise the
+  // newest snapshot of the same play is the one the next is read against. Listening stopped by the person: no timer.
   watch(['player'], () => {
-    if (afterTrack !== null && state.player?.track?.id !== afterTrack) end();
+    if (afterPlay === null) return;
+    if (playEnded(afterPlay, state.player)) end();
+    else afterPlay = state.player;
   });
   watch(['listening'], () => {
-    if (!state.listening && (until !== null || afterTrack !== null)) clear();
+    if (!state.listening && (until !== null || afterPlay !== null)) clear();
     draw();
   });
   watch(['lang'], draw);

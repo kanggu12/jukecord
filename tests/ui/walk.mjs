@@ -1006,10 +1006,16 @@ async function listenHere(page) {
   await page.click('[data-act="listen"]');
   await page.waitForSelector('[data-act="sleep"]:not([hidden])');
 }
+// The timer's choices: the dialog says it stops this browser alone, and its rows are told by their words (each with the
+// same timer icon said nothing).
 await sweep('sleep-menu', FEW, async (page) => {
   await listenHere(page);
   await page.click('[data-act="sleep"]');
   await page.waitForSelector('.dialog [data-sleep="30"]');
+  if (!(await page.locator('.dialog .dialog-note').textContent())?.trim())
+    throw new Error('the timer does not say what stops');
+  const icons = await page.locator('.dialog .choice > svg:not(.check)').count();
+  if (icons > 0) throw new Error(`the timer's choices carry ${icons} icons`);
 });
 await sweep('sleep', [...NARROW, ...FEW], async (page) => {
   await listenHere(page);
