@@ -4,7 +4,7 @@
  * One card per answer, with only what the action changed or showed. The colour on the left edge carries the state
  * (playing, paused, added, a problem), the one place colour means something in Discord's layout.
  */
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown } from 'discord.js';
 import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
@@ -117,6 +117,16 @@ export function problem(message: string): EmbedBuilder {
   return new EmbedBuilder().setColor(COLOUR.problem).setDescription(message);
 }
 
+// The most text a card holds: Discord refuses an embed whose description is longer, and the whole answer with it.
+const CARD_TEXT_MAX = 4096;
+
+// The longest title a line shows: YouTube's own limit. A title read from a file or a page may be three times that.
+const TITLE_MAX = 100;
+
+// The longest address a line links: ten lines with addresses this long still fit in a card. A longer one (a signed
+// link to a file runs to a thousand characters) leaves the title as plain text, so the page shows every track.
+const LINK_MAX = 200;
+
 // "Title" linked to its page, with length and who added it.
 function line(title: string, url: string, durationMs: number | null, addedBy: string | null, lang: Lang): string {
   const length = durationMs === null ? '' : ` · ${formatDuration(durationMs)}`;
@@ -127,8 +137,29 @@ function line(title: string, url: string, durationMs: number | null, addedBy: st
       : addedBy
         ? ` · ${TEXT.addedBy[lang]} <@${addedBy}>`
         : '';
-  // Square brackets in titles would break Discord's link syntax.
-  return `[${title.replace(/[[\]]/g, '')}](${url})${length}${who}`;
+  // A title past the limit is cut short, and the ellipsis says so.
+  const shortened = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title;
+  // Square brackets in titles would break Discord's link syntax; its other marks (bold, strikethrough, spoilers) show
+  // as written, not as formatting the title never had.
+  const text = escapeMarkdown(shortened.replace(/[[\]]/g, ''));
+  return `${url.length <= LINK_MAX ? `[${text}](${url})` : text}${length}${who}`;
+}
+
+// Lines in one card's text: as many as fit, then how many more there are ("+12 more", "+12개 더").
+function fit(lines: readonly string[], lang: Lang, max = CARD_TEXT_MAX): string {
+  let text = '';
+  for (const [index, next] of lines.entries()) {
+    const joined = text ? `${text}\n${next}` : next;
+    // Room is left for the count of the lines that do not fit (it is short: "+9999 more").
+    const rest = lines.length - index - 1;
+    if (joined.length > (rest > 0 ? max - 16 : max)) {
+      const more = lines.length - index;
+      const count = lang === 'ko' ? `+${more}개 더` : `+${more} more`;
+      return text ? `${text}\n${count}` : count;
+    }
+    text = joined;
+  }
+  return text;
 }
 
 /** What was added, and where it landed in the queue; `playingNow` for /play, which plays it at once. */
@@ -273,13 +304,13 @@ export function queueCard(items: readonly QueueItem[], page: number, lang: Lang)
     .setColor(COLOUR.neutral)
     .setTitle(`${TEXT.queue[lang]} (${items.length})`)
     .setDescription(
-      past +
-        shown
-          .map(
-            (item) =>
-              `${item.position + 1}. ${line(item.track.title, item.track.url, item.track.durationMs, item.addedBy, lang)}`,
-          )
-          .join('\n'),
+      fit(
+        shown.map(
+          (item, index) =>
+            `${index === 0 ? past : ''}${item.position + 1}. ${line(item.track.title, item.track.url, item.track.durationMs, item.addedBy, lang)}`,
+        ),
+        lang,
+      ),
     )
     .setFooter({ text: `${TEXT.page[lang]} ${current}/${pages} · ${TEXT.total[lang]} ${formatDuration(total)}` });
 }
@@ -291,12 +322,13 @@ export function historyCard(entries: readonly HistoryEntry[], lang: Lang): Embed
     .setColor(COLOUR.neutral)
     .setTitle(TEXT.history[lang])
     .setDescription(
-      entries
-        .map(
+      fit(
+        entries.map(
           (entry) =>
             `<t:${Math.floor(entry.playedAt / 1000)}:R> ${line(entry.track.title, entry.track.url, entry.track.durationMs, entry.addedBy, lang)}`,
-        )
-        .join('\n'),
+        ),
+        lang,
+      ),
     );
 }
 
@@ -307,9 +339,14 @@ export function playlistsCard(playlists: readonly Playlist[], lang: Lang): Embed
     .setColor(COLOUR.neutral)
     .setTitle(TEXT.playlists[lang])
     .setDescription(
-      playlists
-        .map((playlist) => `**${playlist.name}** · ${lang === 'ko' ? `${playlist.size}곡` : playlist.size}`)
-        .join('\n'),
+      // A name shows as written (its own asterisks do not end the bold), and a server with many shows what fits.
+      fit(
+        playlists.map(
+          (playlist) =>
+            `**${escapeMarkdown(playlist.name)}** · ${lang === 'ko' ? `${playlist.size}곡` : playlist.size}`,
+        ),
+        lang,
+      ),
     );
 }
 
@@ -611,13 +648,15 @@ export function likesCard(entries: readonly LikedTrack[], page: number, lang: La
     .setColor(COLOUR.neutral)
     .setTitle(`${TEXT.likes[lang]} (${entries.length})`)
     .setDescription(
-      entries
-        .slice(first, first + 10)
-        .map(
-          (entry, index) =>
-            `${first + index + 1}. ${line(entry.track.title, entry.track.url, entry.track.durationMs, null, lang)}`,
-        )
-        .join('\n'),
+      fit(
+        entries
+          .slice(first, first + 10)
+          .map(
+            (entry, index) =>
+              `${first + index + 1}. ${line(entry.track.title, entry.track.url, entry.track.durationMs, null, lang)}`,
+          ),
+        lang,
+      ),
     )
     .setFooter({ text: `${TEXT.page[lang]} ${current}/${pages}` });
 }
