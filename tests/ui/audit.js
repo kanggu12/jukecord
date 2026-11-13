@@ -23,6 +23,8 @@
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
  *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest;
  * - small-target: on a touch screen, a control smaller than 44 x 44;
+ * - sticky: on a touch screen (no hover), a :hover rule in effect: the browser keeps :hover on what was tapped last,
+ *   so a key stays boxed or a row lit after a tap;
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
  *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
@@ -463,6 +465,31 @@ window.__audit = () => {
         : box.width < 43.5 || box.height < 43.5;
       if (short) add('small-target', control, `${Math.round(box.width)}x${Math.round(box.height)}`);
     }
+  }
+
+  // On a screen without hover (a touch screen) no :hover rule may be in effect: the browser keeps :hover on what was
+  // tapped last, and a key stayed boxed or a row lit after a tap (the sleep timer's choice left the queue row under it
+  // lit and its title underlined). Read from the stylesheets: a rule is in effect when every @media round it holds
+  // here (one inside a @container may hold on any card, so it counts).
+  if (matchMedia('(hover: none)').matches) {
+    const sticky = new Set();
+    const visit = (rules, holds) => {
+      for (const rule of rules) {
+        if (rule instanceof CSSMediaRule) visit(rule.cssRules, holds && matchMedia(rule.conditionText).matches);
+        else if (rule instanceof CSSGroupingRule) visit(rule.cssRules, holds);
+        else if (holds && rule instanceof CSSStyleRule && /:hover\b/.test(rule.selectorText))
+          sticky.add(rule.selectorText);
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      try {
+        visit(sheet.cssRules, true);
+      } catch {
+        // Another site's stylesheet cannot be read (the panel loads none).
+      }
+    }
+    for (const selector of sticky)
+      findings.push({ kind: 'sticky', where: selector, detail: 'a :hover outside @media (hover: hover)' });
   }
 
   // The listen bar stands at the foot of the window in every layout (the page scrolls under it on a phone).

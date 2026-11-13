@@ -492,8 +492,12 @@ img {
   min-width: 0;
   max-width: 320px;
 }
-.server:hover:not(:disabled) {
-  background: var(--bar-hover);
+/* Under a pointer that hovers (a mouse, a trackpad) only, as every :hover in the panel: a touch screen keeps
+   :hover on what was tapped last, which left a key boxed or a row lit after a tap (the walk finds one outside). */
+@media (hover: hover) {
+  .server:hover:not(:disabled) {
+    background: var(--bar-hover);
+  }
 }
 .server:disabled {
   cursor: default;
@@ -593,9 +597,12 @@ img {
   color: var(--ink-2);
   font-weight: 500;
 }
-.nav a:hover {
-  color: var(--ink);
-  background: var(--bar-hover);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .nav a:hover {
+    color: var(--ink);
+    background: var(--bar-hover);
+  }
 }
 .nav a[aria-current="page"] {
   color: var(--ink);
@@ -635,9 +642,14 @@ img {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.account:hover,
 .account[aria-expanded="true"] {
   background: var(--bar-hover);
+}
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .account:hover {
+    background: var(--bar-hover);
+  }
 }
 .avatar {
   width: 24px;
@@ -875,9 +887,12 @@ img {
     border-color 0.18s ease,
     transform 0.18s var(--ease);
 }
-.key:hover {
-  background: var(--raised-2);
-  border-color: color-mix(in oklch, var(--ink) 20%, transparent);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .key:hover {
+    background: var(--raised-2);
+    border-color: color-mix(in oklch, var(--ink) 20%, transparent);
+  }
 }
 .key:active:not(:disabled) {
   transform: scale(0.97);
@@ -888,9 +903,12 @@ img {
   color: var(--key-ink);
   font-weight: 600;
 }
-.key.primary:hover {
-  background: var(--key-hi);
-  border-color: transparent;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .key.primary:hover {
+    background: var(--key-hi);
+    border-color: transparent;
+  }
 }
 .key.danger {
   background: var(--bad-key);
@@ -898,23 +916,32 @@ img {
   color: #fff;
   font-weight: 600;
 }
-.key.danger:hover {
-  background: var(--bad-key-hi);
-  border-color: transparent;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .key.danger:hover {
+    background: var(--bad-key-hi);
+    border-color: transparent;
+  }
 }
 .key.quiet {
   background: none;
   border-color: transparent;
   color: var(--ink-2);
 }
-.key.quiet:hover {
-  background: var(--hover-tint);
-  border-color: transparent;
-  color: var(--ink);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .key.quiet:hover {
+    background: var(--hover-tint);
+    border-color: transparent;
+    color: var(--ink);
+  }
 }
-.key.quiet.bad:hover {
-  color: var(--bad);
-  background: color-mix(in oklch, var(--bad) 12%, transparent);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .key.quiet.bad:hover {
+    color: var(--bad);
+    background: color-mix(in oklch, var(--bad) 12%, transparent);
+  }
 }
 /* A key is at least as wide as it is tall: a short word on a small key (Join, Leave) stays a finger's width on a touch
    screen, where the small size is 44 px too. */
@@ -970,8 +997,11 @@ img {
     border-color 0.18s ease,
     box-shadow 0.18s ease;
 }
-.field:hover {
-  border-color: color-mix(in oklch, var(--ink) 28%, transparent);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .field:hover {
+    border-color: color-mix(in oklch, var(--ink) 28%, transparent);
+  }
 }
 /* Focused: its line in the focus colour and a soft ring of it round the field (no glow). */
 .field:focus-within {
@@ -1039,8 +1069,11 @@ img {
   cursor: pointer;
   white-space: nowrap;
 }
-.seg button:hover {
-  color: var(--ink);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .seg button:hover {
+    color: var(--ink);
+  }
 }
 .seg button[aria-pressed="true"] {
   background: var(--accent-soft);
@@ -1067,9 +1100,12 @@ img {
   border-radius: var(--r);
   color: var(--ink-3);
 }
-.card-head .seg button:hover {
-  background: var(--hover-tint);
-  color: var(--ink-2);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .card-head .seg button:hover {
+    background: var(--hover-tint);
+    color: var(--ink-2);
+  }
 }
 .card-head .seg button[aria-pressed="true"] {
   background: none;
@@ -1299,9 +1335,12 @@ img {
 .now .title a {
   text-decoration: none;
 }
-.now .title a:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .now .title a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
 .now .meta {
   margin-top: var(--s-4);
@@ -1506,9 +1545,16 @@ img {
   border-radius: var(--r);
   transition: background 0.2s ease;
 }
-.row:hover,
-.row:focus-within {
+/* With the keyboard on one of its keys too (not a key pressed by a finger or a mouse, which keeps the focus: the
+   pane stayed lit after the press, as a hover did). */
+.row:has(:focus-visible) {
   background: var(--hover-tint);
+}
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .row:hover {
+    background: var(--hover-tint);
+  }
 }
 .row .grip {
   color: var(--ink-3);
@@ -1547,9 +1593,12 @@ img {
 .row .name a {
   text-decoration: none;
 }
-.row .name a:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .row .name a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
 /* The line under a row's title: smaller, quieter, its parts 8 px apart on one line, the last cut short with an
    ellipsis when the row is narrow (the whole line is its title: dom.ts subLine), so every row keeps one height. */
@@ -1725,8 +1774,11 @@ img {
 .row .album .vinyl {
   translate: 6px -50%;
 }
-.row:hover .album .vinyl {
-  translate: 12px -50%;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .row:hover .album .vinyl {
+    translate: 12px -50%;
+  }
 }
 
 /* ---- add -------------------------------------------------------------------------------------------------------- */
@@ -1885,8 +1937,11 @@ img {
   border-radius: var(--r);
   cursor: pointer;
 }
-.found-list .result:hover {
-  background: var(--hover-tint);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .found-list .result:hover {
+    background: var(--hover-tint);
+  }
 }
 /* The result the arrow keys are on: the focus ring, drawn inside the row. */
 .found-list .result[aria-selected="true"] {
@@ -1949,9 +2004,12 @@ img {
   border-radius: var(--r);
   color: var(--ink-2);
 }
-.result .pick:hover {
-  background: var(--hover-tint);
-  color: var(--ink);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .result .pick:hover {
+    background: var(--hover-tint);
+    color: var(--ink);
+  }
 }
 /* Looking, nothing found, a search that failed: one line at the rows' inset. */
 .found-state {
@@ -2125,8 +2183,11 @@ img {
   border-color: transparent;
   color: var(--ink);
 }
-.like-key[aria-pressed="true"]:hover {
-  background: var(--hover-tint);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .like-key[aria-pressed="true"]:hover {
+    background: var(--hover-tint);
+  }
 }
 /* The shape is an inner SVG that says fill="none" itself; a rule on it is what overrides that. */
 .key.like-key[aria-pressed="true"] .icon svg {
@@ -2240,8 +2301,11 @@ img {
   border-radius: var(--r);
   transition: background 0.2s ease;
 }
-.channel:hover {
-  background: var(--hover-tint);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .channel:hover {
+    background: var(--hover-tint);
+  }
 }
 .channel .name {
   flex: 1;
@@ -2305,9 +2369,12 @@ img {
   border-radius: var(--r-round);
   padding: 0 var(--s-16);
 }
-.listen .key[data-act="listen"]:hover {
-  background: var(--key-hi);
-  border-color: transparent;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .listen .key[data-act="listen"]:hover {
+    background: var(--key-hi);
+    border-color: transparent;
+  }
 }
 .listen .key[data-act="listen"][aria-pressed="true"] {
   background: var(--accent-soft);
@@ -2320,9 +2387,12 @@ img {
   background: none;
   border-color: transparent;
 }
-.listen .key.bare:hover,
-.listen .key.sleep:hover {
-  background: var(--hover-tint);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .listen .key.bare:hover,
+  .listen .key.sleep:hover {
+    background: var(--hover-tint);
+  }
 }
 /* Three bars that dance while the browser listens, standing still while the sound waits. Each bar is a box of its
    own scaled from its foot: the browser animates a scale without laying anything out or drawing it again (the
@@ -2534,10 +2604,13 @@ img {
   background: var(--panel-opaque);
   border-color: var(--line-2);
 }
-/* Under the pointer too: the quiet keys' hover tint alone is see-through, so it lies over the same solid backing. */
-.sheet .key.quiet.sheet-close:hover {
-  background: linear-gradient(var(--hover-tint), var(--hover-tint)), var(--panel-opaque);
-  border-color: var(--line-2);
+/* Under the pointer too (a mouse's, see .server:hover): the quiet keys' hover tint alone is see-through, so it lies
+   over the same solid backing. */
+@media (hover: hover) {
+  .sheet .key.quiet.sheet-close:hover {
+    background: linear-gradient(var(--hover-tint), var(--hover-tint)), var(--panel-opaque);
+    border-color: var(--line-2);
+  }
 }
 .sheet .sheet-body > :first-child {
   padding-right: calc(var(--s-12) + var(--control-sm) + var(--pad));
@@ -2600,8 +2673,11 @@ img {
   text-align: left;
   cursor: pointer;
 }
-.choice:hover {
-  background: var(--hover-tint);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .choice:hover {
+    background: var(--hover-tint);
+  }
 }
 /* A choice that says what it does under its name: its icon (and its check) on the name's line, as every icon stands
    on the first line of its words. */
@@ -2849,9 +2925,14 @@ kbd {
 .bars .slot.zero .b {
   background: transparent;
 }
-.bars .slot:hover .b,
 .bars .slot:focus-visible .b {
   filter: brightness(1.18);
+}
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .bars .slot:hover .b {
+    filter: brightness(1.18);
+  }
 }
 .chart-tip {
   position: absolute;
@@ -2997,9 +3078,12 @@ kbd {
 .wrapped-song .title a {
   text-decoration: none;
 }
-.wrapped-song .title a:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  .wrapped-song .title a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
 .wrapped-song .meta {
   margin-top: var(--s-4);
@@ -3539,8 +3623,11 @@ kbd {
     background: none;
     border-color: transparent;
   }
-  .now .keys .key:not(.primary):hover {
-    background: var(--hover-tint);
+  /* Under a mouse only (see .server:hover). */
+  @media (hover: hover) {
+    .now .keys .key:not(.primary):hover {
+      background: var(--hover-tint);
+    }
   }
   .now .keys .key:not(.primary)[aria-pressed="true"] {
     background: var(--accent-soft);
@@ -4099,9 +4186,12 @@ kbd {
 button.lyric {
   cursor: pointer;
 }
-button.lyric:hover {
-  background: var(--hover-tint);
-  color: color-mix(in oklch, var(--ink) 75%, transparent);
+/* Under a mouse only (see .server:hover). */
+@media (hover: hover) {
+  button.lyric:hover {
+    background: var(--hover-tint);
+    color: color-mix(in oklch, var(--ink) 75%, transparent);
+  }
 }
 /* The line being sung: the text's own ink (no glow round it: the brighter words say it). */
 .lyric.lit {
