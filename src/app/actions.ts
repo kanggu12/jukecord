@@ -1342,9 +1342,19 @@ export class Actions {
     return this.options.store.settings.community(guildId).voteSkip;
   }
 
-  /** How the votes to skip the current track stand (anyone may look; the panels get it live). */
+  /**
+   * How the votes to skip the current track stand (anyone may look; the panels get it live), with whether the person
+   * asking has a vote that counts.
+   */
   skipVotes(context: ActionContext): VotesView {
-    return this.options.votes?.view(context.guildId) ?? { on: false, votes: 0, needed: 0 };
+    return (
+      this.options.votes?.view(context.guildId, context.userId) ?? { on: false, votes: 0, needed: 0, voted: false }
+    );
+  }
+
+  /** The people whose votes to skip count in a server now, for the live updates to tell each of them they voted. */
+  skipVoters(guildId: string): ReadonlySet<string> {
+    return this.options.votes?.voters(guildId) ?? new Set();
   }
 
   /**

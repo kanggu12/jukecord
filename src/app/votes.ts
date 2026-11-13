@@ -26,6 +26,11 @@ export interface VotesView {
   readonly votes: number;
   /** How many votes skip it: half of the people listening, rounded up, and at least one (0 while votes are off). */
   readonly needed: number;
+  /**
+   * Whether the person it is shown to has a vote among those that count (a panel says "voted" on its Skip key). False
+   * for a view made for no one in particular (a card in a Discord channel is everyone's).
+   */
+  readonly voted: boolean;
 }
 
 /** How a vote went: the votes that count, the votes needed, and whether it made the track go. */
@@ -77,13 +82,34 @@ export class SkipVotes {
     options.bus.on('people', ({ guildId }) => this.recountSoon(guildId));
   }
 
-  /** How the votes of a server's current track stand. */
-  view(guildId: string): VotesView {
+  /**
+   * How the votes of a server's current track stand, for `person` (a Discord ID, or null for no one in particular):
+   * whether they have a vote that counts in it.
+   */
+  view(guildId: string, person: string | null = null): VotesView {
     // Votes off: nothing to count, and nothing for anyone to show.
-    if (!this.options.applies(guildId)) return { on: false, votes: 0, needed: 0 };
+    if (!this.options.applies(guildId)) return { on: false, votes: 0, needed: 0, voted: false };
     const people = this.options.listening(guildId);
     const open = this.live(guildId);
-    return { on: true, votes: open ? counted(open, people) : 0, needed: needed(people) };
+    return {
+      on: true,
+      votes: open ? counted(open, people) : 0,
+      needed: needed(people),
+      // The person's own vote, while it counts: cast during this play, by someone who listens now.
+      voted: person !== null && people.has(person) && (open?.voters.has(person) ?? false),
+    };
+  }
+
+  /**
+   * The people whose votes count in a server's open vote now (none without one): the live updates tell each panel of
+   * theirs that it voted, without telling anyone who else did.
+   */
+  voters(guildId: string): ReadonlySet<string> {
+    const open = this.live(guildId);
+    // No open vote, or votes no longer apply (a DJ role deleted meanwhile): nobody's vote counts.
+    if (!open || !this.options.applies(guildId)) return new Set();
+    const people = this.options.listening(guildId);
+    return new Set([...open.voters].filter((voter) => people.has(voter)));
   }
 
   /**

@@ -548,7 +548,8 @@ export class EventHub {
       `,"type":"state","player":${JSON.stringify(presenter.player(actions.nowPlaying(reader(guildId))))},` +
         `"voice":${JSON.stringify(client.principal.kind === 'guest' ? guestVoice(voice) : voice)},` +
         `"listeners":${JSON.stringify(this.listenersOf(room))},` +
-        `"votes":${JSON.stringify(actions.skipVotes(reader(guildId)))},` +
+        // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
+        `"votes":${JSON.stringify(actions.skipVotes(viewer(client, guildId)))},` +
         `"sound":${JSON.stringify(actions.currentSound(guildId))}}`,
     );
     this.write(
@@ -696,7 +697,8 @@ export class EventHub {
   }
 
   // Sends a server's votes to skip soon: at once if none went lately, otherwise when QUEUE_EVERY_MS has passed since
-  // the last, with the view as it is then. The view is made once for every panel of the server.
+  // the last, with the view as it is then. The view is made once for every panel of the server, in two forms: for the
+  // panels of the people who voted (their Skip says "voted") and for everyone else, so no panel learns who voted.
   private votesSoon(guildId: string, room: Room): void {
     if (room.votesTimer) return;
     const wait = Math.max(0, room.votesSentAt + this.queueEveryMs - steadyNow());
@@ -705,15 +707,22 @@ export class EventHub {
       room.votesSentAt = steadyNow();
       // The room may have closed meanwhile; then nobody needs it.
       if (this.rooms.get(guildId) !== room) return;
-      const bytes = json({ type: 'votes', guild: guildId, votes: this.options.actions.skipVotes(reader(guildId)) });
-      this.broadcast(
-        room,
-        outgoing(
+      const { actions } = this.options;
+      // Made for no one in particular (voted: false), and the people whose votes count, once for the whole room.
+      const view = actions.skipVotes(reader(guildId));
+      const voters = actions.skipVoters(guildId);
+      const form = (voted: boolean) => {
+        const bytes = json({ type: 'votes', guild: guildId, votes: { ...view, voted } });
+        return outgoing(
           bytes.length,
           () => bytes,
           () => gzip(bytes),
-        ),
-      );
+        );
+      };
+      const others = form(false);
+      // The voters' form only when someone voted; each form is packed at most once, whoever needs it first.
+      const theirs = voters.size > 0 ? form(true) : others;
+      this.broadcast(room, (client) => (voters.has(client.person) ? theirs : others)(client));
     }, wait);
     room.votesTimer.unref();
   }

@@ -434,7 +434,7 @@ describe('votes to skip, live', () => {
       const watcher = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { authorization: `Bearer ${HOST_TOKEN}` });
       sockets.push(watcher);
       const state = await watcher.next('state');
-      assert.deepEqual(state.votes, { on: true, votes: 0, needed: 1 });
+      assert.deepEqual(state.votes, { on: true, votes: 0, needed: 1, voted: false });
       // Not listening yet: Alice may not vote.
       const alice = { guildId: GUILD, userId: ALICE, mayControl: false, mayManage: false };
       assert.throws(() => server.actions.skip(alice), /only people listening can vote to skip/);
@@ -449,8 +449,15 @@ describe('votes to skip, live', () => {
       // Alice in a browser, Bob and a third person in voice: three people, two votes needed.
       server.voice.inVoice.set(GUILD, [BOB, '300000000000000003']);
       const told = watcher.next('votes');
+      const hers = browser.next('votes');
       assert.deepEqual(server.actions.skip(alice).votes, { votes: 1, needed: 2 });
-      assert.deepEqual((await told).votes, { on: true, votes: 1, needed: 2 });
+      // Every panel hears how the vote stands; only Alice's hears that the vote is hers.
+      assert.deepEqual((await told).votes, { on: true, votes: 1, needed: 2, voted: false });
+      assert.deepEqual((await hers).votes, { on: true, votes: 1, needed: 2, voted: true });
+      // A page of hers opened again (a reload, another tab) has it in its state.
+      const again = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { cookie, origin: server.url });
+      sockets.push(again);
+      assert.deepEqual((await again.next('state')).votes, { on: true, votes: 1, needed: 2, voted: true });
     } finally {
       for (const socket of sockets) socket.close();
       await server.close();

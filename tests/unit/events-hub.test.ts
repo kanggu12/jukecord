@@ -53,8 +53,9 @@ function hub(
       current: null,
       channels: [{ id: context.userId ?? (context.mayManage ? 'host' : 'anyone') }],
     }),
-    // No votes to skip here (tests/integration/events.test.ts has them over a real connection).
-    skipVotes: () => ({ on: false, votes: 0, needed: 0 }),
+    // No votes to skip here (tests/integration/events.test.ts has them over a real connection), and no voters.
+    skipVotes: () => ({ on: false, votes: 0, needed: 0, voted: false }),
+    skipVoters: () => new Set<string>(),
     // The voice channel's sound: plain.
     currentSound: () => ({ volume: 100, preset: 'off' }),
   };
@@ -499,7 +500,7 @@ describe('EventHub', () => {
     events.attach(panel.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     // The state had them; then three changes close together.
-    assert.deepEqual(panel.of('state')[0]?.votes, { on: false, votes: 0, needed: 0 });
+    assert.deepEqual(panel.of('state')[0]?.votes, { on: false, votes: 0, needed: 0, voted: false });
     for (let i = 0; i < 3; i += 1) handlers.get('votes')?.({ guildId: 'G' });
     await settle(100);
     assert.equal(panel.of('votes').length, 1);
