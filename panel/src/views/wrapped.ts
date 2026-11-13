@@ -571,6 +571,9 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
   const hour = busiestHour(wrapped);
   const song = hasSong(wrapped) ? wrapped.song : null;
   const first = wrapped.firstTrack;
+  // The places as the page numbers them: shared in a tie.
+  const trackPlaces = ranks(wrapped.topTracks.map((entry) => entry.plays));
+  const peoplePlaces = ranks(wrapped.topPeople.map((entry) => entry.plays));
   return {
     lang: state.lang,
     server: { name: guild.name, icon: guildIconUrl(guild.id, guild.icon, 128) },
@@ -606,10 +609,11 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
       { label: words.tileDays, value: count(wrapped.days), unit: '' },
     ],
     tracksLabel: words.mostPlayed,
-    // Each with its unit, as on the page.
-    tracks: wrapped.topTracks.map((entry) => ({
+    // Each with its unit and its place, as on the page.
+    tracks: wrapped.topTracks.map((entry, index) => ({
       title: entry.track.title,
       plays: words.playsCount(entry.plays),
+      rank: trackPlaces[index] ?? index + 1,
       cover: coverUrl(guild.id, entry.track),
     })),
     momentsLabel: words.momentsLabel,
@@ -627,11 +631,12 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
         : []),
     ],
     peopleLabel: words.picksPlayed,
-    people: wrapped.topPeople.slice(0, 3).map((entry) => ({
+    people: wrapped.topPeople.slice(0, 3).map((entry, index) => ({
       // The host has no picture and no Discord name: "Host" in the panel's words, a person for a face.
       name: entry.name ?? words.theHost,
       picture: avatarUrl(entry.userId, entry.avatar, 128),
       plays: words.playsCount(entry.plays),
+      rank: peoplePlaces[index] ?? index + 1,
       role: entry.userId === null,
     })),
   };

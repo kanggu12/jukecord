@@ -1,15 +1,17 @@
 /**
  * Wrapped as a picture to share: a story (1080 by 1920) or a square (1080 by 1080), drawn on a canvas in the panel's
  * own look. The field is lit by the song of the time, as the panel's is by the track playing (its cover, blurred far
- * out of shape); the cards are the panel's glass; the type is the panel's; the rainbow is where the panel has it: the
- * rim of the record and jukecord's mark. The colours are the panel's own tokens, read from its stylesheet as it is
- * now, so the picture is in the theme the panel shows.
+ * out of shape); the cards are the panel's glass; the type is the panel's. The picture says what the Wrapped page
+ * says, as the page draws it: the records plain (the rainbow is the panel's sign of a track playing now, and on the
+ * page these are not; it stays in jukecord's mark), each person's face in their own colour, places shared in a tie.
+ * The colours are the panel's own tokens and rules, read from its stylesheet as it is now, so the picture is in the
+ * theme the panel shows.
  *
  * The covers come from jukecord's own address, so the canvas may be read back into a PNG. The server's icon and
  * people's pictures come from Discord and are drawn only when Discord lets them be read (otherwise their initials
  * are, as the panel does when a picture does not load).
  */
-import { initials } from '../dom.ts';
+import { hueOf, initials } from '../dom.ts';
 
 /** The two shapes: a phone's story, and a square for a post. */
 export type Shape = 'story' | 'square';
@@ -42,6 +44,8 @@ export interface PictureContent {
   readonly tracks: readonly {
     readonly title: string;
     readonly plays: string;
+    /** Its place, as the page numbers it (shared in a tie). */
+    readonly rank: number;
     readonly cover: string | null;
   }[];
   /** The moments' head, and the moments: the busiest day and hour (where they are habits), the longest day. */
@@ -54,6 +58,7 @@ export interface PictureContent {
     readonly name: string;
     readonly picture: string | null;
     readonly plays: string;
+    readonly rank: number;
     readonly role?: boolean;
   }[];
 }
@@ -83,7 +88,6 @@ interface Look {
   readonly raised: string;
   readonly disc: string;
   readonly groove: string;
-  readonly rainbow: readonly string[];
   readonly ambient: number;
   readonly saturate: number;
   readonly brightness: number;
@@ -114,9 +118,6 @@ function lookNow(): Look {
     raised: token('--raised-2') || 'rgba(255, 255, 255, 0.1)',
     disc: token('--disc') || '#0b0c10',
     groove: token('--groove') || 'rgba(255, 255, 255, 0.045)',
-    rainbow: (token('--rainbow') || '#ff6f61, #ffb84d, #4fcf86, #4aa3ff, #a77bff, #ff6f61')
-      .split(',')
-      .map((part) => part.trim()),
     ambient: Number(token('--ambient')) || 0.24,
     saturate: Number(/saturate\(([\d.]+)\)/.exec(tone)?.[1] ?? 0.45),
     brightness: Number(/brightness\(([\d.]+)\)/.exec(tone)?.[1] ?? 0.7),
@@ -426,8 +427,9 @@ function note(ctx: CanvasRenderingContext2D, colour: string, cx: number, cy: num
   ctx.restore();
 }
 
-// The record: dark vinyl with its grooves and a light falling across it, the cover on its label round the spindle
-// hole, and the rainbow on its rim.
+// The record as the Wrapped page draws its albums' (style.css .album .vinyl): dark vinyl with its grooves, a light
+// falling across it and a faint edge, the cover on its label round the spindle hole. No rainbow on its rim: that is
+// the panel's sign of a track playing now, which the page's records are not.
 function record(
   ctx: CanvasRenderingContext2D,
   look: Look,
@@ -436,22 +438,15 @@ function record(
   cy: number,
   radius: number,
 ): void {
-  // The rainbow rim, travelling round the record as the panel's does (still, here).
-  const rim = typeof ctx.createConicGradient === 'function' ? ctx.createConicGradient(-Math.PI / 3, cx, cy) : null;
-  // The mark's colours evenly round the circle, ending where they began (--rainbow).
-  if (rim)
-    for (const [index, stop] of look.rainbow.entries()) rim.addColorStop(index / (look.rainbow.length - 1), stop);
-  // A disc a little larger than the record, which the record then covers but for its rim (one colour where a browser
-  // has no conic gradient).
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius + 9, 0, Math.PI * 2);
-  ctx.fillStyle = rim ?? look.rainbow[3] ?? '#4aa3ff';
-  ctx.fill();
   // The vinyl, in the panel's disc colour.
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.fillStyle = look.disc;
   ctx.fill();
+  // Its faint edge, so it reads as one against a dark field too (the page's 1 px line, at the picture's scale).
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
   // The grooves: thin rings across the vinyl.
   ctx.strokeStyle = look.groove;
   ctx.lineWidth = Math.max(1.5, radius * 0.012);
@@ -532,8 +527,25 @@ function album(
   cover(ctx, look, image, x, y, size, size * 0.08);
 }
 
-// A face: the picture in a circle, or the initials on the panel's raised glass; a role (the host: no account, so no
-// name to take letters from) has a person there, as the panel's own faces show it.
+// A face's colours as the panel's stylesheet paints them (.avatar: a colour of the person's own, from their name, with
+// white letters; .avatar.role: a grey with the person in the second ink), read from an element made for the purpose,
+// so the picture's faces are the page's (they were all the raised glass's grey).
+function faceColours(name: string, role: boolean): { back: string; ink: string } {
+  const probe = document.createElement('span');
+  probe.className = role ? 'avatar role' : 'avatar';
+  // Never seen: only its computed colours are read.
+  probe.hidden = true;
+  // The person's hue, as dom.ts face() sets it (a role has none).
+  if (!role) probe.style.setProperty('--hue', String(hueOf(name)));
+  document.body.append(probe);
+  const style = getComputedStyle(probe);
+  const colours = { back: style.backgroundColor, ink: style.color };
+  probe.remove();
+  return colours;
+}
+
+// A face: the picture in a circle, or the person's initials on their own colour; a role (the host: no account, so no
+// name to take letters from) has a person there on its grey. As the panel's own faces show them.
 function face(
   ctx: CanvasRenderingContext2D,
   look: Look,
@@ -555,15 +567,23 @@ function face(
   ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
   if (image) {
     ctx.drawImage(image, cx - radius, cy - radius, radius * 2, radius * 2);
-  } else if (role) {
-    // The raised glass, and the panel's person icon (Lucide's user, 24 units a side) in the second ink, seven tenths of
-    // the face across with lines of 2.4 units, as the panel's own role faces have it (style.css .avatar.role).
-    ctx.fillStyle = look.raised;
-    ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    ctx.restore();
+    return;
+  }
+  const colours = faceColours(name, role);
+  // The face's colour (the raised glass first, kept by a browser whose canvas would not take the colour as written).
+  ctx.fillStyle = look.raised;
+  ctx.fillStyle = colours.back;
+  ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+  if (role) {
+    // The panel's person icon (Lucide's user, 24 units a side), seven tenths of the face across with lines of 2.4
+    // units, as the panel's own role faces have it (style.css .avatar.role).
     const side = radius * 2 * 0.7;
     ctx.translate(cx - side / 2, cy - side / 2);
     ctx.scale(side / 24, side / 24);
+    // The second ink first, kept where the canvas would not take the stylesheet's colour as written.
     ctx.strokeStyle = look.ink2;
+    ctx.strokeStyle = colours.ink;
     ctx.lineWidth = 2.4;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -572,13 +592,11 @@ function face(
     ctx.arc(12, 7, 4, 0, Math.PI * 2);
     ctx.stroke();
   } else {
-    // As the panel's .avatar: the raised glass, the initials in the second ink, in the middle.
-    ctx.fillStyle = look.raised;
-    ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    // The initials in the face's ink, in the middle.
     ink.write(initials(name), cx, cy + radius * 0.34, {
       size: Math.round(radius * 0.9),
       weight: 600,
-      colour: look.ink2,
+      colour: colours.ink,
       align: 'center',
     });
   }
@@ -807,6 +825,8 @@ function listCard(
   rows: readonly {
     readonly text: string;
     readonly count: string;
+    /** Its place, as the page numbers it (shared in a tie). */
+    readonly rank: number;
     readonly draw: (x: number, y: number, size: number) => void;
   }[],
   x: number,
@@ -828,8 +848,8 @@ function listCard(
     const top = y + LIST.top * scale + index * pitch;
     // Everything on the row is set on its middle: the baseline a little under it.
     const middle = top + pitch / 2;
-    // The rank, faint, as the panel's.
-    ink.write(String(index + 1), x + pad, middle + 10 * scale, {
+    // The place, faint, as the panel's.
+    ink.write(String(row.rank), x + pad, middle + 10 * scale, {
       size: Math.round(26 * scale),
       weight: 600,
       colour: look.ink3,
@@ -913,6 +933,7 @@ function trackRows(ink: Ink, content: PictureContent, covers: readonly (HTMLImag
   return content.tracks.slice(0, most).map((track, index) => ({
     text: track.title,
     count: track.plays,
+    rank: track.rank,
     draw: (x: number, y: number, size: number) =>
       cover(ink.ctx, ink.look, covers[index] ?? null, x, y, size, size * 0.18),
   }));
@@ -923,6 +944,7 @@ function peopleRows(ink: Ink, content: PictureContent, faces: readonly (HTMLImag
   return content.people.map((person, index) => ({
     text: person.name,
     count: person.plays,
+    rank: person.rank,
     draw: (x: number, y: number, size: number) =>
       face(
         ink.ctx,
@@ -1002,7 +1024,9 @@ function square(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent
   ink.fit(content.title, m - 3, 194, { size: 84, weight: 800, colour: look.ink, spacing: -2 }, w, 48);
   const song = content.song ? 316 : 0;
   const totals = 140;
-  const low = listHeight(3, 0.8);
+  // The two lists' cards as tall as the longer one's rows, three at most (always three tall, two rows of a time with
+  // few plays had 80 px of nothing under them).
+  const low = listHeight(Math.max(1, Math.min(3, content.tracks.length), Math.min(3, content.people.length)), 0.8);
   const block = (song ? song + gap : 0) + totals + gap + low;
   const room = { top: 228, bottom: 988 };
   let y = room.top + Math.max(0, (room.bottom - room.top - block) / 2);
