@@ -1,17 +1,27 @@
 /**
  * Wrapped: a server's year in music (or a month, or the last 12 months), a page under the statistics. The song of the
- * time on its record, the first track, the totals, the most played tracks and who added most, and the moments: the
- * busiest day of the week and hour of the day, the longest day, the days with music. "Save as picture" draws it into
- * a PNG to share (picture.ts).
+ * time on its record, the first track, the totals, the most played tracks and whose picks played most, and the
+ * moments: the busiest day of the week and hour of the day (where they are habits), the longest day, the days with
+ * music. "Save as picture" draws it into a PNG to share (picture.ts).
  *
  * The time is in the page's address (/stats/wrapped?period=2026-03), so a link (the Discord card's) opens that time;
  * choosing another puts it there too, and Back goes to the one before.
  */
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
-import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
+import { avatarUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
+import { busiestHour, busiestWeekday, hasSong } from '../facts.ts';
 import { state, t, watch } from '../state.ts';
+import {
+  dayRangeText,
+  dayText,
+  hourSpanText,
+  hourText,
+  lengthParts,
+  lengthText,
+  momentText,
+  withLongest,
+} from '../time.ts';
 import { goTo, problem, showDialog } from '../ui/layers.ts';
-import { listened } from './pages.ts';
 import { drawPicture, type PictureContent, type Shape } from './picture.ts';
 import { album } from './player.ts';
 
@@ -23,10 +33,9 @@ export function timeName(period: Wrapped['period']): string {
   return month ? words.wrappedMonth(year, Number(month)) : words.wrappedYear(year);
 }
 
-/** A day of the time as people say it ("June 24", "6월 24일"), with its year when the time spans two. */
+/** A day of the time as the panel writes days ("Jun 24", "6월 24일"), with its year when the time spans two. */
 export function dayName(day: string, period: Wrapped['period']): string {
-  const [year = '', month, date] = day.split('-');
-  return t().dayOf(Number(month), Number(date), period.kind === 'last-12-months' ? year : null);
+  return dayText(day, state.lang, period.kind === 'last-12-months');
 }
 
 /** A count as people read it: "1,806" ("1,806" in Korean too). */
@@ -34,10 +43,12 @@ export function count(value: number): string {
   return value.toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-US');
 }
 
-/** The busiest of a list of counts (the first of the most), or -1 when all are zero. */
-export function busiest(values: readonly number[]): number {
-  const top = Math.max(0, ...values);
-  return top > 0 ? values.indexOf(top) : -1;
+/**
+ * The time listened and the longest day's, as shown: rounded so that they agree (the longest day never more than the
+ * total, and the days with music at the longest day's length reach the total at least).
+ */
+function lengths(wrapped: Wrapped) {
+  return withLongest(wrapped.playedMs, wrapped.longestDay?.playedMs ?? 0, wrapped.days);
 }
 
 // The time asked for in the page's address, when there is one.
@@ -46,12 +57,11 @@ function periodInAddress(): string | undefined {
   return asked && /^(\d{4}|\d{4}-\d{2}|last-12-months)$/.test(asked) ? asked : undefined;
 }
 
-// A small chart of counts (plays by day of the week, by hour), the busiest column in full colour. It is a picture of
-// the numbers, named whole for screen readers ("Plays by day of the week: Sunday 12, ..."); the busiest is said in
-// words beside it.
-function spark(values: readonly number[], labels: readonly string[], name: string): HTMLElement {
+// A small chart of counts (plays by day of the week, by hour), the busiest column (`most`) in full colour. It is a
+// picture of the numbers, named whole for screen readers ("Plays by day of the week: Sunday 12, ..."); the busiest is
+// said in words beside it.
+function spark(values: readonly number[], labels: readonly string[], name: string, most: number): HTMLElement {
   const top = Math.max(1, ...values);
-  const most = busiest(values);
   return h(
     'div',
     {
@@ -100,7 +110,8 @@ export function wrappedPage(): HTMLElement {
     back.title = words.stats;
     const time = shown ? timeName(shown.period) : '';
     title.textContent = shown ? words.wrappedTitle(time) : words.wrapped;
-    range.textContent = shown ? words.wrappedRange(shown.period.from, shown.period.to) : '';
+    // Its days, as the panel writes a span of days ("Nov 14, 2025 – Nov 13, 2026").
+    range.textContent = shown ? dayRangeText(shown.period.from, shown.period.to, state.lang, true) : '';
     // The key says the time shown, and what it chooses (for screen readers, which hear its name).
     const label = shown
       ? `${time.charAt(0).toUpperCase()}${time.slice(1)}`
@@ -120,10 +131,11 @@ export function wrappedPage(): HTMLElement {
       fill(content, h('div', { class: 'card' }, h('div', { class: 'empty' }, icon('gift'), words.statsEmpty)));
       return;
     }
-    const [hours, rest] = listened(wrapped.playedMs);
+    const { total, longest: longestLength } = lengths(wrapped);
+    const [hours, rest] = lengthParts(total, state.lang);
     // The song of the time, on its record: the cover in its case with the record half out of it, as a row's album,
-    // made big; the cover's colours glow behind it, as behind the turning disc.
-    const song = wrapped.song;
+    // made big. Only a song that played more than once: among tracks played once each, none is the time's song.
+    const song = hasSong(wrapped) ? wrapped.song : null;
     const songCard = song
       ? h(
           'section',
@@ -170,19 +182,7 @@ export function wrappedPage(): HTMLElement {
                   { class: 'name', title: first.track.title, 'data-clip': 'ok' },
                   h('a', { href: first.track.url, target: '_blank', rel: 'noopener noreferrer' }, first.track.title),
                 ),
-                subLine(
-                  h('span', null, firstWhen(first.playedAt, wrapped.period)),
-                  // Who added it: a person, the host, or autoplay (which played it when the queue ran out).
-                  h(
-                    'span',
-                    null,
-                    first.addedBy === 'autoplay'
-                      ? words.byAutoplay
-                      : first.addedBy
-                        ? words.addedBy(first.addedByName ?? first.addedBy)
-                        : words.byHost,
-                  ),
-                ),
+                subLine(h('span', null, firstWhen(first.playedAt, wrapped.period)), h('span', null, firstBy(first))),
               ),
             ),
           ),
@@ -233,7 +233,7 @@ export function wrappedPage(): HTMLElement {
         ),
       ),
     );
-    // Who added most: faces and meters, as on the statistics.
+    // Whose picks played most: faces and meters, as on the statistics, each with the plays of what they added.
     const most = Math.max(1, ...wrapped.topPeople.map((entry) => entry.plays));
     const topPeople = h(
       'ol',
@@ -251,7 +251,8 @@ export function wrappedPage(): HTMLElement {
             face(entry.name ?? words.host, avatarUrl(entry.userId, entry.avatar), 'sm'),
             entry.name ?? words.theHost,
           ),
-          h('span', { class: 'n' }, count(entry.plays)),
+          // Plays, with their unit: they add up to the time's plays, and a bare number read as tracks added.
+          h('span', { class: 'n' }, words.playsCount(entry.plays)),
           h(
             'span',
             { class: 'meter', 'aria-hidden': 'true' },
@@ -260,10 +261,10 @@ export function wrappedPage(): HTMLElement {
         ),
       ),
     );
-    // The moments: the busiest day of the week and hour of the day with their small charts, the longest day, and the
-    // days with music.
-    const day = busiest(wrapped.weekdays);
-    const hour = busiest(wrapped.hours);
+    // The moments: the busiest day of the week and hour of the day with their small charts (each only when it is a
+    // habit, facts.ts), the longest day, and the days with music.
+    const day = busiestWeekday(wrapped);
+    const hour = busiestHour(wrapped);
     const longest = wrapped.longestDay;
     const moment = (label: string, value: string, sub: string | null, chart: HTMLElement | null) =>
       h(
@@ -274,40 +275,50 @@ export function wrappedPage(): HTMLElement {
         sub ? h('div', { class: 'sub' }, sub) : null,
         chart,
       );
-    const moments = h(
-      'div',
-      { class: 'tiles moments' },
-      moment(
-        words.busiestDay,
-        words.weekdaysMany[day] ?? '',
-        words.playsCount(wrapped.weekdays[day] ?? 0),
-        spark(wrapped.weekdays, words.weekdays, words.byWeekday),
-      ),
-      moment(
-        words.busiestHour,
-        `${hour}:00`,
-        words.playsCount(wrapped.hours[hour] ?? 0),
-        spark(
-          wrapped.hours,
-          wrapped.hours.map((_, index) => `${index}:00`),
-          words.byHour,
-        ),
-      ),
+    const shownMoments = [
+      day >= 0
+        ? moment(
+            words.busiestDay,
+            words.weekdaysMany[day] ?? '',
+            words.playsCount(wrapped.weekdays[day] ?? 0),
+            spark(wrapped.weekdays, words.weekdays, words.byWeekday, day),
+          )
+        : null,
+      hour >= 0
+        ? moment(
+            words.busiestHour,
+            hourText(hour),
+            words.playsCount(wrapped.hours[hour] ?? 0),
+            spark(
+              wrapped.hours,
+              wrapped.hours.map((_, index) => hourText(index)),
+              words.byHour,
+              hour,
+            ),
+          )
+        : null,
       longest
         ? moment(
             words.longestDay,
             dayName(longest.day, wrapped.period),
-            `${listenedWords(longest.playedMs)} · ${words.playsCount(longest.plays)}`,
+            `${lengthText(longestLength, state.lang)} · ${words.playsCount(longest.plays)}`,
             null,
           )
         : null,
-      moment(words.tileDays, `${count(wrapped.days)}${state.lang === 'ko' ? words.daysUnit : ''}`, null, null),
-    );
+      // A count of days, bare as the other counts are (in Korean "2일" beside a date read as the second of a month).
+      moment(words.tileDays, count(wrapped.days), null, null),
+    ].filter((tile) => tile !== null);
+    // As many columns as there are moments, so the row has no hole where one is left out.
+    const moments = h('div', { class: 'tiles moments', style: `--n:${shownMoments.length}` }, ...shownMoments);
     fill(
       content,
       // The history reaches back only so far: said once, at the top.
       wrapped.keptFrom
-        ? h('p', { class: 'faint wrapped-kept' }, words.keptFrom(wrapped.keptFrom, count(10_000)))
+        ? h(
+            'p',
+            { class: 'faint wrapped-kept' },
+            words.keptFrom(dayText(wrapped.keptFrom, state.lang, true), count(10_000)),
+          )
         : null,
       h('div', { class: 'wrapped-hero' }, songCard, firstCard),
       tiles,
@@ -318,7 +329,7 @@ export function wrappedPage(): HTMLElement {
         h(
           'section',
           { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', null, words.addedMost)),
+          h('div', { class: 'card-head' }, h('h2', null, words.picksPlayed)),
           h('div', { class: 'chart' }, topPeople),
         ),
       ),
@@ -408,28 +419,24 @@ function capital(text: string): string {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
-// Time listened in words: "1 h 5 min" ("1시간 5분").
-function listenedWords(ms: number): string {
-  const [big, rest] = listened(ms);
-  return state.lang === 'ko' ? `${big}${rest}` : `${big} ${rest}`;
+// When the first track played: its day and its time of day, in this browser's time zone, as the panel writes a moment
+// ("Nov 22, 19:30"); with its year when the time spans two.
+function firstWhen(at: number, period: Wrapped['period']): string {
+  return momentText(at, state.lang, { year: period.kind === 'last-12-months' });
 }
 
-// When the first track played: its day of the time and its time of day, in this browser's time zone.
-function firstWhen(at: number, period: Wrapped['period']): string {
-  const when = new Date(at);
-  const two = (value: number) => String(value).padStart(2, '0');
-  const day = `${when.getFullYear()}-${two(when.getMonth() + 1)}-${two(when.getDate())}`;
-  return `${dayName(day, period)} ${two(when.getHours())}:${two(when.getMinutes())}`;
+// Who added the first track: a person, the host, or autoplay (which played it when the queue ran out).
+function firstBy(first: NonNullable<Wrapped['firstTrack']>): string {
+  const words = t();
+  if (first.addedBy === 'autoplay') return words.byAutoplay;
+  return first.addedBy ? words.addedBy(first.addedByName ?? first.addedBy) : words.byHost;
 }
 
 // The song of the time on its record: its album made big (the cover in its case, the record half out of it with the
-// cover on its label), and the cover's colours glowing behind.
+// cover on its label). No light of its own behind it: the cover's light is the panel's sign of the track playing now.
 function record(wrapped: Wrapped): HTMLElement {
   const song = wrapped.song;
-  const box = h('div', { class: 'record', 'aria-hidden': 'true' }, song ? album(song.track) : null);
-  const cover = song && state.guild ? coverUrl(state.guild.id, song.track) : null;
-  if (cover) box.style.setProperty('--glow', cssUrl(cover));
-  return box;
+  return h('div', { class: 'record', 'aria-hidden': 'true' }, song ? album(song.track) : null);
 }
 
 // The picture to share: its shape (a story or a square), drawn here, and saved (or shared, where the system can).
@@ -524,7 +531,7 @@ function pictureDialog(wrapped: Wrapped): void {
 }
 
 // What the picture says, in the panel's language: the server, the time, the song, the totals, the most played, the
-// moments and who added most.
+// moments and whose picks played most.
 function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
   const words = t();
   const time = timeName(wrapped.period);
@@ -533,17 +540,23 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
   const big =
     wrapped.period.kind === 'last-12-months' ? words.twelveMonths : month ? words.monthName(Number(month)) : year;
   const sub = words.inMusic(wrapped.period.kind === 'month' ? year : null);
-  const [hours, rest] = listened(wrapped.playedMs);
-  const day = busiest(wrapped.weekdays);
-  const hour = busiest(wrapped.hours);
-  const song = wrapped.song;
+  // The figures as the page shows them: the lengths agreeing, the moments only where they are habits, the song only
+  // when it played more than once.
+  const { total, longest } = lengths(wrapped);
+  const [hours, rest] = lengthParts(total, state.lang);
+  const day = busiestWeekday(wrapped);
+  const hour = busiestHour(wrapped);
+  const song = hasSong(wrapped) ? wrapped.song : null;
+  const first = wrapped.firstTrack;
   return {
     lang: state.lang,
     server: { name: guild.name, icon: guildIconUrl(guild.id, guild.icon, 128) },
     big,
     sub,
     title: words.wrappedTitle(time),
-    range: words.wrappedRange(wrapped.period.from, wrapped.period.to),
+    range: dayRangeText(wrapped.period.from, wrapped.period.to, state.lang, true),
+    // The song of the time on its record; with no song (every track played once), the time's first track in its
+    // place, as the page has it: its cover lights the picture as the song's would.
     song: song
       ? {
           label: words.wrappedSong(time),
@@ -553,38 +566,49 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
           factsApart: words.songFactsApart(song.days, song.plays),
           cover: coverUrl(guild.id, song.track),
         }
-      : null,
+      : first
+        ? {
+            label: words.firstTrack,
+            title: first.track.title,
+            artist: first.track.uploader,
+            facts: `${firstWhen(first.playedAt, wrapped.period)} · ${firstBy(first)}`,
+            factsApart: [firstWhen(first.playedAt, wrapped.period), firstBy(first)],
+            cover: coverUrl(guild.id, first.track),
+          }
+        : null,
     numbers: [
       { label: words.tilePlays, value: count(wrapped.plays), unit: '' },
       { label: words.tileListened, value: hours, unit: rest },
       { label: words.tileTracks, value: count(wrapped.tracks), unit: '' },
-      { label: words.tileDays, value: count(wrapped.days), unit: state.lang === 'ko' ? words.daysUnit : '' },
+      { label: words.tileDays, value: count(wrapped.days), unit: '' },
     ],
     tracksLabel: words.mostPlayed,
+    // Each with its unit, as on the page.
     tracks: wrapped.topTracks.map((entry) => ({
       title: entry.track.title,
-      plays: count(entry.plays),
+      plays: words.playsCount(entry.plays),
       cover: coverUrl(guild.id, entry.track),
     })),
+    momentsLabel: words.momentsLabel,
     moments: [
-      { label: words.busiestDay, value: words.weekdaysMany[day] ?? '' },
-      { label: words.busiestHour, value: `${hour}:00-${hour + 1}:00` },
+      ...(day >= 0 ? [{ label: words.busiestDay, value: words.weekdaysMany[day] ?? '' }] : []),
+      ...(hour >= 0 ? [{ label: words.busiestHour, value: hourSpanText(hour, state.lang) }] : []),
       ...(wrapped.longestDay
         ? [
             {
               label: words.longestDay,
               // Without its year: the days at the foot give it, and twelve months hold each date once.
-              value: `${dayName(wrapped.longestDay.day, { ...wrapped.period, kind: 'year' })} · ${listenedWords(wrapped.longestDay.playedMs)}`,
+              value: `${dayText(wrapped.longestDay.day, state.lang, false)} · ${lengthText(longest, state.lang)}`,
             },
           ]
         : []),
     ],
-    peopleLabel: words.addedMost,
+    peopleLabel: words.picksPlayed,
     people: wrapped.topPeople.slice(0, 3).map((entry) => ({
       // The host has no picture and no Discord name: "Host" in the panel's words.
       name: entry.name ?? words.theHost,
       picture: avatarUrl(entry.userId, entry.avatar, 128),
-      plays: count(entry.plays),
+      plays: words.playsCount(entry.plays),
     })),
   };
 }

@@ -9,6 +9,7 @@ import { api, type ListenLink } from '../api.ts';
 import { fill, h, icon } from '../dom.ts';
 import { type QrCode, qrCode } from '../qr.ts';
 import { mayControl, state, t } from '../state.ts';
+import { clockTime, momentText } from '../time.ts';
 import { confirmDialog, problem, showDialog } from '../ui/layers.ts';
 import { act } from './player.ts';
 
@@ -33,13 +34,9 @@ function reachable(url: string): string {
   }
 }
 
-/** A date and time in the panel's language ("Nov 20, 2026, 9:41 PM", "2026. 11. 20. 오후 9:41"). */
+/** A moment as the panel writes moments ("Nov 20, 21:41", "11월 20일 21:41"), or its time of day alone ("21:41"). */
 export function when(ms: number, timeOnly = false): string {
-  const locale = state.lang === 'ko' ? 'ko-KR' : 'en-US';
-  return new Date(ms).toLocaleString(
-    locale,
-    timeOnly ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' },
-  );
+  return timeOnly ? clockTime(ms) : momentText(ms, state.lang);
 }
 
 /** The code as an SVG: dark modules on a light square, with the four-module quiet zone the standard asks for. */

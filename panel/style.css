@@ -3010,21 +3010,8 @@ kbd {
   color: var(--ink-2);
 }
 /* The song's record: a row's album made big (the cover in its case, the record half out of it with the cover on
-   its label), still; the cover's colours glow behind it, as behind the disc. */
-.record {
-  position: relative;
-  isolation: isolate;
-}
-.record::before {
-  content: "";
-  position: absolute;
-  inset: 4px 60px 4px 4px;
-  z-index: -1;
-  border-radius: 24px;
-  background: var(--glow, none) center / cover;
-  filter: blur(26px);
-  opacity: 0.55;
-}
+   its label), still. No light of its own behind it: the cover's light is the panel's sign of the track playing now
+   (the field, the turning disc), and this song is not playing. */
 .wrapped-song .record .album {
   width: 226px;
   height: 152px;
@@ -3050,10 +3037,67 @@ kbd {
   width: 40px;
   height: 40px;
 }
-/* The first track and the most played: rows as the history's (the first track's under its card's head, as every
-   card's rows are; set in the middle of the card's room it floated), a number and the plays beside them. */
+/* The first track and the most played: rows as the history's, a number and the plays beside them. */
 .wrapped-first .row {
   grid-template-columns: 48px minmax(0, 1fr);
+}
+/* The song's card alone in its row (a time with no song: every track played once) or the first track's alone: across
+   the row. */
+.wrapped-hero > :only-child {
+  grid-column: 1 / -1;
+}
+/* Beside the song, on a wide window, the first track is a smaller record of its own: its album made bigger with its
+   words beside it, in the middle of the card's room as the song's record is in its own. As a row under the card's
+   head, it held 40 px of a box as tall as the song's, the rest of it empty. */
+@media (min-width: 1101px) {
+  .wrapped-first .list {
+    flex: 1;
+    justify-content: center;
+  }
+  .wrapped-first .row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--s-16);
+  }
+  .wrapped-first .album {
+    width: 156px;
+    height: 104px;
+  }
+  .wrapped-first .album .case {
+    width: 104px;
+    height: 104px;
+    border-radius: var(--r);
+  }
+  .wrapped-first .album .vinyl {
+    left: 58px;
+    width: 96px;
+    height: 96px;
+  }
+  .wrapped-first .album .vinyl::before {
+    inset: 26px;
+  }
+  .wrapped-first .album .vinyl::after {
+    width: 6px;
+    height: 6px;
+  }
+  .wrapped-first .album .case .note .icon {
+    width: 28px;
+    height: 28px;
+  }
+  .wrapped-first .name {
+    font-size: var(--fs-lg);
+    line-height: var(--lh-lg);
+    font-weight: 650;
+  }
+  /* The moments: as many columns as there are (a tie or too few days can leave a busiest one out). */
+  .tiles.moments {
+    grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr));
+  }
+}
+/* Two moments a row on a narrower window: an odd last one across the row, not beside a hole. */
+@media (max-width: 1100px) {
+  .tiles.moments > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
 }
 .wrapped-tracks .row {
   grid-template-columns: 22px 48px minmax(0, 1fr) auto;
@@ -3898,17 +3942,13 @@ kbd {
   .rank .meter {
     border: 1px solid CanvasText;
   }
-  /* Wrapped's small charts: every column in the text's colour, the busiest in the highlight's; the glow behind the
-     song's record is a picture, which would light the canvas. */
+  /* Wrapped's small charts: every column in the text's colour, the busiest in the highlight's. */
   .moment .spark i {
     forced-color-adjust: none;
     background: CanvasText;
   }
   .moment .spark i.top {
     background: Highlight;
-  }
-  .record::before {
-    display: none;
   }
 }
 

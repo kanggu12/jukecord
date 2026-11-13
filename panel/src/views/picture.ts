@@ -26,6 +26,7 @@ export interface PictureContent {
   readonly title: string;
   /** The first and the last day, in words. */
   readonly range: string;
+  /** The track on the record, whose cover lights the picture: the song of the time, or with none its first track. */
   readonly song: {
     readonly label: string;
     readonly title: string;
@@ -43,9 +44,10 @@ export interface PictureContent {
     readonly plays: string;
     readonly cover: string | null;
   }[];
-  /** The moments: the busiest day and hour, the longest day (a label, and its value). */
+  /** The moments' head, and the moments: the busiest day and hour (where they are habits), the longest day. */
+  readonly momentsLabel: string;
   readonly moments: readonly { readonly label: string; readonly value: string }[];
-  /** Who added most: up to three, each with a face and their plays. */
+  /** Whose picks played most: up to three, each with a face and the plays of what they added. */
   readonly peopleLabel: string;
   readonly people: readonly { readonly name: string; readonly picture: string | null; readonly plays: string }[];
 }
@@ -606,6 +608,7 @@ export async function drawPicture(content: PictureContent, shape: Shape): Promis
     content.song?.facts,
     ...(content.song?.factsApart ?? []),
     content.tracksLabel,
+    content.momentsLabel,
     content.peopleLabel,
     ...content.numbers.flatMap((entry) => [entry.label, entry.value, entry.unit]),
     ...content.tracks.flatMap((entry) => [entry.title, entry.plays]),
@@ -768,7 +771,12 @@ function songCard(
   }
 }
 
-// A card listing tracks on their covers (or people on their faces), each with its count at the end of the line.
+// A list card's parts at its scale: its head's baseline, where its first row starts, a row's height, and the room
+// under its last row. A card of moments beside a list sets its own rows on the same lines (momentsCard).
+const LIST = { head: 62, top: 86, row: 56, foot: 18 } as const;
+
+// A card listing tracks on their covers (or people on their faces), each with its count at the end of the line; its
+// rows `pitch` apart (a row's height at the card's scale unless said).
 function listCard(
   ink: Ink,
   title: string,
@@ -782,20 +790,20 @@ function listCard(
   w: number,
   h: number,
   scale: number,
+  pitch = LIST.row * scale,
 ): void {
   const { ctx, look } = ink;
   glass(ctx, look, x, y, w, h);
   const pad = 44 * scale;
-  head(ink, title, x + pad, y + 62 * scale, Math.round(25 * scale), w - pad * 2);
-  const rowHeight = 56 * scale;
+  head(ink, title, x + pad, y + LIST.head * scale, Math.round(25 * scale), w - pad * 2);
   const picture = 42 * scale;
   // The name in the ink, its count in the second ink at the end of the line, as the panel's ranks.
   const textType: Type = { size: Math.round(29 * scale), weight: 600, colour: look.ink };
   const countType: Type = { size: Math.round(27 * scale), weight: 500, colour: look.ink2, align: 'right' };
   rows.forEach((row, index) => {
-    const top = y + 86 * scale + index * rowHeight;
+    const top = y + LIST.top * scale + index * pitch;
     // Everything on the row is set on its middle: the baseline a little under it.
-    const middle = top + rowHeight / 2;
+    const middle = top + pitch / 2;
     // The rank, faint, as the panel's.
     ink.write(String(index + 1), x + pad, middle + 10 * scale, {
       size: Math.round(26 * scale),
@@ -811,27 +819,44 @@ function listCard(
   });
 }
 
-// The moments, one under another: each a small label over its value.
-function momentsCard(ink: Ink, content: PictureContent, x: number, y: number, w: number, h: number): void {
+// The moments, one under another, as the list card beside them sets its rows: the same head on the same baseline, the
+// first moment where its first row starts, each in a row of the same height (`pitch`). A moment is its label over its
+// value, the two lines in the middle of their row, and a thin line between one moment and the next.
+function momentsCard(
+  ink: Ink,
+  content: PictureContent,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  scale: number,
+  pitch: number,
+): void {
   const { ctx, look } = ink;
   glass(ctx, look, x, y, w, h);
-  const pad = 40;
-  // The card's height shared evenly between the moments.
-  const each = (h - 28) / Math.max(1, content.moments.length);
+  const pad = 44 * scale;
+  head(ink, content.momentsLabel, x + pad, y + LIST.head * scale, Math.round(25 * scale), w - pad * 2);
   content.moments.forEach((moment, index) => {
-    const top = y + 14 + index * each;
-    // The label, then its value under it, the pair in the middle of its row.
-    const middle = top + each / 2;
-    ink.fit(moment.label, x + pad, middle - 8, { size: 22, weight: 500, colour: look.ink2 }, w - pad * 2, 16);
+    const top = y + LIST.top * scale + index * pitch;
+    // The two lines' block centred on the row: the label's baseline a little over the middle, the value's under it.
+    const middle = top + pitch / 2;
+    ink.fit(
+      moment.label,
+      x + pad,
+      middle - 9 * scale,
+      { size: Math.round(22 * scale), weight: 500, colour: look.ink2 },
+      w - pad * 2,
+      Math.round(16 * scale),
+    );
     ink.fit(
       moment.value,
       x + pad,
-      middle + 30,
-      { size: 30, weight: 700, colour: look.ink, spacing: -0.4 },
+      middle + 25 * scale,
+      { size: Math.round(30 * scale), weight: 700, colour: look.ink, spacing: -0.4 },
       w - pad * 2,
-      20,
+      Math.round(20 * scale),
     );
-    // A thin line between one moment and the next.
+    // A thin line between one moment and the next, on the line where the row starts.
     if (index > 0) {
       ctx.fillStyle = look.line;
       ctx.fillRect(x + pad, top, w - pad * 2, 2);
@@ -869,7 +894,7 @@ function trackRows(ink: Ink, content: PictureContent, covers: readonly (HTMLImag
   }));
 }
 
-// The rows of who added most: each on their face.
+// The rows of whose picks played most: each on their face.
 function peopleRows(ink: Ink, content: PictureContent, faces: readonly (HTMLImageElement | null)[]) {
   return content.people.map((person, index) => ({
     text: person.name,
@@ -879,14 +904,14 @@ function peopleRows(ink: Ink, content: PictureContent, faces: readonly (HTMLImag
   }));
 }
 
-// How tall a card listing `rows` is, at a scale.
-function listHeight(rows: number, scale: number): number {
-  return Math.round((86 + rows * 56 + 18) * scale);
+// How tall a card listing `rows` is, at a scale, its rows `pitch` apart (a row's height at the scale unless said).
+function listHeight(rows: number, scale: number, pitch = LIST.row * scale): number {
+  return Math.round((LIST.top + LIST.foot) * scale + rows * pitch);
 }
 
 // The story: the server and the time at the top, the song of the time on its record, the totals, the most played,
-// who added most beside the moments, and jukecord's mark at the foot. The cards are one block, set in the middle of
-// the room between the time and the foot, so a time with a few plays sits as well as a full year.
+// whose picks played most beside the moments, and jukecord's mark at the foot. The cards are one block, set in the
+// middle of the room between the time and the foot, so a time with a few plays sits as well as a full year.
 function story(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent, pictures: Pictures): void {
   const { look } = ink;
   const m = 72;
@@ -895,11 +920,14 @@ function story(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent,
   server(ink, content, pictures.icon, m, 128, 72);
   ink.fit(content.big, m - 6, 384, { size: 184, weight: 800, colour: look.ink, spacing: -5 }, w, 96);
   ink.write(content.sub, m, 458, { size: 56, weight: 650, colour: look.ink, spacing: -1 }, w);
-  // The block's parts and their heights: the bottom row as tall as the taller of its two cards.
-  const song = content.song ? 392 : 0;
+  // The block's parts and their heights. The last row's two cards (whose picks played most, the moments) share their
+  // head and their rows' lines: a row tall enough for a moment's two lines, as many rows as the longer list has.
+  const song = content.song ? 360 : 0;
   const totals = 156;
   const tracks = listHeight(content.tracks.length, 1);
-  const low = Math.max(listHeight(Math.max(content.people.length, 3), 0.88), 36 + content.moments.length * 78);
+  const lowScale = 0.88;
+  const pitch = 70;
+  const low = listHeight(Math.max(1, content.people.length, content.moments.length), lowScale, pitch);
   const block = (song ? song + gap : 0) + totals + gap + tracks + gap + low;
   const room = { top: 498, bottom: 1784 };
   let y = room.top + Math.max(0, (room.bottom - room.top - block) / 2);
@@ -911,17 +939,26 @@ function story(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent,
   y += totals + gap;
   listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 5), m, y, w, tracks, 1);
   y += tracks + gap;
-  // Who added most, and the moments, side by side.
+  // Whose picks played most, and the moments, side by side; either alone (no person added any, all autoplay) across
+  // the row.
   const half = (w - gap) / 2;
-  if (content.people.length > 0)
-    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m, y, half, low, 0.88);
-  momentsCard(ink, content, m + half + gap, y, half, low);
+  const people = content.people.length > 0;
+  const moments = content.moments.length > 0;
+  if (people) {
+    const width = moments ? half : w;
+    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m, y, width, low, lowScale, pitch);
+  }
+  if (moments) {
+    const left = people ? m + half + gap : m;
+    momentsCard(ink, content, left, y, people ? half : w, low, lowScale, pitch);
+  }
   foot(ink, content, m, 1846, w, 1);
   void ctx;
 }
 
 // The square: the server and the time across the top, the song of the time, the totals, the three most played beside
-// who added most, and jukecord's mark at the foot; the cards a block in the middle of their room, as in the story.
+// whose picks played most, and jukecord's mark at the foot; the cards a block in the middle of their room, as in the
+// story.
 function square(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent, pictures: Pictures): void {
   const { look } = ink;
   const m = 56;
@@ -941,10 +978,22 @@ function square(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent
   }
   numbers(ink, content, m, y, w, totals, 50);
   y += totals + gap;
-  const half = (w - gap) / 2;
-  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 3), m, y, half, low, 0.8);
-  if (content.people.length > 0)
-    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m + half + gap, y, half, low, 0.8);
+  // The most played the wider, three fifths of the row, as the page sets them (a title is longer than a name, and each
+  // count says "plays"); alone across the row when no person added any.
+  const people = content.people.length > 0;
+  const wide = people ? Math.round((w - gap) * 0.6) : w;
+  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 3), m, y, wide, low, 0.8);
+  if (people)
+    listCard(
+      ink,
+      content.peopleLabel,
+      peopleRows(ink, content, pictures.faces),
+      m + wide + gap,
+      y,
+      w - gap - wide,
+      low,
+      0.8,
+    );
   foot(ink, content, m, 1036, w, 0.8);
   void ctx;
 }

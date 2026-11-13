@@ -37,6 +37,7 @@ import {
   update,
   watch,
 } from '../state.ts';
+import { lengthText, rounded } from '../time.ts';
 import { askDialog, confirmDialog, messageOf, problem, showDialog, toast } from '../ui/layers.ts';
 import { inviteDialog, mayInvite } from './invite.ts';
 import { lightGlow } from './light.ts';
@@ -859,7 +860,8 @@ export function queueCard(): HTMLElement {
     const control = mayControl();
     (card.querySelector('#queue-h .name') as HTMLElement).textContent = words.queue;
     const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
-    // "13 tracks · 39:00 in all": the number with its unit, so it does not read as a time.
+    // "13 tracks · 39 min in all": the number with its unit, and the length in words as every length of time is
+    // written (a track's own length stays a clock).
     // While searching, how many of the tracks the search shows.
     const searching = search.value.trim() !== '';
     const matching = searching
@@ -874,7 +876,7 @@ export function queueCard(): HTMLElement {
         ? ''
         : searching
           ? words.tracksOf(matching, items.length)
-          : `${words.tracks(items.length)} · ${words.total(clock(total))}`;
+          : `${words.tracks(items.length)} · ${words.total(lengthText(rounded(total), state.lang))}`;
     search.placeholder = words.searchQueue;
     search.setAttribute('aria-label', words.searchQueue);
     clearSearch.hidden = !searching;

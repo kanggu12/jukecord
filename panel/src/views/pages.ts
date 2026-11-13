@@ -10,39 +10,24 @@ import { niceTop } from '../axis.ts';
 import { avatarUrl, face, fill, h, icon } from '../dom.ts';
 import { logoMark } from '../logo.ts';
 import { state, t, watch } from '../state.ts';
+import {
+  apportioned,
+  dayRangeText,
+  dayText,
+  hourSpanText,
+  hourText,
+  lengthParts,
+  lengthText,
+  momentText,
+  monthText,
+} from '../time.ts';
 import { problem } from '../ui/layers.ts';
+import { count } from './wrapped.ts';
 
-// Time listened in words, for a tooltip: "1 h 5 min", "45 min" (Korean "1시간 5분", "45분"), never like a clock's time.
-function listenedWords(ms: number): string {
-  const [big, rest] = listened(ms);
-  return state.lang === 'ko' ? `${big}${rest}` : `${big} ${rest}`;
-}
-
-/** Hours and minutes as people say them ("12 h 5 min", "45 min"): the number, and the rest beside it. */
-export function listened(ms: number): [string, string] {
-  const words = t();
-  const minutes = Math.round(ms / 60_000);
-  const hours = Math.floor(minutes / 60);
-  // "5 h 38 min" in English, "5시간 38분" in Korean: the number big, the rest beside it.
-  const rest =
-    state.lang === 'ko'
-      ? `${words.hoursShort} ${minutes % 60}${words.minutesShort}`
-      : `${words.hoursShort} ${minutes % 60} ${words.minutesShort}`;
-  return hours > 0 ? [String(hours), rest] : [String(minutes), words.minutesShort];
-}
-
-// A log record's time, in this browser's time zone: "2026-11-12 14:03:27".
+// A log record's moment in this browser's time zone, to the second, as the panel writes moments ("Nov 12, 14:03:27",
+// "11월 12일 14:03:27"; the year when it is not this one).
 function logTime(iso: string): string {
-  const at = new Date(iso);
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
-}
-
-// "11-07" from "2026-11-07", in the order people of each language read dates: Korean "11/7", with a slash (with a dot,
-// "11.12" on an axis reads as a number with a decimal point).
-function shortDay(day: string): string {
-  const [, month, date] = day.split('-');
-  return state.lang === 'ko' ? `${Number(month)}/${Number(date)}` : `${month}-${date}`;
+  return momentText(new Date(iso).getTime(), state.lang, { seconds: true });
 }
 
 // A column chart with a y axis, a tooltip on each column and a table view.
@@ -192,16 +177,32 @@ export function statsPage(): HTMLElement {
 
   const draw = (stats: Stats) => {
     const words = t();
-    const [hours, rest] = listened(stats.playedMs);
+    // Per day, or per week over a year (365 bars would be hairlines). Counted back from today, so the newest bar is a
+    // whole week and a short one, if any, is the oldest.
+    const span = days >= 365 ? 7 : 1;
+    const buckets: { first: string; last: string; plays: number; playedMs: number }[] = [];
+    for (let end = stats.days.length; end > 0; end -= span) {
+      const chunk = stats.days.slice(Math.max(0, end - span), end);
+      buckets.unshift({
+        first: chunk[0]?.day ?? '',
+        last: chunk.at(-1)?.day ?? '',
+        plays: chunk.reduce((sum, day) => sum + day.plays, 0),
+        playedMs: chunk.reduce((sum, day) => sum + day.playedMs, 0),
+      });
+    }
+    // The time listened and each bar's, rounded so that the bars' add up to the total as shown (each rounded on its
+    // own, two days of 2.4 minutes showed 2 and 2 under a total of 5).
+    const lengths = apportioned(buckets.map((bucket) => bucket.playedMs));
+    const [hours, rest] = lengthParts(lengths.total, state.lang);
     const tiles = h(
       'div',
       { class: 'tiles' },
       ...(
         [
-          [words.tilePlays, String(stats.plays), ''],
+          [words.tilePlays, count(stats.plays), ''],
           [words.tileListened, hours, rest],
-          [words.tileTracks, String(stats.tracks), ''],
-          [words.tilePeople, String(stats.people), ''],
+          [words.tileTracks, count(stats.tracks), ''],
+          [words.tilePeople, count(stats.people), ''],
         ] as const
       ).map(([label, value, unit]) =>
         h(
@@ -220,49 +221,34 @@ export function statsPage(): HTMLElement {
       );
       return;
     }
-    // Per day, or per week over a year (365 bars would be hairlines): labels at the start, the middle and the end.
-    const span = days >= 365 ? 7 : 1;
-    const buckets: { first: string; last: string; plays: number; playedMs: number }[] = [];
-    // Counted back from today, so the newest bar is a whole week and a short one, if any, is the oldest.
-    for (let end = stats.days.length; end > 0; end -= span) {
-      const chunk = stats.days.slice(Math.max(0, end - span), end);
-      buckets.unshift({
-        first: chunk[0]?.day ?? '',
-        last: chunk.at(-1)?.day ?? '',
-        plays: chunk.reduce((sum, day) => sum + day.plays, 0),
-        playedMs: chunk.reduce((sum, day) => sum + day.playedMs, 0),
-      });
-    }
-    // A week is written as a range that cannot be read as one date ("11-05 – 11-11", Korean "11.5~11.11"): short in
-    // the tooltip, with the year in the table and for screen readers (a year of weeks has two of each month and day).
-    const range = (bucket: (typeof buckets)[number], write: (day: string) => string) =>
+    // A bar's days as the panel writes days: a week as its span ("Nov 5 – 11"), a day alone ("Nov 12"); short in the
+    // tooltip, with the year in the table and for screen readers (a year of weeks has two of each month and day).
+    const when = (bucket: (typeof buckets)[number], year: boolean) =>
       span > 1 && bucket.first !== bucket.last
-        ? `${write(bucket.first)}${state.lang === 'ko' ? '~' : ' – '}${write(bucket.last)}`
-        : write(bucket.first);
-    const dayValues = buckets.map((bucket) => ({
-      label: range(bucket, (day) => day),
-      // When, and how long was listened then, in words ("11-12 · 11 min").
-      tip: `${range(bucket, shortDay)} · ${listenedWords(bucket.playedMs)}`,
+        ? dayRangeText(bucket.first, bucket.last, state.lang, year)
+        : dayText(bucket.first, state.lang, year);
+    const dayValues = buckets.map((bucket, index) => ({
+      label: when(bucket, true),
+      // When, and how long was listened then, in words ("Nov 12 · 11 min"); the bars' times add up to the total.
+      tip: `${when(bucket, false)} · ${lengthText(lengths.parts[index] ?? lengths.total, state.lang)}`,
       value: bucket.plays,
     }));
-    // Under the first, the middle and the last bar. A year of weeks crosses a new year, so its labels carry the year
-    // and the month ("2025-11"), which also read in order.
+    // Under the first, the middle and the last bar. A year of weeks crosses a new year, so its labels name the month
+    // and its year ("Nov 2025"), which also read in order.
     const middle = Math.floor(buckets.length / 2);
     const tickOf = (index: number) => {
       const day = buckets[index]?.first ?? '';
-      const [year, month] = day.split('-');
-      // Korean "2026.05": the month in two digits, so it does not read as a number with a decimal point.
-      const label = span > 1 ? (state.lang === 'ko' ? `${year}.${month}` : `${year}-${month}`) : shortDay(day);
-      return { at: index, label };
+      return { at: index, label: span > 1 ? monthText(day, state.lang) : dayText(day, state.lang, false) };
     };
     const perDay = columns(
       dayValues,
       [tickOf(0), tickOf(middle), tickOf(buckets.length - 1)],
       [span > 1 ? words.weekColumn : words.dayColumn, words.playsColumn],
     );
+    // Each hour by its start in the table ("09:00"), as the span it is in the tooltip ("09:00 – 10:00").
     const hourValues = stats.hours.map((value, hour) => ({
-      label: `${hour}:00`,
-      tip: `${hour}:00-${hour + 1}:00`,
+      label: hourText(hour),
+      tip: hourSpanText(hour, state.lang),
       value,
     }));
     const perHour = columns(
@@ -270,7 +256,8 @@ export function statsPage(): HTMLElement {
       [0, 6, 12, 18, 23].map((hour) => ({ at: hour, label: String(hour) })),
       [words.hourColumn, words.playsColumn],
     );
-    // Ranked lists with a meter each, longest first; the count beside the name, in text colours.
+    // Ranked lists with a meter each, longest first; the count beside the name with its unit (the people's are plays
+    // of what they added, which add up to the plays), in text colours.
     const topPlays = Math.max(1, ...stats.topTracks.map((entry) => entry.plays));
     const tracks = h(
       'ol',
@@ -290,7 +277,7 @@ export function statsPage(): HTMLElement {
             },
             entry.track.title,
           ),
-          h('span', { class: 'n' }, entry.plays),
+          h('span', { class: 'n' }, words.playsCount(entry.plays)),
           h(
             'span',
             { class: 'meter', 'aria-hidden': 'true' },
@@ -316,7 +303,7 @@ export function statsPage(): HTMLElement {
             face(entry.name ?? words.host, avatarUrl(entry.userId, entry.avatar), 'sm'),
             entry.name ?? words.theHost,
           ),
-          h('span', { class: 'n' }, entry.plays),
+          h('span', { class: 'n' }, words.playsCount(entry.plays)),
           h(
             'span',
             { class: 'meter', 'aria-hidden': 'true' },
@@ -346,7 +333,7 @@ export function statsPage(): HTMLElement {
         h(
           'section',
           { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', null, words.addedMost)),
+          h('div', { class: 'card-head' }, h('h2', null, words.picksPlayed)),
           h('div', { class: 'chart' }, people),
         ),
       ),
