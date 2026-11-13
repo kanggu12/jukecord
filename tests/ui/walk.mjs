@@ -1462,10 +1462,14 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
   await page.waitForSelector('.dialog .qr');
+  // The link just made, in the list of links that work (the list is fetched again after it is made).
+  await page.waitForSelector('.dialog .invite-links > li.channel');
   await page.evaluate(() => {
     const url = document.querySelector('.dialog .invite-url');
     if (url) url.textContent = 'https://music.example.com/listen#7Kq2vX9pL4mN8wR3tY6bZ1cF5hJ0sD';
+    // The QR code in the middle, and the made link's row in view under it (a heading over nothing read as a gap).
     document.querySelector('.dialog .qr')?.scrollIntoView({ block: 'center' });
+    document.querySelector('.dialog .invite-links > li')?.scrollIntoView({ block: 'nearest' });
   });
   await shot(6);
   await context.close();
