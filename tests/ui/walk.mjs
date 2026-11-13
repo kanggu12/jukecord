@@ -640,6 +640,16 @@ await sweep('stats', SIZES, async (page) => {
   if (await link.isVisible()) await link.click();
   else await page.goto(`${BASE}/stats`);
   await page.waitForSelector('.tiles');
+  // Every problem of the page said at once.
+  const problems = [];
+  await oneStyle(page).catch((error) => problems.push(error.message));
+  // Each rank's count says what it counts (the people's are plays of what they added, which read as tracks added).
+  const bare = await page.$$eval(
+    '.ranks .n',
+    (counts) => counts.filter((count) => /^\s*[\d,]+\s*$/.test(count.textContent ?? '')).length,
+  );
+  if (bare > 0) problems.push(`${bare} counts in the ranks with no unit`);
+  if (problems.length > 0) throw new Error(problems.join('; '));
 });
 await sweep('stats-tip', FEW, async (page) => {
   await page.goto(`${BASE}/stats`);
@@ -654,6 +664,34 @@ await sweep('stats-tip', FEW, async (page) => {
 await sweep('logs', FEW, async (page) => {
   await page.goto(`${BASE}/logs`);
   await page.waitForSelector('.logs');
+  // Every problem of the page said at once: the records' moments in the panel's style (a message says what it says),
+  // and the look of the list and its head.
+  const problems = [];
+  await oneStyle(page, '.log > :last-child').catch((error) => problems.push(error.message));
+  const look = await page.evaluate(() => ({
+    // Colour on a record's level only for a warning or an error (an "Info" chip on every row said nothing).
+    tinted: [...document.querySelectorAll('.log .badge')].filter(
+      (badge) => !badge.classList.contains('plain') && !/tone-(pause|bad)/.test(badge.className),
+    ).length,
+    // Refresh says its word at every width (on a phone it was its icon alone).
+    refresh: getComputedStyle(document.querySelector('.refresh-key .label') ?? document.body).display !== 'none',
+    // The component right after the level: no wide hole between them (a fixed 64 px column left 40 px on a phone).
+    hole: Math.max(
+      0,
+      ...[...document.querySelectorAll('.log')].slice(0, 20).map((log) => {
+        const badge = log.querySelector('.badge')?.getBoundingClientRect();
+        const component = log.children[2]?.getBoundingClientRect();
+        const widest = Math.max(
+          ...[...document.querySelectorAll('.log .badge')].map((b) => b.getBoundingClientRect().width),
+        );
+        return badge && component ? component.left - badge.left - widest : 0;
+      }),
+    ),
+  }));
+  if (look.tinted > 0) problems.push(`${look.tinted} log levels coloured though they are neither warnings nor errors`);
+  if (!look.refresh) problems.push('Refresh shows its icon alone');
+  if (look.hole > 12.5) problems.push(`${Math.round(look.hole)} px between the widest level and the component`);
+  if (problems.length > 0) throw new Error(problems.join('; '));
 });
 await sweep('loading', FEW, async (page) => {
   const inject = await intercept(page);
@@ -712,8 +750,95 @@ async function wrappedAt(page, period) {
   await page.goto(`${BASE}/stats/wrapped?period=${period}`);
   await page.waitForSelector('.wrapped .page-body > *');
 }
-await sweep('wrapped', SIZES, (page) => wrappedAt(page, 'last-12-months'), { discord: true });
-await sweep('wrapped-few', FEW, (page) => wrappedAt(page, firstMonth), { discord: true });
+// The page says one style of day, time and length (the 0.3.2 review found ISO days, a 12-hour clock beside a 24-hour
+// one, and "1:09:00 in all" beside "6 h 42 min"): no "2025-11-13", no "9:53 PM" or "오후 9:53", no length as a clock
+// but a track's own (in a row's line, a seek bar, a result). `skip` names what may hold other text (a log's message).
+async function oneStyle(page, skip = '') {
+  const wrong = await page.evaluate((skip) => {
+    const main = document.querySelector('main:not([hidden])') ?? document.body;
+    const hidden = skip ? [...main.querySelectorAll(skip)] : [];
+    const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    const found = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (hidden.some((element) => element.contains(node))) continue;
+      const text = node.textContent ?? '';
+      if (/\b\d{4}-\d{2}-\d{2}\b/.test(text) || /\d(\s|\u202f)?(AM|PM)\b|(오전|오후)\s?\d/.test(text)) found.push(text);
+      // A length of time written as a clock beside words ("1:09:00 in all"); a track's m:ss stands alone in its span.
+      if (/\d:\d{2}:\d{2}\s+in all|총\s+\d+:\d{2}/.test(text)) found.push(text);
+    }
+    return found;
+  }, skip);
+  if (wrong.length > 0)
+    throw new Error(`a day, time or length off the panel's one style: ${wrong.slice(0, 3).join(' | ')}`);
+}
+// Wrapped says only what is true (the 0.3.2 review: "Busiest day: Sundays · 1 play" from a tie of one play each,
+// "Time listened 5 min" over two days whose longest was "2 min"): a busiest day or hour only alone at the top and from
+// a week of days with music, no song of the time among tracks played once each, the longest day's time at most the
+// total and, times the days with music, at least the total; and on a wide window the first track's card is not a box
+// as tall as the song's holding one small row.
+async function wrappedIsTrue(page, period) {
+  const facts = await page.evaluate(async (period) => {
+    const tz = -new Date().getTimezoneOffset();
+    const wrapped = await (await fetch(`/api/v1/guilds/local/wrapped?period=${period}&tz=${tz}`)).json();
+    // Minutes in a length as the page writes it ("59 h 22 min", "59시간 22분", "45 s").
+    const minutes = (text) => {
+      const hours = /([\d,]+)\s*(h|시간)/.exec(text);
+      const mins = /(\d+)\s*(min|분)/.exec(text);
+      const secs = /(\d+)\s*(s|초)\b/.exec(text);
+      return (
+        (hours ? Number(hours[1].replace(/,/g, '')) * 60 : 0) +
+        (mins ? Number(mins[1]) : 0) +
+        (secs ? Number(secs[1]) / 60 : 0)
+      );
+    };
+    const tiles = [...document.querySelectorAll('.wrapped .tiles:not(.moments) .tile')];
+    const moments = [...document.querySelectorAll('.wrapped .moment')];
+    const first = document.querySelector('.wrapped-first');
+    const song = document.querySelector('.wrapped-song');
+    const row = first?.querySelector('.row');
+    const head = first?.querySelector('.card-head');
+    return {
+      wrapped,
+      total: minutes(tiles[1]?.querySelector('.v')?.textContent ?? ''),
+      // The longest day's tile is the one whose sub says a length and plays; the busiest ones have charts.
+      longest: minutes(
+        moments.find((tile) => !tile.querySelector('.spark') && tile.querySelector('.sub'))?.querySelector('.sub')
+          ?.textContent ?? '',
+      ),
+      // The busiest day's chart has a column for each day of the week, the busiest hour's for each hour.
+      day: moments.some((tile) => tile.querySelectorAll('.spark i').length === 7),
+      hour: moments.some((tile) => tile.querySelectorAll('.spark i').length === 24),
+      song: Boolean(song),
+      side: Boolean(song && first && song.getBoundingClientRect().top === first.getBoundingClientRect().top),
+      fill: row && first && head ? row.offsetHeight / (first.offsetHeight - head.offsetHeight) : 1,
+    };
+  }, period);
+  const { wrapped } = facts;
+  const alone = (values) => values.filter((value) => value === Math.max(...values)).length === 1;
+  const problems = [];
+  if ((facts.day || facts.hour) && wrapped.days < 7)
+    problems.push(`a busiest moment from ${wrapped.days} days of music`);
+  if (facts.day && !alone(wrapped.weekdays)) problems.push('a busiest day from a tie');
+  if (facts.hour && !alone(wrapped.hours)) problems.push('a busiest hour from a tie');
+  if (facts.song && (wrapped.song?.plays ?? 0) < 2) problems.push('a song of the time played once');
+  if (wrapped.longestDay && facts.longest > facts.total)
+    problems.push(`longest day ${facts.longest} min over ${facts.total}`);
+  if (wrapped.longestDay && facts.longest * wrapped.days < facts.total)
+    problems.push(`${wrapped.days} days of at most ${facts.longest} min under ${facts.total}`);
+  if (facts.side && facts.fill < 0.5)
+    problems.push(`the first track's row fills ${Math.round(facts.fill * 100)} % of its card`);
+  if (problems.length > 0) throw new Error(`Wrapped says what is not true: ${problems.join('; ')}`);
+}
+// Wrapped at a time, and both checks on it, their problems said together.
+async function wrappedChecked(page, period) {
+  await wrappedAt(page, period);
+  const problems = [];
+  await wrappedIsTrue(page, period).catch((error) => problems.push(error.message));
+  await oneStyle(page).catch((error) => problems.push(error.message));
+  if (problems.length > 0) throw new Error(problems.join('; '));
+}
+await sweep('wrapped', SIZES, (page) => wrappedChecked(page, 'last-12-months'), { discord: true });
+await sweep('wrapped-few', FEW, (page) => wrappedChecked(page, firstMonth), { discord: true });
 await sweep('wrapped-empty', FEW, (page) => wrappedAt(page, '2020'));
 await sweep('wrapped-periods', FEW, async (page) => {
   await wrappedAt(page, 'last-12-months');

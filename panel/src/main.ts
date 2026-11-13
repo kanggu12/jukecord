@@ -24,6 +24,7 @@ import {
   update,
   watch,
 } from './state.ts';
+import { momentText } from './time.ts';
 import { closeSheets, goTo, layerBack, layerOpen, problem, toast } from './ui/layers.ts';
 import { guestCard } from './views/guest.ts';
 import { lightField } from './views/light.ts';
@@ -328,9 +329,8 @@ function frame(): void {
         : state.live !== 'open' && state.liveWaiting !== null
           ? (liveWhy() ?? '')
           : guestLogin && state.me?.guest
-            ? words.guestUntil(
-                new Date(state.me.guest.expiresAt).toLocaleString(state.lang === 'ko' ? 'ko-KR' : 'en-US'),
-              )
+            ? // When the link stops working, as the panel writes moments ("Nov 20, 21:41").
+              words.guestUntil(momentText(state.me.guest.expiresAt, state.lang))
             : guild && !mayControl()
               ? lookOnlyWhy()
               : '';

@@ -4,6 +4,9 @@
  * a missing translation fails the type check instead of showing a key on screen.
  */
 
+// The months' short names, for a day ("Nov 22"); a time's own name says its month whole ("November 2025").
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 const EN = {
   // The frame.
   player: 'Player',
@@ -177,16 +180,28 @@ const EN = {
   table: 'Table',
   tableHint: 'Show as a table',
   mostPlayed: 'Most played',
-  addedMost: 'Added most',
+  // Who added the tracks played most: the count beside each person is plays of what they added, not tracks added.
+  picksPlayed: 'Whose picks played most',
   theHost: 'Host',
   playsUnit: 'plays',
-  playsCount: (n: number) => (n === 1 ? '1 play' : `${n} plays`),
+  // A count of plays, its thousands grouped as every count the panel shows ("1,807 plays").
+  playsCount: (n: number) => (n === 1 ? '1 play' : `${n.toLocaleString('en-US')} plays`),
   dayColumn: 'Day',
   weekColumn: 'Week',
   hourColumn: 'Hour',
   playsColumn: 'Plays',
-  hoursShort: 'h',
-  minutesShort: 'min',
+  // A length of time in words, split where a figure sets its number big: "59" and "h 22 min", "45" and "min"; the
+  // seconds are given only under a minute ("45" and "s").
+  lengthOf: (hours: number, minutes: number, seconds: number | null): readonly [string, string] =>
+    seconds !== null
+      ? [String(seconds), 's']
+      : hours > 0
+        ? [hours.toLocaleString('en-US'), minutes > 0 ? `h ${minutes} min` : 'h']
+        : [String(minutes), 'min'],
+  // The two on one line: "59 h 22 min".
+  lengthWords: (number: string, rest: string) => `${number} ${rest}`,
+  // A part of a total that rounds to no minutes, though music played in it.
+  underMinute: 'under a minute',
   // Log.
   levelAll: 'All',
   levelInfo: 'Info',
@@ -242,14 +257,17 @@ const EN = {
   // The page's title and the song's card, from the time's name (the title starts with a capital).
   wrappedTitle: (time: string) => `${time.charAt(0).toUpperCase()}${time.slice(1)} in music`,
   wrappedSong: (time: string) => `Song of ${time}`,
+  // Its days and plays; its plays alone when it played on one day ("played on 1 day" says nothing more).
   songFacts: (days: number, plays: number) =>
-    `played on ${days === 1 ? '1 day' : `${days} days`} · ${plays === 1 ? '1 play' : `${plays} plays`}`,
+    days === 1
+      ? plays === 1
+        ? '1 play'
+        : `${plays.toLocaleString('en-US')} plays`
+      : `played on ${days.toLocaleString('en-US')} days · ${plays.toLocaleString('en-US')} plays`,
   wrappedPeriods: 'Period',
   // The year as the panel names one in a sentence ("2026", Korean "2026년").
   wrappedThisYear: (year: string) => `This year (${year})`,
-  wrappedRange: (from: string, to: string) => `${from} to ${to}`,
   tileDays: 'Days with music',
-  daysUnit: 'days',
   busiestDay: 'Busiest day',
   busiestHour: 'Busiest hour',
   longestDay: 'Longest day',
@@ -266,9 +284,34 @@ const EN = {
     'Saturdays',
   ] as readonly string[],
   weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as readonly string[],
-  // A day of the time: "June 24", with its year when the time spans two ("December 31, 2025").
+  // A day: "Jun 24", with its year when asked ("Dec 31, 2025"). Every day the panel names is written so (time.ts).
   dayOf: (month: number, day: number, year: string | null) =>
-    `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month - 1]} ${day}${year ? `, ${year}` : ''}`,
+    `${MONTHS_SHORT[month - 1] ?? ''} ${day}${year ? `, ${year}` : ''}`,
+  // A day and a time of day: "Nov 22, 19:30".
+  dayAndTime: (day: string, time: string) => `${day}, ${time}`,
+  // The two ends of a span: "19:00 – 20:00".
+  rangeOf: (from: string, to: string) => `${from} – ${to}`,
+  // A span of days, [year, month, day] each: the year once at the end (when asked), the month once when it does not
+  // change: "Nov 1 – 30, 2025", "Jan 1 – Nov 13, 2026", "Nov 14, 2025 – Nov 13, 2026".
+  dayRange: (from: readonly number[], to: readonly number[], year: boolean) => {
+    const [fromYear = 0, fromMonth = 1, fromDay = 1] = from;
+    const [toYear = 0, toMonth = 1, toDay = 1] = to;
+    const month = (number: number) => MONTHS_SHORT[number - 1] ?? '';
+    // Across a new year: each end with its own year.
+    if (fromYear !== toYear)
+      return year
+        ? `${month(fromMonth)} ${fromDay}, ${fromYear} – ${month(toMonth)} ${toDay}, ${toYear}`
+        : `${month(fromMonth)} ${fromDay} – ${month(toMonth)} ${toDay}`;
+    const end = year ? `, ${toYear}` : '';
+    if (fromMonth !== toMonth) return `${month(fromMonth)} ${fromDay} – ${month(toMonth)} ${toDay}${end}`;
+    return fromDay === toDay
+      ? `${month(fromMonth)} ${fromDay}${end}`
+      : `${month(fromMonth)} ${fromDay} – ${toDay}${end}`;
+  },
+  // A month on a chart's axis: "Nov 2025".
+  monthOf: (year: number, month: number) => `${MONTHS_SHORT[month - 1] ?? ''} ${year}`,
+  // The head of the picture's card of moments (the busiest day and hour, the longest day).
+  momentsLabel: 'When it played most',
   byWeekday: 'Plays by day of the week',
   byHour: 'Plays by hour of the day',
   keptFrom: (day: string, kept: string) =>
@@ -300,10 +343,10 @@ const EN = {
   twelveMonths: '12 months',
   inMusic: (year: string | null) => (year ? `${year} in music` : 'in music'),
   // The song's facts apart, for a picture that sets each on its own line when they do not fit one.
-  songFactsApart: (days: number, plays: number) => [
-    `played on ${days === 1 ? '1 day' : `${days} days`}`,
-    plays === 1 ? '1 play' : `${plays} plays`,
-  ],
+  songFactsApart: (days: number, plays: number) =>
+    days === 1
+      ? [plays === 1 ? '1 play' : `${plays.toLocaleString('en-US')} plays`]
+      : [`played on ${days.toLocaleString('en-US')} days`, `${plays.toLocaleString('en-US')} plays`],
   // A track whose fetch waits for its place among every server's downloads (not a person's turn: that is Take turns).
   waitingTurn: 'Waiting to download',
   // The alerts channel, in the menu (app/alerts.ts).
@@ -652,16 +695,22 @@ const KO: Strings = {
   table: '표',
   tableHint: '표로 보기',
   mostPlayed: '많이 들은 곡',
-  addedMost: '많이 추가한 사람',
+  picksPlayed: '선곡이 많이 재생된 사람',
   theHost: '호스트',
   playsUnit: '회',
-  playsCount: (n: number) => `${n}회`,
+  playsCount: (n: number) => `${n.toLocaleString('ko-KR')}회`,
   dayColumn: '날짜',
   weekColumn: '주',
   hourColumn: '시간',
   playsColumn: '재생 횟수',
-  hoursShort: '시간',
-  minutesShort: '분',
+  lengthOf: (hours: number, minutes: number, seconds: number | null): readonly [string, string] =>
+    seconds !== null
+      ? [String(seconds), '초']
+      : hours > 0
+        ? [hours.toLocaleString('ko-KR'), minutes > 0 ? `시간 ${minutes}분` : '시간']
+        : [String(minutes), '분'],
+  lengthWords: (number: string, rest: string) => `${number}${rest}`,
+  underMinute: '1분 미만',
   levelAll: '전체',
   levelInfo: '정보',
   levelWarn: '경고',
@@ -709,12 +758,14 @@ const KO: Strings = {
   wrappedTwelve: '최근 12개월',
   wrappedTitle: (time: string) => `${time} 음악 결산`,
   wrappedSong: (time: string) => `${time}의 노래`,
-  songFacts: (days: number, plays: number) => `${days}일에 걸쳐 ${plays}번 재생`,
+  songFacts: (days: number, plays: number) =>
+    days === 1
+      ? `${plays.toLocaleString('ko-KR')}번 재생`
+      : `${days.toLocaleString('ko-KR')}일에 걸쳐 ${plays.toLocaleString('ko-KR')}번 재생`,
   wrappedPeriods: '기간',
   wrappedThisYear: (year: string) => `올해(${year})`,
-  wrappedRange: (from: string, to: string) => `${from} ~ ${to}`,
-  tileDays: '음악을 들은 날',
-  daysUnit: '일',
+  // A count of days, said as one ("곡 수" beside it): "2일" next to "11월 21일" read as the second of a month.
+  tileDays: '음악을 들은 날수',
   busiestDay: '가장 많이 들은 요일',
   busiestHour: '가장 많이 들은 시간',
   longestDay: '가장 오래 들은 날',
@@ -722,6 +773,23 @@ const KO: Strings = {
   weekdaysMany: ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'],
   weekdays: ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'],
   dayOf: (month: number, day: number, year: string | null) => `${year ? `${year}년 ` : ''}${month}월 ${day}일`,
+  dayAndTime: (day: string, time: string) => `${day} ${time}`,
+  rangeOf: (from: string, to: string) => `${from} ~ ${to}`,
+  // "2025년 11월 1일 ~ 30일", "2026년 1월 1일 ~ 11월 13일", "2025년 11월 14일 ~ 2026년 11월 13일".
+  dayRange: (from: readonly number[], to: readonly number[], year: boolean) => {
+    const [fromYear = 0, fromMonth = 1, fromDay = 1] = from;
+    const [toYear = 0, toMonth = 1, toDay = 1] = to;
+    // The year leads the day, when it is said.
+    const lead = (number: number) => (year ? `${number}년 ` : '');
+    if (fromYear !== toYear)
+      return `${lead(fromYear)}${fromMonth}월 ${fromDay}일 ~ ${lead(toYear)}${toMonth}월 ${toDay}일`;
+    if (fromMonth !== toMonth) return `${lead(fromYear)}${fromMonth}월 ${fromDay}일 ~ ${toMonth}월 ${toDay}일`;
+    return fromDay === toDay
+      ? `${lead(fromYear)}${fromMonth}월 ${fromDay}일`
+      : `${lead(fromYear)}${fromMonth}월 ${fromDay}일 ~ ${toDay}일`;
+  },
+  monthOf: (year: number, month: number) => `${year}년 ${month}월`,
+  momentsLabel: '많이 들은 때',
   byWeekday: '요일별 재생',
   byHour: '시간대별 재생',
   keptFrom: (day: string, kept: string) => `기록은 ${day}부터 남아 있음: 서버마다 최근 ${kept}회까지 남김`,
@@ -736,7 +804,10 @@ const KO: Strings = {
   monthName: (month: number) => `${month}월`,
   twelveMonths: '최근 12개월',
   inMusic: (year: string | null) => (year ? `${year}년 음악 결산` : '음악 결산'),
-  songFactsApart: (days: number, plays: number) => [`${days}일에 걸쳐`, `${plays}번 재생`],
+  songFactsApart: (days: number, plays: number) =>
+    days === 1
+      ? [`${plays.toLocaleString('ko-KR')}번 재생`]
+      : [`${days.toLocaleString('ko-KR')}일에 걸쳐`, `${plays.toLocaleString('ko-KR')}번 재생`],
   waitingTurn: '다운로드 대기 중',
   alerts: '알림 채널',
   alertsHint: 'jukecord가 이 서버에 문제를 알릴 채널: YouTube 차단, 다시 시작, 디스크 부족 등',
