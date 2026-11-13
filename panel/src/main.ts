@@ -629,6 +629,8 @@ function shortcuts(): void {
     const keyboardKey = target.closest('button, a, [role="slider"]')?.matches(':focus-visible') ?? false;
     if (event.key === ' ' && !keyboardKey) {
       event.preventDefault();
+      // The track getting ready: nothing to pause yet, as the main key (at work then) says.
+      if (player.status === 'loading') return;
       void act(null, () => (player.status === 'paused' ? api.resume(guild) : api.pause(guild)));
     } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && !target.closest('[role="slider"]')) {
       event.preventDefault();

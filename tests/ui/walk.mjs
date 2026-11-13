@@ -1026,9 +1026,23 @@ await sweep('notice', FEW, async (page) => {
   });
   await page.waitForSelector('.now .player-note:not([hidden])');
 });
-// A track whose fetch waits for its turn among every server's fetches.
+// A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so the main key and the
+// listening bar's are at work, as a key whose press is under way is: the loader turning in place of Pause, and presses
+// let go (Pause there only marked the track to start paused, which nothing showed: a big Pause over "Waiting to
+// download" at 0:00).
 await sweep('waiting', FEW, async (page) => {
   await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
+  const keys = await page.evaluate(() =>
+    ['.now [data-act="pause"]', '.listen .mini > .key:first-child']
+      .map((selector) => document.querySelector(selector))
+      .filter((key) => key?.getClientRects().length)
+      .map((key) => ({
+        busy: key.getAttribute('aria-disabled') === 'true',
+        turning: [...key.querySelectorAll('svg.spin')].some((icon) => icon.getClientRects().length > 0),
+      })),
+  );
+  if (keys.length === 0 || keys.some((key) => !key.busy || !key.turning))
+    throw new Error(`the keys while the track waits: ${JSON.stringify(keys)}`);
 });
 // The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
 await sweep(

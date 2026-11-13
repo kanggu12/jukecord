@@ -257,13 +257,24 @@ export function listenBar(live: Live): HTMLElement {
   };
 
   // A key's icon and words, changed only when they differ: replacing the inside of a key while it is being pressed
-  // can lose the click.
-  const label = (key: HTMLButtonElement, name: Parameters<typeof icon>[0] | null, words: string, text: boolean) => {
-    const sign = `${name}|${words}|${text}`;
+  // can lose the click. `spin` turns the icon (the loader while the track gets ready).
+  const label = (
+    key: HTMLButtonElement,
+    name: Parameters<typeof icon>[0] | null,
+    words: string,
+    text: boolean,
+    { spin = false } = {},
+  ) => {
+    const sign = `${name}|${words}|${text}|${spin}`;
     if (key.dataset.sign === sign) return;
     key.dataset.sign = sign;
     // The Listen key says what it does in words, its dancing bars before them while it is pressed (style.css).
-    fill(key, key === toggle ? eq : null, name ? icon(name) : null, text ? h('span', { class: 'label' }, words) : null);
+    fill(
+      key,
+      key === toggle ? eq : null,
+      name ? icon(name, spin ? 'spin' : '') : null,
+      text ? h('span', { class: 'label' }, words) : null,
+    );
     key.title = words;
     key.setAttribute('aria-label', words);
   };
@@ -310,7 +321,14 @@ export function listenBar(live: Live): HTMLElement {
     const moving = player?.status === 'playing' || player?.status === 'loading';
     const queued = (state.queue?.items.length ?? 0) > 0;
     const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
-    label(pauseKey, moving ? 'pause' : 'play', pauseWords, false);
+    // While the track gets ready the key is at work, as the playing card's is: the loader turning in its place, and
+    // presses let go (pause then only marked the track to start paused, which nothing showed).
+    const getting = player?.status === 'loading';
+    label(pauseKey, getting ? 'loader-circle' : moving ? 'pause' : 'play', pauseWords, false, { spin: getting });
+    if (!pauseKey.classList.contains('busy')) {
+      if (getting) pauseKey.setAttribute('aria-disabled', 'true');
+      else pauseKey.removeAttribute('aria-disabled');
+    }
     // Skip, or a vote to skip without the DJ role where Skip is one, named with the count of a vote under way and,
     // once the person's vote is in, that they voted (as the playing card's Skip is).
     skipKey.title = skipTitle();
@@ -337,8 +355,13 @@ export function listenBar(live: Live): HTMLElement {
 
   pauseKey.onclick = () => {
     const status = state.player?.status ?? 'idle';
-    // Paused or idle: play on (or start the queue). Playing or loading: pause.
-    void act(pauseKey, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
+    // The track getting ready: nothing to pause yet, the key at work (see draw).
+    if (status === 'loading') return;
+    // Paused or idle: play on (or start the queue). Playing: pause. Drawn again once answered: the press's busy look
+    // gone, the key shows whether the track is getting ready by then.
+    void act(pauseKey, () =>
+      status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild()),
+    ).finally(draw);
   };
   skipKey.onclick = () => void skipOrVote(skipKey);
 

@@ -478,20 +478,31 @@ export function nowCard(live: Live): HTMLElement {
     // Skip, Stop and Repeat after it stay put when the music pauses (Resume was 11 px wider than Pause, 14 in Korean,
     // and moved them).
     const face = moving ? 'pause' : status === 'paused' ? 'resume' : 'play';
+    // While the track gets ready (waiting for its turn to download, or downloading) the key is at work, as a key whose
+    // press is under way is: the loader turning in place of its icon, and presses let go (see pause.onclick). Pause
+    // then only marked the track to start paused, which nothing showed, and a second press was told "it is already
+    // paused" under a key that still said Pause.
+    const getting = status === 'loading';
     const faceWords = { pause: words.pause, resume: words.resume, play: words.play };
     refill(
       pause,
-      `${face}|${Object.values(faceWords).join('|')}`,
+      `${face}|${getting}|${Object.values(faceWords).join('|')}`,
       ...(['pause', 'resume', 'play'] as const).map((name) =>
         h(
           'span',
           // The faces not shown are hidden from screen readers too: the key's name is the one it shows.
           { class: 'face', 'aria-hidden': name === face ? null : 'true' },
-          icon(name === 'pause' ? 'pause' : 'play'),
+          name === face && getting ? icon('loader-circle', 'spin') : icon(name === 'pause' ? 'pause' : 'play'),
           faceWords[name],
         ),
       ),
     );
+    // At work while the track gets ready, said to screen readers as a busy key's is (aria-disabled keeps the keyboard's
+    // focus on it, where disabled would drop it); a press under way (act()) sets and clears it itself.
+    if (!pause.classList.contains('busy')) {
+      if (getting) pause.setAttribute('aria-disabled', 'true');
+      else pause.removeAttribute('aria-disabled');
+    }
     // A key turned off with the focus on it hands it to the main key, or with that off too, to the add field.
     const addField = document.getElementById('add-input');
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.
@@ -612,8 +623,13 @@ export function nowCard(live: Live): HTMLElement {
 
   pause.onclick = () => {
     const status = state.player?.status ?? 'idle';
-    // Paused or idle: play on (or start the queue). Playing or loading: pause.
-    void act(pause, () => (status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild())));
+    // The track getting ready: nothing to pause yet, the key at work (see draw).
+    if (status === 'loading') return;
+    // Paused or idle: play on (or start the queue). Playing: pause. Drawn again once answered: the press's busy look
+    // gone, the key shows whether the track is getting ready by then (starting the queue gets one ready).
+    void act(pause, () =>
+      status === 'paused' || status === 'idle' ? api.resume(guild()) : api.pause(guild()),
+    ).finally(draw);
   };
   skip.onclick = () => {
     // A press while the last skip is under way asks nothing more (act() would refuse it): nor does the card move, or the
