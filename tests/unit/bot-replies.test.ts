@@ -68,6 +68,33 @@ describe('the bot answers commands', () => {
     await bot.client.destroy();
   });
 
+  it('says "Replaced" exactly when the store replaced a list, by its match of names', async () => {
+    const { bot, store } = await playing();
+    const save = async (name: string) => {
+      const asked = interaction('command', 'playlist', { sub: 'save', name });
+      await handlers(bot).onCommand(asked.interaction);
+      return asked.shown[0]?.text;
+    };
+    assert.equal(await save('Mix'), 'Saved "Mix" (3)');
+    // The store keeps a name's case: "mix" is a list of its own, saved beside "Mix", and said so.
+    assert.equal(await save('mix'), 'Saved "mix" (3)');
+    // Spaces around a name are not part of it, there as here.
+    assert.equal(await save('  Mix  '), 'Replaced "Mix" (3)');
+    assert.deepEqual(
+      store.playlists
+        .list('100000000000000001')
+        .map((playlist) => playlist.name)
+        .sort(),
+      ['Mix', 'mix'],
+    );
+    // A name the database keeps otherwise than typed (half of a UTF-16 pair, kept as U+FFFD): the second save
+    // replaced the first, which a comparison of the names as typed said was "Saved".
+    assert.equal(await save('Mix \uD83C'), 'Saved "Mix �" (3)');
+    assert.equal(await save('Mix \uD83C'), 'Replaced "Mix �" (3)');
+    assert.equal(store.playlists.list('100000000000000001').length, 3);
+    await bot.client.destroy();
+  });
+
   it('says a page past the end of the queue is not there, and shows the last one', async () => {
     const { bot } = await playing();
     const past = interaction('command', 'queue', { page: 9 });
@@ -76,6 +103,27 @@ describe('the bot answers commands', () => {
     const korean = interaction('command', 'queue', { page: 9 }, { locale: 'ko' });
     await handlers(bot).onCommand(korean.interaction);
     assert.match(korean.shown[0]?.text ?? '', /\| 9페이지는 없음: 대기열은 1페이지까지 있음\n/);
+    await bot.client.destroy();
+  });
+
+  it('says a page past the end of your likes is not there, as for the queue, and shows the last one', async () => {
+    const { bot } = await playing();
+    // The track playing, liked with /like.
+    await handlers(bot).onCommand(interaction('command', 'like').interaction);
+    const past = interaction('command', 'likes', { sub: 'show', page: 9 });
+    await handlers(bot).onCommand(past.interaction);
+    assert.match(
+      past.shown[0]?.text ?? '',
+      /^Liked \(1\) \| There is no page 9: your likes have 1 page\n1\. \[Track 1\]/,
+    );
+    assert.match(past.shown[0]?.text ?? '', /\| page 1\/1$/);
+    const korean = interaction('command', 'likes', { sub: 'show', page: 9 }, { locale: 'ko' });
+    await handlers(bot).onCommand(korean.interaction);
+    assert.match(korean.shown[0]?.text ?? '', /\| 9페이지는 없음: 좋아요 목록은 1페이지까지 있음\n1\. /);
+    // The page there is, as it was: no word before it.
+    const first = interaction('command', 'likes', { sub: 'show', page: 1 });
+    await handlers(bot).onCommand(first.interaction);
+    assert.match(first.shown[0]?.text ?? '', /^Liked \(1\) \| 1\. \[Track 1\]/);
     await bot.client.destroy();
   });
 

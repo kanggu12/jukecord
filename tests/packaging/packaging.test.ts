@@ -14,6 +14,7 @@ import { LIVE_ACTIONS, PANEL_ACTIONS } from '../../panel/src/api.ts';
 import { withTable } from '../../scripts/api-doc.ts';
 import { notesFor } from '../../scripts/release-notes.ts';
 import { ACTIONS } from '../../src/app/actions.ts';
+import { COMMANDS } from '../../src/cli/commands.ts';
 import { VERSION } from '../../src/version.ts';
 
 const read = (file: string) => fs.readFileSync(file, 'utf8');
@@ -307,6 +308,11 @@ describe('the front door with jukecord not running', () => {
       const real = front('np');
       assert.equal(real.status, 1);
       assert.equal(real.stderr, 'jukecord: jukecord is not running here (./jukecord up)\n');
+      // A backup the same: said once, and no path printed as if one had been made.
+      const backup = front('backup');
+      assert.equal(backup.status, 1);
+      assert.equal(backup.stderr, 'jukecord: jukecord is not running here (./jukecord up)\n');
+      assert.equal(backup.stdout, '');
     } finally {
       fs.rmSync(bin, { recursive: true, force: true });
     }
@@ -398,6 +404,113 @@ describe('the front door with jukecord running', () => {
     const words = [...own.matchAll(/'([a-z-]+)'/g)].map((match) => `--${match[1]}`);
     assert.ok(words.length > 5);
     assert.deepEqual([...door].sort(), [...words].sort());
+  });
+});
+
+describe('the front door makes a backup', () => {
+  // The jukecord command's answers to "backup" as the one in the image gives them, in words and under --json: done,
+  // refused (a backups folder it may not write), and not answering. Each is what it printed on stdout, on stderr, and
+  // its exit code; the words come from the command's own show, so a change to that line is caught here.
+  const file = '/data/backups/jukecord-2026-11-13T04-31-39-453Z.db';
+  const refusal =
+    'could not write the backup: unable to open database: /data/backups/jukecord-2026-11-13T04-31-38-897Z.db.partial';
+  const away = 'jukecord is not answering at http://127.0.0.1:8795 (connect ECONNREFUSED 127.0.0.1:8795)';
+  const answers = {
+    done: {
+      code: 0,
+      words: { out: COMMANDS.backup.show({ file, bytes: 172_032 }), err: '' },
+      json: { out: JSON.stringify({ file, bytes: 172_032 }, null, 2), err: '' },
+    },
+    refused: {
+      code: 1,
+      words: { out: '', err: `jukecord: ${refusal}` },
+      json: { out: '', err: JSON.stringify({ error: { code: 'invalid', message: refusal } }, null, 2) },
+    },
+    away: {
+      code: 3,
+      words: { out: '', err: away },
+      json: { out: '', err: JSON.stringify({ error: { code: 'unreachable', message: away } }, null, 2) },
+    },
+  };
+
+  // The front door, copied into a folder of its own (its backups folder is made there, not in this checkout), with a
+  // Docker whose jukecord runs: the command inside answers as given, and what Compose was asked to copy out is logged.
+  function backup(answer: (typeof answers)[keyof typeof answers]) {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-backup-'));
+    try {
+      fs.copyFileSync('jukecord', path.join(folder, 'jukecord'));
+      fs.writeFileSync(
+        path.join(folder, 'docker'),
+        [
+          '#!/bin/sh',
+          'case "$1" in',
+          '  info) echo 27.0.0 ;;',
+          '  compose)',
+          '    case "$2" in',
+          '      version) echo v2.30.0 ;;',
+          '      ps) echo 0123456789ab ;;',
+          // exec -T -e TZ=... jukecord jukecord ARGS: answered in words, or as JSON when --json is among them.
+          '      exec)',
+          '        shift 7',
+          '        case " $* " in *" --json "*) out=$JSON_OUT err=$JSON_ERR ;; *) out=$WORDS_OUT err=$WORDS_ERR ;; esac',
+          '        [ -z "$out" ] || printf "%s\\n" "$out"',
+          '        [ -z "$err" ] || printf "%s\\n" "$err" >&2',
+          '        exit "$CODE" ;;',
+          // cp SERVICE:FILE DESTINATION: logged, and the destination made as Compose would.
+          '      cp) printf "%s %s\\n" "$3" "$4" >> "$COPIED"; : > "$4" ;;',
+          '    esac ;;',
+          'esac',
+          'exit 0',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const copied = path.join(folder, 'copied.log');
+      const ran = spawnSync('bash', [path.join(folder, 'jukecord'), 'backup'], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${folder}:${process.env.PATH ?? ''}`,
+          CODE: String(answer.code),
+          WORDS_OUT: answer.words.out,
+          WORDS_ERR: answer.words.err,
+          JSON_OUT: answer.json.out,
+          JSON_ERR: answer.json.err,
+          COPIED: copied,
+        },
+      });
+      return {
+        ...ran,
+        copied: fs.existsSync(copied) ? read(copied) : '',
+        made: fs.existsSync(path.join(folder, 'backups')) ? fs.readdirSync(path.join(folder, 'backups')) : [],
+        // The front door's own folder as it names it (the whole path it prints starts with it).
+        folder,
+      };
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true });
+    }
+  }
+
+  it('copies the backup out of the container and prints its whole path here', () => {
+    const done = backup(answers.done);
+    assert.equal(done.status, 0, done.stderr);
+    assert.equal(done.copied, `jukecord:${file} backups/jukecord-2026-11-13T04-31-39-453Z.db\n`);
+    assert.deepEqual(done.made, ['jukecord-2026-11-13T04-31-39-453Z.db']);
+    assert.equal(done.stdout, `${done.folder}/backups/jukecord-2026-11-13T04-31-39-453Z.db\n`);
+  });
+
+  it("says why a backup was not made in the command's words, not its JSON, and ends with its exit code", () => {
+    const refused = backup(answers.refused);
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stderr, `jukecord: ${refusal}\n`);
+    // Nothing was copied, and nothing printed as if it had been.
+    assert.equal(refused.copied, '');
+    assert.equal(refused.stdout, '');
+    // Not answering: the command's own exit code, which says so to a script.
+    const away = backup(answers.away);
+    assert.equal(away.status, 3);
+    assert.equal(away.stderr, `${answers.away.words.err}\n`);
+    assert.equal(away.copied, '');
   });
 });
 

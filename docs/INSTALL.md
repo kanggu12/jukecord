@@ -208,7 +208,9 @@ Any other word goes to the `jukecord` command inside: `./jukecord np`, `./jukeco
 ## Backups
 
 `./jukecord backup` writes a consistent copy of the database while the music and the panel go on, however big the
-database, and prints its whole path. The media cache stays out: tracks are fetched again when played. To put one back:
+database, and prints its whole path; when it cannot, it says why and ends with the jukecord command's
+[exit code](README.md#the-jukecord-command). The media cache stays out: tracks are fetched again when played. To put
+one back:
 
 ```bash
 ./jukecord restore backups/jukecord-<time>.db
@@ -225,8 +227,9 @@ database, and prints its whole path. The media cache stays out: tracks are fetch
 
 `JUKECORD_BACKUP_AT=04:30` in `.env`, then `./jukecord up`, makes a backup every day at that time in this machine's
 time zone (`TZ` in `.env` sets another), or on the first start after that time on a day without one. The volume's
-`backups` folder keeps the newest `JUKECORD_BACKUP_KEEP` (7). `./jukecord doctor` says how old the newest backup is
-and how big the database is; a failed one is in the log and the alerts channels. To copy one out of the volume:
+`backups` folder keeps the newest `JUKECORD_BACKUP_KEEP` (7) of jukecord's own, `jukecord-<time>.db`; a file put there
+under another name is left alone and not counted. `./jukecord doctor` says how old the newest backup is and how big
+the database is; a failed one is in the log and the alerts channels. To copy one out of the volume:
 
 ```bash
 docker compose cp jukecord:/data/backups/<file> .

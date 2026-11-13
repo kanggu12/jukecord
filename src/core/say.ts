@@ -249,6 +249,9 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['the music service answered something that is not JSON', '음악 서비스가 JSON이 아닌 답을 보냄'],
   ['none of its tracks was found on YouTube', 'YouTube에서 그 곡들을 하나도 찾지 못함'],
   ['links of other services are not read here', '여기서는 다른 음악 서비스의 링크를 읽지 않음'],
+  // The picture of a search's result (the search cover route, src/web/server.ts), beside a track's cover above.
+  ['no search found that address lately', '최근 검색 결과에 없는 주소'],
+  ['that search result has no picture', '이미지가 없는 검색 결과'],
 ];
 
 /** A message from the actions in the person's language, as it is (for a reason inside a sentence). */

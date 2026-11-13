@@ -133,4 +133,27 @@ describe('the Discord lyrics card', () => {
       '이 곡의 가사를 찾지 못함',
     );
   });
+
+  it('says a page past the last is not there before the last one, as the queue card does', () => {
+    const text = Array.from({ length: 80 }, (_, index) => `${index + 1}. Fold the morning into paper`).join('\n');
+    const lyrics = { trackId: 1, kind: 'plain' as const, lines: [], text };
+    // Two pages of words; the third asked for shows the second, and says so first.
+    const english = lyricsCard(lyrics, 'Paper Boats', 3, 'en').data;
+    assert.match(english.description ?? '', /^There is no page 3: the lyrics have 2 pages\n\d+\. Fold the morning/);
+    assert.equal(english.footer?.text, 'page 2/2 · Lyrics from LRCLIB');
+    const korean = lyricsCard(lyrics, 'Paper Boats', 3, 'ko').data;
+    assert.match(korean.description ?? '', /^3페이지는 없음: 가사는 2페이지까지 있음\n\d+\. Fold/);
+    // One page: "1 page"; the last page asked for is shown as it is.
+    const short = { ...lyrics, text: 'Fold the morning into paper' };
+    assert.equal(
+      lyricsCard(short, 'Paper Boats', 2, 'en').data.description,
+      'There is no page 2: the lyrics have 1 page\nFold the morning into paper',
+    );
+    assert.equal(lyricsCard(lyrics, 'Paper Boats', 2, 'en').data.description?.startsWith('There'), false);
+    // No words at all: none, whatever the page.
+    assert.equal(
+      lyricsCard({ ...short, text: '' }, 'Paper Boats', 2, 'en').data.description,
+      'No lyrics found for this track',
+    );
+  });
 });

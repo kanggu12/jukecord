@@ -20,6 +20,36 @@ describe('backups in the data folder', () => {
     }
   });
 
+  it('counts only its own: a copy put beside them by hand is not the newest, not one of those kept, and stays', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-backups-'));
+    try {
+      // Three of jukecord's own, a day apart, and files a person put there under names of their own, made now (an
+      // unfinished copy of theirs too, from two hours ago).
+      const own = [1, 2, 3].map((day) => `jukecord-2026-11-0${day}T03-00-00-000Z.db`);
+      const byHand = [
+        'jukecord-before-the-move.db',
+        'jukecord-old.db',
+        'jukecord-2026-11-04.db',
+        'jukecord-2026-11-05T03-00-00-000Z.db.bak',
+        'jukecord-mine.db.partial',
+      ];
+      for (const name of [...own, ...byHand]) fs.writeFileSync(path.join(dir, name), 'x');
+      const now = Date.now();
+      const twoHours = new Date(now - 2 * 3_600_000);
+      fs.utimesSync(path.join(dir, 'jukecord-mine.db.partial'), twoHours, twoHours);
+      // Its own, newest first, with the time each was made (not the file's, which is now for all of them).
+      assert.deepEqual(
+        listBackups(dir).map((backup) => [path.basename(backup.file), backup.at]),
+        [3, 2, 1].map((day) => [`jukecord-2026-11-0${day}T03-00-00-000Z.db`, Date.UTC(2026, 10, day, 3)]),
+      );
+      // Two kept: the oldest of its own goes; the others' files stay, and took no place of the two.
+      pruneBackups(dir, 2, now);
+      assert.deepEqual(fs.readdirSync(dir).sort(), [...own.slice(1), ...byHand].sort());
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('takes no unfinished copy for a backup, and clears one away once it is an hour old', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-backups-'));
     try {

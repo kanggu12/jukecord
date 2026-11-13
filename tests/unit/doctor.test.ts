@@ -140,6 +140,27 @@ describe('runDoctor', () => {
     }
   });
 
+  it('says the newest of its own backups and how many, whatever else was put in the folder by hand', async () => {
+    const { dir, run } = setup({});
+    try {
+      // A backup made three hours ago, as the backup command names it, and a copy someone put beside it under a name
+      // of their own, months old: its name sorted first, so it was "the newest 315 days ago", one of "2 kept".
+      fs.mkdirSync(path.join(dir, 'backups'));
+      const made = new Date(Date.now() - 3 * 3_600_000).toISOString().replace(/[:.]/g, '-');
+      fs.writeFileSync(path.join(dir, 'backups', `jukecord-${made}.db`), Buffer.alloc(110_592));
+      const copy = path.join(dir, 'backups', 'jukecord-before-the-move.db');
+      fs.writeFileSync(copy, Buffer.alloc(2048));
+      fs.utimesSync(copy, new Date(2026, 0, 2), new Date(2026, 0, 2));
+      const check = (await run()).checks.find((entry) => entry.name === 'backups');
+      assert.deepEqual(
+        [check?.status, check?.detail],
+        ['ok', 'the newest 3 h ago (108.0 KiB), 1 kept; no daily backup (JUKECORD_BACKUP_AT)'],
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('warns when the daily backup failed after the newest one there is, or before any was made', async () => {
     const env = { JUKECORD_BACKUP_AT: '04:30' };
     const failure = { at: Date.now() - 2 * 3_600_000, reason: 'ENOSPC: no space left on device' };
