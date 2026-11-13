@@ -2449,7 +2449,8 @@ img {
 .scrim {
   position: fixed;
   inset: var(--bar-h) 0 var(--listen-h) 0;
-  /* Under the bar, with the sheet: what the bar holds (a toast hanging under it on a narrow window) stays over both. */
+  /* Under the bar, with the sheet: what the bar holds (a toast, hanging above the listening bar on a narrow window)
+     stays over both. */
   z-index: 28;
   background: var(--scrim);
   animation: fade 160ms ease-out;
@@ -2473,7 +2474,8 @@ img {
   top: var(--bar-h);
   bottom: var(--listen-h);
   right: 0;
-  /* Under the bar it hangs from, so a toast in the bar's strip shows over it. */
+  /* Under the bar it hangs from, so a toast in the bar's strip (above the listening bar on a narrow window) shows over
+     it. */
   z-index: 29;
   width: min(calc(var(--side-w) + 16px + var(--gap) / 2), 100vw);
   display: flex;
@@ -3559,34 +3561,29 @@ kbd {
     width: auto;
   }
 }
-/* On a narrow window the bar has no room for a toast: it hangs under the bar as a strip of the bar's own glass, as
-   wide as the window (the content passes under it as under the bar), and its words may take two lines. */
+/* On a narrow window the top bar has no room for a toast: it hangs at the bottom of the window instead, right above
+   the listening bar, as a strip of the bars' own glass as wide as the window (the content passes under it as under
+   the bar), and its words may take two lines. Under the top bar it lay across the playing card's head, its Lyrics and
+   More keys, and over a sheet's first row and close key; above the listening bar it covers what passes under that bar
+   anyway. (Placed from the top bar, which is its box: the bar's glass makes it the box of anything placed inside it,
+   and the bar stays at the top.) */
 @media (max-width: 900px) {
   .toasts {
     position: absolute;
-    top: 100%;
     left: 0;
     right: 0;
+    bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
     padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
     background: color-mix(in oklch, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
-    border-bottom: 1px solid var(--line);
+    border-top: 1px solid var(--line);
   }
   .toasts:empty {
     display: none;
   }
   .toast {
     flex: 1;
-  }
-  /* With a sheet open (the menu, the servers), the strip under the bar covered the sheet's first row and its close
-     key for seconds: it hangs at the bottom of the window instead, above the listening bar. (Placed from the bar,
-     which is its box: the bar's glass makes it the box of anything placed inside it, and it stays at the top.) */
-  body:has(> .sheet) .toasts {
-    top: auto;
-    bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
-    border-bottom: 0;
-    border-top: 1px solid var(--line);
   }
 }
 @media (max-width: 900px) {
