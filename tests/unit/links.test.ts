@@ -255,6 +255,34 @@ describe('links of other services', () => {
     assert.equal(queries.length, 1);
   });
 
+  it('keep no match for a Spotify playlist’s local files, which have no ID of their own', async () => {
+    // A file on the playlist owner's disk: Spotify lists it with "id": null, and every such file has the same null.
+    const local = (name: string, seconds: number) => ({
+      id: null,
+      name,
+      duration_ms: seconds * 1000,
+      type: 'track',
+      artists: [{ name: 'Example Band' }],
+    });
+    const playlist = (id: string) =>
+      `https://api.spotify.com/v1/playlists/${id}/tracks?limit=100&fields=items(track(id,name,duration_ms,type,artists(name)))`;
+    const { fetch } = tableFetch({
+      'https://accounts.spotify.com/api/token': JSON.stringify({ access_token: 'example-token', expires_in: 3600 }),
+      [playlist('0exampleplaylist000001')]: JSON.stringify({ items: [{ track: local('Low Tide', 203) }] }),
+      [playlist('0exampleplaylist000002')]: JSON.stringify({ items: [{ track: local('Lanterns', 198) }] }),
+    });
+    const { ytdlp, queries } = madeUpSearch({ 'Low Tide': 203, Lanterns: 198 });
+    const { links: reader } = links(fetch, ytdlp, { spotify: true });
+    const first = await reader.resolve('spotify:playlist:0exampleplaylist000001');
+    const second = await reader.resolve('spotify:playlist:0exampleplaylist000002');
+    // Each file is its own song: the second is searched for, not given the first one's recording.
+    assert.deepEqual(
+      [...first.tracks, ...second.tracks].map((track) => track.title),
+      ['Low Tide', 'Lanterns'],
+    );
+    assert.equal(queries.length, 2);
+  });
+
   it('read the meta tags of a page, every value of a tag that comes twice', () => {
     const tags = metaTags(
       '<meta property="og:title" content="A &amp; B"/><meta name="music:musician_description" content="One"><meta name="music:musician_description" content="Two">',

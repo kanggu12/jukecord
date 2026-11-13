@@ -336,11 +336,15 @@ export class Links {
     type Item = { id?: unknown; name?: unknown; duration_ms?: unknown; artists?: { name?: unknown }[]; type?: unknown };
     const read = (item: Item | null | undefined): LinkTrack[] => {
       if (!item || typeof item.name !== 'string' || (item.type !== undefined && item.type !== 'track')) return [];
+      const artists = (item.artists ?? []).flatMap((artist) => (typeof artist.name === 'string' ? [artist.name] : []));
+      // A playlist's local file (one on its owner's disk) has no ID: every one is "id": null, so its song names it
+      // instead, or every local file would be given the recording found for the first.
+      const id = typeof item.id === 'string' && item.id ? item.id : `local:${artists.join(', ')} - ${item.name}`;
       return [
         {
-          key: `spotify:${String(item.id)}`,
+          key: `spotify:${id}`,
           title: item.name,
-          artists: (item.artists ?? []).flatMap((artist) => (typeof artist.name === 'string' ? [artist.name] : [])),
+          artists,
           durationMs: typeof item.duration_ms === 'number' ? item.duration_ms : null,
         },
       ];
