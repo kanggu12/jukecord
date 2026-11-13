@@ -308,6 +308,11 @@ describe('the front door with jukecord not running', () => {
       const real = front('np');
       assert.equal(real.status, 1);
       assert.equal(real.stderr, 'jukecord: jukecord is not running here (./jukecord up)\n');
+      // A backup the same: said once, and no path printed as if one had been made.
+      const backup = front('backup');
+      assert.equal(backup.status, 1);
+      assert.equal(backup.stderr, 'jukecord: jukecord is not running here (./jukecord up)\n');
+      assert.equal(backup.stdout, '');
     } finally {
       fs.rmSync(bin, { recursive: true, force: true });
     }
