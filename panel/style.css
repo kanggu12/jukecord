@@ -1447,6 +1447,22 @@ img {
 .now .keys:not(:has(> .key.primary:not([hidden]))) > .key {
   flex: none;
 }
+/* The main key's three faces (Pause, Resume, Play) in one place, the one shown across it with its icon and words in
+   the middle, the others hidden there: the key is as wide as its widest face in every state, so the keys after it
+   stay put when the music pauses. */
+.key.faces {
+  display: inline-grid;
+}
+.key.faces > .face {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-6);
+}
+.key.faces > .face[aria-hidden="true"] {
+  visibility: hidden;
+}
 
 /* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
 .progress {

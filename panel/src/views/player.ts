@@ -265,7 +265,8 @@ export function nowCard(live: Live): HTMLElement {
   const now = h('span', { class: 'num' }, '0:00');
   const end = h('span', { class: 'num' }, '');
   const progress = h('div', { class: 'progress' }, bar, h('div', { class: 'times' }, now, end));
-  const pause = h('button', { class: 'key primary', type: 'button', 'data-act': 'pause' });
+  // The main key holds its three faces in one place (see draw), each shown in turn.
+  const pause = h('button', { class: 'key primary faces', type: 'button', 'data-act': 'pause' });
   const skip = h('button', { class: 'key', type: 'button', 'data-act': 'skip' });
   const stop = h('button', { class: 'key', type: 'button', 'data-act': 'stop' });
   const repeat = h('button', { class: 'key square', type: 'button', 'data-act': 'repeat' });
@@ -469,8 +470,25 @@ export function nowCard(live: Live): HTMLElement {
     keys.hidden = keySet === 'none';
     for (const key of [pause, stop, repeat]) key.hidden = keySet !== 'all';
     skip.hidden = keySet === 'none';
-    const pauseWords = moving ? words.pause : status === 'paused' ? words.resume : words.play;
-    refill(pause, `${moving}|${pauseWords}`, icon(moving ? 'pause' : 'play'), pauseWords);
+    // The main key: Pause while the music plays or gets ready, Resume while paused, Play with nothing playing. Its three
+    // faces share one place, the two not shown hidden in it, so the key is as wide as its widest face whatever it says:
+    // Skip, Stop and Repeat after it stay put when the music pauses (Resume was 11 px wider than Pause, 14 in Korean,
+    // and moved them).
+    const face = moving ? 'pause' : status === 'paused' ? 'resume' : 'play';
+    const faceWords = { pause: words.pause, resume: words.resume, play: words.play };
+    refill(
+      pause,
+      `${face}|${Object.values(faceWords).join('|')}`,
+      ...(['pause', 'resume', 'play'] as const).map((name) =>
+        h(
+          'span',
+          // The faces not shown are hidden from screen readers too: the key's name is the one it shows.
+          { class: 'face', 'aria-hidden': name === face ? null : 'true' },
+          icon(name === 'pause' ? 'pause' : 'play'),
+          faceWords[name],
+        ),
+      ),
+    );
     // A key turned off with the focus on it hands it to the main key, or with that off too, to the add field.
     const addField = document.getElementById('add-input');
     // With nothing playing, the key starts the queue (when there is one); before the first state it waits.

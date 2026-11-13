@@ -520,6 +520,40 @@ if (!ONLY || ONLY.has('listening')) {
 await api('POST', '/guilds/local/player/pause');
 await until('paused');
 await sweep('paused', SIZES);
+// The keys after the main key stay put as the music plays, pauses and stops (Resume was 11 px wider than Pause, 14 in
+// Korean on a phone, and moved Skip, Stop and Repeat): the main key keeps one width whichever of its words it shows.
+await sweep(
+  'keys-stay',
+  [
+    [390, 844],
+    [412, 915],
+    [1440, 900],
+  ],
+  async (page) => {
+    const inject = await intercept(page);
+    await page.reload();
+    await page.waitForSelector('.now .keys:not([hidden])');
+    const now = await api('GET', '/guilds/local/player');
+    const places = [];
+    for (const [step, change] of [
+      { status: 'playing' },
+      { status: 'idle', track: null },
+      { status: 'paused' },
+    ].entries()) {
+      inject({ type: 'player', player: { ...now, ...change, version: now.version + 1000 + step } });
+      await page.waitForTimeout(250);
+      places.push(
+        await page.evaluate(() =>
+          [...document.querySelectorAll('.now .keys > .key')]
+            .filter((key) => key.getClientRects().length > 0)
+            .map((key) => `${key.dataset.act} ${Math.round(key.getBoundingClientRect().left * 2) / 2}`)
+            .join(', '),
+        ),
+      );
+    }
+    if (new Set(places).size > 1) throw new Error(`the keys move: ${places.join(' / ')}`);
+  },
+);
 await sweep('menu', FEW, async (page) => {
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet .section');
