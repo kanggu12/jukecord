@@ -974,6 +974,41 @@ await sweep('notice', FEW, async (page) => {
 await sweep('waiting', FEW, async (page) => {
   await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
 });
+// The server's choices in the menu: their names start at one place, whatever stands before them (Everyone's people icon
+// and the roles' dots: the dots were 6 px narrower, and the roles' names 6 px left of Everyone), and the choice made is
+// the brand's blue, its check and an "on" switch alike (they wore the play green beside the chosen segments' blue).
+async function settingsLook(page) {
+  const wrong = await page.evaluate(() => {
+    const problems = [];
+    const lefts = new Set(
+      [...document.querySelectorAll('.sheet .choice[data-choice] > .grow')]
+        .filter((label) => label.getClientRects().length > 0)
+        .map((label) => Math.round(label.getBoundingClientRect().left)),
+    );
+    if (lefts.size > 1) problems.push(`the choices' names start at ${[...lefts].join(', ')}`);
+    // The tokens as the browser writes them, to compare with what it computed.
+    const root = getComputedStyle(document.documentElement);
+    const probe = document.createElement('i');
+    document.body.append(probe);
+    const colour = (token) => {
+      probe.style.color = root.getPropertyValue(token);
+      return getComputedStyle(probe).color;
+    };
+    const accent = colour('--accent');
+    const key = colour('--key');
+    probe.remove();
+    for (const check of document.querySelectorAll(
+      '.sheet .choice:is([aria-pressed="true"], [aria-checked="true"]) .check',
+    ))
+      if (getComputedStyle(check).color !== accent) problems.push(`a chosen check in ${getComputedStyle(check).color}`);
+    for (const toggle of document.querySelectorAll('.sheet .switch[aria-checked="true"]')) {
+      const track = getComputedStyle(toggle, '::before').backgroundColor;
+      if (track !== key) problems.push(`an on switch in ${track}`);
+    }
+    return problems;
+  });
+  if (wrong.length > 0) throw new Error(wrong.join('; '));
+}
 // The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
 await sweep(
   'menu-discord',
@@ -982,6 +1017,7 @@ await sweep(
     await page.click('[data-act="menu"]');
     await page.waitForSelector('.sheet .section .choice[aria-pressed="true"] >> nth=1');
     await page.waitForTimeout(400);
+    await settingsLook(page);
   },
   { discord: true },
 );

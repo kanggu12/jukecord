@@ -312,11 +312,17 @@ function drawDj(box: HTMLElement, guild: string, settings: Settings, again: () =
         'aria-pressed': String(settings.djRoleId === id),
         dataset: { choice: id ?? '' },
       },
+      // A role's dot in a slot as wide as an icon, so its name starts where Everyone's does beside its people icon (a
+      // bare dot, 6 px narrower, put the names 6 px left of it).
       id
-        ? h('span', {
-            class: 'swatch',
-            style: `background:${color ? `#${color.toString(16).padStart(6, '0')}` : 'var(--ink-3)'}`,
-          })
+        ? h(
+            'span',
+            { class: 'swatch-slot' },
+            h('span', {
+              class: 'swatch',
+              style: `background:${color ? `#${color.toString(16).padStart(6, '0')}` : 'var(--ink-3)'}`,
+            }),
+          )
         : icon('users'),
       h('span', { class: 'grow' }, name),
       icon('check', 'check'),
