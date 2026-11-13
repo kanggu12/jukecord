@@ -368,6 +368,14 @@ describe('the front door with jukecord running', () => {
           imported.stdout,
           'inside: playlist import --guild 1234 Friday night - --json\n#EXTM3U\nhttps://example.com/a\n',
         );
+        // The options before the command, as the help shows them ("jukecord [--guild ID] <command>"): the file is
+        // handed over all the same (its name reached the command, which could not open it inside the container).
+        const first = fromHere('--guild', '1234', '--json', 'playlist', 'import', 'Friday night', 'friday.m3u');
+        assert.equal(first.status, 0, first.stderr);
+        assert.equal(
+          first.stdout,
+          'inside: --guild 1234 --json playlist import Friday night -\n#EXTM3U\nhttps://example.com/a\n',
+        );
         // A file that is not there is a typing mistake here; nothing reaches the command.
         const missing = fromHere('playlist', 'import', 'Friday', 'gone.m3u');
         assert.equal(missing.status, 2);

@@ -87,6 +87,63 @@ inside() {
   compose exec "${tty[@]}" -e "TZ=$(timezone)" "$service" jukecord "$@"
 }
 
+# Runs the jukecord command inside with these words, and an import's file with them: its words that are not options
+# start with "playlist import" and the fourth is the file, wherever the options are (before the command too, as the
+# help shows them: "jukecord [--guild ID] <command>"). The file is on this machine, where the command was typed, and
+# the command inside the container cannot see it there: it gets the text on its standard input instead ("-"), at most
+# a byte over 1 MiB (it says when the file is larger). The words are read as the command reads them (parseLine in
+# src/cli/main.ts): these options take the word after them as their value, and after -- every word is one.
+pass_on() {
+  local valued=' --url --token --guild --limit --level --component --days --scope --year --month --format '
+  local words=() file='' found=0 value=0 rest=0 first='' second='' word
+  for word in "$@"; do
+    # The value of the option before it, as it is.
+    if [ "$value" = 1 ]; then
+      words+=("$word")
+      value=0
+      continue
+    fi
+    if [ "$rest" = 0 ]; then
+      case "$word" in
+        --)
+          rest=1
+          words+=("$word")
+          continue
+          ;;
+        --*=*)
+          words+=("$word")
+          continue
+          ;;
+        --*)
+          case "$valued" in *" $word "*) value=1 ;; esac
+          words+=("$word")
+          continue
+          ;;
+      esac
+    fi
+    # A word: the first two name the command, the fourth of an import is its file ("-" is the standard input given).
+    found=$((found + 1))
+    case "$found" in 1) first=$word ;; 2) second=$word ;; esac
+    if [ "$found" = 4 ] && [ "$first" = playlist ] && [ "$second" = import ] && [ "$word" != - ]; then
+      file=$word
+      words+=(-)
+    else
+      words+=("$word")
+    fi
+  done
+  if [ -z "$file" ]; then
+    inside "$@"
+    return
+  fi
+  # A relative name is taken from where the command was typed, as for a restore.
+  case "$file" in /*) ;; *) file="$caller/$file" ;; esac
+  if [ ! -f "$file" ]; then
+    say "$file is not there"
+    exit 2
+  fi
+  head -c 1048577 -- "$file" | inside "${words[@]}"
+}
+
 # A setting from .env as Compose reads it: the last line that sets it, without quotes around the value, and without
 # the comment after it (a space and #) when the value has no quotes.
 setting() {
@@ -406,62 +463,10 @@ mv jukecord.db.restoring jukecord.db'
       inside --help
     fi
     ;;
-  playlist)
-    # An import's file is on this machine, where the command was typed, and the command inside the container cannot
-    # see it there: it gets the text on its standard input instead ("-"), at most a byte over 1 MiB (it says when the
-    # file is larger). The words are read as the command reads them (parseLine in src/cli/main.ts): the second word
-    # that is not an option is the file, and these options take the word after them as their value.
-    valued=' --url --token --guild --limit --level --component --days --scope --year --month --format '
-    if [ "${2:-}" = import ]; then
-      words=(playlist import)
-      file=''
-      found=0
-      value=0
-      rest=0
-      for word in "${@:3}"; do
-        if [ "$value" = 1 ]; then
-          words+=("$word")
-          value=0
-          continue
-        fi
-        if [ "$rest" = 0 ]; then
-          case "$word" in
-            --)
-              rest=1
-              words+=("$word")
-              continue
-              ;;
-            --*=*)
-              words+=("$word")
-              continue
-              ;;
-            --*)
-              case "$valued" in *" $word "*) value=1 ;; esac
-              words+=("$word")
-              continue
-              ;;
-          esac
-        fi
-        found=$((found + 1))
-        if [ "$found" = 2 ] && [ "$word" != - ]; then
-          file=$word
-          words+=(-)
-        else
-          words+=("$word")
-        fi
-      done
-      if [ -n "$file" ]; then
-        # A relative name is taken from where the command was typed, as for a restore.
-        case "$file" in /*) ;; *) file="$caller/$file" ;; esac
-        if [ ! -f "$file" ]; then
-          say "$file is not there"
-          exit 2
-        fi
-        head -c 1048577 -- "$file" | inside "${words[@]}"
-        exit
-      fi
-    fi
-    inside "$@"
+  playlist | --*)
+    # The playlist commands, and the jukecord command's options typed before its command: an import's file goes over
+    # on the standard input (pass_on above).
+    pass_on "$@"
     ;;
   *)
     # Running, the jukecord command inside judges every word itself (the image can be newer than this checkout, and
