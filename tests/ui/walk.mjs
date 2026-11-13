@@ -1269,6 +1269,14 @@ await sweep('liked-menu', [[360, 780]], async (page) => {
 await sweep('history-keys', DISCOVERY, async (page) => {
   await page.click('.library-seg [data-view="history"]');
   await page.waitForSelector('.history .row');
+  // The line under each title (when, how long, who added it) whole on a laptop's window and wider: at 1440 px three
+  // keys beside it cut every row's to "3:00 added by ...".
+  const cut = await page.evaluate(() =>
+    [...document.querySelectorAll(window.innerWidth >= 1024 ? '.history .row .sub' : 'none')]
+      .filter((line) => line.offsetParent && line.scrollWidth > line.clientWidth + 1)
+      .map((line) => line.textContent),
+  );
+  if (cut.length > 0) throw new Error(`the history's lines are cut: ${cut.slice(0, 3).join(' | ')}`);
 });
 // Autoplay from the server's plays (the seeded history: nothing to fetch). Nothing playing and nothing queued: the add
 // card says autoplay is on, and the queue's key shows it.

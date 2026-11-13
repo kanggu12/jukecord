@@ -2080,11 +2080,13 @@ img {
 .queue-list .row .acts > .more-key {
   display: inline-flex;
 }
-/* History and liked rows: the heart and three keys; on a narrow card the heart and one key for the rest. */
+/* History and liked rows: the heart and three keys; on a narrow card the heart and one key for the rest. Narrow is up
+   to 420 px: the side column of a 1440 px window (389 px) with three keys left the line under a title "3:00 added
+   by ..." on every row, and who added it was never read. */
 .history .row .acts > .lib-more {
   display: none;
 }
-@container card (max-width: 340px) {
+@container card (max-width: 420px) {
   .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
     display: none;
   }
