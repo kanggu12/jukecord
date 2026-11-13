@@ -19,45 +19,57 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> &nbsp;|&nbsp;
+  <a href="#what-it-does">What it does</a> &nbsp;|&nbsp;
   <a href="#how-it-works">How it works</a> &nbsp;|&nbsp;
-  <a href="#features">Features</a> &nbsp;|&nbsp;
-  <a href="#guides">Guides</a> &nbsp;|&nbsp;
-  <a href="#contribute">Contribute</a>
+  <a href="#for-contributors">For contributors</a> &nbsp;|&nbsp;
+  <a href="#guides">Guides</a>
 </p>
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/panel-dark.webp">
-    <img alt="The jukecord panel for a made-up Discord server, Night Owls: cards of frosted glass over a field lit by the colours of the cover that is playing. The track playing turns on a disc beside its progress bar and keys; the queue below lists each track with its cover, its length and who added it. On the right, the bot is in the voice channel Lounge with four people, three people listen in their browsers, and the recently played tracks follow. The bar at the bottom offers to play the music in this browser too." src="docs/assets/panel-light.webp" width="100%">
+    <img alt="The jukecord panel for a made-up Discord server, Night Owls. The track playing turns on a disc beside its progress bar and keys; the queue below lists each track with its cover, its length and who added it. On the right, the bot is in the voice channel Lounge with four people, three people listen in their browsers, and the recently played tracks follow. The bar at the bottom offers to play the music in this browser too." src="docs/assets/panel-light.webp" width="100%">
   </picture>
 </p>
 
 jukecord plays music from YouTube, SoundCloud and the other sites [yt-dlp](https://github.com/yt-dlp/yt-dlp) reads in
 a Discord voice channel. Its web panel shows the same queue, and **Listen here** plays it in any browser at the same
-place in the track: for a friend at work, on a phone, or without a Discord account. It runs on your own computer, a
-Raspberry Pi or a Kubernetes cluster, and keeps everything there.
-
-| Listen                                                                                                  | Host                                                                            | Contribute                                                                     |
-| :------------------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------ | :----------------------------------------------------------------------------- |
-| In Discord, or in a browser with a login or a friend's listening link. [Using jukecord](docs/README.md) | One command with Docker Compose, or the Helm chart. [Quick start](#quick-start) | The tests need no Discord bot and reach no site. [Where to start](#contribute) |
-
-## How it works
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
-    <img alt="How jukecord works. You and your friends use slash commands in Discord, the panel, the jukecord command or the HTTP API, and every one of them goes through one list of actions and one permission check, the DJ role. jukecord fetches tracks from YouTube, SoundCloud and the other sites yt-dlp reads, through its own proxy that reaches only public addresses, evens out their loudness once and keeps them as Opus. Each Discord server has one queue and one player, and the player is the clock: here it plays Glass Garden (Live at the Old Hall), at 1:09 of 3:00. Rainbow lines carry the music people hear: the bot plays it live in the voice channel from the clock's place, at the volume the server set, and a browser that presses Listen here plays the same file within 0.3 seconds of the clock, at its own volume." src="docs/assets/how-it-works-light.svg" width="100%">
-  </picture>
-</p>
-
-Each Discord server has one queue and one player, and the player is the clock. The bot plays the voice channel from the
-clock's place, and a browser that listens plays the same file in step with it. Discord, the panel, the API and the
-command all call one list of actions, so the same rules hold whichever is used
-([architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md)).
+place in the track. It runs on your own computer, a Raspberry Pi or a Kubernetes cluster.
 
 ## Quick start
 
-**Docker Compose** on Linux, macOS or Windows (WSL). It builds the image, starts jukecord and opens the panel:
+<table>
+<tr>
+<th width="50%" align="left">Listen</th>
+<th width="50%" align="left">Host</th>
+</tr>
+<tr>
+<td valign="top">
+
+On a jukecord someone runs for your server:
+
+1. Open the address the host gives you and log in with Discord, or open a listening link: it needs no account.
+2. Press **Listen here**. The queue plays in your browser, in step with the voice channel, at your own volume.
+3. Add music in the panel or with `/play` in Discord.
+
+**[Using jukecord](docs/README.md)**
+
+</td>
+<td valign="top">
+
+On a computer that stays on while people listen:
+
+1. Start it with the commands below for your system.
+2. [Make the Discord bot](#the-discord-bot) and give jukecord its token, or skip it to play in browsers only.
+3. `./jukecord open` logs you in; **Invite** in the panel makes links for friends.
+
+**[Installing](docs/INSTALL.md)**
+
+</td>
+</tr>
+</table>
+
+**Docker Compose** on Linux, macOS or Windows (WSL):
 
 ```bash
 git clone https://github.com/kanggu12/jukecord.git && cd jukecord
@@ -65,24 +77,18 @@ git clone https://github.com/kanggu12/jukecord.git && cd jukecord
 ./jukecord open
 ```
 
-Without a bot token it plays in the browser only. [Make the bot](#the-discord-bot), then give it the token:
+With the bot's token:
 
 ```bash
 echo 'JUKECORD_DISCORD_TOKEN=YOUR_BOT_TOKEN' >> .env
 ./jukecord up
 ```
 
-**Kubernetes** with the Helm chart, the token in a Secret of your own:
+**Kubernetes:** the Helm chart from `oci://ghcr.io/kanggu12/charts/jukecord`, the token in a Secret of your own:
+[install on a cluster](docs/KUBERNETES.md#install).
 
-```bash
-kubectl create namespace jukecord
-kubectl -n jukecord create secret generic jukecord-discord --from-literal=token=YOUR_BOT_TOKEN
-helm install jukecord oci://ghcr.io/kanggu12/charts/jukecord -n jukecord --set discord.existingSecret=jukecord-discord --wait
-kubectl -n jukecord port-forward svc/jukecord 8795:8795 &
-kubectl -n jukecord exec deploy/jukecord -- jukecord link
-```
-
-**From source**, with Node 24.11 or newer, ffmpeg and yt-dlp installed:
+**From source**, with Node 24.11 or newer, ffmpeg and yt-dlp installed (`node src/cli/main.ts link` then prints a
+login link):
 
 ```bash
 git clone https://github.com/kanggu12/jukecord.git && cd jukecord
@@ -90,52 +96,29 @@ npm ci && npm run build
 JUKECORD_DISCORD_TOKEN=YOUR_BOT_TOKEN npm start
 ```
 
-In another terminal, `node src/cli/main.ts link` prints a login link. [Installing](docs/INSTALL.md) covers a public
-address for friends, logging in with Discord, updates and backups; [without internet](docs/OFFLINE.md), a machine that
-cannot reach the registries.
-
 ### The Discord bot
 
 1. On the [Discord Developer Portal](https://discord.com/developers/applications), make an application, open **Bot**
-   and press **Reset Token**. That token is `JUKECORD_DISCORD_TOKEN`. No privileged intents are needed.
+   and press **Reset Token**. That token is `JUKECORD_DISCORD_TOKEN`.
 2. Open **OAuth2**, tick the scopes `bot` and `applications.commands` and the permissions **View Channels**, **Connect**
    and **Speak**, then open the link it makes to add the bot to your server.
 3. For logging in with Discord, put the **Client ID** and **Client Secret** in `JUKECORD_DISCORD_CLIENT_ID` and
-   `JUKECORD_DISCORD_CLIENT_SECRET`, and add `<your panel's address>/auth/callback` to **Redirects**. Without them only
-   the host logs in, with `./jukecord open`.
+   `JUKECORD_DISCORD_CLIENT_SECRET`, and add `<your panel's address>/auth/callback` to **Redirects**.
 
-The slash commands appear within seconds; `/play`, `/add`, `/np`, `/queue` and `/listen` are the everyday ones.
+## What it does
 
-### What it runs on
-
-|                    | Needs                                                                                                                                   |
-| :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
-| **Docker Compose** | Linux, macOS or Windows (WSL), amd64 or arm64, Docker with Compose 2.24 or newer; 430 MB for the image, 2 GiB for the cache             |
-| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system, through Docker Compose with a [released image](docs/INSTALL.md#raspberry-pi-and-other-arm64-machines) |
-| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume                                                               |
-| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                                    |
-| **Listening**      | A current browser on a computer or a phone                                                                                              |
-
-The first `./jukecord up` builds the image, FFmpeg included: about a minute on a fast desktop.
-
-## Features
-
-- **Listen along.** **Listen here** plays the queue in the browser in step with the voice channel, at its own volume;
-  a browser more than 0.3 s off the clock jumps back in line. The media keys and the lock screen control it.
-- **One queue, four ways in.** The panel, slash commands in English and Korean, the `jukecord` command and an HTTP API
-  do the same things under the same rules ([the API](docs/API.md)).
-- **Guests without Discord.** A listening link for 1, 7 or 30 days, with a QR code, lets anyone listen along to one
-  server; revoking it ends its guests at once.
-- **Logins and roles.** People log in with Discord and see the servers they share with the bot; a DJ role decides who
-  may change the music.
-- **Steady and small.** One process and one SQLite file, tracks fetched once and kept as Opus with their loudness
-  evened out. It fetches only from public addresses and comes back where it was after a restart.
+- **Listen along.** **Listen here** plays the queue in a browser in step with the voice channel; the media keys and
+  the lock screen control it.
+- **One queue, four ways in.** The panel, slash commands in English and Korean, the `jukecord` command and an
+  [HTTP API](docs/API.md), under the same rules.
+- **Guests without Discord.** A listening link for 1, 7 or 30 days, with a QR code; revoking it ends its guests at once.
+- **Logins and roles.** People log in with Discord; a DJ role decides who may change the music.
+- **Steady and small.** One process and one SQLite file; each track is fetched once, its loudness evened out.
 
 ### Listen together
 
-The words of the track playing follow the line being sung, for everyone ([LRCLIB](https://lrclib.net)). The light
-behind the glass moves with the music while a browser listens. On a phone the panel installs like an app, and a sleep
-timer stops listening after 15, 30 or 60 minutes or at the end of the track.
+The lyrics follow the line being sung, for everyone. The light behind the glass moves with the music. On a phone the
+panel installs like an app, with a sleep timer.
 
 <p align="center">
   <picture>
@@ -146,20 +129,17 @@ timer stops listening after 15, 30 or 60 minutes or at the end of the track.
 
 ### Find music, keep it
 
-Search words show what YouTube found as you type, to play now, next or later. When the queue runs out, autoplay picks
-from the server's own plays or from YouTube's mix of the last track. Likes, playlists as files (a list of addresses,
-M3U or JSON), and links from Deezer, Spotify and Apple Music, found on YouTube.
+Search as you type, autoplay from the server's own plays when the queue runs out, likes, playlists as files, and links
+from Deezer, Spotify and Apple Music.
 
 ### Fair in a crowd
 
-Where a server has a DJ role, a skip from anyone else is a vote of the people listening. People can take turns, each
-can be held to a number of tracks, and the bot can stay in voice all day. The voice channel has a volume up to 200 %
-and sounds to choose (more bass, clearer voices, brighter, softer at night), which browsers listening along hear too.
+With a DJ role, a skip from anyone else is a vote. People can take turns and be held to a number of tracks. The voice
+channel has a volume and sounds to choose, which browsers listening along hear too.
 
 ### Wrapped
 
-A server's year in music, a month or the last 12 months: the song of the year, the most played tracks, who added most
-and the busiest hours, saved as a picture for a story or a post.
+A server's year in music, or a month, saved as a picture for a story or a post.
 
 <p align="center">
   <picture>
@@ -168,67 +148,80 @@ and the busiest hours, saved as a picture for a story or a post.
   </picture>
 </p>
 
-### Looks after itself
+## How it works
 
-A server nobody hears pauses after two minutes instead of fetching for nobody. After a restart the bot goes back to its
-voice channel, an alerts channel hears about trouble (YouTube refusing jukecord, a disk nearly full, a failed backup),
-and a backup can be made every day.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
+    <img alt="How jukecord works. You and your friends use slash commands in Discord, the panel, the jukecord command or the HTTP API, and every one of them goes through one list of actions and one permission check, the DJ role. jukecord fetches tracks from YouTube, SoundCloud and the other sites yt-dlp reads, through its own proxy that reaches only public addresses, evens out their loudness once and keeps them as Opus. Each Discord server has one queue and one player, and the player is the clock: here it plays Glass Garden (Live at the Old Hall), at 1:09 of 3:00. Rainbow lines carry the music people hear: the bot plays it live in the voice channel from the clock's place, at the volume the server set, and a browser that presses Listen here plays the same file within 0.3 seconds of the clock, at its own volume." src="docs/assets/how-it-works-light.svg" width="100%">
+  </picture>
+</p>
 
-### Light on a small machine
+Each Discord server has one queue and one player, and the player is the clock that the voice channel and every browser
+follow ([architecture](docs/ARCHITECTURE.md)). On two cores with a year of use in it, jukecord rests at about 85 MiB
+of memory, and a thousand open panels see each change within about a tenth of a second
+([measured](docs/TESTING.md#measurements)).
 
-On two processor cores with a year of use in it (a thousand tracks queued, 10,000 plays), jukecord rests at about
-85 MiB of memory and answers each read of the panel in about 20 ms or less. A thousand panels open at once see each
-change of the queue within about a tenth of a second ([how it was measured](docs/TESTING.md#measurements)).
+### Your data
 
-## Everyday use
+Everything stays in jukecord's data folder: one SQLite file and the tracks it fetched. Logins and tokens are kept as
+hashes, and nothing is sent as telemetry. jukecord talks to Discord, to the sites the tracks come from and, for lyrics,
+to LRCLIB ([what leaves your computer](docs/FAQ.md#privacy)).
 
-| To                   | With Docker Compose                                                       |
-| :------------------- | :------------------------------------------------------------------------ |
-| Open the panel       | `./jukecord open`                                                         |
-| See how it runs      | `./jukecord status`, and `./jukecord doctor` to check every part          |
-| Read the log         | `./jukecord logs`, or the **Log** page in the panel                       |
-| Back up the database | `./jukecord backup`, into `./backups`; `JUKECORD_BACKUP_AT` for every day |
-| Update               | `git pull && ./jukecord update`                                           |
-| Stop                 | `./jukecord down`; the data stays                                         |
+## For contributors
 
-Anything else goes to the `jukecord` command inside: `./jukecord np`, `./jukecord add <address or words>`. On
-Kubernetes it runs through `kubectl exec` ([Kubernetes](docs/KUBERNETES.md)).
+jukecord is MIT licensed and built in the open. The tests need no Discord bot and reach no site: yt-dlp and Discord
+have stand-ins, and the panel is checked in a browser against a seeded server. [CONTRIBUTING.md](CONTRIBUTING.md) has
+the setup and the checks.
 
-## Your data
+| Path                     | What it is                                                                               |
+| :----------------------- | :--------------------------------------------------------------------------------------- |
+| `src/app/`               | The actions, one function per thing a person can do, and who may do it                   |
+| `src/core/`              | Each server's queue and player, the clock, the words the bot and the panel share         |
+| `src/media/`             | yt-dlp and ffmpeg, the cache, covers, lyrics, links of other services, the address guard |
+| `src/web/`               | The HTTP API, the logins and the live updates                                            |
+| `src/discord/`           | The bot: slash commands, cards and the voice channel                                     |
+| `src/cli/`, `src/store/` | The `jukecord` command; SQLite and its migrations                                        |
+| `panel/`                 | The web panel: TypeScript and one stylesheet                                             |
+| `deploy/`, `tests/`      | The image, the Helm chart and its kind check; the tests and the panel's walk             |
 
-- Everything is in jukecord's data folder: one SQLite file, and the tracks it fetched with their pictures, up to
-  `JUKECORD_CACHE_MAX`.
-- Logins and tokens are kept as hashes, the logs mask tokens, and nothing is sent as telemetry.
-- jukecord talks to Discord, to the sites the tracks come from, to LRCLIB for lyrics (`JUKECORD_LYRICS=off`) and to
-  Deezer, Spotify or Apple Music for their links (`JUKECORD_LINK_SERVICES`). Browsers get covers from jukecord.
-- Docker Compose opens the panel on this computer only, until you give it a
-  [public address](docs/INSTALL.md#friends-on-other-machines).
+Report a bug or ask for a feature in [Issues](https://github.com/kanggu12/jukecord/issues/new/choose); see what changed
+in [CHANGELOG.md](CHANGELOG.md), and report a security problem through [SECURITY.md](.github/SECURITY.md).
+
+## What it runs on
+
+|                    | Needs                                                                                                                                   |
+| :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| **Docker Compose** | Linux, macOS or Windows (WSL), amd64 or arm64, Docker with Compose 2.24 or newer; 430 MB for the image, 2 GiB for the cache             |
+| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system, through Docker Compose with a [released image](docs/INSTALL.md#raspberry-pi-and-other-arm64-machines) |
+| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume                                                               |
+| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                                    |
+| **Listening**      | A current browser on a computer or a phone                                                                                              |
 
 ## Guides
 
-| Guide                                                                                              | What it covers                                                                            |
-| :------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------- |
-| **Using it**                                                                                       |                                                                                           |
-| [Using jukecord](docs/README.md)                                                                   | The panel, the slash commands, the `jukecord` command, who may do what, the settings      |
-| [Questions and answers](docs/FAQ.md)                                                               | What it takes to run, listening with friends, what leaves your computer                   |
-| [Troubleshooting](docs/TROUBLESHOOTING.md)                                                         | YouTube's bot check, a silent bot or browser, logins, a port in use                       |
-| **Hosting it**                                                                                     |                                                                                           |
-| [Installing](docs/INSTALL.md)                                                                      | Docker Compose, friends on other machines, logging in with Discord, Raspberry Pi, updates |
-| [Kubernetes](docs/KUBERNETES.md)                                                                   | The Helm chart: its values, the Ingress, the NetworkPolicy, k3s                           |
-| [Without internet](docs/OFFLINE.md)                                                                | Moving the image and the data to a machine without internet access                        |
-| **Working on the code**                                                                            |                                                                                           |
-| [The API](docs/API.md)                                                                             | Every operation over HTTP, beside its command and slash command, and the live updates     |
-| [Architecture](docs/ARCHITECTURE.md) · [Decisions](docs/DECISIONS.md) · [Testing](docs/TESTING.md) | How it is built, why, and how it is checked                                               |
+### For listeners
 
-## Contribute
+| Guide                                | What it covers                                                                       |
+| :----------------------------------- | :----------------------------------------------------------------------------------- |
+| [Using jukecord](docs/README.md)     | The panel, the slash commands, the `jukecord` command, who may do what, the settings |
+| [Questions and answers](docs/FAQ.md) | Listening with friends, what it takes to run, what leaves your computer              |
 
-jukecord is MIT licensed and built in the open. Its tests need no Discord bot: yt-dlp and Discord have stand-ins, and
-the panel is checked in a browser against a seeded server.
+### For hosts
 
-- **Report a bug or ask for a feature** in [Issues](https://github.com/kanggu12/jukecord/issues/new/choose).
-- **Change the code.** [CONTRIBUTING.md](CONTRIBUTING.md) has the setup and a map of the code.
-- **See what changed** in [CHANGELOG.md](CHANGELOG.md); report a security problem through
-  [SECURITY.md](.github/SECURITY.md).
+| Guide                                      | What it covers                                                                            |
+| :----------------------------------------- | :---------------------------------------------------------------------------------------- |
+| [Installing](docs/INSTALL.md)              | Docker Compose, friends on other machines, logging in with Discord, everyday use, updates |
+| [Kubernetes](docs/KUBERNETES.md)           | The Helm chart: its values, the Ingress, the NetworkPolicy, k3s                           |
+| [Without internet](docs/OFFLINE.md)        | Moving the image and the data to a machine without internet access                        |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | YouTube's bot check, a silent bot or browser, logins, a port in use                       |
+
+### For contributors
+
+| Guide                                                                                              | What it covers                                                                        |
+| :------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
+| [The API](docs/API.md)                                                                             | Every operation over HTTP, beside its command and slash command, and the live updates |
+| [Architecture](docs/ARCHITECTURE.md) · [Decisions](docs/DECISIONS.md) · [Testing](docs/TESTING.md) | How it is built, why, and how it is checked                                           |
 
 ## License
 

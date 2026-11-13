@@ -181,6 +181,20 @@ Without the token it runs browser-only. The data goes to `./data`, with the host
 `node src/cli/main.ts link` in the same folder makes a login link. yt-dlp needs a JavaScript runtime for YouTube:
 jukecord passes it its own Node.
 
+## Everyday use
+
+| To                   | With Docker Compose                                              |
+| :------------------- | :--------------------------------------------------------------- |
+| Open the panel       | `./jukecord open`                                                |
+| See how it runs      | `./jukecord status`, and `./jukecord doctor` to check every part |
+| Read the log         | `./jukecord logs`, or the **Log** page in the panel              |
+| Back up the database | `./jukecord backup`, into `./backups`                            |
+| Update               | `./jukecord backup && git pull && ./jukecord update`             |
+| Stop                 | `./jukecord down`; the data stays                                |
+
+Any other word goes to the `jukecord` command inside: `./jukecord np`, `./jukecord add <address or words>`
+([the jukecord command](README.md#the-jukecord-command)). On Kubernetes it runs through `kubectl exec`.
+
 ## Updating
 
 ```bash
