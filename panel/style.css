@@ -4641,6 +4641,11 @@ button.lyric {
 .listeners > .num {
   white-space: nowrap;
 }
+/* The number of the rest beside the faces it adds to, one group 4 px apart: with the 8 px of the row's other parts, a
+   laptop's narrow column (1024 px) was a pixel short of one face beside Invite. */
+.listeners > .faces + .num {
+  margin-left: calc(-1 * var(--s-4));
+}
 .listeners > .key[data-act="invite"] {
   margin-left: auto;
 }

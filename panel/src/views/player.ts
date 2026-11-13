@@ -2287,24 +2287,64 @@ export function voiceCard(): HTMLElement {
     presetKey.setAttribute('aria-label', presetLabel);
     presetKey.title = presetLabel;
     presetKey.disabled = !control;
-    // Who listens in browsers.
+    drawListening();
+  };
+  // Who listens in browsers: the words, as many faces as the row holds with Invite at its end (six at most), and the
+  // number of the rest. Five faces and "+1" beside the words sent Invite onto a line of its own at 1440 px.
+  let fittedWidth = -1;
+  // The row's words as drawn last, and whether Invite stands on their line (its top above their foot: a wrapped
+  // Invite starts under the line).
+  let label = h('span', { class: 'grow' });
+  const together = () => invite.getBoundingClientRect().top < label.getBoundingClientRect().bottom;
+  const drawListening = () => {
+    const words = t();
     const people = state.listeners.people;
     (invite.querySelector('.label') as HTMLElement).textContent = words.invite;
     invite.title = words.inviteToListen;
-    fill(
-      listening,
-      icon('headphones'),
-      h('span', { class: 'grow' }, words.listeningHere),
-      people.length > 0
-        ? h('span', { class: 'faces' }, ...people.slice(0, 6).map((person) => listenerFace(person)))
-        : h('span', { class: 'faint' }, words.nobody),
-      // Faces say who; a number only for the browsers beyond the six faces shown.
-      state.listeners.count > Math.min(6, people.length)
-        ? h('span', { class: 'faint num' }, `+${state.listeners.count - Math.min(6, people.length)}`)
-        : null,
-      mayInvite() ? invite : null,
-    );
+    label = h('span', { class: 'grow' }, words.listeningHere);
+    const most = Math.min(6, people.length);
+    // The faces made once, so fitting moves them rather than making them (and their pictures) again.
+    const faces = people.slice(0, most).map((person) => listenerFace(person));
+    const row = (shown: number) =>
+      fill(
+        listening,
+        icon('headphones'),
+        label,
+        shown > 0
+          ? h('span', { class: 'faces' }, ...faces.slice(0, shown))
+          : h('span', { class: 'faint' }, words.nobody),
+        // Faces say who; a number only for the browsers beyond the faces shown.
+        state.listeners.count > shown ? h('span', { class: 'faint num' }, `+${state.listeners.count - shown}`) : null,
+        mayInvite() ? invite : null,
+      );
+    row(most);
+    fittedWidth = listening.clientWidth;
+    // Nothing to give up (no Invite, one face or none), or not laid out (a hidden card): as drawn.
+    if (!mayInvite() || most <= 1 || fittedWidth === 0 || together()) return;
+    for (let shown = most - 1; shown >= 1; shown -= 1) {
+      row(shown);
+      if (together()) return;
+    }
+    // Not even one face beside it (a narrow column): every face on the first line, and Invite under them as before.
+    row(most);
   };
+  // Fitted again in the next frame (never inside the observer's own call, whose sizes it would change) when the row
+  // has another width (the window), or when Invite went under the words since the fit with faces to give up (a font
+  // came in after it and widened them). A fit that holds changes nothing, so this does not go round.
+  let refit = 0;
+  const fitSoon = () => {
+    if (refit) return;
+    refit = window.requestAnimationFrame(() => {
+      refit = 0;
+      const wrapped = mayInvite() && listening.contains(invite) && !together();
+      if (listening.clientWidth !== fittedWidth || (wrapped && listening.querySelectorAll('.faces > *').length > 1))
+        drawListening();
+    });
+  };
+  new ResizeObserver(fitSoon).observe(listening);
+  // Any of the panel's fonts coming in (a weight or a part of the alphabet first used by the faces or the count) takes
+  // another width than the row was fitted with: fitted again, with more faces too if they fit now.
+  document.fonts.addEventListener('loadingdone', () => drawListening());
   leave.onclick = () =>
     void act(leave, async () => {
       const id = guild();

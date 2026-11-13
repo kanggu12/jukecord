@@ -1647,19 +1647,35 @@ await sweep(
   },
   { login: false },
 );
-// Guests among the people listening, in the made-up Discord.
-await sweep('listeners-guest', FEW, null, {
-  discord: {
-    listeners: {
-      people: [
-        ...MADE_UP.listeners.people,
-        { id: null, name: 'Guest', avatar: null, guest: true },
-        { id: null, name: 'Friend', avatar: null, friend: true },
-      ],
-      count: 6,
+// Guests among the people listening, in the made-up Discord: as many faces as the row holds with Invite at its end
+// (five faces and "+1" sent Invite onto a line of its own at 1440 px), the number of the rest beside them.
+await sweep(
+  'listeners-guest',
+  FEW,
+  async (page) => {
+    await page.waitForSelector('.listeners .faces');
+    const off = await page.evaluate(() => {
+      const row = document.querySelector('.listeners');
+      const invite = row.querySelector('[data-act="invite"]').getBoundingClientRect();
+      const words = row.querySelector('.grow').getBoundingClientRect();
+      const faces = row.querySelectorAll('.faces > *').length;
+      return invite.top < words.bottom ? null : `Invite on a line of its own beside ${faces} faces`;
+    });
+    if (off) throw new Error(off);
+  },
+  {
+    discord: {
+      listeners: {
+        people: [
+          ...MADE_UP.listeners.people,
+          { id: null, name: 'Guest', avatar: null, guest: true },
+          { id: null, name: 'Friend', avatar: null, friend: true },
+        ],
+        count: 6,
+      },
     },
   },
-});
+);
 // What another app shared, on the page that adds it: for the host, and for a guest (who only listens).
 const SHARED = `/add?title=Paper%20Boats&text=${encodeURIComponent('Listen to this https://media.example/demo005')}`;
 // What came reads as words (its name over its address, in no box like a field's), and a key leaves without a change:
