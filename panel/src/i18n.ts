@@ -204,6 +204,7 @@ const EN = {
   loginTitle: 'Log in to jukecord',
   loginDiscord: 'Log in with Discord',
   loginHost: 'Ask the person who runs jukecord for a login link. On that machine:',
+  loginGuest: 'Ask the person who shared the link for a new one.',
   loginCompose: 'Docker Compose',
   loginElsewhere: 'Kubernetes or from source',
   loginErrors: {
@@ -668,6 +669,7 @@ const KO: Strings = {
   loginTitle: 'jukecord 로그인',
   loginDiscord: '디스코드로 로그인',
   loginHost: 'jukecord를 운영하는 사람에게 로그인 링크를 받으세요. jukecord가 실행 중인 컴퓨터에서:',
+  loginGuest: '링크를 보내 준 사람에게 새 링크를 받으세요.',
   loginCompose: 'Docker Compose',
   loginElsewhere: '쿠버네티스나 소스로 실행할 때',
   loginErrors: {

@@ -548,6 +548,8 @@ export function loginPage(status: Status | null, error: string | null): HTMLElem
   // Only the panel's own words for the errors it knows: the address's text is anyone's to write, and the page must not
   // say it in jukecord's name. Another code says only that the login did not go through.
   const message = error ? (words.loginErrors[error] ?? words.loginFailed) : null;
+  // Out of a listening link (it ended, was revoked, or is full): a guest, who has no login of their own to ask for.
+  const guest = error?.startsWith('listen-') ?? false;
   return h(
     'main',
     { class: 'login' },
@@ -575,16 +577,19 @@ export function loginPage(status: Status | null, error: string | null): HTMLElem
             words.loginDiscord,
           )
         : null,
-      h('p', null, words.loginHost),
+      // A guest whose listening link ended: a new link from whoever shared it (the host's commands are not theirs).
+      guest ? h('p', null, words.loginGuest) : h('p', null, words.loginHost),
       // Which command, by how jukecord was installed.
-      h(
-        'dl',
-        { class: 'login-commands' },
-        h('dt', null, words.loginCompose),
-        h('dd', null, h('code', null, './jukecord open')),
-        h('dt', null, words.loginElsewhere),
-        h('dd', null, h('code', null, 'jukecord link')),
-      ),
+      guest
+        ? null
+        : h(
+            'dl',
+            { class: 'login-commands' },
+            h('dt', null, words.loginCompose),
+            h('dd', null, h('code', null, './jukecord open')),
+            h('dt', null, words.loginElsewhere),
+            h('dd', null, h('code', null, 'jukecord link')),
+          ),
     ),
   );
 }

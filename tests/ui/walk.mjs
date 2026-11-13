@@ -1078,6 +1078,18 @@ await sweep(
   },
   { login: false },
 );
+// A guest whose listening link has ended, on the login page: told to ask whoever shared it for a new one, without the
+// host's commands for a machine the guest never sees.
+await sweep(
+  'login-guest',
+  FEW,
+  async (page) => {
+    await page.goto(`${BASE}/login?error=listen-ended`);
+    await page.waitForSelector('.login .card .notice');
+    if (await page.locator('.login-commands').count()) throw new Error("a guest is shown the host's commands");
+  },
+  { login: false },
+);
 // Guests among the people listening, in the made-up Discord.
 await sweep('listeners-guest', FEW, null, {
   discord: {
