@@ -180,7 +180,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'only its maker and people who can manage the server can revoke a listening link',
     '듣기 링크는 만든 사람과 서버 관리 권한이 있는 사람만 폐기할 수 있음',
   ],
-  ['a guest of a listening link can only listen', '듣기 링크로 들어온 손님은 듣기만 할 수 있음'],
+  ['a guest can only look and listen', '손님은 보고 듣기만 할 수 있음'],
   ['a listening link opens its own server only', '듣기 링크는 그 링크의 서버만 열 수 있음'],
   ['this listening link has ended or does not exist', '끝났거나 없는 듣기 링크'],
   ['this listening link has as many guests as it allows', '이 듣기 링크의 손님 자리가 가득 참'],

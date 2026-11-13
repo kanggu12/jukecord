@@ -712,8 +712,12 @@ export class Bot implements Directory, AlertSink {
             await interaction.editReply({
               embeds: [
                 moved === 0
-                  ? note(lang, 'The queue takes turns already', '대기열이 이미 번갈아 정렬됨')
-                  : note(lang, `Put the queue in turns: ${moved} moved`, `대기열을 번갈아 정렬함: ${moved}곡 옮김`),
+                  ? note(lang, 'Already in turns: nothing moved', '대기열이 이미 번갈아 놓여 있음')
+                  : note(
+                      lang,
+                      `Moved ${moved === 1 ? '1 track' : `${moved} tracks`} so people take turns`,
+                      `사람마다 번갈아 오도록 ${moved}곡 옮김`,
+                    ),
               ],
             });
             return;

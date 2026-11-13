@@ -183,7 +183,7 @@ function showPlayer(answer: unknown): string {
   const state =
     player.status === 'loading'
       ? player.waiting
-        ? 'Waiting for its turn'
+        ? 'Waiting to download'
         : `Getting ready${player.progress !== null ? ` (${Math.round(player.progress * 100)}%)` : ''}`
       : player.status === 'paused'
         ? 'Paused'
@@ -327,7 +327,7 @@ function showWrapped(answer: unknown): string {
   // "2026", "2026-03" or "the last 12 months", in the title and the song's line.
   const time = period.kind === 'last-12-months' ? 'the last 12 months' : period.key;
   const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)} in music (${period.from} to ${period.to})`];
-  if (wrapped.plays === 0) return [...lines, 'Nothing was played in this time'].join('\n');
+  if (wrapped.plays === 0) return [...lines, 'Nothing was played in this period'].join('\n');
   // Each count with its word in the singular or the plural, as it reads.
   const many = (count: number, one: string, more: string) => `${count} ${count === 1 ? one : more}`;
   lines.push(
@@ -922,7 +922,9 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     request: () => ({}),
     show: (answer) => {
       const moved = (answer as { moved: number }).moved;
-      return moved === 0 ? 'The queue takes turns already' : `Moved ${moved} ${moved === 1 ? 'track' : 'tracks'}`;
+      return moved === 0
+        ? 'Already in turns: nothing moved'
+        : `Moved ${moved} ${moved === 1 ? 'track' : 'tracks'} so people take turns`;
     },
   },
   'person-limit': {

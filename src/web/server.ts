@@ -134,7 +134,7 @@ const FETCHING: ReadonlySet<OperationName> = new Set(['skip', 'play-now', 'jump'
 // who it is and which server it opens, and the status. Anything else is refused before it is looked at, whatever its
 // access would allow a login; the audio and the live updates check the guest's server on their own.
 const GUEST_MAY: ReadonlySet<OperationName> = new Set(['now-playing', 'queue', 'lyrics', 'me', 'guilds', 'status']);
-const GUEST_ONLY = 'a guest of a listening link can only listen';
+const GUEST_ONLY = 'a guest can only look and listen';
 
 // What a refusal says when jukecord sheds work it can do later, and when a login or an address sends changes faster
 // than the rates allow.

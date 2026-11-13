@@ -324,7 +324,7 @@ describe('Wrapped in the jukecord command', () => {
       period: { kind: 'last-12-months', key: 'last-12-months', from: '2025-11-12', to: '2026-11-11' },
       plays: 0,
     });
-    assert.equal(empty, 'The last 12 months in music (2025-11-12 to 2026-11-11)\nNothing was played in this time');
+    assert.equal(empty, 'The last 12 months in music (2025-11-12 to 2026-11-11)\nNothing was played in this period');
   });
 });
 
@@ -397,7 +397,7 @@ describe('Wrapped in Discord', () => {
       // Nothing played: said in the card, which keeps its title.
       const quiet = wrappedCard(actions.wrapped(look, '2026-03', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
       assert.equal(quiet?.title, 'March 2026 in music');
-      assert.equal(quiet?.description, 'Nothing was played in this time');
+      assert.equal(quiet?.description, 'Nothing was played in this period');
       const twelve = wrappedCard(
         actions.wrapped(look, 'last-12-months', 540, NOW),
         'en',

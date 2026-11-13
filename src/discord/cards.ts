@@ -34,7 +34,8 @@ const TEXT = {
   playingNow: { en: 'Playing now', ko: '지금 재생' },
   paused: { en: 'Paused', ko: '일시정지' },
   loading: { en: 'Getting it ready', ko: '준비 중' },
-  waiting: { en: 'Waiting for its turn', ko: '차례를 기다리는 중' },
+  // A fetch waiting for its place among every server's downloads (not a person's turn: that is Take turns).
+  waiting: { en: 'Waiting to download', ko: '다운로드 대기 중' },
   nothing: { en: 'Nothing is playing', ko: '재생 중인 곡 없음' },
   queue: { en: 'Queue', ko: '대기열' },
   empty: { en: 'The queue is empty', ko: '대기열이 비어 있음' },
@@ -58,7 +59,7 @@ const TEXT = {
   topTracks: { en: 'Most played', ko: '많이 들은 곡' },
   topPeople: { en: 'Added most', ko: '많이 추가한 사람' },
   nobody: { en: 'the host', ko: '호스트' },
-  noStats: { en: 'Nothing was played in this time', ko: '이 기간에 들은 곡 없음' },
+  noStats: { en: 'Nothing was played in this period', ko: '이 기간에 들은 곡 없음' },
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
   onlyRole: { en: 'Only members with this role may change the music', ko: '이 역할이 있는 사람만 음악을 바꿀 수 있음' },

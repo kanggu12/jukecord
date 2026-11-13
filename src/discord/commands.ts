@@ -403,7 +403,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
       (option) =>
         option
           .setName('period')
-          .setDescription('Which time (default: this year)')
+          .setDescription('The period (default: this year)')
           .setNameLocalizations({ ko: '기간' })
           .setDescriptionLocalizations({ ko: '어느 기간(기본: 올해)' })
           .addChoices(
@@ -531,7 +531,7 @@ export function commandDefinitions(): RESTPostAPIChatInputApplicationCommandsJSO
           .setName('now')
           .setDescription('Put the queue in turns once')
           .setNameLocalizations({ ko: '맞추기' })
-          .setDescriptionLocalizations({ ko: '지금 대기열을 한 번 번갈아 정렬' }),
+          .setDescriptionLocalizations({ ko: '지금 대기열을 사람마다 번갈아 오도록 한 번 옮기기' }),
       ),
     command(
       'limit',

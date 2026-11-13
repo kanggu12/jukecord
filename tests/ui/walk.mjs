@@ -425,7 +425,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await page.waitForSelector('.history .row');
   await page.click('[data-act="listen"]');
   await page.waitForFunction(
-    () => document.querySelector('.listen .what span')?.textContent?.includes('In time'),
+    () => document.querySelector('.listen .what span')?.textContent?.includes('In sync'),
     null,
     {
       timeout: 15000,
@@ -454,7 +454,7 @@ if (!ONLY || ONLY.has('listening')) {
   let synced = false;
   for (let i = 0; i < 40 && !synced; i += 1) {
     await page.waitForTimeout(250);
-    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In sync'));
   }
   const audio = await page.evaluate(() => {
     const element = document.querySelector('audio') ?? [...document.querySelectorAll('*')].find(() => false);
@@ -1212,13 +1212,13 @@ if (!ONLY || ONLY.has('listening-sound')) {
   let synced = false;
   for (let i = 0; i < 40 && !synced; i += 1) {
     await page.waitForTimeout(250);
-    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+    synced = await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In sync'));
   }
   let still = true;
   for (const preset of ['night', 'bass']) {
     await api('PUT', '/guilds/local/voice/sound', { preset });
     await page.waitForTimeout(2500);
-    still &&= await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In time'));
+    still &&= await page.evaluate(() => document.querySelector('.listen .what span')?.textContent?.includes('In sync'));
   }
   report.push({
     state: 'listening-sound',
