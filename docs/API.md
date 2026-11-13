@@ -138,7 +138,7 @@ playlist) so a program does not need to ask again.
 | Operation | Request | Needs | CLI | Discord |
 | :-- | :-- | :-- | :-- | :-- |
 | `history` Played tracks, newest first | `GET /api/v1/guilds/{guild}/history` | read | `jukecord history` | `/history` |
-| `stats` Listening figures: plays per day and hour, most played tracks, who added most | `GET /api/v1/guilds/{guild}/stats` | read | `jukecord stats` | `/stats` |
+| `stats` Listening figures: plays per day and hour, most played tracks, whose picks played most | `GET /api/v1/guilds/{guild}/stats` | read | `jukecord stats` | `/stats` |
 | `wrapped` The server's year (or a month, or the last 12 months) in music: totals, top five tracks and people, moments | `GET /api/v1/guilds/{guild}/wrapped` | read | `jukecord wrapped` | `/wrapped` |
 | `likes` The tracks you liked, newest first | `GET /api/v1/guilds/{guild}/likes` | read | `jukecord likes` | `/likes show` |
 | `like` Like a track this server is playing, has queued or played (the DJ role is not needed) | `PUT /api/v1/guilds/{guild}/likes/{track}` | control | `jukecord like` | `/like` |

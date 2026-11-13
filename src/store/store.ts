@@ -715,7 +715,7 @@ export class HistoryRepository {
          GROUP BY h.track_id ORDER BY plays DESC, played_ms DESC, h.track_id LIMIT ?`,
       )
       .all(guildId, since, top) as Row[];
-    // Who added most: people and the host, not autoplay.
+    // Whose picks played most (plays of what each one added): people and the host, not autoplay.
     const people = db
       .prepare(
         `SELECT added_by, COUNT(*) AS plays, SUM(played_ms) AS played_ms

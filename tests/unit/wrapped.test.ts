@@ -97,7 +97,7 @@ describe('Wrapped', () => {
     }
   });
 
-  it("leaves autoplay's plays out of who added most and of the people, as the statistics do", async () => {
+  it("leaves autoplay's plays out of whose picks played most and of the people, as the statistics do", async () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
@@ -301,7 +301,8 @@ describe('Wrapped in the jukecord command', () => {
       playedMs: 3_900_000,
       tracks: 3,
       people: 2,
-      days: 5,
+      // More than a week of days with music: a busiest day and hour alone at the top are habits worth naming.
+      days: 8,
       topTracks: [{ track, plays: 9 }],
       topPeople: [
         { name: 'Alice', plays: 10 },
@@ -315,9 +316,11 @@ describe('Wrapped in the jukecord command', () => {
       keptFrom: null,
     });
     assert.match(text, /^2026 in music \(2026-01-01 to 2026-11-11\)/);
-    assert.match(text, /12 plays · 1 h 5 min · 3 tracks · 2 people · music on 5 days/);
+    assert.match(text, /12 plays · 1 h 5 min · 3 tracks · 2 people · music on 8 days/);
     assert.match(text, /Song of 2026: Morning Light \(played on 4 days, 9 times\)/);
-    assert.match(text, /\n {5}2 {2}the host\n/);
+    // The counts say they are plays, of a track and of what a person added.
+    assert.match(text, /Most played:\n {5}9 plays {2}Morning Light\n/);
+    assert.match(text, /Whose picks played most:\n {4}10 plays {2}Alice\n {5}2 plays {2}the host\n/);
     assert.match(text, /Busiest: Fridays, 22:00-23:00/);
     assert.match(text, /Longest day: 2026-07-04, 40 min \(4 plays\)/);
     assert.match(text, /First track: .*Morning Light, added by Alice/);
@@ -339,8 +342,30 @@ describe('Wrapped in the jukecord command', () => {
       keptFrom: null,
     });
     assert.match(quiet, /1 play · 2 min · 1 track · 1 person · music on 1 day/);
-    assert.match(quiet, /Song of 2025-11: Morning Light \(played on 1 day, once\)/);
+    // One play is no song of the month and no habit: neither is said.
+    assert.doesNotMatch(quiet, /Song of/);
+    assert.doesNotMatch(quiet, /Busiest/);
     assert.match(quiet, /Longest day: 2025-11-23, 2 min \(1 play\)/);
+    // Two days of 2.4 minutes: 5 minutes in all, and the longest of them 3 (rounded on its own it said 2).
+    const two = COMMANDS.wrapped.show({
+      period: { kind: 'month', key: '2025-11', from: '2025-11-01', to: '2025-11-30' },
+      plays: 2,
+      playedMs: 288_000,
+      tracks: 2,
+      people: 1,
+      days: 2,
+      topTracks: [{ track, plays: 1 }],
+      topPeople: [{ name: null, plays: 2 }],
+      weekdays: [1, 0, 0, 0, 0, 1, 0],
+      hours: Array.from({ length: 24 }, (_, hour) => (hour === 10 || hour === 19 ? 1 : 0)),
+      longestDay: { day: '2025-11-23', plays: 1, playedMs: 144_000 },
+      firstTrack: null,
+      song: { track, plays: 1, days: 1 },
+      keptFrom: null,
+    });
+    assert.match(two, /2 plays · 5 min · /);
+    assert.match(two, /Longest day: 2025-11-23, 3 min \(1 play\)/);
+    assert.doesNotMatch(two, /Busiest/);
     const empty = COMMANDS.wrapped.show({
       period: { kind: 'last-12-months', key: 'last-12-months', from: '2025-11-12', to: '2026-11-11' },
       plays: 0,
@@ -386,17 +411,16 @@ describe('Wrapped in Discord', () => {
         card?.description ?? '',
         /\*\*1\*\* play · listened \*\*1 h 7 min\*\* · \*\*1\*\* track · \*\*1\*\* person · music on \*\*1\*\* day/,
       );
-      assert.match(
-        card?.description ?? '',
-        /\*\*Song of 2026\*\*\n\[Track 1\]\(https:\/\/example.com\/watch\?v=v1\) · played on 1 day, once/,
-      );
-      assert.match(card?.description ?? '', /1\. <@300000000000000001> · 1/);
-      assert.equal(card?.thumbnail?.url, 'https://images.example.com/a.jpg');
+      // One play on one day: no song of the year (it played once) and no busiest day or hour (one evening is no
+      // habit), so neither is said, nor the song's picture.
+      assert.doesNotMatch(card?.description ?? '', /Song of/);
+      assert.equal(card?.thumbnail, undefined);
+      // The counts say they are plays, under a heading that says whose.
+      assert.match(card?.description ?? '', /\*\*Most played\*\*\n1\. .* · 1 play\n/);
+      assert.match(card?.description ?? '', /\*\*Whose picks played most\*\*\n1\. <@300000000000000001> · 1 play/);
       assert.deepEqual(
         card?.fields?.map((field) => [field.name, field.value]),
         [
-          ['Busiest day', 'Fridays'],
-          ['Busiest hour', '22:00-23:00'],
           ['Longest day', 'June 19 · 1 h 7 min'],
           ['First track', '[Track 1](https://example.com/watch?v=v1) · June 19'],
         ],
@@ -408,12 +432,10 @@ describe('Wrapped in Discord', () => {
       const kard = korean.embeds[0]?.toJSON();
       assert.equal(kard?.title, 'Night Owls · 2026년 음악 결산');
       assert.match(kard?.description ?? '', /재생 \*\*1\*\*회 · 들은 시간 \*\*1시간 7분\*\*/);
-      assert.match(kard?.description ?? '', /\*\*2026년의 노래\*\*\n.* · 1일에 걸쳐 1번 재생/);
-      assert.deepEqual(kard?.fields?.map((field) => field.value).slice(0, 3), [
-        '금요일',
-        '22:00-23:00',
-        '6월 19일 · 1시간 7분',
-      ]);
+      assert.doesNotMatch(kard?.description ?? '', /의 노래/);
+      assert.match(kard?.description ?? '', /음악을 들은 날수 \*\*1\*\*/);
+      assert.match(kard?.description ?? '', /<@300000000000000001> · 1회/);
+      assert.deepEqual(kard?.fields?.map((field) => field.value).slice(0, 1), ['6월 19일 · 1시간 7분']);
       assert.equal(korean.components.length, 0);
       // Nothing played: said in the card, which keeps its title.
       const quiet = wrappedCard(actions.wrapped(look, '2026-03', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
@@ -427,6 +449,55 @@ describe('Wrapped in Discord', () => {
         540,
       ).embeds[0]?.toJSON();
       assert.equal(twelve?.title, 'The last 12 months in music');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('names a busiest day and hour in the card when they are habits, and leaves out a tie', async () => {
+    const server = await testServer();
+    try {
+      const { store, actions } = server;
+      const [a] = addTracks(store, 1);
+      assert.ok(a);
+      // Music on nine Fridays and one Tuesday of 2026, at 21:30 in Seoul (12:30 UTC): Fridays, alone at the top, and
+      // the hour 21 alone, over more than a week of days, none of them most of the plays.
+      const days = [
+        Date.UTC(2026, 0, 2),
+        Date.UTC(2026, 0, 9),
+        Date.UTC(2026, 0, 16),
+        Date.UTC(2026, 0, 23),
+        Date.UTC(2026, 0, 30),
+        Date.UTC(2026, 1, 6),
+        Date.UTC(2026, 1, 13),
+        Date.UTC(2026, 1, 20),
+        Date.UTC(2026, 1, 27),
+        Date.UTC(2026, 2, 3),
+      ];
+      for (const day of days)
+        store.history.add({
+          guildId: GUILD,
+          trackId: a.id,
+          addedBy: ALICE,
+          playedAt: day + 12.5 * 3600_000,
+          playedMs: 180_000,
+        });
+      const card = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const fields = Object.fromEntries((card?.fields ?? []).map((field) => [field.name, field.value]));
+      assert.equal(fields['Busiest day'], 'Fridays');
+      assert.equal(fields['Busiest hour'], '21:00-22:00');
+      // Eight Tuesdays more, at 11:00: as many Tuesdays as Fridays, a tie, and the card names no busiest day.
+      for (let week = 0; week < 8; week += 1)
+        store.history.add({
+          guildId: GUILD,
+          trackId: a.id,
+          addedBy: ALICE,
+          playedAt: Date.UTC(2026, 3, 7 + week * 7, 2),
+          playedMs: 180_000,
+        });
+      const tied = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const names = (tied?.fields ?? []).map((field) => field.name);
+      assert.ok(!names.includes('Busiest day'), `a tie named a busiest day: ${JSON.stringify(tied?.fields)}`);
     } finally {
       await server.close();
     }

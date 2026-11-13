@@ -296,7 +296,7 @@ export const API = {
   stats: op({
     method: 'GET',
     path: '/guilds/{guild}/stats',
-    summary: 'Listening figures: plays per day and hour, most played tracks, who added most',
+    summary: 'Listening figures: plays per day and hour, most played tracks, whose picks played most',
     tag: 'history',
     access: 'read',
     params: InGuild,

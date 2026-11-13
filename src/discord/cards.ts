@@ -6,6 +6,8 @@
  */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown } from 'discord.js';
 import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
+import { busiestHour, busiestWeekday, hasSong } from '../core/facts.ts';
+import { type Length, withLongest } from '../core/lengths.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
 import type { Sound } from '../core/sound.ts';
@@ -57,7 +59,8 @@ const TEXT = {
   listened: { en: 'listened', ko: '들은 시간' },
   distinct: { en: 'tracks', ko: '곡' },
   topTracks: { en: 'Most played', ko: '많이 들은 곡' },
-  topPeople: { en: 'Added most', ko: '많이 추가한 사람' },
+  // Whose tracks were played most (the counts are plays of what each one added, not tracks added), as the panel says.
+  topPeople: { en: 'Whose picks played most', ko: '선곡이 많이 재생된 사람' },
   nobody: { en: 'the host', ko: '호스트' },
   noStats: { en: 'Nothing was played in this period', ko: '이 기간에 들은 곡 없음' },
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
@@ -368,6 +371,22 @@ export function playlistsCard(playlists: readonly Playlist[], lang: Lang): Embed
     );
 }
 
+// A count of plays with its word: "1 play", "1,807 plays", "1,807회" (a bare number beside a track read as anything).
+function playsOf(count: number, lang: Lang): string {
+  const number = count.toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US');
+  if (lang === 'ko') return `${number}회`;
+  return count === 1 ? '1 play' : `${number} plays`;
+}
+
+// A length as the panel rounds it (core/lengths.ts), in words: "3 h 12 min", "45 min", "45 s" ("3시간 12분").
+function lengthWords(length: Length, lang: Lang): string {
+  if (length.unit === 'second') return lang === 'ko' ? `${length.count}초` : `${length.count} s`;
+  const hours = Math.floor(length.count / 60);
+  const rest = length.count % 60;
+  if (lang === 'ko') return hours > 0 ? `${hours}시간 ${rest}분` : `${rest}분`;
+  return hours > 0 ? `${hours} h ${rest} min` : `${rest} min`;
+}
+
 // Listening time as people say it: "3 h 12 min", "45 min".
 function hoursMinutes(ms: number, lang: Lang): string {
   const minutes = Math.round(ms / 60_000);
@@ -387,7 +406,7 @@ function sparkline(days: StatsView['days']): string {
     .join('');
 }
 
-/** Listening figures: totals, plays per day, the most played tracks and who added most. */
+/** Listening figures: totals, plays per day, the most played tracks and whose picks played most. */
 export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(COLOUR.neutral).setTitle(TEXT.statsTitle[lang](stats.span));
   if (stats.plays === 0) return embed.setDescription(TEXT.noStats[lang]);
@@ -404,13 +423,15 @@ export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   if (stats.topTracks.length > 0) {
     lines.push('', `**${TEXT.topTracks[lang]}**`);
     for (const [index, entry] of stats.topTracks.slice(0, 5).entries()) {
-      lines.push(`${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${entry.plays}`);
+      lines.push(
+        `${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${playsOf(entry.plays, lang)}`,
+      );
     }
   }
   if (stats.topPeople.length > 0) {
     lines.push('', `**${TEXT.topPeople[lang]}**`);
     for (const entry of stats.topPeople.slice(0, 3)) {
-      lines.push(`${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${entry.plays}`);
+      lines.push(`${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${playsOf(entry.plays, lang)}`);
     }
   }
   return embed.setDescription(lines.join('\n'));
@@ -465,8 +486,8 @@ const WRAPPED = {
   song: { en: (time: string) => `Song of ${time}`, ko: (time: string) => `${time}의 노래` },
   songFacts: {
     en: (days: number, plays: number) =>
-      `played on ${days === 1 ? '1 day' : `${days} days`}, ${plays === 1 ? 'once' : `${plays} times`}`,
-    ko: (days: number, plays: number) => `${days}일에 걸쳐 ${plays}번 재생`,
+      `${days === 1 ? '' : `played on ${days} days, `}${plays === 1 ? 'once' : `${plays} times`}`,
+    ko: (days: number, plays: number) => (days === 1 ? `${plays}번 재생` : `${days}일에 걸쳐 ${plays}번 재생`),
   },
   lastYear: { en: 'the last 12 months', ko: '최근 12개월' },
   busiestDay: { en: 'Busiest day', ko: '가장 많이 들은 요일' },
@@ -538,12 +559,17 @@ export function wrappedCard(
     : [];
   if (view.plays === 0) return { embeds: [embed.setDescription(TEXT.noStats[lang])], components };
   const count = (value: number) => value.toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US');
+  // The time listened and the longest day, rounded so that they agree (two days of 2.4 minutes are 5 minutes, and the
+  // longest of them 3, not 2), as the panel shows them.
+  const { total, longest } = withLongest(view.playedMs, view.longestDay?.playedMs ?? 0, view.days);
   const totals =
     lang === 'ko'
-      ? `재생 **${count(view.plays)}**회 · 들은 시간 **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}**곡 · **${count(view.people)}**명 · 음악을 들은 날 **${count(view.days)}**일`
-      : `**${count(view.plays)}** ${view.plays === 1 ? 'play' : 'plays'} · listened **${hoursMinutes(view.playedMs, lang)}** · **${count(view.tracks)}** ${view.tracks === 1 ? 'track' : 'tracks'} · **${count(view.people)}** ${view.people === 1 ? 'person' : 'people'} · music on **${count(view.days)}** ${view.days === 1 ? 'day' : 'days'}`;
+      ? `재생 **${count(view.plays)}**회 · 들은 시간 **${lengthWords(total, lang)}** · **${count(view.tracks)}**곡 · **${count(view.people)}**명 · 음악을 들은 날수 **${count(view.days)}**`
+      : `**${count(view.plays)}** ${view.plays === 1 ? 'play' : 'plays'} · listened **${lengthWords(total, lang)}** · **${count(view.tracks)}** ${view.tracks === 1 ? 'track' : 'tracks'} · **${count(view.people)}** ${view.people === 1 ? 'person' : 'people'} · music on **${count(view.days)}** ${view.days === 1 ? 'day' : 'days'}`;
   const lines = [totals];
-  if (view.song) {
+  // A song of the time only when one played more than once (core/facts.ts): among tracks played once each, it was only
+  // the longest of them.
+  if (view.song && hasSong(view)) {
     const song = view.song;
     lines.push(
       '',
@@ -556,25 +582,33 @@ export function wrappedCard(
   }
   lines.push('', `**${TEXT.topTracks[lang]}**`);
   for (const [index, entry] of view.topTracks.entries())
-    lines.push(`${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${count(entry.plays)}`);
+    lines.push(
+      `${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${playsOf(entry.plays, lang)}`,
+    );
   lines.push('', `**${TEXT.topPeople[lang]}**`);
   for (const [index, entry] of view.topPeople.entries())
-    lines.push(`${index + 1}. ${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${count(entry.plays)}`);
+    lines.push(
+      `${index + 1}. ${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${playsOf(entry.plays, lang)}`,
+    );
   if (view.keptFrom) lines.push('', WRAPPED.kept[lang](view.keptFrom));
   embed.setDescription(lines.join('\n'));
-  // The moments, side by side: the busiest day of the week and hour of the day (the first of the most), the longest
-  // day, the first track.
-  const weekday = view.weekdays.indexOf(Math.max(...view.weekdays));
-  const hour = view.hours.indexOf(Math.max(...view.hours));
-  embed.addFields(
-    { name: WRAPPED.busiestDay[lang], value: WRAPPED.weekdays[lang][weekday] ?? '', inline: true },
-    { name: WRAPPED.busiestHour[lang], value: `${hour}:00-${hour + 1}:00`, inline: true },
-  );
+  // The moments, side by side: the busiest day of the week and hour of the day where they are true (core/facts.ts: never
+  // from a tie, a habit only from a week of days with music, not one long day's), the longest day, the first track.
+  const weekday = busiestWeekday(view);
+  const hour = busiestHour(view);
+  if (weekday >= 0)
+    embed.addFields({ name: WRAPPED.busiestDay[lang], value: WRAPPED.weekdays[lang][weekday] ?? '', inline: true });
+  if (hour >= 0)
+    embed.addFields({
+      name: WRAPPED.busiestHour[lang],
+      value: `${String(hour).padStart(2, '0')}:00-${String(hour + 1).padStart(2, '0')}:00`,
+      inline: true,
+    });
   if (view.longestDay) {
     const day = view.longestDay;
     embed.addFields({
       name: WRAPPED.longestDay[lang],
-      value: `${dayName(day.day, view.period, lang)} · ${hoursMinutes(day.playedMs, lang)}`,
+      value: `${dayName(day.day, view.period, lang)} · ${lengthWords(longest, lang)}`,
       inline: true,
     });
   }

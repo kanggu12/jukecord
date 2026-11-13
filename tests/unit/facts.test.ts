@@ -1,10 +1,10 @@
 /**
- * Wrapped names a busiest day or hour, and a song of the time, only when it is true (panel/src/facts.ts): never from a
+ * Wrapped names a busiest day or hour, and a song of the time, only when it is true (src/core/facts.ts): never from a
  * tie, never a habit from a few days or from one long night, never a song among tracks played once each.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { alone, busiestHour, busiestWeekday, HABIT_DAYS, hasSong } from '../../panel/src/facts.ts';
+import { alone, busiestHour, busiestWeekday, HABIT_DAYS, hasSong } from '../../src/core/facts.ts';
 
 // Twenty-four hours, zero but the ones given.
 const hours = (given: Record<number, number>) => Array.from({ length: 24 }, (_, hour) => given[hour] ?? 0);

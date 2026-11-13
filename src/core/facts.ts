@@ -4,10 +4,25 @@
  * played once each would be shared, in a picture, as a fact it is not. What is not true is left out, silently: the
  * page and the picture show the other figures.
  *
- * Kept apart from the pages (which need a browser), as axis.ts is, so the rules are tested as they are
- * (tests/unit/facts.test.ts).
+ * Shared by the panel's page and pictures, the Discord card and the command line, so the three say the same facts; kept
+ * apart from them, so the rules are tested as they are (tests/unit/facts.test.ts).
  */
-import type { Wrapped } from './api.ts';
+
+/** What the rules read of a time's Wrapped (the API's answer, the bot's and the command line's views alike). */
+export interface Wrapped {
+  /** Plays on each day of the week, Sunday first. */
+  readonly weekdays: readonly number[];
+  /** Plays in each hour of the day, 0 to 23. */
+  readonly hours: readonly number[];
+  /** Days with music in the time. */
+  readonly days: number;
+  /** Plays in the time. */
+  readonly plays: number;
+  /** The day with the most time listened ("YYYY-MM-DD"), with its plays. */
+  readonly longestDay: { readonly day: string; readonly plays: number; readonly playedMs?: number } | null;
+  /** The song of the time, with how often it played. */
+  readonly song: { readonly plays: number } | null;
+}
 
 /** How many days with music a time needs before it names a habit: a week of them. Fewer, and one evening decides. */
 export const HABIT_DAYS = 7;

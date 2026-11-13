@@ -308,7 +308,7 @@ is among those plays (a new one) gets one of the older half of them, so its musi
 track" asks YouTube (through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a
 server that wants something new, and falls back to the history. One track is queued when the last one starts, so it is fetched in
 time; its row says Autoplay, people's tracks added at the end go before it, and statistics and Wrapped leave it out of
-who added most. It is nobody's turn when people take turns (its tracks stay after people's), and the limit of tracks per
+whose picks played most. It is nobody's turn when people take turns (its tracks stay after people's), and the limit of tracks per
 person does not count it. A Stop ends it until a track starts again: the music does not start by itself after someone
 stopped it, and a stop asked for after this track is a Stop too. It picks only while the music goes on: a player paused
 by a person, or resting with nobody listening, gets its pick when it plays again.

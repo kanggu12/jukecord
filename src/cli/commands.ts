@@ -7,6 +7,8 @@
  */
 
 import fs from 'node:fs';
+import { busiestHour, busiestWeekday, hasSong } from '../core/facts.ts';
+import { type Length, withLongest } from '../core/lengths.ts';
 import { sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
@@ -294,9 +296,10 @@ interface WrappedJson {
   keptFrom: string | null;
 }
 
-// "12 h 5 min", "45 min": time listened as people say it.
-function listened(ms: number): string {
-  const minutes = Math.round(ms / 60_000);
+// "12 h 5 min", "45 min", "45 s": a length as the panel rounds it (core/lengths.ts), as people say it.
+function listened(length: Length): string {
+  if (length.unit === 'second') return `${length.count} s`;
+  const minutes = length.count;
   return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
 }
 
@@ -338,37 +341,44 @@ function showWrapped(answer: unknown): string {
   if (wrapped.plays === 0) return [...lines, 'Nothing was played in this period'].join('\n');
   // Each count with its word in the singular or the plural, as it reads.
   const many = (count: number, one: string, more: string) => `${count} ${count === 1 ? one : more}`;
+  // The time listened and the longest day rounded together, so that they agree as the panel shows them.
+  const { total, longest } = withLongest(wrapped.playedMs, wrapped.longestDay?.playedMs ?? 0, wrapped.days);
   lines.push(
     [
       many(wrapped.plays, 'play', 'plays'),
-      listened(wrapped.playedMs),
+      listened(total),
       many(wrapped.tracks, 'track', 'tracks'),
       many(wrapped.people, 'person', 'people'),
       `music on ${many(wrapped.days, 'day', 'days')}`,
     ].join(' · '),
   );
-  if (wrapped.song) {
+  // A song of the time only when one played more than once (core/facts.ts): among tracks played once each, it was only
+  // the longest of them.
+  if (wrapped.song && hasSong(wrapped)) {
     const song = wrapped.song;
-    // "played on 1 day, once" for a song of a quiet month, as people say it.
-    const days = song.days === 1 ? '1 day' : `${song.days} days`;
-    const times = song.plays === 1 ? 'once' : `${song.plays} times`;
-    lines.push(`Song of ${time}: ${song.track.title} (played on ${days}, ${times})`);
+    // "played 3 times" for a song of one day, "played on 4 days, 9 times" otherwise, as people say it.
+    const times = `${song.plays} times`;
+    lines.push(
+      `Song of ${time}: ${song.track.title} (${song.days === 1 ? times : `played on ${song.days} days, ${times}`})`,
+    );
   }
+  // The counts with their word: they are plays, of a track or of what a person added (not tracks added).
+  const plays = (count: number) => many(count, 'play', 'plays').padStart(10);
   lines.push('Most played:');
-  for (const entry of wrapped.topTracks) lines.push(`  ${String(entry.plays).padStart(4)}  ${entry.track.title}`);
-  lines.push('Added most:');
-  for (const entry of wrapped.topPeople)
-    lines.push(`  ${String(entry.plays).padStart(4)}  ${entry.name ?? 'the host'}`);
-  // The busiest day of the week and hour of the day: the first of the most, as the panel shows them.
-  const weekday = wrapped.weekdays.indexOf(Math.max(...wrapped.weekdays));
-  const hour = wrapped.hours.indexOf(Math.max(...wrapped.hours));
+  for (const entry of wrapped.topTracks) lines.push(`  ${plays(entry.plays)}  ${entry.track.title}`);
+  lines.push('Whose picks played most:');
+  for (const entry of wrapped.topPeople) lines.push(`  ${plays(entry.plays)}  ${entry.name ?? 'the host'}`);
+  // The busiest day of the week and hour of the day, each where it is true (core/facts.ts: never from a tie, a habit
+  // only from a week of days with music, not one long day's), as the panel shows them.
+  const weekday = busiestWeekday(wrapped);
+  const hour = busiestHour(wrapped);
   const names = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
-  lines.push(`Busiest: ${names[weekday]}, ${hour}:00-${hour + 1}:00`);
+  const two = (value: number) => String(value).padStart(2, '0');
+  const busiest = [weekday >= 0 ? names[weekday] : null, hour >= 0 ? `${two(hour)}:00-${two(hour + 1)}:00` : null];
+  if (busiest.some(Boolean)) lines.push(`Busiest: ${busiest.filter(Boolean).join(', ')}`);
   if (wrapped.longestDay) {
     const day = wrapped.longestDay;
-    lines.push(
-      `Longest day: ${day.day}, ${listened(day.playedMs)} (${day.plays === 1 ? '1 play' : `${day.plays} plays`})`,
-    );
+    lines.push(`Longest day: ${day.day}, ${listened(longest)} (${many(day.plays, 'play', 'plays')})`);
   }
   if (wrapped.firstTrack) {
     const first = wrapped.firstTrack;
@@ -533,10 +543,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       const lines = [
         `The last ${stats.span} days: ${stats.plays} plays, ${hoursMinutes(stats.playedMs)}, ${stats.tracks} tracks`,
       ];
+      // The counts with their word: they are plays, of a track or of what a person added (not tracks added).
+      const plays = (count: number) => `${count} ${count === 1 ? 'play' : 'plays'}`.padStart(10);
       if (stats.topTracks.length > 0) lines.push('Most played:');
-      for (const entry of stats.topTracks.slice(0, 10)) lines.push(`  ${entry.plays}  ${entry.track.title}`);
-      if (stats.topPeople.length > 0) lines.push('Added most:');
-      for (const entry of stats.topPeople.slice(0, 5)) lines.push(`  ${entry.plays}  ${entry.name ?? 'the host'}`);
+      for (const entry of stats.topTracks.slice(0, 10)) lines.push(`  ${plays(entry.plays)}  ${entry.track.title}`);
+      if (stats.topPeople.length > 0) lines.push('Whose picks played most:');
+      for (const entry of stats.topPeople.slice(0, 5))
+        lines.push(`  ${plays(entry.plays)}  ${entry.name ?? 'the host'}`);
       return lines.join('\n');
     },
   },

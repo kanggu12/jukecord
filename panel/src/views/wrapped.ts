@@ -7,9 +7,10 @@
  * The time is in the page's address (/stats/wrapped?period=2026-03), so a link (the Discord card's) opens that time;
  * choosing another puts it there too, and Back goes to the one before.
  */
+
+import { busiestHour, busiestWeekday, hasSong } from '../../../src/core/facts.ts';
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
-import { busiestHour, busiestWeekday, hasSong } from '../facts.ts';
 import { state, t, watch } from '../state.ts';
 import {
   dayRangeText,
