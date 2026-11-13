@@ -3363,6 +3363,18 @@ kbd {
   .sound input[type="range"] {
     height: 44px;
   }
+  /* A finger's keys (44 px) in the voice card's rows: rows as tall as their keys put the channels' Join keys a pixel
+     apart and the sound's key on the line above it. Each row with a key keeps 8 px between its key and the next key
+     or line: the channels 4 px each above and below inside a list 4 px from its ends, the sound's row 8 px. */
+  .channels {
+    padding-block: var(--s-4);
+  }
+  .channels > .channel {
+    padding-block: var(--s-4);
+  }
+  .sound {
+    padding-block: var(--s-8);
+  }
 }
 
 /* The queue's tools on a narrow card: Take turns now waits behind the tools key with the others (see the rule for

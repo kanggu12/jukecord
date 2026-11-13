@@ -371,7 +371,9 @@ await sweep(
   },
   { touch: true },
 );
-// A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows.
+// A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows. The
+// voice card's keys of a finger's size keep apart from each other and from the lines between its rows (in rows as tall
+// as the keys, the channels' Join keys were a pixel apart and the sound's key on the line above it).
 await sweep(
   'tablet',
   [
@@ -379,7 +381,33 @@ await sweep(
     [1180, 820],
     [1366, 950],
   ],
-  null,
+  async (page) => {
+    await page.waitForSelector('.channels .channel .key');
+    const close = await page.evaluate(() => {
+      const card = document.querySelector('.card[aria-labelledby="voice-h"]');
+      const keys = [...card.querySelectorAll('.key')]
+        .filter((key) => key.getClientRects().length > 0)
+        .map((key) => key.getBoundingClientRect());
+      // The lines between the rows: the top edges of the rows that draw one.
+      const lines = [...card.children]
+        .filter((row) => Number.parseFloat(getComputedStyle(row).borderTopWidth) > 0)
+        .map((row) => row.getBoundingClientRect().top);
+      const found = [];
+      for (const [index, key] of keys.entries()) {
+        for (const other of keys.slice(index + 1)) {
+          const side = Math.min(key.right, other.right) - Math.max(key.left, other.left);
+          const apart = Math.max(other.top - key.bottom, key.top - other.bottom);
+          if (side > 0 && apart < 4) found.push(`two keys ${apart.toFixed(1)} px apart`);
+        }
+        for (const line of lines) {
+          const apart = Math.min(Math.abs(key.top - line), Math.abs(key.bottom - line));
+          if (apart < 4) found.push(`a key ${apart.toFixed(1)} px from a line`);
+        }
+      }
+      return found;
+    });
+    if (close.length > 0) throw new Error(`the voice card's keys are too close: ${close.join(', ')}`);
+  },
   { discord: true, touch: true },
 );
 
