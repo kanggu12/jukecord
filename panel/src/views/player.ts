@@ -13,6 +13,7 @@ import {
   api,
   coverUrl,
   type HistoryEntry,
+  type Listener,
   type Player,
   type PlaylistFile,
   type QueueItem,
@@ -2121,13 +2122,7 @@ export function voiceCard(): HTMLElement {
       icon('headphones'),
       h('span', { class: 'grow' }, words.listeningHere),
       people.length > 0
-        ? h(
-            'span',
-            { class: 'faces' },
-            ...people
-              .slice(0, 6)
-              .map((person) => face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm')),
-          )
+        ? h('span', { class: 'faces' }, ...people.slice(0, 6).map((person) => listenerFace(person)))
         : h('span', { class: 'faint' }, words.nobody),
       // Faces say who; a number only for the browsers beyond the six faces shown.
       state.listeners.count > Math.min(6, people.length)
@@ -2395,11 +2390,17 @@ export function historyCard(): HTMLElement {
 }
 
 /** A listener's name as the panel says it: a guest, a friend and the host in the person's language, anyone else by
- * name. The host has no Discord name (the server says "Host"): in the panel's words, its face's letter is the account
- * key's ("호" in Korean, where the server's word made it "H"). */
-export function listenerName(person: { id: string | null; name: string; guest?: boolean; friend?: boolean }): string {
+ * name (the host has no Discord name: the server says "Host"). */
+export function listenerName(person: Omit<Listener, 'avatar'>): string {
   if (person.guest) return t().guest;
   if (person.friend) return t().friend;
   if (person.id === null) return t().host;
   return person.name;
+}
+
+/** A listener's face, small: a Discord picture or initials, and for a role (a guest, a friend, the host: no account,
+ * no id) a person, as the account key shows it. */
+export function listenerFace(person: Listener): HTMLElement {
+  const role = Boolean(person.guest || person.friend || person.id === null);
+  return face(listenerName(person), avatarUrl(person.id, person.avatar), 'sm', role);
 }

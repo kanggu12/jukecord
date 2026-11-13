@@ -378,7 +378,8 @@ function frame(): void {
       refill(
         account,
         `${me.id}|${name}|${me.avatar}`,
-        face(name, avatarUrl(me.id, me.avatar), 'sm'),
+        // The host, a friend and a guest have no account: a person in their face, not the letter of a word.
+        face(name, avatarUrl(me.id, me.avatar), 'sm', me.kind !== 'user'),
         // Cut short when long (a Discord name can be 32 letters), with the whole name as its title.
         h('span', { class: 'name', title: name, 'data-clip': 'ok' }, name),
         icon('menu'),

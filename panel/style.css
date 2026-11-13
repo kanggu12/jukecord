@@ -683,6 +683,23 @@ img {
   width: 20px;
   height: 20px;
 }
+/* A role's face (the host, a guest, a friend: no account, so no name to take letters from): a person in the second
+   ink on a solid grey, as a server's icon without a picture is shown, with no hue (a role is not one person to tell
+   apart). Solid, so a face over the one before it in a row of faces hides it as a picture does. */
+.avatar.role {
+  background: color-mix(in oklch, var(--ink) 14%, var(--panel-opaque));
+  color: var(--ink-2);
+}
+/* The person in the middle of the face, seven tenths of its width (the icon's own box is a line's height), its lines
+   as heavy as the letters of the faces beside it (the icons' own 2 units of 24 drew a hair at 20 px). Of a class's
+   weight, as the icon rules after it are. */
+:where(.avatar.role) .icon {
+  width: 70%;
+  height: 70%;
+}
+:where(.avatar.role) .icon svg {
+  stroke-width: 2.4;
+}
 
 /* Toasts live inside the bar, never over the cards (they would cut across their edges). */
 .toasts {

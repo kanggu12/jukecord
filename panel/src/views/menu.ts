@@ -114,8 +114,16 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     h(
       'div',
       { class: 'line' },
-      face(named, avatarUrl(me.id, me.avatar)),
-      h('div', { class: 'grow' }, h('b', null, named), how ? h('div', { class: 'faint' }, how) : null),
+      // A role (the host, a friend, a guest) has no account: a person in its face, as on the account key.
+      face(named, avatarUrl(me.id, me.avatar), '', me.kind !== 'user'),
+      h(
+        'div',
+        { class: 'grow' },
+        // The name on one line, cut short when long (a Discord name can be 32 letters), whole in its title: the sheet's
+        // head is as tall as its close key, and a name of two lines would stand below the key.
+        h('b', { class: 'who-name', title: named, 'data-clip': 'ok' }, named),
+        how ? h('div', { class: 'faint' }, how) : null,
+      ),
     ),
   );
   // The pages, for narrow windows where the bar has no room for them.

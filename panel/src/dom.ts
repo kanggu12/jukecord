@@ -165,11 +165,20 @@ export function guildIconUrl(id: string, hash: string | null, size = 64): string
   return hash ? `https://cdn.discordapp.com/icons/${id}/${hash}.png?size=${size}` : null;
 }
 
-/** A round picture with the person's initials behind it, shown when the picture is missing or fails to load. */
-export function face(name: string, url: string | null, extra = ''): HTMLElement {
-  const box = h('span', { class: `avatar ${extra}`.trim(), title: name }, initials(name));
-  // The colour behind the letters: a hue from the name, the same for a person everywhere (style.css .avatar).
-  box.style.setProperty('--hue', String(hueOf(name)));
+/**
+ * A round picture with the person's initials behind it, shown when the picture is missing or fails to load. A role (the
+ * host, a guest, a friend: a login with no account, so no name of its own) shows a person instead of letters, on a
+ * neutral face: the role's word gave letters that read as a name ("손" for a guest reads as the surname Son).
+ */
+export function face(name: string, url: string | null, extra = '', role = false): HTMLElement {
+  const box = h(
+    'span',
+    { class: ['avatar', role ? 'role' : '', extra].filter(Boolean).join(' '), title: name },
+    role ? icon('user') : initials(name),
+  );
+  // The colour behind the letters: a hue from the name, the same for a person everywhere (style.css .avatar). A role
+  // has none: it is no one person to tell apart, and its word (whose hue it took) changed with the language.
+  if (!role) box.style.setProperty('--hue', String(hueOf(name)));
   if (url) {
     // Not lazy: the picture is not in the page until it has loaded, and a lazy picture outside the page never loads.
     const img = h('img', { src: url, alt: '', referrerpolicy: 'no-referrer' });
