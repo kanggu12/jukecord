@@ -1400,6 +1400,104 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await context.close();
 }
 
+// ---- the cover's light ---------------------------------------------------------------------------------------------
+// The light behind the glass is the cover's, and a soft light, not a tint: with the boldest covers playing (a green, an
+// amber, and the seed's most saturated, a purple), the field and a card's face stay near grey, measured on the page's
+// picture in OKLCH. 0.3.0 washed the whole panel in the cover's colour (the field's chroma up to 0.107, a card's face
+// up to 0.039, with the green cover of the README's picture); and the light must still be seen near the top.
+const COVER_LIGHT = { covers: ['demo002', 'demo014', 'demo006'], field: 0.03, face: 0.02, lift: 0.01 };
+// A colour (0 to 255 each) in OKLab: lightness and the two axes, whose length is the chroma.
+function oklab([r, g, b]) {
+  const linear = (value) => {
+    const v = value / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const [R, G, B] = [linear(r), linear(g), linear(b)];
+  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+  const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+  const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+const chroma = ([, a, b]) => Math.hypot(a, b);
+// The mean colour of some boxes ([x, y, width, height]) of the page as it is drawn, read from its picture on a blank
+// page's canvas (the panel's own page refuses pictures from data: addresses, rightly).
+async function drawn(page, boxes) {
+  const png = await page.screenshot();
+  const blank = await page.context().newPage();
+  const means = await blank.evaluate(
+    async ([data, boxes]) => {
+      const picture = new Image();
+      picture.src = `data:image/png;base64,${data}`;
+      await picture.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = picture.width;
+      canvas.height = picture.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(picture, 0, 0);
+      return boxes.map(([x, y, width, height]) => {
+        const pixels = ctx.getImageData(Math.round(x), Math.round(y), width, height).data;
+        const sum = [0, 0, 0];
+        for (let at = 0; at < pixels.length; at += 4) for (let c = 0; c < 3; c += 1) sum[c] += pixels[at + c];
+        return sum.map((value) => value / (pixels.length / 4));
+      });
+    },
+    [png.toString('base64'), boxes],
+  );
+  await blank.close();
+  return means;
+}
+await sweep(
+  'cover-light',
+  [
+    [390, 844],
+    [1440, 900],
+    [1920, 1080],
+  ],
+  async (page) => {
+    const problems = [];
+    for (const cover of COVER_LIGHT.covers) {
+      const played = await api('POST', '/guilds/local/player/play', { input: `https://media.example/${cover}` });
+      const title = played.items[0]?.track.title ?? '';
+      // The page shows it, and its light is on (motion is off on the walk's pages: no fade to wait for).
+      await page.waitForFunction((title) => document.title.startsWith(title), title);
+      await page.waitForSelector('.ambient > div.on');
+      await page.waitForTimeout(300);
+      // The field above the first card and in the gap under it, and the face of the add card in its padding.
+      const where = await page.evaluate(() => {
+        const cards = [...document.querySelectorAll('main .card')].filter((card) => card.offsetParent);
+        const first = cards[0].getBoundingClientRect();
+        const next = cards.map((card) => card.getBoundingClientRect()).find((box) => box.top > first.bottom - 1);
+        const add = document.querySelector('.add-card').getBoundingClientRect();
+        const middle = first.left + first.width / 2 - 50;
+        return [
+          [middle, first.top - 7, 100, 3],
+          [middle, (first.bottom + next.top) / 2 - 1, 100, 3],
+          [add.left + 4, add.top + add.height / 2 - 3, 6, 6],
+        ];
+      });
+      const [top, gap, face] = (await drawn(page, where)).map(oklab);
+      // The same top of the field without the light: how much the light shows there.
+      await page.evaluate(() => {
+        document.querySelector('.ambient').style.visibility = 'hidden';
+      });
+      const [bare] = (await drawn(page, [where[0]])).map(oklab);
+      await page.evaluate(() => {
+        document.querySelector('.ambient').style.visibility = '';
+      });
+      const lift = Math.hypot(...top.map((value, at) => value - bare[at]));
+      const field = Math.max(chroma(top), chroma(gap));
+      if (field > COVER_LIGHT.field) problems.push(`${cover}: the field's chroma ${field.toFixed(3)}`);
+      if (chroma(face) > COVER_LIGHT.face) problems.push(`${cover}: a card's chroma ${chroma(face).toFixed(3)}`);
+      if (lift < COVER_LIGHT.lift) problems.push(`${cover}: the light shows ${lift.toFixed(3)} at the top`);
+    }
+    if (problems.length > 0) throw new Error(`the cover's light tints the panel: ${problems.join('; ')}`);
+  },
+);
+
 await browser.close();
 fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
 

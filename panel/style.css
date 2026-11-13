@@ -26,15 +26,15 @@
      the glass is the cover's, while a track plays). */
   --bg: #0d0e12;
   --bg-top: #111318;
-  --ambient: 0.32;
-  --ambient-tone: saturate(1.5) brightness(0.6);
+  --ambient: 0.24;
+  --ambient-tone: saturate(0.45) brightness(0.7);
   /* The glass of the cards: one flat translucent pane (the field's light shows through it). */
   --panel: rgba(30, 32, 39, 0.55);
   --panel-solid: rgba(22, 23, 29, 0.96);
   /* The same, with nothing showing through (less transparency). */
   --panel-opaque: #16171d;
   --edge: rgba(255, 255, 255, 0.085);
-  --glass: blur(24px) saturate(160%);
+  --glass: blur(24px);
   /* One soft shadow under what floats over the field: a card, a sheet, a dialog. */
   --shadow: 0 16px 40px -24px rgba(0, 0, 0, 0.7);
   /* A key's face and the face under the pointer (or chosen); a field's face, darker than the glass it is in. */
@@ -76,8 +76,8 @@
   color-scheme: light;
   --bg: #eef0f4;
   --bg-top: #f6f7f9;
-  --ambient: 0.19;
-  --ambient-tone: saturate(1.7) brightness(1.3);
+  --ambient: 0.16;
+  --ambient-tone: saturate(0.45) brightness(1.2);
   --panel: rgba(255, 255, 255, 0.62);
   --panel-solid: rgba(255, 255, 255, 0.97);
   --panel-opaque: #ffffff;
@@ -114,8 +114,8 @@
     color-scheme: light;
     --bg: #eef0f4;
     --bg-top: #f6f7f9;
-    --ambient: 0.19;
-    --ambient-tone: saturate(1.7) brightness(1.3);
+    --ambient: 0.16;
+    --ambient-tone: saturate(0.45) brightness(1.2);
     --panel: rgba(255, 255, 255, 0.62);
     --panel-solid: rgba(255, 255, 255, 0.97);
     --panel-opaque: #ffffff;
@@ -232,12 +232,12 @@
    1920 px beside the dark one, so it gets more there. */
 @media (min-width: 1600px) {
   :root[data-theme="light"] {
-    --ambient: 0.3;
+    --ambient: 0.22;
   }
 }
 @media (min-width: 1600px) and (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --ambient: 0.3;
+    --ambient: 0.22;
   }
 }
 html {
@@ -260,13 +260,17 @@ body {
 }
 /* The light behind the glass: the cover of the track playing, blurred far out of shape and toned for the theme
    (dimmed on the dark field, brightened on the pale one), fading in and out as tracks change. Two layers take turns.
-   Each is drawn at a tenth of the window and scaled up: blurring a small picture costs far less than a large one. */
+   Each is drawn at a tenth of the window and scaled up: blurring a small picture costs far less than a large one.
+   A soft light, not a tint: the cover's colours less saturated than the cover's own (--ambient-tone), weak, and
+   falling off from the top of the window, so the field and the glass read as grey with a hint of the cover's hue
+   (tests/ui/walk.mjs, cover-light, holds the field and a card's face to a low chroma with the boldest covers). */
 .ambient {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+  mask-image: linear-gradient(180deg, #000, rgb(0 0 0 / 0.55) 60%, rgb(0 0 0 / 0.35));
 }
 .ambient > div {
   position: absolute;
@@ -1098,7 +1102,7 @@ img {
   z-index: -1;
   border-radius: 50%;
   background: var(--cover, none) center / cover;
-  filter: blur(26px) saturate(1.6);
+  filter: blur(26px);
   opacity: 0;
   transform: scale(1.15);
   transition: opacity 0.8s ease;
@@ -2899,7 +2903,7 @@ kbd {
   z-index: -1;
   border-radius: 24px;
   background: var(--glow, none) center / cover;
-  filter: blur(26px) saturate(1.5);
+  filter: blur(26px);
   opacity: 0.55;
 }
 .wrapped-song .record .album {
@@ -4147,7 +4151,7 @@ button.lyric:hover {
   z-index: -1;
   border-radius: 50%;
   background: var(--cover, none) center / cover;
-  filter: blur(26px) saturate(1.6);
+  filter: blur(26px);
   opacity: 0;
   transform: scale(1.1);
   will-change: opacity;
@@ -4156,7 +4160,7 @@ button.lyric:hover {
 /* The glow's wider layer, further out and softer, seen only on the loudest beats: the glow seems to swell with them
    while nothing changes size. */
 .art .beat.wide {
-  filter: blur(34px) saturate(1.6);
+  filter: blur(34px);
   transform: scale(1.32);
 }
 /* The field's extra light: the cover again (its place and blur are the field's layers', above), with no fade of its

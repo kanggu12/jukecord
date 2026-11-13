@@ -109,9 +109,9 @@ function lookNow(): Look {
     rainbow: (token('--rainbow') || '#ff6f61, #ffb84d, #4fcf86, #4aa3ff, #a77bff, #ff6f61')
       .split(',')
       .map((part) => part.trim()),
-    ambient: Number(token('--ambient')) || 0.32,
-    saturate: Number(/saturate\(([\d.]+)\)/.exec(tone)?.[1] ?? 1.5),
-    brightness: Number(/brightness\(([\d.]+)\)/.exec(tone)?.[1] ?? 0.6),
+    ambient: Number(token('--ambient')) || 0.24,
+    saturate: Number(/saturate\(([\d.]+)\)/.exec(tone)?.[1] ?? 0.45),
+    brightness: Number(/brightness\(([\d.]+)\)/.exec(tone)?.[1] ?? 0.7),
   };
 }
 
