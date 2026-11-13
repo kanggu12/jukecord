@@ -680,6 +680,25 @@ await sweep(
   },
   { forced: true },
 );
+// No colour on the page is drawn with a hue it lost. Mixed in oklch with transparent, a colour of little chroma (the
+// inks, the light field) kept its chroma but lost its hue, which the browser drew at 0°, a rose: the light theme's
+// bars were pink, its grey ink warm.
+async function noLostHue(page) {
+  const lost = await page.evaluate(() => {
+    const found = new Set();
+    for (const element of document.querySelectorAll('html, body, body *')) {
+      for (const part of [null, '::before', '::after']) {
+        const style = getComputedStyle(element, part);
+        for (const value of [style.color, style.backgroundColor, style.borderTopColor, style.boxShadow])
+          for (const match of value.matchAll(/oklch\(([\d.]+) ([\d.]+) none/g))
+            if (Number(match[2]) > 0.003)
+              found.add(`${element.tagName.toLowerCase()}.${element.classList[0] ?? ''}${part ?? ''}: ${match[0]}`);
+      }
+    }
+    return [...found];
+  });
+  if (lost.length > 0) throw new Error(`colours drawn with a lost hue: ${lost.slice(0, 3).join(' | ')}`);
+}
 await sweep('stats', SIZES, async (page) => {
   // The link in the bar on a wide window; on a narrow one the links are in the menu, so the address itself (waiting
   // for a hidden link to become pressable would take half a minute a page).
@@ -696,6 +715,7 @@ await sweep('stats', SIZES, async (page) => {
     (counts) => counts.filter((count) => /^\s*[\d,]+\s*$/.test(count.textContent ?? '')).length,
   );
   if (bare > 0) problems.push(`${bare} counts in the ranks with no unit`);
+  await noLostHue(page).catch((error) => problems.push(error.message));
   if (problems.length > 0) throw new Error(problems.join('; '));
 });
 await sweep('stats-tip', FEW, async (page) => {
@@ -1556,6 +1576,10 @@ await sweep(
     await page.click('[data-act="menu"]');
     await page.waitForSelector('.sheet .settings .switch');
     await page.waitForTimeout(400);
+    const problems = [];
+    await settingsLook(page).catch((error) => problems.push(error.message));
+    await noLostHue(page).catch((error) => problems.push(error.message));
+    if (problems.length > 0) throw new Error(problems.join('; '));
   },
   { discord: { djRole: true } },
 );

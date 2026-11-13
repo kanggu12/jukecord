@@ -71,8 +71,11 @@
   --groove: rgba(255, 255, 255, 0.045);
   --disc: #0b0c10;
   /* The charts' bars and the ranks' meters: ink, as the rest of the page's figures (a blue of their own meant nothing;
-     colour is for what it means: play, pause, load, a problem, and the rainbow of the mark). */
-  --series: color-mix(in oklch, var(--ink) 58%, transparent);
+     colour is for what it means: play, pause, load, a problem, and the rainbow of the mark).
+     Every mix with transparent is made in srgb, which keeps the colour as it is and thins it. In oklch a colour of
+     little chroma (the inks, the light field) lost its hue against transparent's, and the browser drew the chroma
+     left at hue 0, a rose: the light theme's bars were pink and its grey ink warm. */
+  --series: color-mix(in srgb, var(--ink) 58%, transparent);
   --rest: #f4f4f5;
   /* The mark's colours: the same rainbow on the arch, the disc's rim and the progress bar. */
   --rainbow: #ff6f61, #ffb84d, #4fcf86, #4aa3ff, #a77bff, #ff6f61;
@@ -118,7 +121,7 @@
   --focus: oklch(0.55 0.15 250);
   --groove: rgba(255, 255, 255, 0.06);
   --disc: #16181f;
-  --series: color-mix(in oklch, var(--ink) 52%, transparent);
+  --series: color-mix(in srgb, var(--ink) 52%, transparent);
   --rest: #aab0c0;
 }
 @media (prefers-color-scheme: light) {
@@ -161,7 +164,7 @@
     --focus: oklch(0.55 0.15 250);
     --groove: rgba(255, 255, 255, 0.06);
     --disc: #16181f;
-    --series: color-mix(in oklch, var(--ink) 52%, transparent);
+    --series: color-mix(in srgb, var(--ink) 52%, transparent);
     --rest: #aab0c0;
   }
 }
@@ -356,7 +359,7 @@ img {
   display: block;
 }
 ::selection {
-  background: color-mix(in oklch, var(--load) 35%, transparent);
+  background: color-mix(in srgb, var(--load) 35%, transparent);
 }
 :focus-visible {
   outline: 2px solid var(--focus);
@@ -434,7 +437,7 @@ img {
    a word beside the name, the connection its lamp and its word, the pages their words with the one in use underlined
    along the bar's foot, the account a bare key. Under the pointer a part takes a faint tint of the bar's glass. */
 .bar {
-  --bar-hover: color-mix(in oklch, var(--ink) 6%, transparent);
+  --bar-hover: color-mix(in srgb, var(--ink) 6%, transparent);
   position: sticky;
   top: 0;
   z-index: 30;
@@ -445,7 +448,7 @@ img {
   padding: var(--safe-top) max(16px, var(--safe-right)) 0 max(16px, var(--safe-left));
   height: var(--bar-h);
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
-  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-bottom: 1px solid var(--line);
@@ -563,7 +566,7 @@ img {
   height: 8px;
   border-radius: 50%;
   background: var(--tone, var(--ink-3));
-  box-shadow: 0 0 6px 1px color-mix(in oklch, var(--tone, var(--ink-3)) 60%, transparent);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--tone, var(--ink-3)) 60%, transparent);
   flex: none;
 }
 .tone-idle .dot,
@@ -685,9 +688,10 @@ img {
 }
 /* A role's face (the host, a guest, a friend: no account, so no name to take letters from): a person in the second
    ink on a solid grey, as a server's icon without a picture is shown, with no hue (a role is not one person to tell
-   apart). Solid, so a face over the one before it in a row of faces hides it as a picture does. */
+   apart). Solid, so a face over the one before it in a row of faces hides it as a picture does. Mixed in srgb: in
+   oklch the light theme's ink and white both have no hue, and the mix came out a faint rose. */
 .avatar.role {
-  background: color-mix(in oklch, var(--ink) 14%, var(--panel-opaque));
+  background: color-mix(in srgb, var(--ink) 14%, var(--panel-opaque));
   color: var(--ink-2);
 }
 /* The person in the middle of the face, seven tenths of its width (the icon's own box is a line's height), its lines
@@ -919,7 +923,7 @@ img {
 @media (hover: hover) {
   .key:hover {
     background: var(--raised-2);
-    border-color: color-mix(in oklch, var(--ink) 20%, transparent);
+    border-color: color-mix(in srgb, var(--ink) 20%, transparent);
   }
 }
 .key:active:not(:disabled) {
@@ -968,7 +972,7 @@ img {
 @media (hover: hover) {
   .key.quiet.bad:hover {
     color: var(--bad);
-    background: color-mix(in oklch, var(--bad) 12%, transparent);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
   }
 }
 /* A key is at least as wide as it is tall: a short word on a small key (Join, Leave) stays a finger's width on a touch
@@ -989,8 +993,8 @@ img {
   width: var(--control-sm);
 }
 .key[aria-pressed="true"] {
-  background: color-mix(in oklch, var(--load) 16%, transparent);
-  border-color: color-mix(in oklch, var(--load) 40%, transparent);
+  background: color-mix(in srgb, var(--load) 16%, transparent);
+  border-color: color-mix(in srgb, var(--load) 40%, transparent);
   color: var(--ink);
 }
 .key:disabled,
@@ -1028,13 +1032,13 @@ img {
 /* Under a mouse only (see .server:hover). */
 @media (hover: hover) {
   .field:hover {
-    border-color: color-mix(in oklch, var(--ink) 28%, transparent);
+    border-color: color-mix(in srgb, var(--ink) 28%, transparent);
   }
 }
 /* Focused: its line in the focus colour and a soft ring of it round the field (no glow). */
 .field:focus-within {
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent);
 }
 /* The input fills the field, which holds the room round its words (the browser's own padding would add a pixel). */
 .field input {
@@ -1106,7 +1110,7 @@ img {
 .seg button[aria-pressed="true"] {
   background: var(--accent-soft);
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 /* A field in a head is of the head's small size, as its keys are. */
 .card-head .field {
@@ -1164,7 +1168,7 @@ img {
   height: 20px;
   translate: 0 -50%;
   border-radius: 10px;
-  background: color-mix(in oklch, var(--ink) 22%, transparent);
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
   transition: background 160ms ease;
 }
 /* The knob. */
@@ -1484,7 +1488,7 @@ img {
   top: 6px;
   height: 4px;
   border-radius: 2px;
-  background: color-mix(in oklch, var(--ink) 30%, transparent);
+  background: color-mix(in srgb, var(--ink) 30%, transparent);
   transition:
     top 0.15s ease,
     height 0.15s ease;
@@ -1509,7 +1513,7 @@ img {
   background: conic-gradient(var(--rainbow));
 }
 .paused .track .fill {
-  background: color-mix(in oklch, var(--ink) 45%, transparent);
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
 }
 .paused .track .knob {
   background: var(--rest);
@@ -1777,7 +1781,7 @@ img {
   overflow: hidden;
   background: var(--raised-2);
   /* A hairline round the picture, so a cover of the field's own colour still has an edge (no shadow: it is flat). */
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
 }
 .album .case img {
   width: 100%;
@@ -2038,7 +2042,7 @@ img {
   border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--raised-2);
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--ink) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
 }
 .result .cover img {
   width: 100%;
@@ -2125,7 +2129,7 @@ img {
   content: "";
   position: absolute;
   inset: -1px;
-  border: 2px dashed color-mix(in oklch, var(--focus) 70%, transparent);
+  border: 2px dashed color-mix(in srgb, var(--focus) 70%, transparent);
   border-radius: inherit;
   pointer-events: none;
   opacity: 1;
@@ -2143,8 +2147,8 @@ img {
 /* ---- autoplay --------------------------------------------------------------------------------------------------- */
 /* The queue's autoplay key: on, it takes the tint of a key that is on (a contrast theme fills it, below). */
 .autoplay-key.on {
-  background: color-mix(in oklch, var(--load) 16%, transparent);
-  border-color: color-mix(in oklch, var(--load) 40%, transparent);
+  background: color-mix(in srgb, var(--load) 16%, transparent);
+  border-color: color-mix(in srgb, var(--load) 40%, transparent);
 }
 /* The key says what it is in words, as the head's tools do. A card of 640 px or less (a phone's, a narrow window's)
    lists autoplay, named with its mode, with the tools behind the queue's tools key (see toolsMore), at the width the
@@ -2232,7 +2236,7 @@ img {
 .paste:focus-visible {
   outline: 0;
   border-color: var(--focus);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent);
 }
 /* Smaller text in a field makes Safari zoom the page. */
 @media (max-width: 900px) {
@@ -2437,7 +2441,7 @@ img {
   /* Its parts above the home bar and clear of the corners; its glass reaches the edges. */
   padding: 0 max(16px, var(--safe-right)) var(--safe-bottom) max(16px, var(--safe-left));
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
-  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-top: 1px solid var(--line);
@@ -2462,7 +2466,7 @@ img {
 }
 .listen .key[data-act="listen"][aria-pressed="true"] {
   background: var(--accent-soft);
-  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--ink);
 }
 /* The player's own keys on the bar, and the sleep timer: bare icons, a tint under the pointer. */
@@ -3323,7 +3327,7 @@ kbd {
   flex: 1;
   min-width: 0;
   border-radius: var(--r-sm) var(--r-sm) 0 0;
-  background: color-mix(in oklch, var(--series) 38%, transparent);
+  background: color-mix(in srgb, var(--series) 38%, transparent);
 }
 .moment .spark i.top {
   background: var(--series);
@@ -3846,7 +3850,7 @@ kbd {
     right: 0;
     bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
     padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
-    background: color-mix(in oklch, var(--bg) 90%, transparent);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
     border-top: 1px solid var(--line);
@@ -4369,7 +4373,7 @@ kbd {
   text-align: left;
   font: 700 var(--fs-xl) / var(--lh-xl) var(--font);
   letter-spacing: -0.01em;
-  color: color-mix(in oklch, var(--ink) 52%, transparent);
+  color: color-mix(in srgb, var(--ink) 52%, transparent);
   transition:
     color 0.35s ease,
     background 0.2s ease;
@@ -4381,7 +4385,7 @@ button.lyric {
 @media (hover: hover) {
   button.lyric:hover {
     background: var(--hover-tint);
-    color: color-mix(in oklch, var(--ink) 75%, transparent);
+    color: color-mix(in srgb, var(--ink) 75%, transparent);
   }
 }
 /* The line being sung: the text's own ink (no glow round it: the brighter words say it). */
