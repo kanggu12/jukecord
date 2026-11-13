@@ -810,6 +810,33 @@ img {
   min-height: 0;
   height: calc(100dvh - var(--bar-h) - var(--listen-h));
 }
+/* A guest on a window with two columns: one column in the middle, the playing card and the queue, as wide as the
+   player's column beside the lyrics; the right column only while the lyrics are open, as they live there. Who listens is
+   in the listening bar and until when the guest's link works in the menu: beside them the guest's card was a column's
+   height of glass holding one line ("Nobody is listening yet") and its link's end. */
+.main.guest {
+  grid-template-columns: minmax(0, calc(100% - var(--side-w) - var(--gap)));
+  justify-content: center;
+}
+.main.guest > .col.side:not(.lyrics-open) {
+  display: none;
+}
+.main.guest:has(> .col.side.lyrics-open) {
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+}
+/* So does a sheet hanging at the window's right (the menu): the player stands where it stands beside the lyrics, the
+   sheet over the right column's place with its edge in the gap (over the column in the middle, it cut across its
+   cards). From 2460 px the sheet hangs in the page's side, clear of the column (.sheet:not(.left)). */
+@media (width < 2460px) {
+  body:has(> .sheet:not(.left)) .main.guest {
+    grid-template-columns: minmax(0, 1fr) var(--side-w);
+  }
+}
+/* Alone in the middle, the queue ends at its last row (a card the window's height round three rows was mostly empty
+   glass); beside the lyrics it fills its column, so the two columns end together. */
+.main.guest:not(:has(> .col.side.lyrics-open)) .card.fill[aria-labelledby="queue-h"] {
+  flex: 0 1 auto;
+}
 .main.single {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -3714,6 +3741,15 @@ kbd {
        and the page under it is where the rest of the cards are. */
     overscroll-behavior: auto;
   }
+  /* A guest's cards one under another as anyone's, the guest's card under the queue: a phone's listening bar has no
+     room for the faces of who listens (and the lyrics open as a sheet here, see lyrics.ts), with a sheet open too. */
+  .main.guest,
+  body:has(> .sheet:not(.left)) .main.guest {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .main.guest > .col.side:not(.lyrics-open) {
+    display: flex;
+  }
 }
 /* A wide window short of height, with a mouse, keeps two columns: the playing card gives up height (a smaller disc,
    less padding), so the queue under it still shows its rows. "Wider than 1100 px", not "at least 1101": a zoomed
@@ -4744,13 +4780,12 @@ button.lyric {
   display: grid;
   gap: var(--s-8);
 }
-/* The guest's card fills the column beside the player, as the history does for members (so the two columns end
-   together), the guest's link at its foot. */
+/* The guest's link at the card's foot, under the people (the card shows in one column only, as tall as what it holds). */
 .guest-until {
   display: flex;
   align-items: flex-start;
   gap: var(--s-6);
-  margin: auto 0 0;
+  margin: 0;
   padding: var(--s-12) var(--pad);
   border-top: 1px solid var(--line);
   color: var(--ink-2);

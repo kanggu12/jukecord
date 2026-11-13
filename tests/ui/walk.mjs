@@ -1423,16 +1423,47 @@ async function asGuest(page) {
   const pill = (await page.locator('.bar .pill').textContent()) ?? '';
   if (/guest|손님/i.test(pill)) throw new Error(`a guest's pill says: ${pill}`);
 }
-// A guest's card says nobody listens yet as the other cards say an empty list (a bare "Nobody" in the corner of a card
-// the column's height read as unfinished).
+// A guest's player. On a window with two columns: one column in the middle, the playing card and the queue, the queue
+// ending at its last row, and the right column only while the lyrics are open (a card of 760 px held "Nobody is
+// listening yet" and its link's end, which the listening bar and the menu say). On one column (a phone): the guest's
+// card under the queue says who listens, nobody yet as the other cards say an empty list.
+async function guestLayout(page) {
+  const problems = await page.evaluate(() => {
+    const found = [];
+    const main = document.querySelector('.main');
+    const [player, side] = main.querySelectorAll(':scope > .col');
+    const at = player.getBoundingClientRect();
+    if (side.classList.contains('lyrics-open')) return found;
+    if (side.getClientRects().length > 0) {
+      // One column: the guest's card under the player's, saying nobody listens yet when nobody does.
+      if (side.getBoundingClientRect().top < at.bottom - 0.5) found.push("the guest's card stands beside the player");
+      const people = side.querySelectorAll('.guest-people > li:not(.empty)').length;
+      if (people === 0 && !side.querySelector('.guest-people > li.empty')?.getClientRects().length)
+        found.push("the guest's card does not say nobody listens yet");
+      return found;
+    }
+    // Two columns' window: the player alone, in the middle of the window.
+    const across = at.left - (document.documentElement.clientWidth - at.right);
+    if (Math.abs(across) > 1) found.push(`the player stands ${across.toFixed(1)} px off the window's middle`);
+    // Its queue, when it scrolls not, ends at its last row (the list's 8 px and the card's edge under it).
+    const card = document.querySelector('.card[aria-labelledby="queue-h"]');
+    const list = card.querySelector('.queue-list');
+    const last = list.lastElementChild;
+    if (last && list.scrollHeight <= list.clientHeight + 1) {
+      const room = card.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+      if (room > 12) found.push(`the queue's card runs ${Math.round(room)} px past its last row`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(problems.join('; '));
+}
 await sweep(
   'guest',
   SIZES,
   async (page) => {
     await asGuest(page);
-    const people = await page.locator('.guest-people > li:not(.empty)').count();
-    if (people === 0 && !(await page.locator('.guest-people > li.empty').isVisible()))
-      throw new Error("the guest's card does not say nobody listens yet");
+    await guestLayout(page);
+    await edgesFade(page);
   },
   { login: false },
 );
@@ -1442,12 +1473,17 @@ await sweep(
   async (page) => {
     await asGuest(page);
     await openLyrics(page);
+    // Beside the player on two columns' windows (the right column only now), a sheet on one.
+    await guestLayout(page);
+    await edgesFade(page);
   },
   { login: false },
 );
+// A guest's menu: the player stands where it stands beside the lyrics while the sheet is open (over the column in the
+// middle, the sheet's edge cut across its cards).
 await sweep(
   'guest-menu',
-  FEW,
+  [...FEW, [2560, 1400]],
   async (page) => {
     await asGuest(page);
     await page.click('[data-act="menu"]');
