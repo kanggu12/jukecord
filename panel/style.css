@@ -2613,10 +2613,11 @@ img {
     display: none;
   }
 }
+/* From the sheet's top: its first section is its head, with its own room above (below). */
 .sheet .sheet-body {
   flex: 1;
   min-height: 0;
-  padding: var(--s-8) 0 var(--pad);
+  padding: 0 0 var(--pad);
 }
 /* The sheet's own close key, in its top corner (clear of a phone's rounded corner); the first section leaves it room:
    the key and the card inset beside it. */
@@ -2642,6 +2643,24 @@ img {
 }
 .sheet .sheet-body > :first-child {
   padding-right: calc(var(--s-12) + var(--control-sm) + var(--pad));
+}
+/* The first section is the sheet's head (the menu's who): as tall as the close key with 12 px above and below it, its
+   row in the middle, so the key stands on that row's centre at either key size (the row, 20 px down under a key 12 px
+   down, stood 12 px below the key's centre with a mouse's key and 4 px with a finger's). */
+.sheet .sheet-body > .section:first-child {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(2 * var(--s-12) + var(--control-sm));
+  padding-block: 0;
+}
+/* The menu's name of who is logged in: one line, cut short when long (its title has it whole), so the head keeps the
+   close key's height. */
+.who-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* A sheet floats over the page at its own size: its inset stays the phone's and the laptop's 16 px on any window (the
    page's grows with the window's width; a sheet's room for its close key, 12 + 28 + 16, stays on the scale). */

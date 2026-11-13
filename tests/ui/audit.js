@@ -9,7 +9,7 @@
  * - overlap: two pieces of text drawn over each other;
  * - contrast: text below 4.5:1 against what is really behind it (translucent layers composited), 3:1 when large;
  * - align: the controls of one row (keys, fields, pickers, rows of choices, menus) at different heights, or with the
- *   labels and words standing in that row, at different centres;
+ *   labels and words standing in that row, at different centres; a sheet's close key off the centre of its first row;
  * - icon: an icon (or a lamp, a face, a swatch) off the centre of the line of words beside it;
  * - label: the words of a key, a pill, a badge or a face off the middle of their frame: upright their capitals (Korean,
  *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are;
@@ -765,6 +765,18 @@ window.__audit = () => {
     if (!outer || !seen(inner) || outer.matches('.seg') || inner.matches('input, select, textarea')) continue;
     const off = middle(inner.getBoundingClientRect()) - middle(outer.getBoundingClientRect());
     if (Math.abs(off) > HALF) add('align', inner, `${px(off)} px off the middle of ${describe(outer)}`);
+  }
+  // A sheet's close key, in its corner, stands on the centre of the sheet's first row: the menu's who, the lyrics'
+  // head (fixed 12 px from the top, it stood 12 px above the menu's first row at 1440). Measured with the sheet at its
+  // top, as it opens.
+  for (const close of document.querySelectorAll('.sheet > .sheet-close')) {
+    const body = close.parentElement.querySelector('.sheet-body');
+    const head = body?.firstElementChild;
+    if (!head || !seen(close) || body.scrollTop > 0) continue;
+    // The head's first row: a line of words and controls, or the head itself (a card's head is one).
+    const row = head.matches('.card-head') ? head : (head.querySelector('.line, .card-head') ?? head);
+    const off = middle(close.getBoundingClientRect()) - middle(row.getBoundingClientRect());
+    if (Math.abs(off) > HALF) add('align', close, `${px(off)} px off the centre of ${describe(row)}`);
   }
 
   // An icon and its words: the mark's centre on the centre of the line beside it (the first line, when the words take
