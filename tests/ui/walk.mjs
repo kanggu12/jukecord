@@ -822,6 +822,29 @@ await sweep(
   },
   { discord: { view: true } },
 );
+// The queue's tools say what they do in words (Shuffle, Take turns where there is room, and the key that lists the rest
+// with theirs: as six bare icons on a short window, Take turns and Remove duplicates could not be told), on the line of
+// the queue's title, so the queue under it keeps its rows (and on a wide window short of height, the search too).
+async function toolsInWords(page) {
+  const problems = await page.evaluate(() => {
+    const tools = document.querySelector('.card-head .tools:has(> .tools-more)');
+    const found = [...tools.querySelectorAll(':scope > .key:not(.tools-more)')]
+      .filter((key) => key.getClientRects().length > 0 && !key.querySelector('.label')?.getClientRects().length)
+      .map((key) => `${key.dataset.act} without its word`);
+    const middle = (element) => {
+      const box = element.getBoundingClientRect();
+      return (box.top + box.bottom) / 2;
+    };
+    const head = tools.closest('.card-head');
+    const title = middle(head.querySelector('h2'));
+    const sameLine = window.innerWidth > 1100 ? [tools, head.querySelector('.head-search')] : [tools];
+    for (const part of sameLine) {
+      if (Math.abs(middle(part) - title) > 1) found.push(`${part.className} off the title's line`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the queue's head: ${problems.join(', ')}`);
+}
 // Wide windows short of height (a 1366 by 768 laptop with the browser's bars, a 1920 by 1080 screen at 150 %): two
 // columns, the playing card shorter, the add field and the queue's rows in sight.
 await sweep(
@@ -831,9 +854,11 @@ await sweep(
     [1280, 610],
     [1920, 700],
   ],
-  null,
+  toolsInWords,
   { touch: false },
 );
+// A laptop's 1024 by 768 with a mouse: two columns, the queue's tools on the title's line, in words.
+await sweep('laptop-tools', [[1024, 768]], toolsInWords, { touch: false });
 // Touch screens as wide but short (an iPad Air held sideways under Safari's bars, an Android tablet under Chrome's):
 // one column, as a phone, since their keys are taller.
 await sweep(
@@ -948,6 +973,7 @@ await sweep(
           : 'nowhere to be seen',
     );
     if (where !== 'the right column') throw new Error(`the lyrics opened in ${where} beside two columns`);
+    await toolsInWords(page);
   },
   { touch: false },
 );

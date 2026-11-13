@@ -1094,12 +1094,14 @@ export function queueCard(): HTMLElement {
       const result = await api.dedupe(guild());
       toast(t().deduped(result.removed));
     });
-  // The tools a narrow card hides, as a list; each runs what its key would.
+  // The tools the card hides (a phone's, a short window's), as a list with their words; each runs what its key would.
+  // Only those hidden: Shuffle, and autoplay's key on a card that shows it, are not listed again.
   toolsMore.onclick = () => {
     const words = t();
     const box = h('div', { class: 'menu-list' });
     const dialog = showDialog(words.queue, box);
     const choice = (source: HTMLButtonElement, name: IconName, text: string, bad = false) => {
+      if (source.getClientRects().length > 0) return null;
       const button = h(
         'button',
         // Named after the key it stands for, so tests (and people reading the page) can tell the choices apart.
