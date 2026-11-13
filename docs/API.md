@@ -58,8 +58,8 @@ Every error is the same shape, with the HTTP status that matches its code:
 |    409 | `conflict`     | not possible now: nothing is playing, the queue is full                        |
 |    429 | `too-many`     | too many failed logins from this address                                       |
 |    429 | `rate-limited` | changes faster than the rates below; `Retry-After` says when to try again      |
-|    503 | `unavailable`  | a part jukecord needs is missing: no bot (browser-only), Discord not answering |
-|    503 | `unavailable`  | a busy moment: every lookup taken, LRCLIB not answering; with `Retry-After`    |
+|    503 | `unavailable`  | a part jukecord needs is missing: no bot (browser-only), a feature turned off  |
+|    503 | `unavailable`  | a moment's trouble: lookups all taken, Discord or LRCLIB silent; `Retry-After` |
 |    503 | `busy`         | jukecord has fallen behind and turns away what can wait; `Retry-After` too     |
 
 ### Rates and busy moments

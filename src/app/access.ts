@@ -58,6 +58,10 @@ export interface AccessOptions {
 
 // The answer while Discord has not sent the server list yet (the first seconds after a start); panels ask again.
 const STILL_CONNECTING = 'jukecord is still connecting to Discord; try again in a moment';
+// When to ask again after a moment's trouble with Discord (Retry-After): the list usually comes within seconds, and a
+// question that went unanswered may be answered at the next. Said like jukecord's own busy answers, so the command
+// line's exit code tells "later" from "no" here too.
+const DISCORD_RETRY_MS = 2000;
 // The answer to a guest asking for any server but its link's: the same whether that server exists or not.
 const OTHER_SERVER = 'a listening link opens its own server only';
 
@@ -102,7 +106,7 @@ export class Access {
       return [];
     }
     // Just started: an empty list now would read as "the bot is in no server".
-    if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING);
+    if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING, { retryAfterMs: DISCORD_RETRY_MS });
     const guilds = directory.guilds();
     if (principal.kind === 'host') return guilds.map((guild) => ({ ...guild, mayControl: true, mayManage: true }));
     // A friend: every server the host has, to view or control. A guest: its link's server, while the bot is there.
@@ -137,7 +141,7 @@ export class Access {
       if (principal.kind !== 'host') throw new ActionError('forbidden', 'only the host can use jukecord here');
       return { guildId, userId: null, mayControl: true, mayManage: true };
     }
-    if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING);
+    if (!directory.loaded()) throw new ActionError('unavailable', STILL_CONNECTING, { retryAfterMs: DISCORD_RETRY_MS });
     if (!directory.guilds().some((guild) => guild.id === guildId)) {
       throw new ActionError('not-found', 'the bot is not in that server');
     }
@@ -188,6 +192,7 @@ export class Access {
         throw new ActionError(
           'unavailable',
           `Discord did not answer: ${error instanceof Error ? error.message : String(error)}`,
+          { retryAfterMs: DISCORD_RETRY_MS },
         );
       })
       .finally(() => this.asking.delete(key));

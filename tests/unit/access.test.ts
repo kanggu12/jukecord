@@ -137,6 +137,11 @@ describe('Access', () => {
     const { directory, access } = setup();
     directory.down = true;
     assert.equal(await code(() => access.context({ kind: 'user', userId: ALICE }, GUILD)), 'unavailable');
+    // A moment's trouble, said with when to ask again (Retry-After), as jukecord's own busy answers are.
+    await assert.rejects(
+      access.context({ kind: 'user', userId: ALICE }, GUILD),
+      (error: unknown) => error instanceof ActionError && error.retryAfterMs === 2000,
+    );
   });
 
   it('has one local server in browser-only mode, for the host only', async () => {

@@ -462,6 +462,8 @@ describe('logging in with Discord through the server', () => {
       const early = await app.inject({ method: 'GET', url: api('/guilds'), headers: asHost });
       assert.equal(early.statusCode, 503);
       assert.equal(early.json().error.code, 'unavailable');
+      // "Try again in a moment" says when, as every busy answer does (the command line's exit code 4 reads it).
+      assert.equal(early.headers['retry-after'], '2');
       server.directory.serversKnown = true;
       const stranger = await login();
       assert.equal(stranger.headers.location, '/login?error=not-a-member');
