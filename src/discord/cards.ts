@@ -286,6 +286,15 @@ export function nowCard(
   return { embeds: [embed], components: [buttons] };
 }
 
+// A page asked for past the end of a card's list shows the last one, and this line says so first, the same on every
+// paged card (shown without a word, the last page read as the one asked for). `whole` names the list with its verb.
+function pastEnd(page: number, pages: number, lang: Lang, whole: { en: string; ko: string }): string {
+  if (page <= pages) return '';
+  return lang === 'ko'
+    ? `${page}페이지는 없음: ${whole.ko} ${pages}페이지까지 있음\n`
+    : `There is no page ${page}: ${whole.en} ${pages === 1 ? '1 page' : `${pages} pages`}\n`;
+}
+
 /** One page of the queue (10 per page) with the total length. */
 export function queueCard(items: readonly QueueItem[], page: number, lang: Lang): EmbedBuilder {
   if (items.length === 0) return new EmbedBuilder().setColor(COLOUR.neutral).setDescription(TEXT.empty[lang]);
@@ -293,13 +302,8 @@ export function queueCard(items: readonly QueueItem[], page: number, lang: Lang)
   const current = Math.min(Math.max(1, page), pages);
   const shown = items.slice((current - 1) * 10, current * 10);
   const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
-  // A page past the end shows the last one, and says so first: shown without a word, it read as that page.
-  const past =
-    page > pages
-      ? lang === 'ko'
-        ? `${page}페이지는 없음: 대기열은 ${pages}페이지까지 있음\n`
-        : `There is no page ${page}: the queue has ${pages === 1 ? '1 page' : `${pages} pages`}\n`
-      : '';
+  // Before the first line, so the card's length counts it.
+  const past = pastEnd(page, pages, lang, { en: 'the queue has', ko: '대기열은' });
   return new EmbedBuilder()
     .setColor(COLOUR.neutral)
     .setTitle(`${TEXT.queue[lang]} (${items.length})`)
@@ -604,8 +608,11 @@ export function lyricsCard(lyrics: LyricsAnswer, title: string, page: number, la
   if (current.trim()) pages.push(current);
   const count = Math.max(1, pages.length);
   const shown = Math.min(Math.max(1, page), count);
+  // Past the last page of words that are there, said first as on the queue's card (words with nothing in them read
+  // as none, whatever the page).
+  const past = pages.length > 0 ? pastEnd(page, count, lang, { en: 'the lyrics have', ko: '가사는' }) : '';
   return embed
-    .setDescription(pages[shown - 1]?.trim() || TEXT.noLyrics[lang])
+    .setDescription(`${past}${pages[shown - 1]?.trim() || TEXT.noLyrics[lang]}`)
     .setFooter({ text: `${TEXT.page[lang]} ${shown}/${count} · ${TEXT.lyricsFrom[lang]}` });
 }
 
@@ -644,6 +651,8 @@ export function likesCard(entries: readonly LikedTrack[], page: number, lang: La
   const pages = Math.max(1, Math.ceil(entries.length / 10));
   const current = Math.min(Math.max(1, page), pages);
   const first = (current - 1) * 10;
+  // Before the first line, so the card's length counts it, as on the queue's card.
+  const past = pastEnd(page, pages, lang, { en: 'your likes have', ko: '좋아요 목록은' });
   return new EmbedBuilder()
     .setColor(COLOUR.neutral)
     .setTitle(`${TEXT.likes[lang]} (${entries.length})`)
@@ -653,7 +662,7 @@ export function likesCard(entries: readonly LikedTrack[], page: number, lang: La
           .slice(first, first + 10)
           .map(
             (entry, index) =>
-              `${first + index + 1}. ${line(entry.track.title, entry.track.url, entry.track.durationMs, null, lang)}`,
+              `${index === 0 ? past : ''}${first + index + 1}. ${line(entry.track.title, entry.track.url, entry.track.durationMs, null, lang)}`,
           ),
         lang,
       ),

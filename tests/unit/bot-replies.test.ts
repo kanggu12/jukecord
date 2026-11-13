@@ -79,6 +79,27 @@ describe('the bot answers commands', () => {
     await bot.client.destroy();
   });
 
+  it('says a page past the end of your likes is not there, as for the queue, and shows the last one', async () => {
+    const { bot } = await playing();
+    // The track playing, liked with /like.
+    await handlers(bot).onCommand(interaction('command', 'like').interaction);
+    const past = interaction('command', 'likes', { sub: 'show', page: 9 });
+    await handlers(bot).onCommand(past.interaction);
+    assert.match(
+      past.shown[0]?.text ?? '',
+      /^Liked \(1\) \| There is no page 9: your likes have 1 page\n1\. \[Track 1\]/,
+    );
+    assert.match(past.shown[0]?.text ?? '', /\| page 1\/1$/);
+    const korean = interaction('command', 'likes', { sub: 'show', page: 9 }, { locale: 'ko' });
+    await handlers(bot).onCommand(korean.interaction);
+    assert.match(korean.shown[0]?.text ?? '', /\| 9페이지는 없음: 좋아요 목록은 1페이지까지 있음\n1\. /);
+    // The page there is, as it was: no word before it.
+    const first = interaction('command', 'likes', { sub: 'show', page: 1 });
+    await handlers(bot).onCommand(first.interaction);
+    assert.match(first.shown[0]?.text ?? '', /^Liked \(1\) \| 1\. \[Track 1\]/);
+    await bot.client.destroy();
+  });
+
   it('answers look-ups to the person alone, the history and the statistics too, and a command gone from this version', async () => {
     const { bot } = await playing();
     for (const name of ['history', 'stats', 'queue', 'version', 'karaoke']) {
