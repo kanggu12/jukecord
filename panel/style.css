@@ -2124,6 +2124,9 @@ img {
   padding: var(--s-8);
   border-radius: var(--r);
   cursor: pointer;
+  /* Brought into sight by the arrow keys, the chosen result stops 8 px clear of the listening bar on a phone (its frame
+     sat on the bar's edge) and of the list's own edges (the room it leaves is the next row's padding, no cover). */
+  scroll-margin-block: var(--s-8);
 }
 /* Under a mouse only (see .server:hover). */
 @media (hover: hover) {

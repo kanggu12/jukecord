@@ -479,6 +479,26 @@ async function edgesFade(page) {
   if (problems.length > 0) throw new Error(`the scrolling boxes' edges: ${problems.join('; ')}`);
 }
 
+// One order for adding a track, from the gentlest to the one that cuts off what everyone hears: the add card's keys
+// (Add, Play next, Play now), a search result's picks under them, a history row's keys (after its heart, before its
+// list key), and a queued row's (Play next, Play now, then Remove). The results and the history had them reversed.
+async function oneOrder(page) {
+  const orders = await page.evaluate(() => {
+    const of = (selector, key) =>
+      [...(document.querySelector(selector)?.children ?? [])].map((element) => element.dataset[key]).join();
+    return {
+      'the add card': [of('.add', 'at'), 'end,next,now'],
+      'a result': [of('#add-found .picks', 'pick'), 'end,next,now'],
+      'a history row': [of('.history .row .acts', 'key'), 'like,again,next,now,more'],
+      'a queued row': [of('.queue-list .row:not(.next) .acts', 'key'), 'next,jump,remove,more'],
+    };
+  });
+  const wrong = Object.entries(orders)
+    .filter(([, [order, meant]]) => order !== '' && order.replace(/^,+|,+$/g, '') !== meant)
+    .map(([name, [order, meant]]) => `${name}: ${order} (${meant} meant)`);
+  if (wrong.length > 0) throw new Error(`the keys that add a track: ${wrong.join('; ')}`);
+}
+
 // Past the widest the page's content grows (1680 px), it stands in the middle at that width: on a 2560 px screen the
 // queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px.
 async function pageCentred(page) {
@@ -1854,6 +1874,18 @@ await sweep('search', DISCOVERY, async (page) => {
     return found;
   });
   if (problems.length > 0) throw new Error(`the results: ${problems.join(', ')}`);
+  // One order for adding a track: the results' keys as the add card's above them (Add, Play next, Play now), and so
+  // the history's rows and the queue's (Play next before Play now); under those keys the results had them reversed.
+  await oneOrder(page);
+  // Brought into sight by the arrow keys on a phone, the chosen result stops clear of the listening bar (its frame sat
+  // on the bar's edge).
+  const gap = await page.evaluate(() => {
+    const chosen = document.querySelector('#add-found [aria-selected="true"]')?.getBoundingClientRect();
+    const bar = document.querySelector('.listen')?.getBoundingClientRect();
+    return chosen && bar && chosen.top < bar.top ? bar.top - chosen.bottom : null;
+  });
+  if (gap !== null && gap < 7.5) throw new Error(`the chosen result stops ${gap.toFixed(1)} px from the listening bar`);
+  await edgesFade(page);
 });
 // Nothing found for the words: the list says so.
 await sweep(
@@ -1928,14 +1960,11 @@ await sweep('liked-menu', [[360, 780]], async (page) => {
 await sweep('history-keys', DISCOVERY, async (page) => {
   await page.click('.library-seg [data-view="history"]');
   await page.waitForSelector('.history .row');
-  // The line under each title (when, how long, who added it) whole on a laptop's window and wider: at 1440 px three
-  // keys beside it cut every row's to "3:00 added by ...".
-  const cut = await page.evaluate(() =>
-    [...document.querySelectorAll(window.innerWidth >= 1024 ? '.history .row .sub' : 'none')]
-      .filter((line) => line.offsetParent && line.scrollWidth > line.clientWidth + 1)
-      .map((line) => line.textContent),
-  );
-  if (cut.length > 0) throw new Error(`the history's lines are cut: ${cut.slice(0, 3).join(' | ')}`);
+  // The line under each title whole with who added the track, at every width: at 1440 px three keys beside it cut
+  // every row's to "3:00 added by ...", and on phones and the tablet the name was lost at the line's end. (Measured
+  // part by part: the whole line never overflows, as its last part cuts itself short.)
+  await rowsWhole(page);
+  await oneOrder(page);
 });
 // Autoplay from the server's plays (the seeded history: nothing to fetch). Nothing playing and nothing queued: the add
 // card says autoplay is on, and the queue's key shows it.

@@ -861,9 +861,10 @@ export function queueCard(): HTMLElement {
         ),
       ),
       // The keys that change the queue for those who may; the menu key (it holds Like) for anyone who may like too. A
-      // guest or a login that may only look has neither: no key that does nothing.
+      // guest or a login that may only look has neither: no key that does nothing. Play next before Play now, as the
+      // add card has them (from the gentlest to the one that cuts off what everyone hears), then Remove.
       control
-        ? h('div', { class: 'acts' }, jump, next, remove, more)
+        ? h('div', { class: 'acts' }, next, jump, remove, more)
         : mayLike()
           ? h('div', { class: 'acts' }, more)
           : h('div'),
@@ -1348,10 +1349,11 @@ function trackMenu(id: number): void {
     void toggleLike(item.track);
   };
   const control = mayControl();
+  // In the order of the row's keys: Play next, Play now; then the moves, Like, and Remove last.
   fill(
     box,
-    control ? choice('play', words.playNow, () => api.jump(guild(), id)) : null,
     control && item.position > 0 ? choice('arrow-up-to-line', words.playNext, () => api.move(guild(), id, 0)) : null,
+    control ? choice('play', words.playNow, () => api.jump(guild(), id)) : null,
     control && item.position > 0
       ? choice('arrow-up', words.moveUp, (position) => api.move(guild(), id, Math.max(0, position - 1)))
       : null,
@@ -1858,13 +1860,15 @@ export function addCard(): HTMLElement {
         h('span', { class: 'name', title: result.title, 'data-clip': 'ok' }, result.title),
         sub.length > 0 ? h('span', { class: 'sub', title: sub.join(' · '), 'data-clip': 'ok' }, sub.join(' · ')) : null,
       ),
-      // For the pointer only: a screen reader hears the option, and its keys from the field's description.
+      // For the pointer only: a screen reader hears the option, and its keys from the field's description. In the order
+      // of the add card's keys above them (Add, Play next, Play now: from the gentlest to the one that cuts off what
+      // everyone hears), as every row of the panel has them; reversed under those keys, they read as the other way.
       h(
         'span',
         { class: 'picks', 'aria-hidden': 'true' },
-        pick('now', 'play', words.playNow),
-        pick('next', 'arrow-up-to-line', words.playNext),
         pick('end', 'list-plus', words.add),
+        pick('next', 'arrow-up-to-line', words.playNext),
+        pick('now', 'play', words.playNow),
       ),
     );
     // A press on a pick plays or queues it; anywhere else on the row adds it, as Enter does. The field keeps the
@@ -2386,9 +2390,9 @@ function libraryView(): 'history' | 'liked' {
 }
 
 /**
- * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to play it now,
- * next or at the end. A narrow card, or a wide window short of height, keeps the heart and puts the rest behind one key
- * (see libraryMenu).
+ * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to add it at
+ * the end, play it next or play it now. A narrow card, or a wide window short of height, keeps the heart and puts the
+ * rest behind one key (see libraryMenu).
  */
 function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTMLElement {
   const words = t();
@@ -2436,11 +2440,13 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
       ),
       subLine(...sub),
     ),
-    h('div', { class: 'acts' }, heartKey(track), now, next, again, more),
+    // The heart, then the add card's order (Add again, Play next, Play now), then the key that lists them.
+    h('div', { class: 'acts' }, heartKey(track), again, next, now, more),
   );
 }
 
-// A history or liked row's keys as a list, on a narrow card or a short window: play now, play next, add.
+// A history or liked row's keys as a list, on a narrow card or a short window, in the order of the keys: add, play
+// next, play now.
 function libraryMenu(track: Track): void {
   const words = t();
   const box = h('div', { class: 'menu-list' });
@@ -2455,9 +2461,9 @@ function libraryMenu(track: Track): void {
   };
   fill(
     box,
-    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
-    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
     choice('list-plus', words.addAgain, async () => added(await api.add(guild(), track.url))),
+    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
+    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
   );
 }
 
