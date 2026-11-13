@@ -68,6 +68,33 @@ describe('the bot answers commands', () => {
     await bot.client.destroy();
   });
 
+  it('says "Replaced" exactly when the store replaced a list, by its match of names', async () => {
+    const { bot, store } = await playing();
+    const save = async (name: string) => {
+      const asked = interaction('command', 'playlist', { sub: 'save', name });
+      await handlers(bot).onCommand(asked.interaction);
+      return asked.shown[0]?.text;
+    };
+    assert.equal(await save('Mix'), 'Saved "Mix" (3)');
+    // The store keeps a name's case: "mix" is a list of its own, saved beside "Mix", and said so.
+    assert.equal(await save('mix'), 'Saved "mix" (3)');
+    // Spaces around a name are not part of it, there as here.
+    assert.equal(await save('  Mix  '), 'Replaced "Mix" (3)');
+    assert.deepEqual(
+      store.playlists
+        .list('100000000000000001')
+        .map((playlist) => playlist.name)
+        .sort(),
+      ['Mix', 'mix'],
+    );
+    // A name the database keeps otherwise than typed (half of a UTF-16 pair, kept as U+FFFD): the second save
+    // replaced the first, which a comparison of the names as typed said was "Saved".
+    assert.equal(await save('Mix \uD83C'), 'Saved "Mix �" (3)');
+    assert.equal(await save('Mix \uD83C'), 'Replaced "Mix �" (3)');
+    assert.equal(store.playlists.list('100000000000000001').length, 3);
+    await bot.client.destroy();
+  });
+
   it('says a page past the end of the queue is not there, and shows the last one', async () => {
     const { bot } = await playing();
     const past = interaction('command', 'queue', { page: 9 });

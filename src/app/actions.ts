@@ -747,15 +747,22 @@ export class Actions {
     return this.options.store.playlists.list(context.guildId);
   }
 
-  /** Saves the current track and the queue, in play order, under a name (replacing a list of that name). */
-  playlistSave(context: ActionContext, name: string): Playlist {
+  /**
+   * Saves the current track and the queue, in play order, under a name (replacing a list of that name), and says
+   * whether it replaced one, which the bot says ("Replaced" rather than "Saved").
+   */
+  playlistSave(context: ActionContext, name: string): Playlist & { readonly replaced: boolean } {
     this.control(context);
     const current = this.options.players.get(context.guildId).snapshot().track;
     const queued = this.options.queue.list(context.guildId).map((item) => item.track.id);
     const ids = current ? [current.id, ...queued] : queued;
     if (ids.length === 0) throw new ActionError('invalid', 'there is nothing to save: the queue is empty');
     try {
-      return this.options.store.playlists.save(context.guildId, name, ids, context.userId);
+      // The list that will be replaced, found by the store's own match of names (as load, rename, delete and import
+      // find one), just before the save: a match made apart from the store's (the bot compared the names itself)
+      // can say "Saved" over a list the store replaced.
+      const replaced = this.options.store.playlists.find(context.guildId, name) !== null;
+      return { ...this.options.store.playlists.save(context.guildId, name, ids, context.userId), replaced };
     } catch (error) {
       throw this.fromStore(error);
     }

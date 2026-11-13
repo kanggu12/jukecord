@@ -790,13 +790,12 @@ export class Bot implements Directory, AlertSink {
         await interaction.editReply({ embeds: [playlistsCard(actions.playlists(context), lang)] });
         return;
       case 'save': {
-        const name = options.getString('name', true);
-        // Saving over a playlist of that name replaces it, which is said: "Saved" read as if nothing was lost.
-        const replaced = actions.playlists(context).some((playlist) => playlist.name === name.trim());
-        const saved = actions.playlistSave(context, name);
+        const saved = actions.playlistSave(context, options.getString('name', true));
+        // Saving over a playlist of that name replaces it, which is said: "Saved" read as if nothing was lost. Whether
+        // it did is the store's answer, so the word and what was done agree.
         await interaction.editReply({
           embeds: [
-            replaced
+            saved.replaced
               ? note(lang, `Replaced "${saved.name}" (${saved.size})`, `"${saved.name}" 덮어씀(${saved.size}곡)`)
               : note(lang, `Saved "${saved.name}" (${saved.size})`, `"${saved.name}" 저장(${saved.size}곡)`),
           ],
