@@ -680,6 +680,37 @@ await sweep(
   },
   { forced: true },
 );
+// Entries of the same count share a place, in every ranked list on the page (two tracks played once each were 1st and
+// 2nd, as if one had played less): a tie's places are one, and the count after it has its position's place.
+async function placesShared(page) {
+  return page.evaluate(() => {
+    const main = document.querySelector('main:not([hidden])') ?? document.body;
+    // Each list's rows as [place, count].
+    const lists = [
+      ...[...main.querySelectorAll('.wrapped-tracks')].map((list) =>
+        [...list.querySelectorAll('.row')].map((row) => [
+          row.querySelector('.pos')?.textContent,
+          row.querySelector('.n')?.textContent,
+        ]),
+      ),
+      ...[...main.querySelectorAll('.ranks')].map((list) =>
+        [...list.querySelectorAll('.rank')].map((row) => [
+          row.querySelector('.num')?.textContent,
+          row.querySelector('.n')?.textContent,
+        ]),
+      ),
+    ];
+    const wrong = [];
+    for (const rows of lists)
+      rows.forEach(([place, count], index) => {
+        if (index === 0) return;
+        const [before, last] = rows[index - 1];
+        if (count === last && place !== before) wrong.push(`two of ${count} at places ${before} and ${place}`);
+        if (count !== last && Number(place) !== index + 1) wrong.push(`${count} at place ${place}, not ${index + 1}`);
+      });
+    return wrong;
+  });
+}
 // No colour on the page is drawn with a hue it lost. Mixed in oklch with transparent, a colour of little chroma (the
 // inks, the light field) kept its chroma but lost its hue, which the browser drew at 0°, a rose: the light theme's
 // bars were pink, its grey ink warm.
@@ -715,6 +746,7 @@ await sweep('stats', SIZES, async (page) => {
     (counts) => counts.filter((count) => /^\s*[\d,]+\s*$/.test(count.textContent ?? '')).length,
   );
   if (bare > 0) problems.push(`${bare} counts in the ranks with no unit`);
+  problems.push(...(await placesShared(page)));
   await noLostHue(page).catch((error) => problems.push(error.message));
   if (problems.length > 0) throw new Error(problems.join('; '));
 });
@@ -903,6 +935,7 @@ async function wrappedIsTrue(page, period) {
     problems.push(`${wrapped.days} days of at most ${facts.longest} min under ${facts.total}`);
   if (facts.side && facts.fill < 0.5)
     problems.push(`the first track's row fills ${Math.round(facts.fill * 100)} % of its card`);
+  problems.push(...(await placesShared(page)));
   if (problems.length > 0) throw new Error(`Wrapped says what is not true: ${problems.join('; ')}`);
 }
 // Wrapped at a time, and both checks on it, their problems said together.

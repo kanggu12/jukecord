@@ -67,6 +67,20 @@ export function busiestHour(wrapped: Pick<Wrapped, 'hours' | 'days' | 'plays' | 
 }
 
 /**
+ * The places of a list's entries by their counts, most first: entries of the same count share a place, and the next
+ * count's place is its own position (1, 2, 2, 4), as a tie is ranked in a race. Numbered one after another, two tracks
+ * played once each were first and second, as if the second had played less.
+ */
+export function ranks(counts: readonly number[]): number[] {
+  const places: number[] = [];
+  counts.forEach((count, index) => {
+    // The same count as the entry before: its place; a smaller one, the place of its position.
+    places.push(index > 0 && count === counts[index - 1] ? (places[index - 1] ?? 1) : index + 1);
+  });
+  return places;
+}
+
+/**
  * Whether the time has a song: one that played more than once. The song is the track played on the most days, then
  * the most times; when it played once, every track played once, and it was only the longest of them.
  */

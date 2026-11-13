@@ -454,6 +454,35 @@ describe('Wrapped in Discord', () => {
     }
   });
 
+  it('gives tracks and people of the same plays one place in the card, as the panel numbers them', async () => {
+    const server = await testServer();
+    try {
+      const { store, actions } = server;
+      const [a, b] = addTracks(store, 2);
+      assert.ok(a && b);
+      // Two tracks played once each, added by two people: a tie in both lists (numbered 1 and 2, the second read as
+      // played less).
+      for (const [track, by, day] of [
+        [a.id, ALICE, 19],
+        [b.id, BOB, 20],
+      ] as const)
+        store.history.add({
+          guildId: GUILD,
+          trackId: track,
+          addedBy: by,
+          playedAt: Date.UTC(2026, 5, day, 13),
+          playedMs: 180_000,
+        });
+      const card = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const description = card?.description ?? '';
+      // Any space between a count and its word (words may keep them together with a no-break space).
+      assert.match(description, /\*\*Most played\*\*\n1\. .* · 1\splay\n1\. .* · 1\splay\n/);
+      assert.match(description, /\*\*Whose picks played most\*\*\n1\. <@\d+> · 1\splay\n1\. <@\d+> · 1\splay/);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('names a busiest day and hour in the card when they are habits, and leaves out a tie', async () => {
     const server = await testServer();
     try {

@@ -8,7 +8,7 @@
  * choosing another puts it there too, and Back goes to the one before.
  */
 
-import { busiestHour, busiestWeekday, hasSong } from '../../../src/core/facts.ts';
+import { busiestHour, busiestWeekday, hasSong, ranks } from '../../../src/core/facts.ts';
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
 import { state, t, watch } from '../state.ts';
@@ -209,7 +209,9 @@ export function wrappedPage(): HTMLElement {
         ),
       ),
     );
-    // The most played, each on its album, with its plays.
+    // The most played, each on its album, with its plays and its place (shared in a tie: two tracks played once each
+    // are both first).
+    const trackPlaces = ranks(wrapped.topTracks.map((entry) => entry.plays));
     const topTracks = h(
       'ol',
       { class: 'list wrapped-tracks' },
@@ -217,7 +219,7 @@ export function wrappedPage(): HTMLElement {
         h(
           'li',
           { class: 'row', dataset: { id: `top-${entry.track.id}` } },
-          h('span', { class: 'pos' }, index + 1),
+          h('span', { class: 'pos' }, trackPlaces[index] ?? index + 1),
           album(entry.track),
           h(
             'div',
@@ -236,6 +238,7 @@ export function wrappedPage(): HTMLElement {
     );
     // Whose picks played most: faces and meters, as on the statistics, each with the plays of what they added.
     const most = Math.max(1, ...wrapped.topPeople.map((entry) => entry.plays));
+    const peoplePlaces = ranks(wrapped.topPeople.map((entry) => entry.plays));
     const topPeople = h(
       'ol',
       { class: 'ranks' },
@@ -243,7 +246,7 @@ export function wrappedPage(): HTMLElement {
         h(
           'li',
           { class: 'rank' },
-          h('span', { class: 'faint num' }, index + 1),
+          h('span', { class: 'faint num' }, peoplePlaces[index] ?? index + 1),
           h(
             'span',
             { class: 'who' },

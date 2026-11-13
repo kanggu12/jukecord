@@ -6,7 +6,7 @@
  */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown } from 'discord.js';
 import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
-import { busiestHour, busiestWeekday, hasSong } from '../core/facts.ts';
+import { busiestHour, busiestWeekday, hasSong, ranks } from '../core/facts.ts';
 import { type Length, withLongest } from '../core/lengths.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
@@ -422,9 +422,11 @@ export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   ];
   if (stats.topTracks.length > 0) {
     lines.push('', `**${TEXT.topTracks[lang]}**`);
+    // Tracks of the same plays share a place, as the panel numbers them (core/facts.ts).
+    const places = ranks(stats.topTracks.map((entry) => entry.plays));
     for (const [index, entry] of stats.topTracks.slice(0, 5).entries()) {
       lines.push(
-        `${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${playsOf(entry.plays, lang)}`,
+        `${places[index] ?? index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${playsOf(entry.plays, lang)}`,
       );
     }
   }
@@ -580,15 +582,18 @@ export function wrappedCard(
     const picture = song.track.thumbnail;
     if (picture && /^https?:\/\//.test(picture)) embed.setThumbnail(picture);
   }
+  // Entries of the same plays share a place, as the panel's page and picture number them (core/facts.ts).
+  const trackPlaces = ranks(view.topTracks.map((entry) => entry.plays));
+  const peoplePlaces = ranks(view.topPeople.map((entry) => entry.plays));
   lines.push('', `**${TEXT.topTracks[lang]}**`);
   for (const [index, entry] of view.topTracks.entries())
     lines.push(
-      `${index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${playsOf(entry.plays, lang)}`,
+      `${trackPlaces[index] ?? index + 1}. ${line(entry.track.title, entry.track.url, null, null, lang)} · ${playsOf(entry.plays, lang)}`,
     );
   lines.push('', `**${TEXT.topPeople[lang]}**`);
   for (const [index, entry] of view.topPeople.entries())
     lines.push(
-      `${index + 1}. ${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${playsOf(entry.plays, lang)}`,
+      `${peoplePlaces[index] ?? index + 1}. ${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${playsOf(entry.plays, lang)}`,
     );
   if (view.keptFrom) lines.push('', WRAPPED.kept[lang](view.keptFrom));
   embed.setDescription(lines.join('\n'));

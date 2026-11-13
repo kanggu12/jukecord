@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { alone, busiestHour, busiestWeekday, HABIT_DAYS, hasSong } from '../../src/core/facts.ts';
+import { alone, busiestHour, busiestWeekday, HABIT_DAYS, hasSong, ranks } from '../../src/core/facts.ts';
 
 // Twenty-four hours, zero but the ones given.
 const hours = (given: Record<number, number>) => Array.from({ length: 24 }, (_, hour) => given[hour] ?? 0);
@@ -15,6 +15,18 @@ describe('the one largest of some counts', () => {
     assert.equal(alone([1, 0, 0, 0, 0, 0, 1]), -1);
     assert.equal(alone([0, 0, 0]), -1);
     assert.equal(alone([]), -1);
+  });
+});
+
+describe('the places of a list by its counts', () => {
+  it('shares a place between entries of the same count (the review: two tracks played once, ranked 1 and 2)', () => {
+    assert.deepEqual(ranks([1, 1]), [1, 1]);
+    assert.deepEqual(ranks([224, 120, 94]), [1, 2, 3]);
+  });
+
+  it("gives the count after a tie its own position's place, as a race does", () => {
+    assert.deepEqual(ranks([22, 16, 16, 9, 9, 9, 8]), [1, 2, 2, 4, 4, 4, 7]);
+    assert.deepEqual(ranks([]), []);
   });
 });
 

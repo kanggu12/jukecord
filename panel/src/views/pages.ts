@@ -5,6 +5,7 @@
  * 2px apart, one colour for the one measure (plays), checked for contrast on both themes; the whole column is the
  * hover and focus target, every value is in the tooltip and in the table view, and text never takes the bar colour.
  */
+import { ranks } from '../../../src/core/facts.ts';
 import { api, type LogRecord, type Stats, type Status } from '../api.ts';
 import { niceTop } from '../axis.ts';
 import { avatarUrl, face, fill, h, icon } from '../dom.ts';
@@ -257,8 +258,10 @@ export function statsPage(): HTMLElement {
       [words.hourColumn, words.playsColumn],
     );
     // Ranked lists with a meter each, longest first; the count beside the name with its unit (the people's are plays
-    // of what they added, which add up to the plays), in text colours.
+    // of what they added, which add up to the plays), in text colours. Entries of the same count share a place, as on
+    // Wrapped (two tracks of 9 plays were 5th and 6th).
     const topPlays = Math.max(1, ...stats.topTracks.map((entry) => entry.plays));
+    const trackPlaces = ranks(stats.topTracks.map((entry) => entry.plays));
     const tracks = h(
       'ol',
       { class: 'ranks' },
@@ -266,7 +269,7 @@ export function statsPage(): HTMLElement {
         h(
           'li',
           { class: 'rank' },
-          h('span', { class: 'faint num' }, index + 1),
+          h('span', { class: 'faint num' }, trackPlaces[index] ?? index + 1),
           h(
             'a',
             {
@@ -287,6 +290,7 @@ export function statsPage(): HTMLElement {
       ),
     );
     const topPeople = Math.max(1, ...stats.topPeople.map((entry) => entry.plays));
+    const peoplePlaces = ranks(stats.topPeople.map((entry) => entry.plays));
     const people = h(
       'ol',
       { class: 'ranks' },
@@ -294,7 +298,7 @@ export function statsPage(): HTMLElement {
         h(
           'li',
           { class: 'rank' },
-          h('span', { class: 'faint num' }, index + 1),
+          h('span', { class: 'faint num' }, peoplePlaces[index] ?? index + 1),
           h(
             'span',
             { class: 'who' },
