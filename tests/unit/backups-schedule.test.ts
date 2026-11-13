@@ -91,6 +91,25 @@ describe('the daily backup', () => {
     late.store.close();
   });
 
+  it('is made on a day someone put a copy of their own in the folder after its time', async () => {
+    const { clock, store, sink, schedule } = setup('2026-11-11T09:00:00');
+    // A copy put there by hand at 08:00, after 04:30: taken for today's backup, it put the day's own off.
+    fs.mkdirSync(path.join(dir, 'backups'));
+    const copy = path.join(dir, 'backups', 'jukecord-before-the-move.db');
+    fs.writeFileSync(copy, 'x');
+    fs.utimesSync(copy, new Date(clock.now() - 3_600_000), new Date(clock.now() - 3_600_000));
+    schedule.start();
+    await schedule.idle();
+    // Today's, made at the start, beside the copy.
+    assert.equal(sink.records.filter((record) => record.msg === 'made the scheduled backup').length, 1);
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'backups')).sort(), [
+      'jukecord-2026-11-11T00-00-00-000Z.db',
+      'jukecord-before-the-move.db',
+    ]);
+    schedule.stop();
+    store.close();
+  });
+
   it('says a failed backup once, in the log and to the alerts, and tries again the next day', async () => {
     const { clock, store, sink, alerts, schedule } = setup('2026-11-11T04:00:00');
     // The backups folder cannot be made: a file stands where it would be.
