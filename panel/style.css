@@ -3188,16 +3188,25 @@ kbd {
 }
 
 /* ---- logs ------------------------------------------------------------------------------------------------------- */
+/* The records: one grid down the whole list, each record a row of it (a subgrid): the time, the level, the component
+   and the message, each column as wide as its widest entry in the list. The component and the message start at one
+   place in every record, and the level's column is as wide as the widest level shown (a fixed 64 px left a short
+   "Info" with 40 px of nothing before the component on a phone). */
 .logs {
   font: var(--fs-sm) / var(--lh-sm) var(--mono);
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  align-content: start;
+  column-gap: var(--s-12);
+}
+/* Nothing to list: the words across the list. */
+.logs > .empty {
+  grid-column: 1 / -1;
 }
 .log {
+  grid-column: 1 / -1;
   display: grid;
-  /* The time, the level, the component, the message. The level has a width of its own, as wide as its longest word
-     ("Warning"): each record is a grid of its own, and a column as wide as its own word started the component and
-     the message at three different places down the list. */
-  grid-template-columns: 172px 64px 96px minmax(0, 1fr);
-  gap: var(--s-12);
+  grid-template-columns: subgrid;
   padding: var(--s-6) var(--pad);
   border-bottom: 1px solid var(--line);
 }
@@ -3205,6 +3214,12 @@ kbd {
   border-bottom: 0;
 }
 .log .fields {
+  color: var(--ink-3);
+}
+/* A record's level when it needs no look: its word in the quiet ink, as the time beside it, in the chip's place (so
+   it stands where a warning's word does). Only a warning and an error keep a chip of their colour. */
+.badge.plain {
+  background: none;
   color: var(--ink-3);
 }
 .log-filter {
@@ -3682,10 +3697,12 @@ kbd {
     --pos-w: 24px;
     grid-template-columns: var(--pos-w) 48px minmax(0, 1fr) auto;
   }
-  /* A log record on a narrow window: time, level and component on one line, the message under them. */
+  /* A log record on a narrow window: time, level and component on one line, the message across the line under them. */
+  .logs {
+    column-gap: var(--s-8);
+  }
   .log {
-    grid-template-columns: auto 64px minmax(0, 1fr);
-    gap: 2px 8px;
+    row-gap: 2px;
   }
   .log > :last-child {
     grid-column: 1 / -1;
@@ -3697,20 +3714,28 @@ kbd {
     gap: var(--s-8);
   }
 }
-/* The log's tools on a window too narrow for them on one line (the levels, a filter of 260 px and Refresh): the
-   levels and Refresh on one line, the filter across the next. */
+/* The log's head on a window too narrow for its tools on one line (the levels, a filter of 260 px and Refresh): the
+   title with Refresh at the line's end, the levels under them, the filter across the next line. Refresh keeps its word
+   (a key that does something says what); beside the levels it did not fit a phone, and showed its icon alone. */
 @media (max-width: 680px) {
   .page-head .page-tools {
     flex-wrap: wrap;
   }
-  /* The log's title on a row of its own, over its tools (between two rows of them, it stood alone in the middle). The
-     statistics' head, a title and one choice of range, keeps them on one line. */
+  /* The title takes half the line at least, so the levels go under it and Refresh stays beside it. The statistics'
+     head, a title and one choice of range, keeps them on one line. */
   .page-head:has(.log-filter) h1 {
-    flex: 1 1 100%;
+    flex: 1 1 0;
+    min-width: 50%;
   }
+  /* The tools join the head's own lines, in their order: Refresh, the levels, the filter. */
   .page-head:has(.log-filter) .page-tools {
-    flex: 1 1 100%;
-    margin-left: 0;
+    display: contents;
+  }
+  .page-head:has(.log-filter) .refresh-key {
+    order: 1;
+  }
+  .page-head:has(.log-filter) .seg {
+    order: 2;
   }
   .page-tools .log-filter {
     order: 3;
@@ -3722,14 +3747,6 @@ kbd {
   /* The narrowest phones give the version's place to the server's name (/version and the status still say it). */
   .bar .version {
     display: none;
-  }
-  /* The log's Refresh shows its icon alone, so it stays on the line of the levels instead of taking one of its own. */
-  .page-tools .refresh-key .label {
-    display: none;
-  }
-  .page-tools .refresh-key {
-    width: var(--control);
-    padding: 0;
   }
 }
 @media (max-width: 560px) {

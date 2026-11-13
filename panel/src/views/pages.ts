@@ -399,7 +399,9 @@ export function logsPage(): HTMLElement {
   );
 
   const row = (record: LogRecord) => {
-    const tone = { debug: 'idle', info: 'load', warn: 'pause', error: 'bad' }[record.level];
+    // Colour for what needs a look, a warning or an error; the others' level is a word in the quiet ink, as the time
+    // beside it (an "Info" chip on every row was colour that said nothing).
+    const tone = { debug: null, info: null, warn: 'pause', error: 'bad' }[record.level];
     const words = t();
     // One record's level, in the singular and in the panel's words (the filter's keys use the plural).
     const levelName = {
@@ -414,9 +416,9 @@ export function logsPage(): HTMLElement {
     return h(
       'div',
       { class: 'log' },
-      // The date as year-month-day in both languages (no day-month order to misread), and the time to the second.
+      // The moment as the panel writes moments, to the second.
       h('span', { class: 'faint num' }, logTime(record.time)),
-      h('span', null, h('span', { class: `badge tone-${tone}` }, levelName)),
+      h('span', null, h('span', { class: tone ? `badge tone-${tone}` : 'badge plain' }, levelName)),
       h('span', { class: 'muted' }, record.component),
       h('span', null, record.msg, fields ? h('span', { class: 'fields' }, ` ${fields}`) : null),
     );
@@ -477,10 +479,9 @@ export function logsPage(): HTMLElement {
     );
     component.placeholder = words.component;
     component.setAttribute('aria-label', words.component);
-    // Its word in a label: the narrowest windows show the icon alone, and the key keeps its name for them.
+    // Its word beside its icon on every window: a key that does something says what (on a phone it stands on the
+    // title's line, where it has the room).
     fill(refresh, icon('refresh-cw'), h('span', { class: 'label' }, words.refresh));
-    refresh.title = words.refresh;
-    refresh.setAttribute('aria-label', words.refresh);
     fill(older, icon('history'), words.older);
   };
   // The filter follows the typing, a moment after the last key.

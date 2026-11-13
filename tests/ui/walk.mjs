@@ -649,6 +649,34 @@ await sweep('stats-tip', FEW, async (page) => {
 await sweep('logs', FEW, async (page) => {
   await page.goto(`${BASE}/logs`);
   await page.waitForSelector('.logs');
+  // Every problem of the page said at once: the records' moments in the panel's style (a message says what it says),
+  // and the look of the list and its head.
+  const problems = [];
+  await oneStyle(page, '.log > :last-child').catch((error) => problems.push(error.message));
+  const look = await page.evaluate(() => ({
+    // Colour on a record's level only for a warning or an error (an "Info" chip on every row said nothing).
+    tinted: [...document.querySelectorAll('.log .badge')].filter(
+      (badge) => !badge.classList.contains('plain') && !/tone-(pause|bad)/.test(badge.className),
+    ).length,
+    // Refresh says its word at every width (on a phone it was its icon alone).
+    refresh: getComputedStyle(document.querySelector('.refresh-key .label') ?? document.body).display !== 'none',
+    // The component right after the level: no wide hole between them (a fixed 64 px column left 40 px on a phone).
+    hole: Math.max(
+      0,
+      ...[...document.querySelectorAll('.log')].slice(0, 20).map((log) => {
+        const badge = log.querySelector('.badge')?.getBoundingClientRect();
+        const component = log.children[2]?.getBoundingClientRect();
+        const widest = Math.max(
+          ...[...document.querySelectorAll('.log .badge')].map((b) => b.getBoundingClientRect().width),
+        );
+        return badge && component ? component.left - badge.left - widest : 0;
+      }),
+    ),
+  }));
+  if (look.tinted > 0) problems.push(`${look.tinted} log levels coloured though they are neither warnings nor errors`);
+  if (!look.refresh) problems.push('Refresh shows its icon alone');
+  if (look.hole > 12.5) problems.push(`${Math.round(look.hole)} px between the widest level and the component`);
+  if (problems.length > 0) throw new Error(problems.join('; '));
 });
 await sweep('loading', FEW, async (page) => {
   const inject = await intercept(page);
