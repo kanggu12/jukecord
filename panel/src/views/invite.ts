@@ -188,9 +188,10 @@ export function inviteDialog(): void {
           words.revoke,
         );
         revoke.onclick = async () => {
+          // The Invite dialog steps aside while the question is open: the question says which link, as its row does.
           const ok = await confirmDialog({
             title: words.inviteRevokeTitle,
-            text: words.inviteRevokeText,
+            text: words.inviteRevokeLink(when(link.expiresAt)),
             ok: words.revoke,
             danger: true,
           });

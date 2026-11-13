@@ -2614,9 +2614,9 @@ img {
   animation: fade 160ms ease-out;
 }
 /* A dialog's shade covers everything, the bar too. A dialog and its shade share one level, so the page's order stacks
-   them: a dialog opened over another (a question over the Invite dialog or the playlists) has its shade over the one
-   below, which then reads as under it and takes no clicks (on a level above every shade, the dialog below stayed
-   bright and pressable, and the two looked like one box cut in half). */
+   them. A dialog opened over another (a question over the Invite dialog, a playlist's keys over the playlists) puts the
+   one below and its shade aside until it closes (ui/layers.ts): one dialog shows at a time, and no edge of one cuts
+   across the other (shorter and at the same top, the question showed half a line of the Invite dialog under it). */
 .scrim.full {
   inset: 0;
   z-index: 40;

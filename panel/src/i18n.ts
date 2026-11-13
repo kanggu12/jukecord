@@ -419,7 +419,8 @@ const EN = {
   inviteMadeBy: (name: string, ago: string) => `made ${ago} by ${name}`,
   inviteMadeByHost: (ago: string) => `made ${ago} by the host`,
   inviteRevokeTitle: 'Revoke this listening link?',
-  inviteRevokeText: 'Guests listening with it are cut off at once.',
+  // Which link, as its row says until when it works: the Invite dialog steps aside while the question is open.
+  inviteRevokeLink: (until: string) => `Guests listening with the link that works until ${until} are cut off at once.`,
   inviteQr: (what: string) => `QR code of the link: ${what}`,
   // Under "Guest" in a guest's menu.
   guestCanListen: (date: string) => `Can listen until ${date}`,
@@ -887,7 +888,7 @@ const KO: Strings = {
   inviteMadeBy: (name: string, ago: string) => `${name} 님이 ${ago} 만듦`,
   inviteMadeByHost: (ago: string) => `호스트가 ${ago} 만듦`,
   inviteRevokeTitle: '이 듣기 링크를 폐기할까요?',
-  inviteRevokeText: '이 링크로 듣고 있는 손님은 바로 연결이 끊김.',
+  inviteRevokeLink: (until: string) => `${until}까지 쓸 수 있는 링크로 듣고 있는 손님은 바로 연결이 끊김.`,
   inviteQr: (what: string) => `링크의 QR 코드: ${what}`,
   guestCanListen: (date: string) => `${date}까지 들을 수 있음`,
   guest: '손님',

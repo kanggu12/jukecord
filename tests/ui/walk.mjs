@@ -1351,9 +1351,10 @@ await sweep('invite', FEW, async (page) => {
     throw new Error(`marked as new: ${rows.map((row) => row.marked).join(', ')}`);
   if (rows.some((row) => row.broken)) throw new Error('a part of a link row breaks across lines');
 });
-// The question over the Invite dialog (revoking a link): the dialog under it is shaded and takes no clicks. Over a
-// dialog on top of every shade, the list's Revoke stayed bright and pressable under the question, and the two dialogs
-// read as one box cut across.
+// The question over the Invite dialog (revoking a link): the dialog under it steps aside while it is open, taking no
+// clicks, and the question says which link. Over a dialog on top of every shade, the list's Revoke stayed bright and
+// pressable under the question; then shaded, shorter and at the same top, the question still cut across it (half a
+// line of the Invite dialog under its edge, a phone's QR code sliced in two).
 await sweep('invite-revoke', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
@@ -1368,6 +1369,13 @@ await sweep('invite-revoke', FEW, async (page) => {
     return below.contains(hit) ? 'the Invite dialog under the question takes clicks' : null;
   });
   if (under) throw new Error(under);
+  const shown = await page.$$eval(
+    '.dialog',
+    (dialogs) => dialogs.filter((dialog) => dialog.getClientRects().length > 0).length,
+  );
+  if (shown !== 1) throw new Error(`${shown} dialogs show at once`);
+  const text = (await page.locator('.dialog .dialog-text').textContent()) ?? '';
+  if (!/until|까지/.test(text)) throw new Error(`the question does not say which link: ${text}`);
 });
 await sweep('invite-friend', FEW, async (page) => {
   await invite(page);
