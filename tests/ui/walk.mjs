@@ -1145,6 +1145,8 @@ await until('playing');
 // old "1/2표" read as a half), and once their vote is in, that they voted. The row of keys stays one line, or the main
 // key alone over the other four, at every width (a longer count once left a key alone on a second line).
 async function skipSays(page, voted) {
+  // The count comes with the live state, a moment after the page: waited for (and said missing below if it never came).
+  await page.waitForSelector('.now [data-act="skip"] .votes', { timeout: 10000 }).catch(() => {});
   const { text, lang, rows } = await page.evaluate(() => {
     const row = document.querySelector('.now .keys');
     const tops = new Map();
