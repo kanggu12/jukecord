@@ -261,26 +261,16 @@ window.__audit = () => {
         if (out) add('crossing', layer, 'outside its dialog');
         continue;
       }
-      // A toast lives inside the top bar, or (on a narrow window) in the strip hanging right under it, as wide as the
-      // window: the strip is part of the bar, and content passes under both.
-      const barElement = document.querySelector('.bar');
-      const bar = barElement.getBoundingClientRect();
+      // A toast lives inside the top bar, or (on a narrow window, where the bar has no room) in a strip right above the
+      // listening bar, as wide as the window: the strip is part of the bars, and content passes under it as under them.
+      // A strip hanging under the top bar is not one of these: it lay across the first card's head and its keys (the
+      // playing card's Lyrics and More), where nothing passes under the bar at the top of the page.
+      const bar = document.querySelector('.bar').getBoundingClientRect();
       const strip = layer.closest('.toasts')?.getBoundingClientRect();
-      // The strip hangs from the bar's inner edge, so it starts on the bar's bottom line (covering it) or right under.
-      const line = Number.parseFloat(getComputedStyle(barElement).borderBottomWidth) || 0;
-      const hanging =
-        strip &&
-        strip.top >= bar.bottom - line - 0.5 &&
-        strip.top <= bar.bottom + 0.5 &&
-        strip.left <= 0.5 &&
-        strip.right >= document.documentElement.clientWidth - 0.5;
-      // With a sheet open on a narrow window the strip hangs at the bottom of the window instead, right above the
-      // listening bar and as wide as the window: under the bar it covered the sheet's first row and close key.
       const listen = document.querySelector('.listen')?.getBoundingClientRect();
       const above =
         strip &&
         listen &&
-        document.querySelector('.sheet') &&
         Math.abs(strip.bottom - listen.top) <= 1.5 &&
         strip.left <= 0.5 &&
         strip.right >= document.documentElement.clientWidth - 0.5;
@@ -288,8 +278,7 @@ window.__audit = () => {
         if (a.top < strip.top - 0.5 || a.bottom > strip.bottom + 0.5) add('crossing', layer, 'outside its strip');
         continue;
       }
-      const bottom = hanging ? strip.bottom : bar.bottom;
-      if (a.top < bar.top - 0.5 || a.bottom > bottom + 0.5) add('crossing', layer, 'outside the top bar');
+      if (a.top < bar.top - 0.5 || a.bottom > bar.bottom + 0.5) add('crossing', layer, 'outside the top bar');
       continue;
     }
     let crossed = 0;

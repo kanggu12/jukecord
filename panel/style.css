@@ -1324,6 +1324,24 @@ img {
   gap: var(--s-6);
   align-items: flex-start;
 }
+/* What the player will do when this track ends (stop): its icon in the colour of a held state, as the head's lamp for
+   Paused, its words, and beside them the key that plays on after it. On one line with the key, centred on it; on a
+   narrow card the key may go under the words. */
+.now .stop-note {
+  margin-top: var(--s-8);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-4) var(--s-6);
+  color: var(--ink-2);
+}
+.now .stop-note > .icon {
+  color: var(--pause);
+}
+/* The key a little apart from the words it answers (12 px, as a key from the words beside it in a row). */
+.now .stop-note > .key {
+  margin-left: var(--s-6);
+}
 .now .live-note {
   margin-top: var(--s-8);
   display: flex;
@@ -1356,6 +1374,11 @@ img {
      down). The row of keys, not the whole column: the progress bar's four-a-second tick lays the column out, and a
      container there was asked again each time. */
   container: now-keys / inline-size;
+}
+/* Skip alone, for someone without the DJ role whose Skip is a vote: its own width at the row's start (the narrow
+   cards' rules share a row out among several keys, and gave a lone key the card's whole width). */
+.now .keys:not(:has(> .key.primary:not([hidden]))) > .key {
+  flex: none;
 }
 
 /* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
@@ -1846,14 +1869,17 @@ img {
   min-height: 190px;
   contain: size;
 }
-/* A column too short for both (a laptop's window under 880 px). Nothing found yet (or nothing at all): the line takes
-   what it needs and the queue keeps the rest; giving up its rows for it left one line over an empty box. */
-@media (max-height: 880px) {
+/* A column too short for both (a laptop's window up to 960 px tall: at 900, three of the queue's rows left the results
+   two). Nothing found yet (or nothing at all): the line takes what it needs and the queue keeps the rest; giving up
+   its rows for it left one line over an empty box. */
+@media (max-height: 960px) {
   .col:has(> .add-card.found-fit) > .card.fill > .queue-list {
     min-height: 0;
   }
   /* Any result: the queue keeps its head with its count and gives the room of its rows to the results, which sit
-     against the field (beside them, what was left of the rows was one row or a sliver of one). */
+     against the field (beside them, what was left of the rows was one row or a sliver of one). The results' part of
+     the card takes the room, the line of keys at its foot: a list that shows whole rows only (see fitFound) ends
+     above it with the room it leaves. */
   .col:has(> .add-card.found-fit .result) > .card.fill {
     flex: none;
     min-height: 0;
@@ -1861,11 +1887,23 @@ img {
   .col:has(> .add-card.found-fit .result) > .card.fill > .queue-list {
     display: none;
   }
+  /* And its own search, which would look through rows not shown: on a card under 980 px it took a line of the head,
+     and a laptop's 1024 by 768 had two whole results. */
+  .col:has(> .add-card.found-fit .result) > .card.fill .head-search {
+    display: none;
+  }
   .add-card.found-fit:has(.result) {
     flex: 1 1 auto;
   }
+  .add-card.found-fit:has(.result) .found {
+    flex: 1 1 auto;
+  }
   .add-card.found-fit:has(.result) .found-list {
+    flex: 0 1 auto;
     max-height: none;
+  }
+  .add-card.found-fit:has(.result) .found-keys {
+    margin-top: auto;
   }
 }
 .found-list:empty {
@@ -2005,21 +2043,11 @@ img {
   background: color-mix(in oklch, var(--load) 16%, transparent);
   border-color: color-mix(in oklch, var(--load) 40%, transparent);
 }
-/* The key says what it is in words, as the head's tools do, for as long as they keep theirs (a card of 640 px; an
-   infinity sign alone did not say what it opens); narrower, its icon and its tint, the words in its title and for
-   screen readers. */
-@container card (max-width: 640px) {
-  .card-head .autoplay-key {
-    width: var(--control-sm);
-    padding: 0;
-  }
-  .card-head .autoplay-key .label {
-    display: none;
-  }
-}
-/* A narrow card (a phone) lists autoplay with the tools behind the queue's tools key (see toolsMore), at the width
-   the rule for the tools uses: beside the title, Shuffle and that key, its key took the head onto a second line. */
-@container (max-width: 560px) {
+/* The key says what it is in words, as the head's tools do. A card of 640 px or less (a phone's, a narrow window's)
+   lists autoplay, named with its mode, with the tools behind the queue's tools key (see toolsMore), at the width the
+   rule for the tools uses: an infinity sign alone did not say what it opens, and beside the title, Shuffle and that
+   key, its key with its words took the head onto a second line. */
+@container (max-width: 640px) {
   .card-head .autoplay-key {
     display: none;
   }
@@ -2449,7 +2477,8 @@ img {
 .scrim {
   position: fixed;
   inset: var(--bar-h) 0 var(--listen-h) 0;
-  /* Under the bar, with the sheet: what the bar holds (a toast hanging under it on a narrow window) stays over both. */
+  /* Under the bar, with the sheet: what the bar holds (a toast, hanging above the listening bar on a narrow window)
+     stays over both. */
   z-index: 28;
   background: var(--scrim);
   animation: fade 160ms ease-out;
@@ -2473,7 +2502,8 @@ img {
   top: var(--bar-h);
   bottom: var(--listen-h);
   right: 0;
-  /* Under the bar it hangs from, so a toast in the bar's strip shows over it. */
+  /* Under the bar it hangs from, so a toast in the bar's strip (above the listening bar on a narrow window) shows over
+     it. */
   z-index: 29;
   width: min(calc(var(--side-w) + 16px + var(--gap) / 2), 100vw);
   display: flex;
@@ -3386,9 +3416,11 @@ kbd {
   flex: 1;
   min-width: 0;
 }
-/* The presets' dialog: each choice says what it does under its name. */
+/* A line over a dialog's choices (who hears the presets, what the sleep timer stops). */
 .dialog-note {
   margin: 0 0 8px;
+  /* A line of two that ends with a word alone reads as cut off: the lines are evened out. */
+  text-wrap: pretty;
 }
 .choice .hint {
   display: block;
@@ -3399,6 +3431,18 @@ kbd {
   /* The voice volume takes a finger's height, as the listening bar's does. */
   .sound input[type="range"] {
     height: 44px;
+  }
+  /* A finger's keys (44 px) in the voice card's rows: rows as tall as their keys put the channels' Join keys a pixel
+     apart and the sound's key on the line above it. Each row with a key keeps 8 px between its key and the next key
+     or line: the channels 4 px each above and below inside a list 4 px from its ends, the sound's row 8 px. */
+  .channels {
+    padding-block: var(--s-4);
+  }
+  .channels > .channel {
+    padding-block: var(--s-4);
+  }
+  .sound {
+    padding-block: var(--s-8);
   }
 }
 
@@ -3469,9 +3513,9 @@ kbd {
 }
 /* A card under 980 px puts its search on a line of its own under the title, so the tools keep their words beside the
    title (as icons alone, on a tablet's touch screen with no tooltips, "Remove duplicates", "Save" and "Load" were
-   guesses). Under 640 px they show as icons (their names stay in the tooltip and for screen readers): a tablet held
-   upright (744 to 768 px, a card of about 710) keeps the words. A chart's Table key keeps its word, so every chart
-   says it the same way. */
+   guesses). Under 640 px Shuffle and Take turns keep theirs and the others wait behind the tools key, listed with
+   theirs (as six icons alone, Take turns and Remove duplicates could not be told); a tablet held upright (744 to 768
+   px, a card of about 710) shows them all. */
 @container (max-width: 980px) {
   .card-head .head-search {
     order: 3;
@@ -3483,12 +3527,13 @@ kbd {
   }
 }
 @container (max-width: 640px) {
-  .card-head .tools .key:not(.table-key):has(.label) .label {
+  .card-head
+    .tools:has(> .tools-more)
+    > :is([data-act="dedupe"], [data-act="save"], [data-act="load"], [data-act="clear"]) {
     display: none;
   }
-  .card-head .tools .key.sm:not(.table-key):has(.label) {
-    width: var(--control-sm);
-    padding: 0;
+  .card-head .tools .tools-more {
+    display: inline-flex;
   }
 }
 /* Narrower still: the search goes to its own line under the title, and a queued track has two keys, not three. */
@@ -3509,27 +3554,12 @@ kbd {
   .row .acts > .more-key {
     display: inline-flex;
   }
-  /* The queue's tools: Shuffle with its word, the rest behind one key. */
-  .card-head
-    .tools:has(> .tools-more)
-    > :is([data-act="dedupe"], [data-act="save"], [data-act="load"], [data-act="clear"]) {
-    display: none;
-  }
-  .card-head .tools .tools-more {
-    display: inline-flex;
-  }
-  /* As heavy as the rule above that makes the tools square, and heavier: Shuffle keeps its word, so its width. */
-  .card-head .tools .key.sm:not(.table-key)[data-act="shuffle"]:has(.label) {
-    width: auto;
-    padding: 0 var(--s-8);
-  }
-  .card-head .tools .key.sm:not(.table-key)[data-act="shuffle"]:has(.label) .label {
-    display: inline;
-  }
 }
 /* A wide window short of height (two columns, the shorter playing card above): the queue's search goes back beside its
-   title and its tools show as icons, named in their tooltips (a mouse is there to point at them), so the head is one
-   line and the queue under it still shows three rows; with the search on a line of its own it showed two. */
+   title, so the head is one line and the queue under it still shows three rows (with the search on a line of its own
+   it showed two). Its tools keep their words (as six bare icons, Take turns and Remove duplicates could not be told):
+   all of them where the card has room for them on that line (a 1920 px screen at 150 %), Shuffle and Take turns where
+   it has less (1366 by 768), Shuffle alone narrower; the others wait behind the tools key, listed with theirs. */
 @media (width > 1100px) and (max-height: 720px) and (pointer: fine) {
   .card-head .head-search {
     order: 0;
@@ -3539,25 +3569,35 @@ kbd {
   .card-head .head-search + .tools {
     margin-left: 0;
   }
-  .card-head .tools .key:not(.table-key):has(.label) .label {
-    display: none;
+  @container card (max-width: 1200px) {
+    .card-head
+      .tools:has(> .tools-more)
+      > :is([data-act="dedupe"], [data-act="save"], [data-act="load"], [data-act="clear"]) {
+      display: none;
+    }
+    .card-head .tools .tools-more {
+      display: inline-flex;
+    }
   }
-  .card-head .tools .key.sm:not(.table-key):has(.label) {
-    width: var(--control-sm);
-    padding: 0;
+  @container card (max-width: 840px) {
+    .card-head .tools:has(> .tools-more) > [data-act="turns"] {
+      display: none;
+    }
   }
 }
-/* Two columns at most 1100 px wide and short of height, with a mouse (a laptop's 1024 by 768): the queue's tools show
-   as icons, named in their tooltips, so they stay on the title's line above the search and the queue under them still
-   shows three rows; with their words (Take turns among them) they took a line of their own, and with a title of two
-   lines playing it showed two. A tablet of that size has one column, and its words. */
+/* Two columns at most 1100 px wide and short of height, with a mouse (a laptop's 1024 by 768): the queue's tools stay
+   on the title's line above the search, so the queue under them still shows three rows (with all their words they
+   took a line of their own, and with a title of two lines playing it showed two): Shuffle and Take turns with their
+   words, and the others behind the tools key, listed with theirs. A tablet of that size has one column, and all of
+   them. */
 @media (width > 900px) and (width <= 1100px) and (height > 720px) and (max-height: 800px) and (pointer: fine) {
-  .card-head .tools:has(> .tools-more) .key:not(.table-key):has(.label) .label {
+  .card-head
+    .tools:has(> .tools-more)
+    > :is([data-act="dedupe"], [data-act="save"], [data-act="load"], [data-act="clear"]) {
     display: none;
   }
-  .card-head .tools:has(> .tools-more) .key.sm:not(.table-key):has(.label) {
-    width: var(--control-sm);
-    padding: 0;
+  .card-head .tools .tools-more {
+    display: inline-flex;
   }
 }
 /* Shorter still (a 1920 by 1080 screen at 150 % with the browser's bars, about 1280 by 610): the gaps, the cards' heads,
@@ -3623,34 +3663,29 @@ kbd {
     width: auto;
   }
 }
-/* On a narrow window the bar has no room for a toast: it hangs under the bar as a strip of the bar's own glass, as
-   wide as the window (the content passes under it as under the bar), and its words may take two lines. */
+/* On a narrow window the top bar has no room for a toast: it hangs at the bottom of the window instead, right above
+   the listening bar, as a strip of the bars' own glass as wide as the window (the content passes under it as under
+   the bar), and its words may take two lines. Under the top bar it lay across the playing card's head, its Lyrics and
+   More keys, and over a sheet's first row and close key; above the listening bar it covers what passes under that bar
+   anyway. (Placed from the top bar, which is its box: the bar's glass makes it the box of anything placed inside it,
+   and the bar stays at the top.) */
 @media (max-width: 900px) {
   .toasts {
     position: absolute;
-    top: 100%;
     left: 0;
     right: 0;
+    bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
     padding: var(--s-8) max(var(--pad), var(--safe-right)) var(--s-8) max(var(--pad), var(--safe-left));
     background: color-mix(in oklch, var(--bg) 90%, transparent);
     backdrop-filter: var(--glass);
     -webkit-backdrop-filter: var(--glass);
-    border-bottom: 1px solid var(--line);
+    border-top: 1px solid var(--line);
   }
   .toasts:empty {
     display: none;
   }
   .toast {
     flex: 1;
-  }
-  /* With a sheet open (the menu, the servers), the strip under the bar covered the sheet's first row and its close
-     key for seconds: it hangs at the bottom of the window instead, above the listening bar. (Placed from the bar,
-     which is its box: the bar's glass makes it the box of anything placed inside it, and it stays at the top.) */
-  body:has(> .sheet) .toasts {
-    top: auto;
-    bottom: calc(var(--bar-h) + var(--listen-h) - 100dvh);
-    border-bottom: 0;
-    border-top: 1px solid var(--line);
   }
 }
 @media (max-width: 900px) {
@@ -4091,6 +4126,13 @@ kbd {
   align-items: center;
   gap: var(--s-4);
 }
+/* A finger's keys are taller than the head's least height: the playing card's head keeps their height while they are
+   not there (nothing playing), so the card does not jump by it as tracks start and stop. */
+@media (pointer: coarse) {
+  .card[aria-labelledby="now-h"] > .card-head {
+    min-height: calc(var(--control-sm) + 2 * var(--s-8) + 1px);
+  }
+}
 /* The right column while the lyrics are open: the lyrics in place of the voice channel and the history. */
 .col.side.lyrics-open > :not(.lyrics-card) {
   display: none;
@@ -4118,8 +4160,12 @@ kbd {
   position: relative;
   flex: 1;
   min-height: 0;
-  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane). */
-  padding: var(--s-8) calc(var(--pad) - var(--s-8));
+  /* Its lines' words at the card's inset, as the head's are (each line's own 8 px under its hover pane); at the top,
+     the fade's height (below), so the first line stands clear of it when the lines are at their start. */
+  padding: var(--s-24) calc(var(--pad) - var(--s-8)) var(--s-8);
+  /* The lines fade out at the box's top and bottom edges, over most of a line, rather than being cut there: cut, the
+     line above showed stubs of its letters under the head's rule, and the last one was sliced by the credit's. */
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--s-24), #000 calc(100% - var(--s-32)), transparent);
 }
 /* Room after the last line, so it too can stand a third of the way down when it is sung. */
 .lyrics-body::after {
@@ -4397,6 +4443,12 @@ button.lyric:hover {
   align-items: center;
   gap: var(--s-6);
   min-width: 0;
+}
+/* Nobody yet: the empty state across the card, its icon over its words, as an empty queue's or history's. */
+.guest-people > li.empty {
+  flex: 1 1 100%;
+  display: grid;
+  gap: var(--s-8);
 }
 /* The guest's card fills the column beside the player, as the history does for members (so the two columns end
    together), the guest's link at its foot. */

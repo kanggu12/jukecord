@@ -14,11 +14,11 @@ address ([who may do what](#who-may-do-what)).
 
 ### Playing
 
-- **Remove**, among the player's keys, drops the track without counting it as played.
-- **⋯** in the player's head has **Stop after this track**: the player stops for everyone when the track ends, and the
-  queue stays. Pressed again, it plays on.
+- **⋯** in the player's head lists what else there is for the track playing. **Stop after this track**: the player
+  stops for everyone when the track ends, and the queue stays; the player says so under the track, with **Keep
+  playing** beside it. **Remove this track** skips it without counting it as played.
 - **Lyrics** in the player's head shows the track's words from LRCLIB. If you may change the music, choose a line to
-  play from there.
+  play from there. When LRCLIB has none, a short message says so.
 - **Listen here**, at the bottom, plays the music in this browser in step with the voice channel, at this browser's
   own volume. The media keys and the lock screen control it.
 - **The sleep timer**, beside **Listen here**, stops this browser alone after 15, 30 or 60 minutes or at the end of the

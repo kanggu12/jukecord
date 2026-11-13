@@ -306,8 +306,12 @@ function frame(): void {
       'hidden',
       state.guilds.length <= 1,
     );
-    // One label for the state of the connection, then whether this login may only look (a guest says it is one).
+    // One label for the state of the connection, then whether this login may only look (a guest says it is one). Someone
+    // without the DJ role whose Skip is a vote may do more than look: the label says that (it said "View only" beside
+    // a Skip key that worked).
     const guestLogin = state.me?.kind === 'guest';
+    const limited = Boolean(guild) && !mayControl();
+    const voter = limited && maySkip();
     const [tone, label] =
       state.live === 'refused'
         ? ['bad', words.refused]
@@ -319,8 +323,8 @@ function frame(): void {
               ? ['idle', words.browserOnly]
               : state.status && !state.status.discord
                 ? ['bad', words.discordDown]
-                : guild && !mayControl()
-                  ? ['pause', words.lookOnly]
+                : limited
+                  ? ['pause', voter ? words.skipByVote : words.lookOnly]
                   : ['play', words.connected];
     pill.className = `pill tone-${tone}`;
     pill.title =
@@ -331,8 +335,10 @@ function frame(): void {
           : guestLogin && state.me?.guest
             ? // When the link stops working, as the panel writes moments ("Nov 20, 21:41").
               words.guestUntil(momentText(state.me.guest.expiresAt, state.lang))
-            : guild && !mayControl()
-              ? lookOnlyWhy()
+            : limited
+              ? voter
+                ? words.skipByVoteHint
+                : lookOnlyWhy()
               : '';
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them
@@ -399,7 +405,7 @@ function frame(): void {
     if (account.getAttribute('aria-expanded') === 'true') closeSheets();
     else menuSheet(navigate, menuHooks);
   };
-  watch(['status', 'guild', 'live', 'liveWaiting', 'lang', 'me', 'guilds'], drawBar);
+  watch(['status', 'guild', 'live', 'liveWaiting', 'lang', 'me', 'guilds', 'votes'], drawBar);
   // The light behind the glass: the cover of the track playing, in two layers that take turns, so the old cover fades
   // out while the new one fades in. Nothing playing: the field rests near grey.
   const ambient = h('div', { class: 'ambient', 'aria-hidden': 'true' }, h('div'), h('div'));

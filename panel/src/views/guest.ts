@@ -25,11 +25,13 @@ export function guestCard(): HTMLElement {
     const words = t();
     (card.querySelector('#guest-h') as HTMLElement).textContent = words.listeningHere;
     count.textContent = state.listeners.count > 0 ? words.listeners(state.listeners.count) : '';
-    // Each person with their face and name (a guest and a friend in the panel's words); nobody yet says so.
+    // Each person with their face and name (a guest and a friend in the panel's words). Nobody yet is said as the
+    // other cards say an empty list, an icon over the words in the card's middle: a bare "Nobody" in the corner of a
+    // card the column's height read as a card left unfinished.
     fill(
       people,
       ...(state.listeners.people.length === 0
-        ? [h('li', { class: 'faint' }, words.nobody)]
+        ? [h('li', { class: 'empty' }, icon('headphones'), words.nobodyListening)]
         : state.listeners.people.map((person) =>
             h(
               'li',

@@ -386,7 +386,9 @@ await sweep(
   },
   { touch: true },
 );
-// A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows.
+// A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows. The
+// voice card's keys of a finger's size keep apart from each other and from the lines between its rows (in rows as tall
+// as the keys, the channels' Join keys were a pixel apart and the sound's key on the line above it).
 await sweep(
   'tablet',
   [
@@ -394,7 +396,33 @@ await sweep(
     [1180, 820],
     [1366, 950],
   ],
-  null,
+  async (page) => {
+    await page.waitForSelector('.channels .channel .key');
+    const close = await page.evaluate(() => {
+      const card = document.querySelector('.card[aria-labelledby="voice-h"]');
+      const keys = [...card.querySelectorAll('.key')]
+        .filter((key) => key.getClientRects().length > 0)
+        .map((key) => key.getBoundingClientRect());
+      // The lines between the rows: the top edges of the rows that draw one.
+      const lines = [...card.children]
+        .filter((row) => Number.parseFloat(getComputedStyle(row).borderTopWidth) > 0)
+        .map((row) => row.getBoundingClientRect().top);
+      const found = [];
+      for (const [index, key] of keys.entries()) {
+        for (const other of keys.slice(index + 1)) {
+          const side = Math.min(key.right, other.right) - Math.max(key.left, other.left);
+          const apart = Math.max(other.top - key.bottom, key.top - other.bottom);
+          if (side > 0 && apart < 4) found.push(`two keys ${apart.toFixed(1)} px apart`);
+        }
+        for (const line of lines) {
+          const apart = Math.min(Math.abs(key.top - line), Math.abs(key.bottom - line));
+          if (apart < 4) found.push(`a key ${apart.toFixed(1)} px from a line`);
+        }
+      }
+      return found;
+    });
+    if (close.length > 0) throw new Error(`the voice card's keys are too close: ${close.join(', ')}`);
+  },
   { discord: true, touch: true },
 );
 
@@ -740,7 +768,16 @@ for (let i = 0; i < 16; i += 1) await api('POST', '/guilds/local/playlists/Frida
 await sweep('long-queue', FEW);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
-await sweep('empty', FEW);
+// Nothing playing and nothing queued: the playing card has no key that would do nothing (Lyrics for no track, More
+// offering to stop after it, a disabled Play the width of a phone's card).
+await sweep('empty', FEW, async (page) => {
+  const live = await page.evaluate(() =>
+    [...document.querySelectorAll('.now .keys, [data-act="lyrics"], [data-act="now-more"]')]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => element.dataset.act ?? 'the transport keys'),
+  );
+  if (live.length > 0) throw new Error(`with nothing to play, the playing card shows ${live.join(', ')}`);
+});
 
 // Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
 // choose from, the picture to save, and the page in a contrast theme.
@@ -930,13 +967,18 @@ await sweep(
   { discord: true },
 );
 // An add that does not go through (an address on a private network, which jukecord does not fetch): the reason under
-// the field as well as in the bar.
+// the field, said there alone (a toast in the bar said it a second time).
 await sweep('add-failed', FEW, async (page) => {
   // The refusal is an answer of 400, which the browser reports on its console: expected here.
   page.expectedErrors = [/status of 400/];
   await page.fill('#add-input', 'http://10.0.0.1/tune');
   await page.click('.add [type="submit"]');
   await page.waitForSelector('.add-failed:not([hidden])');
+  await page.waitForTimeout(300);
+  if ((await page.locator('.toast').count()) > 0) throw new Error('the reason is said in a toast as well');
+  // The add card's filled key is Add, what Enter does: Play now cuts off the track everyone is hearing.
+  const filled = await page.locator('.add .key.primary').getAttribute('data-at');
+  if (filled !== 'end') throw new Error(`the add card's filled key is "${filled}", not Add`);
 });
 // Someone who may only look, in the made-up Discord: no grips, no keys on the rows, the saved playlists to look at.
 await sweep(
@@ -948,6 +990,29 @@ await sweep(
   },
   { discord: { view: true } },
 );
+// The queue's tools say what they do in words (Shuffle, Take turns where there is room, and the key that lists the rest
+// with theirs: as six bare icons on a short window, Take turns and Remove duplicates could not be told), on the line of
+// the queue's title, so the queue under it keeps its rows (and on a wide window short of height, the search too).
+async function toolsInWords(page) {
+  const problems = await page.evaluate(() => {
+    const tools = document.querySelector('.card-head .tools:has(> .tools-more)');
+    const found = [...tools.querySelectorAll(':scope > .key:not(.tools-more)')]
+      .filter((key) => key.getClientRects().length > 0 && !key.querySelector('.label')?.getClientRects().length)
+      .map((key) => `${key.dataset.act} without its word`);
+    const middle = (element) => {
+      const box = element.getBoundingClientRect();
+      return (box.top + box.bottom) / 2;
+    };
+    const head = tools.closest('.card-head');
+    const title = middle(head.querySelector('h2'));
+    const sameLine = window.innerWidth > 1100 ? [tools, head.querySelector('.head-search')] : [tools];
+    for (const part of sameLine) {
+      if (Math.abs(middle(part) - title) > 1) found.push(`${part.className} off the title's line`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the queue's head: ${problems.join(', ')}`);
+}
 // Wide windows short of height (a 1366 by 768 laptop with the browser's bars, a 1920 by 1080 screen at 150 %): two
 // columns, the playing card shorter, the add field and the queue's rows in sight.
 await sweep(
@@ -957,9 +1022,11 @@ await sweep(
     [1280, 610],
     [1920, 700],
   ],
-  null,
+  toolsInWords,
   { touch: false },
 );
+// A laptop's 1024 by 768 with a mouse: two columns, the queue's tools on the title's line, in words.
+await sweep('laptop-tools', [[1024, 768]], toolsInWords, { touch: false });
 // Touch screens as wide but short (an iPad Air held sideways under Safari's bars, an Android tablet under Chrome's):
 // one column, as a phone, since their keys are taller.
 await sweep(
@@ -1041,6 +1108,9 @@ async function openLyrics(page) {
 }
 await sweep('lyrics', SIZES, async (page) => {
   await openLyrics(page);
+  // The lines fade out at the box's edges rather than being cut there (letters' stubs under the head's rule).
+  const mask = await page.evaluate(() => getComputedStyle(document.querySelector('.lyrics-body')).maskImage);
+  if (!/gradient/.test(mask)) throw new Error("the lyrics' lines are cut at the box's edges, not faded");
   // In a sheet (one column): the sheet's close key on the centre of the lyrics' head and inside it. A head shorter
   // than a finger's key left the key hanging across the line under it.
   const off = await page.evaluate(() => {
@@ -1074,6 +1144,7 @@ await sweep(
           : 'nowhere to be seen',
     );
     if (where !== 'the right column') throw new Error(`the lyrics opened in ${where} beside two columns`);
+    await toolsInWords(page);
   },
   { touch: false },
 );
@@ -1081,20 +1152,55 @@ await sweep('lyrics-plain', FEW, async (page) => {
   page.lyricsKind = 'plain';
   await openLyrics(page);
 });
+// No lyrics found: the Lyrics key opens nothing (a card the column's height, or a whole sheet on a phone, held one
+// line), and a toast says so.
 await sweep('lyrics-none', FEW, async (page) => {
   page.lyricsKind = 'none';
-  await openLyrics(page);
+  await page.click('[data-act="lyrics"]');
+  await page.waitForSelector('.toast');
+  const opened = await page.evaluate(() =>
+    Boolean(document.querySelector('.sheet .lyrics, .lyrics-card:not([hidden])')),
+  );
+  if (opened) throw new Error('the lyrics opened to say there are none');
 });
 await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
-// The playing card's More menu, and the card while the player is to stop after this track.
+// The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it), and the
+// card while the player is to stop after this track.
 await sweep('now-more', FEW, async (page) => {
   await page.click('[data-act="now-more"]');
   await page.waitForSelector('.dialog [data-choice="stop-after"]');
+  const [title, track] = await page.evaluate(() => [
+    document.querySelector('.dialog h2')?.textContent,
+    document.querySelector('.now .title')?.textContent,
+  ]);
+  if (title !== track) throw new Error(`the playing track's More is titled "${title}", not "${track}"`);
+  if ((await page.locator('.dialog [data-choice="drop"]').count()) === 0) throw new Error('More has no Remove');
 });
 // From the top of the track, so it does not end (and stop) while these pages are looked at.
 await api('POST', '/guilds/local/player/seek', { positionMs: 0 });
 await api('PUT', '/guilds/local/player/stop-after', { on: true });
-await sweep('stops-after', FEW);
+// The head keeps one line: the words are under the track (beside the state they pushed Lyrics and More onto a second
+// line of a phone's head), with the key that plays on after it, which asks for that (answered here, so the server
+// stops after the track for every page of the state).
+await sweep('stops-after', FEW, async (page) => {
+  await page.waitForSelector('.now .stop-note:not([hidden])');
+  const off = await page.evaluate(() => {
+    const head = document.querySelector('.card[aria-labelledby="now-h"] > .card-head');
+    const keys = head.querySelector('.head-keys').getBoundingClientRect();
+    const title = head.querySelector('#now-h').getBoundingClientRect();
+    return Math.abs((keys.top + keys.bottom) / 2 - (title.top + title.bottom) / 2);
+  });
+  if (off > 0.5)
+    throw new Error(`the playing card's head takes two lines (its keys ${off.toFixed(1)} px off its title)`);
+  const asked = [];
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/player\/stop-after$/, async (route) => {
+    asked.push(route.request().postDataJSON());
+    await route.fulfill({ json: await api('GET', '/guilds/local/player') });
+  });
+  await page.click('.now [data-act="keep-playing"]');
+  await page.waitForTimeout(300);
+  if (asked[0]?.on !== false) throw new Error(`Keep playing asked for ${JSON.stringify(asked[0] ?? null)}`);
+});
 await api('PUT', '/guilds/local/player/stop-after', { on: false });
 // Playing again if the track ended meanwhile (it stopped after it).
 await api('POST', '/guilds/local/player/resume').catch(() => {});
@@ -1104,10 +1210,16 @@ async function listenHere(page) {
   await page.click('[data-act="listen"]');
   await page.waitForSelector('[data-act="sleep"]:not([hidden])');
 }
+// The timer's choices: the dialog says it stops this browser alone, and its rows are told by their words (each with the
+// same timer icon said nothing).
 await sweep('sleep-menu', FEW, async (page) => {
   await listenHere(page);
   await page.click('[data-act="sleep"]');
   await page.waitForSelector('.dialog [data-sleep="30"]');
+  if (!(await page.locator('.dialog .dialog-note').textContent())?.trim())
+    throw new Error('the timer does not say what stops');
+  const icons = await page.locator('.dialog .choice > svg:not(.check)').count();
+  if (icons > 0) throw new Error(`the timer's choices carry ${icons} icons`);
 });
 await sweep('sleep', [...NARROW, ...FEW], async (page) => {
   await listenHere(page);
@@ -1186,7 +1298,19 @@ async function asGuest(page) {
   await page.waitForSelector('.app .card');
   await page.waitForSelector('.bar .pill.tone-idle');
 }
-await sweep('guest', SIZES, asGuest, { login: false });
+// A guest's card says nobody listens yet as the other cards say an empty list (a bare "Nobody" in the corner of a card
+// the column's height read as unfinished).
+await sweep(
+  'guest',
+  SIZES,
+  async (page) => {
+    await asGuest(page);
+    const people = await page.locator('.guest-people > li:not(.empty)').count();
+    if (people === 0 && !(await page.locator('.guest-people > li.empty').isVisible()))
+      throw new Error("the guest's card does not say nobody listens yet");
+  },
+  { login: false },
+);
 await sweep(
   'guest-lyrics',
   FEW,
@@ -1306,10 +1430,18 @@ async function skipSays(page, voted) {
   if (rows.length > 2 || (rows.length === 2 && rows[0] !== 1)) throw new Error(`the keys lie in rows of ${rows}`);
 }
 // Someone without the DJ role, with a vote to skip under way: the Skip key says how it stands, at every width (the
-// count stays on the key when a narrow row shows icons alone).
-await sweep('vote-skip', SIZES, (page) => skipSays(page, false), {
-  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } },
-});
+// count stays on the key when a narrow row shows icons alone), and the bar does not call them "View only" while their
+// Skip works.
+await sweep(
+  'vote-skip',
+  SIZES,
+  async (page) => {
+    await skipSays(page, false);
+    const said = (await page.locator('.bar .pill').textContent()) ?? '';
+    if (/View only|보기 전용/.test(said)) throw new Error(`the bar says "${said}" while Skip is a vote`);
+  },
+  { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } } },
+);
 // The same person once their vote is in: the key says they voted.
 await sweep('vote-skip-voted', SIZES, (page) => skipSays(page, true), {
   discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } },
@@ -1434,6 +1566,23 @@ await sweep('search', DISCOVERY, async (page) => {
   // The keyboard on the second result.
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
+  // The list shows three whole results at least (at 1440 by 900 the queue's rows left it two), and ends on whole rows:
+  // the one its foot cuts shows half of itself or more, or none of itself (a few pixels of the next cover, or its ring
+  // alone, sat over the line of keys).
+  const problems = await page.evaluate(() => {
+    const list = document.querySelector('#add-found');
+    const box = list.getBoundingClientRect();
+    const rows = [...list.querySelectorAll('[role="option"]')].map((row) => row.getBoundingClientRect());
+    const whole = rows.filter((row) => row.top >= box.top - 0.5 && row.bottom <= box.bottom + 0.5).length;
+    const found = whole < 3 ? [`${whole} whole results in sight`] : [];
+    for (const row of rows) {
+      if (row.top >= box.bottom - 0.5 || row.bottom <= box.bottom + 0.5) continue;
+      const shown = box.bottom - row.top;
+      if (shown < row.height / 2) found.push(`${shown.toFixed(1)} px of a result at the foot`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the results: ${problems.join(', ')}`);
 });
 // Nothing found for the words: the list says so.
 await sweep(
@@ -1450,6 +1599,15 @@ await sweep(
     await page.waitForSelector('.found-state:not([hidden])');
   },
 );
+// Escape in the add field: first the results close, the words staying; again, the words go, as a search field's do.
+await sweep('add-escape', [[1440, 900]], async (page) => {
+  await searchFor(page, 'paper boats');
+  await page.keyboard.press('Escape');
+  if ((await page.inputValue('#add-input')) !== 'paper boats') throw new Error('the first Escape took the words');
+  if (await page.locator('#add-found').isVisible()) throw new Error('the first Escape left the results open');
+  await page.keyboard.press('Escape');
+  if ((await page.inputValue('#add-input')) !== '') throw new Error('a second Escape kept the words');
+});
 // A link from another window held over the page: the add card says where it goes.
 await sweep(
   'drop-link',

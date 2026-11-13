@@ -5,6 +5,10 @@
  * line to play the track from there. Plain words when the lyrics have no timings, "none found" otherwise, and the
  * source credited under them.
  *
+ * The Lyrics key looks them up before opening anything: a track with no words to show (none found, an instrumental)
+ * opens nothing, and a toast says so (a card the column's height, or a whole sheet on a phone, held that one line).
+ * Open already, the view follows the music and says the same in its place when the next track has none.
+ *
  * Nothing here runs while the lyrics are closed. Open, a timer four times a second finds the line being sung (a
  * search in the lines, no drawing) and changes two lines' look only when the line changes.
  */
@@ -14,7 +18,7 @@ import { ONE_COLUMN } from '../columns.ts';
 import { clock, fill, h, icon } from '../dom.ts';
 import type { Live } from '../live.ts';
 import { mayControl, positionNow, state, t, watch } from '../state.ts';
-import { problem, sheet } from '../ui/layers.ts';
+import { problem, sheet, toast } from '../ui/layers.ts';
 
 // A line is lit this much before its time: the eye reaches it as the voice does.
 const LEAD_MS = 150;
@@ -27,11 +31,21 @@ const KEPT = 20;
 let open = false;
 const listeners = new Set<() => void>();
 // Set by the view once it is made: what the Lyrics key does.
-let toggle: () => void = () => {};
+let toggle: () => Promise<void> = async () => {};
 
-/** Opens the lyrics, or closes them when open (the Lyrics key in the playing card). */
-export function toggleLyrics(): void {
-  toggle();
+/**
+ * Opens the lyrics, or closes them when open (the Lyrics key in the playing card). Opening looks them up first (it may
+ * take a moment: the key shows it is busy meanwhile); with no words to show, a toast says so and nothing opens, and a
+ * lookup that fails is thrown, for the key to say why.
+ */
+export function toggleLyrics(): Promise<void> {
+  return toggle();
+}
+
+/** Whether lyrics have words to show: lines, or plain words (not "none found", not an instrumental). */
+function hasWords(lyrics: Lyrics): boolean {
+  if (lyrics.kind === 'none' || lyrics.kind === 'instrumental') return false;
+  return lyrics.lines.length > 0 || Boolean(lyrics.text?.trim());
 }
 
 /** Whether the lyrics are open. */
@@ -323,7 +337,33 @@ export function lyricsView(live: Live): HTMLElement {
     if (on) void load();
     pace();
   };
-  toggle = () => setOpen(!open);
+  // The Lyrics key's opening: the lyrics of the track playing, kept ones at once, else asked for (a refusal is thrown to
+  // the key); opened with words to show, said in a toast without.
+  const lookAndOpen = async () => {
+    const track = state.player?.track ?? null;
+    const guild = state.guild?.id;
+    // Nothing playing: nothing to look up (the key is not there then).
+    if (!track || !guild) return;
+    let lyrics = kept.get(track.id);
+    if (!lyrics) {
+      lyrics = await api.lyrics(guild);
+      kept.delete(lyrics.trackId);
+      kept.set(lyrics.trackId, lyrics);
+      while (kept.size > KEPT) kept.delete(kept.keys().next().value ?? lyrics.trackId);
+    }
+    // Opened meanwhile (the key pressed twice), or the answer is for a track that has ended since: the view opens and
+    // looks up the one playing now itself.
+    if (open) return;
+    if (lyrics.trackId !== state.player?.track?.id || hasWords(lyrics)) {
+      setOpen(true);
+      return;
+    }
+    toast(lyrics.kind === 'instrumental' ? t().lyricsInstrumental : t().lyricsNone, 'load', 'mic-vocal');
+  };
+  toggle = async () => {
+    if (open) setOpen(false);
+    else await lookAndOpen();
+  };
   shut.onclick = () => setOpen(false);
   // A window turned or resized past the rule: the lyrics move to where they belong now.
   oneColumn.addEventListener('change', () => {
