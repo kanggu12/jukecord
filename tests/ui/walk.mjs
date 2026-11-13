@@ -1317,21 +1317,53 @@ await sweep('sleep-menu', FEW, async (page) => {
   const icons = await page.locator('.dialog .choice > svg:not(.check)').count();
   if (icons > 0) throw new Error(`the timer's choices carry ${icons} icons`);
 });
-await sweep('sleep', [...NARROW, ...FEW], async (page) => {
+// The listening bar while this browser listens, as a person sees it: what its Stop and timer keys say, what the timer's
+// key looks like, and how far its parts reach.
+async function listeningBar(page) {
+  return page.evaluate(() => {
+    const words = (key) =>
+      [...(key?.querySelectorAll('.label') ?? [])]
+        .filter((label) => label.getClientRects().length > 0)
+        .map((label) => label.textContent.trim())
+        .join(' ');
+    const sleep = document.querySelector('.listen [data-act="sleep"]');
+    const parts = [...document.querySelectorAll('.listen > *')].filter((part) => part.getClientRects().length > 0);
+    return {
+      stop: words(document.querySelector('.listen [data-act="listen"]')),
+      sleep: words(sleep),
+      face: sleep ? getComputedStyle(sleep).backgroundColor : '',
+      right: Math.max(...parts.map((part) => part.getBoundingClientRect().right)),
+      width: window.innerWidth,
+    };
+  });
+}
+// The timer set for thirty minutes, from the bar: its key shows it is on and the time left, beside Stop in words, at
+// every width (a phone showed a moon that looked the same set or not, and the Stop key as a circle of bars).
+async function sleepSet(page) {
   await listenHere(page);
+  const before = await listeningBar(page);
   await page.click('[data-act="sleep"]');
   await page.click('.dialog [data-sleep="30"]');
   await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
-});
+  // The press's own tint under the pointer gone, as a person sees the key a moment later.
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const after = await listeningBar(page);
+  const problems = [];
+  if (!before.stop || !before.sleep) problems.push(`the keys say "${before.stop}" and "${before.sleep}"`);
+  if (!/^\d+:\d\d$/.test(after.sleep)) problems.push(`the set timer's key says "${after.sleep}", not the time left`);
+  if (after.face === before.face) problems.push('the set timer looks as one not set');
+  for (const bar of [before, after])
+    if (bar.right > bar.width + 0.5) problems.push(`the bar reaches ${Math.round(bar.right)} px of ${bar.width}`);
+  if (problems.length > 0) throw new Error(problems.join('; '));
+}
+// Phones, a small tablet's width between them and the tablets (at 561 to 680 px the bar ran past the window's edge
+// while listening), the tablets and the laptops.
+await sweep('sleep', [...NARROW, [600, 960], ...FEW], sleepSet);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 // Listening with nothing playing, the timer set: the bar keeps to the phone's width.
-await sweep('sleep-idle', NARROW, async (page) => {
-  await listenHere(page);
-  await page.click('[data-act="sleep"]');
-  await page.click('.dialog [data-sleep="30"]');
-  await page.waitForSelector('[data-act="sleep"][aria-pressed="true"]');
-});
+await sweep('sleep-idle', NARROW, sleepSet);
 
 // Inviting: a listening link for guests with its QR code and the links that work, and the host's login link for a
 // friend. The key beside the listeners opens it.

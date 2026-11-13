@@ -53,7 +53,8 @@ export function listenBar(live: Live): HTMLElement {
   const pauseKey = h('button', { class: 'key square bare', type: 'button' });
   const skipKey = h('button', { class: 'key square bare', type: 'button' }, icon('skip-forward'));
   const mini = h('div', { class: 'mini' }, pauseKey, skipKey);
-  const art = h('div');
+  // The small disc, in a box of its own: a phone's bar gives its room to the words while listening (style.css).
+  const art = h('div', { class: 'disc-box' });
   const what = h('div', { class: 'what' });
   const status = h('div', { class: 'state' }, art, what);
   const faces = h('div', { class: 'faces' });
@@ -257,15 +258,16 @@ export function listenBar(live: Live): HTMLElement {
   };
 
   // A key's icon and words, changed only when they differ: replacing the inside of a key while it is being pressed
-  // can lose the click. `spin` turns the icon (the loader while the track gets ready).
+  // can lose the click. `short`, when given, is what a narrow bar shows of the words (style.css picks one); the whole
+  // words stay the key's name and title. `spin` turns the icon (the loader while the track gets ready).
   const label = (
     key: HTMLButtonElement,
     name: Parameters<typeof icon>[0] | null,
     words: string,
     text: boolean,
-    { spin = false } = {},
+    { short = '', spin = false } = {},
   ) => {
-    const sign = `${name}|${words}|${text}|${spin}`;
+    const sign = `${name}|${words}|${text}|${short}|${spin}`;
     if (key.dataset.sign === sign) return;
     key.dataset.sign = sign;
     // The Listen key says what it does in words, its dancing bars before them while it is pressed (style.css).
@@ -273,7 +275,8 @@ export function listenBar(live: Live): HTMLElement {
       key,
       key === toggle ? eq : null,
       name ? icon(name, spin ? 'spin' : '') : null,
-      text ? h('span', { class: 'label' }, words) : null,
+      text ? h('span', { class: short ? 'label long' : 'label' }, words) : null,
+      text && short ? h('span', { class: 'label short' }, short) : null,
     );
     key.title = words;
     key.setAttribute('aria-label', words);
@@ -287,9 +290,14 @@ export function listenBar(live: Live): HTMLElement {
     toggle.setAttribute('aria-pressed', String(state.listening && !retry));
     // The key's bars dance only while sound plays here (in time), and rest while paused or catching up.
     toggle.classList.toggle('sounding', state.listening && sync === 'in-sync' && player?.status === 'playing');
-    label(toggle, null, state.listening && !retry ? words.stopListening : words.listenHere, true);
+    // Listening, the key stops it: in short words on a narrow bar ("Stop" beside the dancing bars), where the whole
+    // words, the timer's key and the title did not fit (a phone showed the bars alone, which said nothing).
+    if (state.listening && !retry) label(toggle, null, words.stopListening, true, { short: words.stopListeningShort });
+    else label(toggle, null, words.listenHere, true);
     // The sleep timer stops this browser's listening: there only while it listens.
     sleep.hidden = !state.listening;
+    // Listening here: a phone's bar gives the small disc's room to the keys' words and the title (style.css).
+    bar.classList.toggle('here', state.listening);
     // What plays, with this browser's state under it.
     // Not listening here, the line says nothing: the Listen key beside it says what it does (a line telling people to
     // press it was a hint nobody needed).
@@ -313,8 +321,19 @@ export function listenBar(live: Live): HTMLElement {
       what,
       // One line, cut short with an ellipsis on a narrow bar; the whole title on hover and for screen readers.
       player?.track ? h('b', { title: player.track.title, 'data-clip': 'ok' }, player.track.title) : null,
-      // How this browser plays along, while it does (a problem in the colour of one).
-      message ? h('span', sync === 'blocked' || sync === 'failed' ? { class: 'text-bad' } : null, message) : null,
+      // How this browser plays along, while it does (a problem in the colour of one). Cut short on a narrow bar, with
+      // its whole words in its title, as the track's title is; with no track over it, it may take two lines.
+      message
+        ? h(
+            'span',
+            {
+              ...(sync === 'blocked' || sync === 'failed' ? { class: 'text-bad' } : {}),
+              title: message,
+              'data-clip': 'ok',
+            },
+            message,
+          )
+        : null,
     );
     // On a phone the now-playing card is far up the page: pause and skip are here too, with the main key's rule:
     // playing or loading shows pause; paused or idle shows play, which also starts a waiting queue.
@@ -338,8 +357,6 @@ export function listenBar(live: Live): HTMLElement {
     setOff(skipKey, !maySkip() || !player?.track, pauseKey, toggle);
     // A guest has neither: it can never press them.
     mini.hidden = state.me?.kind === 'guest';
-    // Nothing playing: the bar has room, so the phone's Listen key says its name too (see style.css).
-    bar.classList.toggle('idle', !player?.track);
     // Who else listens: the faces built again only when the people change (their pictures would load again).
     const people = state.listeners.people.slice(0, 5);
     refill(

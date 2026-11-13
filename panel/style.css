@@ -2487,12 +2487,26 @@ img {
   background: none;
   border-color: transparent;
 }
+/* The sleep timer's key is round, as the Listen key beside it is: set, it is on as that key is (its soft blue and its
+   rim), with the time left or the end of the track in its words. Bare while set, it looked like a key not set. */
+.listen .key.sleep {
+  border-radius: var(--r-round);
+}
 /* Under a mouse only (see .server:hover). */
 @media (hover: hover) {
   .listen .key.bare:hover,
   .listen .key.sleep:hover {
     background: var(--hover-tint);
   }
+}
+.listen .key.sleep[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--ink);
+}
+/* A key's short words, for a narrow bar (below): its whole words elsewhere. */
+.listen .label.short {
+  display: none;
 }
 /* Three bars that dance while the browser listens, standing still while the sound waits. Each bar is a box of its
    own scaled from its foot: the browser animates a scale without laying anything out or drawing it again (the
@@ -2585,6 +2599,15 @@ img {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* With no track over it ("Waiting for a track"), the line has the bar's height to itself: on a phone's narrow bar it
+   takes a second line rather than being cut, and past two it is cut (its whole words are its title). */
+.listen .what span:only-child {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
 }
 .listen .mini {
   display: none;
@@ -3906,6 +3929,14 @@ kbd {
   .listen .volume input {
     width: 84px;
   }
+  /* Stop and the sleep timer's key in short words ("Stop", "Sleep"): beside their whole words and the player's keys the
+     title had no room at 600 px, and 82 px at 744. The whole words stay their names and titles. */
+  .listen .label.long {
+    display: none;
+  }
+  .listen .label.short {
+    display: inline;
+  }
   .row .grip {
     display: none;
   }
@@ -3932,6 +3963,13 @@ kbd {
   /* A phone's bar: its parts closer together, and its sides at the cards' edges under it, as on any window. */
   .bar {
     gap: var(--s-8);
+  }
+}
+/* A narrow window's listening bar has no room for the volume beside the keys' words and the title (at 561 px it ran
+   past the window's edge while listening): the system's volume serves there, as on a phone. */
+@media (max-width: 680px) {
+  .listen .volume {
+    display: none;
   }
 }
 /* The log's head on a window too narrow for its tools on one line (the levels, a filter of 260 px and Refresh): the
@@ -3977,34 +4015,22 @@ kbd {
   .account .name {
     display: none;
   }
-  .listen .volume,
-  .listen .faces-box,
-  .listen .key.sleep .label {
-    display: none;
-  }
-  .listen > .key.sleep {
-    width: var(--control);
-    padding: 0;
+  /* A phone's listening bar: its parts 8 px apart, as the top bar's are. */
+  .listen {
+    gap: var(--s-8);
   }
   .listen > .key[data-act="listen"] {
     padding: 0 var(--s-12);
   }
-  /* Listening, the key is its dancing bars alone (its words, "Stop listening here", name it to a screen reader and in
-     its tooltip): the title and the state beside it keep the bar's room. */
-  .listen > .key[data-act="listen"][aria-pressed="true"] {
-    width: var(--control);
-    padding: 0;
+  /* Listening, Stop and the timer's key say theirs in short words with 8 px inside them, and the small disc gives its
+     room to them and the title (with the disc, a Korean title kept 3 px at 360). Before, the two keys were a circle of
+     bars and a moon that said nothing: a set timer's moon looked like one not set. */
+  .listen > .key[data-act="listen"][aria-pressed="true"],
+  .listen > .key.sleep {
+    padding: 0 var(--s-8);
   }
-  .listen > .key[data-act="listen"][aria-pressed="true"] .label {
+  .listen.here .disc-box {
     display: none;
-  }
-  /* Nothing playing leaves the bar room: the Listen key says its name, the way into listening in the browser. */
-  .listen.idle > .key[data-act="listen"] {
-    width: auto;
-    padding: 0 var(--s-12);
-  }
-  .listen.idle > .key[data-act="listen"] .label {
-    display: inline;
   }
   .tiles {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -4149,7 +4175,8 @@ kbd {
   }
   .seg button[aria-pressed="true"],
   .key[aria-pressed="true"],
-  .listen .key[data-act="listen"][aria-pressed="true"] {
+  .listen .key[data-act="listen"][aria-pressed="true"],
+  .listen .key.sleep[aria-pressed="true"] {
     forced-color-adjust: none;
     background: Highlight;
     border-color: Highlight;
@@ -4459,17 +4486,6 @@ button.lyric {
   /* A line is a finger's height to choose. */
   button.lyric {
     min-height: 44px;
-  }
-}
-@media (max-width: 560px) {
-  /* Listening already, with nothing playing: the key shows its icon alone as at any other time, leaving the room to
-     the sleep timer beside it (its words, to stop listening, are its name for screen readers and its tooltip). */
-  .listen.idle > .key[data-act="listen"][aria-pressed="true"] {
-    width: var(--control);
-    padding: 0;
-  }
-  .listen.idle > .key[data-act="listen"][aria-pressed="true"] .label {
-    display: none;
   }
 }
 
