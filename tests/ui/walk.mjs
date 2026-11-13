@@ -1040,11 +1040,15 @@ async function guestLink() {
   links.used += 1;
   return links.hash;
 }
-// A guest's panel: in with a listening link, the player and the queue, the lyrics, the menu.
+// A guest's panel: in with a listening link, the player and the queue, the lyrics, the menu. The bar says it is a guest
+// once, on the account key: its pill says the connection as anyone's does (it said "Guest" as well, by a lamp that told
+// no state).
 async function asGuest(page) {
   await page.goto(`${BASE}/listen${await guestLink()}`);
   await page.waitForSelector('.app .card');
-  await page.waitForSelector('.bar .pill.tone-idle');
+  await page.waitForSelector('.bar .pill.tone-play');
+  const pill = (await page.locator('.bar .pill').textContent()) ?? '';
+  if (/guest|손님/i.test(pill)) throw new Error(`a guest's pill says: ${pill}`);
 }
 await sweep('guest', SIZES, asGuest, { login: false });
 await sweep(

@@ -99,14 +99,14 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   const me = state.me;
   if (!me) return;
   // The host has no Discord name: one line, "Host" in the panel's language; a friend and a guest the same, a guest with
-  // until when its link works. A Discord login: the name, and how.
+  // until when its link works (not "as a guest" again under "Guest"). A Discord login: the name, and how.
   const host = me.kind === 'host';
   const named = host ? words.host : me.kind === 'friend' ? words.friend : me.kind === 'guest' ? words.guest : me.name;
   const how =
     me.kind === 'user'
       ? words.discordLogin
       : me.kind === 'guest' && me.guest
-        ? words.guestUntil(when(me.guest.expiresAt))
+        ? words.guestCanListen(when(me.guest.expiresAt))
         : null;
   const who = h(
     'div',

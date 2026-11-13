@@ -361,6 +361,8 @@ const EN = {
   inviteRevokeTitle: 'Revoke this listening link?',
   inviteRevokeText: 'Guests listening with it are cut off at once.',
   inviteQr: (what: string) => `QR code of the link: ${what}`,
+  // Under "Guest" in a guest's menu.
+  guestCanListen: (date: string) => `Can listen until ${date}`,
   guest: 'Guest',
   friend: 'Friend',
   guestUntil: (date: string) => `Listening as a guest until ${date}`,
@@ -777,6 +779,7 @@ const KO: Strings = {
   inviteRevokeTitle: '이 듣기 링크를 폐기할까요?',
   inviteRevokeText: '이 링크로 듣고 있는 손님은 바로 연결이 끊김.',
   inviteQr: (what: string) => `링크의 QR 코드: ${what}`,
+  guestCanListen: (date: string) => `${date}까지 들을 수 있음`,
   guest: '손님',
   friend: '친구',
   guestUntil: (date: string) => `${date}까지 손님으로 듣는 중`,
