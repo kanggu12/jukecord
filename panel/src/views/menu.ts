@@ -590,8 +590,8 @@ function fillTokens(
           const scopeName = { read: words.scopeRead, control: words.scopeControl, admin: words.scopeAdmin }[
             token.scope
           ];
-          // Its name and how it is used, beside its Revoke, as a listening link's row (a key's icon before the two lines
-          // stood on their middle, 9.5 px under the name it marks).
+          // Its name and how it is used, beside its Revoke, as a listening link's row (a key's icon before the two
+          // lines stood on their middle, 9.5 px under the name it marks).
           return h(
             'div',
             { class: 'line', dataset: { id: String(token.id) } },

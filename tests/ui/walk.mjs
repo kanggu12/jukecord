@@ -494,9 +494,9 @@ async function choicesInBlue(page) {
     document.body.append(probe);
     const soft = getComputedStyle(probe).backgroundColor;
     probe.remove();
-    const chosen = document.querySelectorAll(
-      '.choice:is([aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]), .seg button[aria-pressed="true"]',
-    );
+    // A choice in a list in use, and the choice made in a row of choices.
+    const inUse = '[aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]';
+    const chosen = document.querySelectorAll(`.choice:is(${inUse}), .seg button[aria-pressed="true"]`);
     return [...chosen]
       .filter((element) => element.getClientRects().length > 0)
       .filter((element) => getComputedStyle(element).backgroundColor !== soft)
@@ -552,8 +552,9 @@ async function pageCentred(page) {
       const bar = document.querySelector(selector);
       if (!bar?.getClientRects().length) continue;
       const edges = inside(bar);
+      const span = (from, to) => `${Math.round(from)} to ${Math.round(to)}`;
       if (Math.abs(edges.left - left) > 0.5 || Math.abs(edges.right - right) > 0.5)
-        return `${name}'s contents span ${Math.round(edges.left)} to ${Math.round(edges.right)}, the page's ${Math.round(left)} to ${Math.round(right)}`;
+        return `${name}'s contents span ${span(edges.left, edges.right)}, the page's ${span(left, right)}`;
     }
     return null;
   });

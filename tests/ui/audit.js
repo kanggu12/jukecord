@@ -318,7 +318,8 @@ window.__audit = () => {
   const dialogs = [...document.querySelectorAll('.dialog')].filter(shown);
   for (const layer of [...document.querySelectorAll('.sheet, .dialog, .toast')].filter(shown)) {
     if (layer.matches('.dialog') && layer !== dialogs.at(-1)) continue;
-    // A sheet under a dialog (a token made in the menu, shown once in its dialog) is under the dialog's shade by design.
+    // A sheet under a dialog (a token made in the menu, shown once in its dialog) is under the dialog's shade, by
+    // design.
     if (layer.matches('.sheet') && dialogs.length > 0) continue;
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
