@@ -1566,6 +1566,35 @@ img {
 .key.faces > .face[aria-hidden="true"] {
   visibility: hidden;
 }
+/* The face that says the state while the track gets ready, in the weight of words that are no key's, in every state
+   alike: the key is as wide as its widest face, so no face's width may change with the state (the keys after it would
+   move). */
+.key.faces > .face.status {
+  font-weight: 500;
+}
+/* While the track gets ready there is nothing to press: the main key's place says the state in the quiet ink, with no
+   key's fill or edge, and not dimmed as a key turned off is (it is words, not a key turned off). A dim slab of the
+   brand's blue saying "Pause" was the loudest thing on the card. The listening bar's pause key the same: its loader in
+   the quiet ink. */
+.key.getting {
+  background: none;
+  border-color: transparent;
+  color: var(--ink-2);
+  cursor: default;
+}
+.key.getting[aria-disabled="true"] {
+  opacity: 1;
+}
+/* Under a mouse only (see .server:hover): no key's pane comes up under the pointer. */
+@media (hover: hover) {
+  .key.getting:hover,
+  .listen .key.bare.getting:hover {
+    background: none;
+  }
+}
+.key.getting:active {
+  transform: none;
+}
 
 /* The progress bar: click or drag to seek; the knob carries the rainbow while playing. */
 .progress {
@@ -4414,6 +4443,12 @@ kbd {
     background: ButtonText;
     border-color: ButtonText;
     color: ButtonFace;
+  }
+  /* While the track gets ready its place holds words, not a key: in the text's colour on the canvas. */
+  .key.primary.getting {
+    background: transparent;
+    border-color: transparent;
+    color: CanvasText;
   }
   /* The charts' bars and the ranks' meters in the text's colour, each meter's track outlined. */
   .bars .b,

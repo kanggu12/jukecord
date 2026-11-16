@@ -275,7 +275,8 @@ export function nowCard(live: Live): HTMLElement {
   const now = h('span', { class: 'num' }, '0:00');
   const end = h('span', { class: 'num' }, '');
   const progress = h('div', { class: 'progress' }, bar, h('div', { class: 'times' }, now, end));
-  // The main key holds its three faces in one place (see draw), each shown in turn.
+  // The main key holds its faces in one place (see draw), each shown in turn: Pause, Resume, Play, and while the track
+  // gets ready no key at all but the state in quiet words.
   const pause = h('button', { class: 'key primary faces', type: 'button', 'data-act': 'pause' });
   const skip = h('button', { class: 'key', type: 'button', 'data-act': 'skip' });
   const stop = h('button', { class: 'key', type: 'button', 'data-act': 'stop' });
@@ -483,32 +484,39 @@ export function nowCard(live: Live): HTMLElement {
     keys.classList.toggle('alone', keySet === 'skip');
     for (const key of [pause, stop, repeat]) key.hidden = keySet !== 'all';
     skip.hidden = keySet === 'none';
-    // The main key: Pause while the music plays or gets ready, Resume while paused, Play with nothing playing. Its three
-    // faces share one place, the two not shown hidden in it, so the key is as wide as its widest face whatever it says:
-    // Skip, Stop and Repeat after it stay put when the music pauses (Resume was 11 px wider than Pause, 14 in Korean,
-    // and moved them).
-    const face = moving ? 'pause' : status === 'paused' ? 'resume' : 'play';
-    // While the track gets ready (waiting for its turn to download, or downloading) the key is at work, as a key whose
-    // press is under way is: the loader turning in place of its icon, and presses let go (see pause.onclick). Pause
-    // then only marked the track to start paused, which nothing showed, and a second press was told "it is already
-    // paused" under a key that still said Pause.
+    // While the track gets ready (waiting for its turn to download, or downloading) there is nothing to press: Pause
+    // then only marked the track to start paused, which nothing showed (see pause.onclick). The main key's place says
+    // the state instead, quietly: the loader turning and "Getting ready", with no key's fill (a dim slab of the brand's
+    // blue saying "Pause" was the loudest thing on the card, and named what was not happening).
     const getting = status === 'loading';
-    const faceWords = { pause: words.pause, resume: words.resume, play: words.play };
+    // The main key: Pause while the music plays, Resume while paused, Play with nothing playing, the state while the
+    // track gets ready. Its four faces share one place, those not shown hidden in it, so the key is as wide as its
+    // widest face whatever it says: Skip, Stop and Repeat after it stay put as the music pauses or gets ready (Resume
+    // was 11 px wider than Pause, 14 in Korean, and moved them).
+    const face = getting ? 'getting' : moving ? 'pause' : status === 'paused' ? 'resume' : 'play';
+    const faceWords = { pause: words.pause, resume: words.resume, play: words.play, getting: words.loading };
     refill(
       pause,
-      `${face}|${getting}|${Object.values(faceWords).join('|')}`,
-      ...(['pause', 'resume', 'play'] as const).map((name) =>
+      `${face}|${Object.values(faceWords).join('|')}`,
+      ...(['pause', 'resume', 'play', 'getting'] as const).map((name) =>
         h(
           'span',
-          // The faces not shown are hidden from screen readers too: the key's name is the one it shows.
-          { class: 'face', 'aria-hidden': name === face ? null : 'true' },
-          name === face && getting ? icon('loader-circle', 'spin') : icon(name === 'pause' ? 'pause' : 'play'),
+          // The faces not shown are hidden from screen readers too: the key's name is the one it shows. The state's
+          // face is of its own (style.css: its weight in every state, so the key's width never changes).
+          { class: name === 'getting' ? 'face status' : 'face', 'aria-hidden': name === face ? null : 'true' },
+          // The loader turns only while it is seen.
+          name === 'getting'
+            ? icon('loader-circle', name === face ? 'spin' : '')
+            : icon(name === 'pause' ? 'pause' : 'play'),
           faceWords[name],
         ),
       ),
     );
-    // At work while the track gets ready, said to screen readers as a busy key's is (aria-disabled keeps the keyboard's
-    // focus on it, where disabled would drop it); a press under way (act()) sets and clears it itself.
+    // The state's look (style.css): no fill, the quiet ink, not dimmed as a key turned off is.
+    pause.classList.toggle('getting', getting);
+    // Nothing to press, said to screen readers as a busy key's is (aria-disabled keeps the keyboard's focus on it, where
+    // disabled would drop it, and it is a key again once the track plays); a press under way (act()) sets and clears it
+    // itself.
     if (!pause.classList.contains('busy')) {
       if (getting) pause.setAttribute('aria-disabled', 'true');
       else pause.removeAttribute('aria-disabled');

@@ -715,10 +715,13 @@ await sweep(
     await page.waitForSelector('.now .keys:not([hidden])');
     const now = await api('GET', '/guilds/local/player');
     const places = [];
+    // Getting ready too: the main key's place then says so in words of its own, which move nothing either.
     for (const [step, change] of [
       { status: 'playing' },
       { status: 'idle', track: null },
       { status: 'paused' },
+      { status: 'loading', positionMs: 0, progress: 0.42 },
+      { status: 'loading', positionMs: 0, progress: null, waiting: true },
     ].entries()) {
       inject({ type: 'player', player: { ...now, ...change, version: now.version + 1000 + step } });
       await page.waitForTimeout(250);
@@ -1039,6 +1042,41 @@ await sweep('logs', FEW, async (page) => {
   // The records fade out at an edge with more beyond it (the first one in sight was sliced through its letters).
   await edgesFade(page);
 });
+// While the track gets ready there is nothing to press: the main key's place (and on a phone the listening bar's pause
+// key) says the state, the loader turning, in words on the card ("Getting ready"), with no key's fill and not dimmed (a
+// dim slab of the brand's blue saying "Pause" was the loudest thing on the card, and named what was not happening).
+async function gettingReady(page) {
+  const keys = await page.evaluate(() =>
+    ['.now [data-act="pause"]', '.listen .mini > .key:first-child']
+      .map((selector) => document.querySelector(selector))
+      .filter((key) => key?.getClientRects().length)
+      .map((key) => {
+        const look = getComputedStyle(key);
+        const face = key.querySelector('.face:not([aria-hidden="true"])');
+        return {
+          key: key.closest('.listen') ? "the bar's" : "the card's",
+          busy: key.getAttribute('aria-disabled') === 'true',
+          turning: [...key.querySelectorAll('svg.spin')].some((icon) => icon.getClientRects().length > 0),
+          // The words: the card's shown face, or the bar's key's name (its icon alone, in a row of icons).
+          words: face ? face.textContent : (key.getAttribute('aria-label') ?? ''),
+          fill: look.backgroundColor,
+          opacity: look.opacity,
+        };
+      }),
+  );
+  const wrong = keys
+    .filter(
+      (key) =>
+        !key.busy ||
+        !key.turning ||
+        !/Getting\sready|준비\s중/.test(key.words) ||
+        !/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(key.fill) ||
+        key.opacity !== '1',
+    )
+    .map((key) => JSON.stringify(key));
+  if (keys.length === 0 || wrong.length > 0) throw new Error(`the keys while the track gets ready: ${wrong.join(' ')}`);
+}
+
 await sweep('loading', FEW, async (page) => {
   const inject = await intercept(page);
   await page.reload();
@@ -1047,6 +1085,7 @@ await sweep('loading', FEW, async (page) => {
   const player = await api('GET', '/guilds/local/player');
   inject({ type: 'player', player: { ...player, status: 'loading', progress: 0.42, version: player.version + 1000 } });
   await page.waitForTimeout(200);
+  await gettingReady(page);
 });
 await sweep('failed', FEW, async (page) => {
   const inject = await intercept(page);
@@ -1286,23 +1325,12 @@ await sweep('notice', FEW, async (page) => {
   });
   await page.waitForSelector('.now .player-note:not([hidden])');
 });
-// A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so the main key and the
-// listening bar's are at work, as a key whose press is under way is: the loader turning in place of Pause, and presses
-// let go (Pause there only marked the track to start paused, which nothing showed: a big Pause over "Waiting to
-// download" at 0:00).
+// A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so there is nothing to press:
+// the main key's place and the listening bar's pause key say the state, quietly (gettingReady: a big Pause over
+// "Waiting to download" at 0:00, then a dim one, named what was not happening).
 await sweep('waiting', FEW, async (page) => {
   await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
-  const keys = await page.evaluate(() =>
-    ['.now [data-act="pause"]', '.listen .mini > .key:first-child']
-      .map((selector) => document.querySelector(selector))
-      .filter((key) => key?.getClientRects().length)
-      .map((key) => ({
-        busy: key.getAttribute('aria-disabled') === 'true',
-        turning: [...key.querySelectorAll('svg.spin')].some((icon) => icon.getClientRects().length > 0),
-      })),
-  );
-  if (keys.length === 0 || keys.some((key) => !key.busy || !key.turning))
-    throw new Error(`the keys while the track waits: ${JSON.stringify(keys)}`);
+  await gettingReady(page);
 });
 // The server's choices in the menu: their names start at one place, whatever stands before them (Everyone's people icon
 // and the roles' dots: the dots were 6 px narrower, and the roles' names 6 px left of Everyone), and the choice made is

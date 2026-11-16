@@ -339,11 +339,19 @@ export function listenBar(live: Live): HTMLElement {
     // playing or loading shows pause; paused or idle shows play, which also starts a waiting queue.
     const moving = player?.status === 'playing' || player?.status === 'loading';
     const queued = (state.queue?.items.length ?? 0) > 0;
-    const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
-    // While the track gets ready the key is at work, as the playing card's is: the loader turning in its place, and
-    // presses let go (pause then only marked the track to start paused, which nothing showed).
+    // While the track gets ready there is nothing to press, as on the playing card: the key's place says the state, the
+    // loader turning in the quiet ink, not dimmed as a key turned off is (style.css), and its name says it in words
+    // ("Getting ready"); presses are let go (pause then only marked the track to start paused, which nothing showed).
     const getting = player?.status === 'loading';
+    const pauseWords = getting
+      ? words.loading
+      : moving
+        ? words.pause
+        : player?.status === 'paused'
+          ? words.resume
+          : words.play;
     label(pauseKey, getting ? 'loader-circle' : moving ? 'pause' : 'play', pauseWords, false, { spin: getting });
+    pauseKey.classList.toggle('getting', getting);
     if (!pauseKey.classList.contains('busy')) {
       if (getting) pauseKey.setAttribute('aria-disabled', 'true');
       else pauseKey.removeAttribute('aria-disabled');
