@@ -489,7 +489,10 @@ async function oneOrder(page) {
     return {
       'the add card': [of('.add', 'at'), 'end,next,now'],
       'a result': [of('#add-found .picks', 'pick'), 'end,next,now'],
-      'a history row': [of('.history .row .acts', 'key'), 'like,again,next,now,more'],
+      // A history row's heart and the key that lists the rest in words, at every width (libraryKeys).
+      'a history row': [of('.history .row .acts', 'key'), 'like,more'],
+      // That list, open: the add card's order.
+      "a history row's list": [of('.dialog .menu-list:has([data-choice="again"])', 'choice'), 'again,next,now'],
       'a queued row': [of('.queue-list .row:not(.next) .acts', 'key'), 'next,jump,remove,more'],
     };
   });
@@ -516,6 +519,61 @@ async function pageCentred(page) {
   if (off) throw new Error(off);
 }
 
+// What this login cannot press is not drawn, nor what does nothing here: every key, field and slider shown on the
+// page's cards and in the listening bar can be pressed, but a key at work for a moment (busy, or the main key's place
+// while the track gets ready). A login that may only look saw about 45 dim keys (the queue's tools, Autoplay, the
+// sound's key, Leave, Join and the volume, a Pause beside the Skip that was its vote, three add keys on every history
+// row), and an empty queue five dead tools under a live search.
+async function nothingDead(page) {
+  const dead = await page.evaluate(() =>
+    [...document.querySelectorAll('.main :is(button, input, select), .listen :is(button, input)')]
+      .filter((control) => control.getClientRects().length > 0 && getComputedStyle(control).visibility !== 'hidden')
+      .filter(
+        (control) =>
+          control.disabled || (control.getAttribute('aria-disabled') === 'true' && !control.matches('.busy, .getting')),
+      )
+      .map(
+        (control) =>
+          control.dataset.act ??
+          control.dataset.key ??
+          control.getAttribute('aria-label') ??
+          control.textContent.trim(),
+      ),
+  );
+  if (dead.length > 0) throw new Error(`keys drawn that cannot be pressed: ${dead.slice(0, 6).join(', ')}`);
+}
+
+// A history row's keys, at every width: its heart and the key that lists the rest in words, each for a login that can
+// press it (at 2560 px the list gave way to three bare icons, and a login that may only look had them all, dim).
+async function libraryKeys(page, want) {
+  const shown = await page.evaluate(() => [
+    ...new Set(
+      [...document.querySelectorAll('.history .row')]
+        .filter((row) => row.getClientRects().length > 0)
+        .map((row) =>
+          [...row.querySelectorAll('.acts > *')]
+            .filter((key) => key.getClientRects().length > 0 && getComputedStyle(key).visibility !== 'hidden')
+            .map((key) => key.dataset.key)
+            .join(),
+        ),
+    ),
+  ]);
+  const wrong = shown.filter((keys) => keys !== want);
+  if (wrong.length > 0) throw new Error(`history rows show "${wrong.join('" | "')}", not "${want}"`);
+}
+
+// Who listens in browsers stands at the end of its row (the faces, or "Nobody"), with Invite after it or without it: for
+// a login that may not invite, "Listening in browsers Nobody" ran together.
+async function listenersEnd(page) {
+  const apart = await page.evaluate(() => {
+    const row = document.querySelector('.listeners');
+    const last = [...row.children].filter((part) => part.getClientRects().length > 0).at(-1);
+    const end = row.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(row).paddingRight);
+    return end - last.getBoundingClientRect().right;
+  });
+  if (apart > 0.5) throw new Error(`who listens in browsers stands ${apart.toFixed(1)} px short of the row's end`);
+}
+
 // ---- the walk ---------------------------------------------------------------------------------------------------
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 // Nothing playing: past the widest the page grows, its content in the middle.
@@ -525,12 +583,16 @@ await sweep('login', FEW);
 await api('POST', '/guilds/local/player/resume');
 await until('playing');
 // A track playing, at every width: the queue's head steady with its longest words, every row's line whole with who
-// added the track, the lists faded at their edges, the content in the middle past its widest.
+// added the track, the lists faded at their edges, the content in the middle past its widest; the history's rows with
+// their heart and list key, the voice card's words in one column, the heart after the title.
 await sweep('playing', SIZES, async (page) => {
   await headSteady(page);
   await rowsWhole(page);
   await edgesFade(page);
   await pageCentred(page);
+  await libraryKeys(page, 'like,more');
+  await voiceColumn(page);
+  await heartAfterTitle(page);
 });
 await sweep('discord', SIZES, null, { discord: true });
 // The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
@@ -563,6 +625,25 @@ await sweep(
   },
   { touch: true },
 );
+// The voice card's words in one column, after each row's icon: the bot's place, the channels, the sound and who listens
+// (they started at 1084, 1080 and, for "Sound" with no icon, 1056 px).
+async function voiceColumn(page) {
+  const starts = await page.evaluate(() => {
+    const card = document.querySelector('.card[aria-labelledby="voice-h"]');
+    return [...card.querySelectorAll(':scope > .voice-now, .channels > .channel, :scope > .sound, :scope > .listeners')]
+      .filter((row) => row.getClientRects().length > 0)
+      .map((row) => {
+        // The first thing after the row's icon: its words (or the slider that stands in their place).
+        const first = [...row.children].find((part) => part.getClientRects().length > 0 && !part.matches('.icon'));
+        return [row.classList[0], first ? first.getBoundingClientRect().left : null];
+      })
+      .filter(([, left]) => left !== null);
+  });
+  const lefts = starts.map(([, left]) => left);
+  if (Math.max(...lefts) - Math.min(...lefts) > 0.5)
+    throw new Error(`the voice card's words start at ${starts.map(([row, left]) => `${row} ${left}`).join(', ')}`);
+}
+
 // A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows. The
 // voice card's keys of a finger's size keep apart from each other and from the lines between its rows (in rows as tall
 // as the keys, the channels' Join keys were a pixel apart and the sound's key on the line above it).
@@ -599,6 +680,28 @@ await sweep(
       return found;
     });
     if (close.length > 0) throw new Error(`the voice card's keys are too close: ${close.join(', ')}`);
+    // And as far apart as each other, one under another: Leave from the first Join as the Joins (16 px against 8), and
+    // the heads side by side as one line, of one height with their rules level (the voice card's was 13 px shorter, its
+    // title 7 px higher than the playing card's).
+    const uneven = await page.evaluate(() => {
+      const found = [];
+      const keys = [...document.querySelectorAll('.voice-now > .key, .channels .key')]
+        .filter((key) => key.getClientRects().length > 0)
+        .map((key) => key.getBoundingClientRect())
+        .sort((a, b) => a.top - b.top);
+      const gaps = keys.slice(1).map((key, at) => key.top - keys[at].bottom);
+      if (gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) > 0.5)
+        found.push(`the voice card's keys ${gaps.map((gap) => gap.toFixed(1)).join(', ')} px apart`);
+      const heads = ['now-h', 'voice-h'].map((id) =>
+        document.querySelector(`.card[aria-labelledby="${id}"] > .card-head`).getBoundingClientRect(),
+      );
+      // Side by side only (one column stacks them).
+      if (heads[0].right <= heads[1].left && Math.abs(heads[0].bottom - heads[1].bottom) > 0.5)
+        found.push(`the heads side by side end ${Math.abs(heads[0].bottom - heads[1].bottom).toFixed(1)} px apart`);
+      return found;
+    });
+    if (uneven.length > 0) throw new Error(uneven.join('; '));
+    await voiceColumn(page);
     // Its finger-sized keys leave the history's words the least room of any window: who added each track whole.
     await rowsWhole(page);
     await headSteady(page);
@@ -715,10 +818,13 @@ await sweep(
     await page.waitForSelector('.now .keys:not([hidden])');
     const now = await api('GET', '/guilds/local/player');
     const places = [];
+    // Getting ready too: the main key's place then says so in words of its own, which move nothing either.
     for (const [step, change] of [
       { status: 'playing' },
       { status: 'idle', track: null },
       { status: 'paused' },
+      { status: 'loading', positionMs: 0, progress: 0.42 },
+      { status: 'loading', positionMs: 0, progress: null, waiting: true },
     ].entries()) {
       inject({ type: 'player', player: { ...now, ...change, version: now.version + 1000 + step } });
       await page.waitForTimeout(250);
@@ -1039,6 +1145,41 @@ await sweep('logs', FEW, async (page) => {
   // The records fade out at an edge with more beyond it (the first one in sight was sliced through its letters).
   await edgesFade(page);
 });
+// While the track gets ready there is nothing to press: the main key's place (and on a phone the listening bar's pause
+// key) says the state, the loader turning, in words on the card ("Getting ready"), with no key's fill and not dimmed (a
+// dim slab of the brand's blue saying "Pause" was the loudest thing on the card, and named what was not happening).
+async function gettingReady(page) {
+  const keys = await page.evaluate(() =>
+    ['.now [data-act="pause"]', '.listen .mini > .key:first-child']
+      .map((selector) => document.querySelector(selector))
+      .filter((key) => key?.getClientRects().length)
+      .map((key) => {
+        const look = getComputedStyle(key);
+        const face = key.querySelector('.face:not([aria-hidden="true"])');
+        return {
+          key: key.closest('.listen') ? "the bar's" : "the card's",
+          busy: key.getAttribute('aria-disabled') === 'true',
+          turning: [...key.querySelectorAll('svg.spin')].some((icon) => icon.getClientRects().length > 0),
+          // The words: the card's shown face, or the bar's key's name (its icon alone, in a row of icons).
+          words: face ? face.textContent : (key.getAttribute('aria-label') ?? ''),
+          fill: look.backgroundColor,
+          opacity: look.opacity,
+        };
+      }),
+  );
+  const wrong = keys
+    .filter(
+      (key) =>
+        !key.busy ||
+        !key.turning ||
+        !/Getting\sready|준비\s중/.test(key.words) ||
+        !/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(key.fill) ||
+        key.opacity !== '1',
+    )
+    .map((key) => JSON.stringify(key));
+  if (keys.length === 0 || wrong.length > 0) throw new Error(`the keys while the track gets ready: ${wrong.join(' ')}`);
+}
+
 await sweep('loading', FEW, async (page) => {
   const inject = await intercept(page);
   await page.reload();
@@ -1047,6 +1188,7 @@ await sweep('loading', FEW, async (page) => {
   const player = await api('GET', '/guilds/local/player');
   inject({ type: 'player', player: { ...player, status: 'loading', progress: 0.42, version: player.version + 1000 } });
   await page.waitForTimeout(200);
+  await gettingReady(page);
 });
 await sweep('failed', FEW, async (page) => {
   const inject = await intercept(page);
@@ -1072,27 +1214,82 @@ await sweep('failed', FEW, async (page) => {
   if (!said.includes('Neon Rain') || said.includes(':') || /\d{3}/.test(said))
     throw new Error(`the failed track reads "${said}"`);
 });
+// No live connection: before any state, the playing card's head says the connection's (connecting, in the colour of a
+// wait, as the bar's label), and its body claims nothing (it said "Now playing" over "Connecting…", beside the bar's
+// "Connecting").
 await sweep('disconnected', FEW, async (page) => {
   await page.routeWebSocket(/\/api\/v1\/events/, (ws) => ws.close({ code: 1006, reason: 'gone' }).catch(() => {}));
   await page.reload();
   await page.waitForSelector('.app .card');
   await page.waitForTimeout(1500);
+  const head = await page.evaluate(() => ({
+    words: document.querySelector('#now-h')?.textContent ?? '',
+    lamp: document.querySelector('#now-h .dot')?.className ?? '',
+    title: document.querySelector('.now .title')?.getClientRects().length > 0,
+  }));
+  if (!/^(Connecting|연결\s중)$/.test(head.words) || !head.lamp.includes('tone-pause') || head.title)
+    throw new Error(
+      `connecting, the playing card says "${head.words}" (${head.lamp})${head.title ? ' over a title' : ''}`,
+    );
 });
+// The playing track's heart right after the title's last word, on the line the title ends on, however it wraps (beside
+// a title of two balanced lines it stood at the column's end, 320 px from the words).
+async function heartAfterTitle(page) {
+  const off = await page.evaluate(() => {
+    const heart = document.querySelector('.now .title-row .like-key');
+    const title = document.querySelector('.now .title');
+    if (!heart?.getClientRects().length || !title?.getClientRects().length) return null;
+    // The title's lines, one box each (it runs inline with the heart).
+    const last = [...title.getClientRects()].at(-1);
+    const key = heart.getBoundingClientRect();
+    const middle = (key.top + key.bottom) / 2;
+    if (middle < last.top || middle > last.bottom) return "the heart is not on the title's last line";
+    const apart = key.left - last.right;
+    return apart < 0 || apart > 8.5 ? `the heart stands ${apart.toFixed(1)} px after the title's last word` : null;
+  });
+  if (off) throw new Error(off);
+}
+
 // The seed's longest title playing, on phones and the tablet: the bar at the bottom shows it on one line.
 {
   const queue = await api('GET', '/guilds/local/queue');
   const long = queue.items.find((item) => item.track.title.length > 60);
   if (long) await api('POST', `/guilds/local/queue/${long.id}/play`).catch(() => {});
   await until('playing');
-  await sweep('long-title', NARROW);
+  // The heart after the title's last word, which wraps here.
+  await sweep('long-title', NARROW, heartAfterTitle);
 }
-// A queue of two hundred tracks (saved playlists loaded over and over).
+// A queue of two hundred tracks (saved playlists loaded over and over), the long title still playing.
 for (let i = 0; i < 16; i += 1) await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
-await sweep('long-queue', FEW);
+await sweep('long-queue', FEW, heartAfterTitle);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
+// Nothing queued: the queue's card has no search and no tool that would do nothing (a live search over the empty list
+// and five dead tools), and its message stands in the middle of the card where the card fills its column (two
+// columns), or the card ends at it (one column): it stood at the top of a card the column's height.
+async function queueAtRest(page) {
+  const problems = await page.evaluate(() => {
+    const found = [];
+    const card = document.querySelector('.card[aria-labelledby="queue-h"]');
+    const list = card.querySelector('.queue-list');
+    const message = list.querySelector(':scope > .empty');
+    if (card.querySelector('.head-search')?.getClientRects().length) found.push('a search field');
+    const box = list.getBoundingClientRect();
+    const said = message?.getBoundingClientRect();
+    const side = document.querySelector('.card[aria-labelledby="voice-h"]')?.getBoundingClientRect();
+    if (said && side && side.left >= card.getBoundingClientRect().right) {
+      const off = (said.top + said.bottom) / 2 - (box.top + box.bottom) / 2;
+      if (Math.abs(off) > 1) found.push(`its message ${off.toFixed(1)} px off the middle of the card's room`);
+    } else if (card.getBoundingClientRect().bottom - box.bottom > 1.5) {
+      found.push(`the card runs ${Math.round(card.getBoundingClientRect().bottom - box.bottom)} px past its message`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the empty queue: ${problems.join('; ')}`);
+  await nothingDead(page);
+}
 // Nothing playing and nothing queued: the playing card has no key that would do nothing (Lyrics for no track, More
-// offering to stop after it, a disabled Play the width of a phone's card).
+// offering to stop after it, a disabled Play the width of a phone's card), nor has the queue's (above).
 await sweep('empty', FEW, async (page) => {
   const live = await page.evaluate(() =>
     [...document.querySelectorAll('.now .keys, [data-act="lyrics"], [data-act="now-more"]')]
@@ -1100,6 +1297,7 @@ await sweep('empty', FEW, async (page) => {
       .map((element) => element.dataset.act ?? 'the transport keys'),
   );
   if (live.length > 0) throw new Error(`with nothing to play, the playing card shows ${live.join(', ')}`);
+  await queueAtRest(page);
 });
 
 // Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
@@ -1295,23 +1493,12 @@ await sweep('notice', FEW, async (page) => {
   const why = ((await page.locator('.now .player-note').textContent()) ?? '').toLowerCase();
   if (!state || why.includes(state)) throw new Error(`the notice "${why}" says the head's "${state}" again`);
 });
-// A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so the main key and the
-// listening bar's are at work, as a key whose press is under way is: the loader turning in place of Pause, and presses
-// let go (Pause there only marked the track to start paused, which nothing showed: a big Pause over "Waiting to
-// download" at 0:00).
+// A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so there is nothing to press:
+// the main key's place and the listening bar's pause key say the state, quietly (gettingReady: a big Pause over
+// "Waiting to download" at 0:00, then a dim one, named what was not happening).
 await sweep('waiting', FEW, async (page) => {
   await player(page, { status: 'loading', positionMs: 0, progress: null, waiting: true });
-  const keys = await page.evaluate(() =>
-    ['.now [data-act="pause"]', '.listen .mini > .key:first-child']
-      .map((selector) => document.querySelector(selector))
-      .filter((key) => key?.getClientRects().length)
-      .map((key) => ({
-        busy: key.getAttribute('aria-disabled') === 'true',
-        turning: [...key.querySelectorAll('svg.spin')].some((icon) => icon.getClientRects().length > 0),
-      })),
-  );
-  if (keys.length === 0 || keys.some((key) => !key.busy || !key.turning))
-    throw new Error(`the keys while the track waits: ${JSON.stringify(keys)}`);
+  await gettingReady(page);
 });
 // The server's choices in the menu: their names start at one place, whatever stands before them (Everyone's people icon
 // and the roles' dots: the dots were 6 px narrower, and the roles' names 6 px left of Everyone), and the choice made is
@@ -1386,6 +1573,11 @@ await sweep(
     );
     const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
     if (!lamp.includes('tone-idle')) throw new Error(`the bar's "View only" is ${lamp}`);
+    // Nothing drawn it cannot press: hearts on the history's rows (it may like), the sound in words, and Playlists.
+    await nothingDead(page);
+    await libraryKeys(page, 'like');
+    await voiceColumn(page);
+    await listenersEnd(page);
     await tool(page, 'load');
     await page.waitForSelector('.dialog .channel');
   },
@@ -1579,8 +1771,27 @@ await sweep('lyrics-none', FEW, async (page) => {
   if (opened) throw new Error('the lyrics opened to say there are none');
 });
 await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
-// The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it), and the
-// card while the player is to stop after this track.
+// A list of choices holds its rows' words alike: each row's first line as far from its top as the others' (beside a row
+// of one line, whose words stand in the middle of its height, a row with a hint under its name started them at its
+// padding, and the rows' lines stood 46, then 42 px apart).
+async function choicesInLine(page) {
+  const offsets = await page.evaluate(() => {
+    // The dialog on top: the last in the page.
+    const dialog = [...document.querySelectorAll('.dialog')].at(-1);
+    return [...dialog.querySelectorAll('.menu-list > .choice')]
+      .filter((choice) => choice.getClientRects().length > 0)
+      .map((choice) => {
+        // Its first line: the name over a hint, or its words alone.
+        const first = (choice.querySelector('.choice-name') ?? choice.querySelector('.grow')).getBoundingClientRect();
+        return Math.round(((first.top + first.bottom) / 2 - choice.getBoundingClientRect().top) * 2) / 2;
+      });
+  });
+  if (Math.max(...offsets) - Math.min(...offsets) > 0.5)
+    throw new Error(`the choices' first lines stand ${offsets.join(', ')} px under their tops`);
+}
+// The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it): what can
+// be done to the track alone (Invite to listen, which is not about the track, lives beside the people listening and in
+// the menu), its rows alike.
 await sweep('now-more', FEW, async (page) => {
   await page.click('[data-act="now-more"]');
   await page.waitForSelector('.dialog [data-choice="stop-after"]');
@@ -1590,6 +1801,9 @@ await sweep('now-more', FEW, async (page) => {
   ]);
   if (title !== track) throw new Error(`the playing track's More is titled "${title}", not "${track}"`);
   if ((await page.locator('.dialog [data-choice="drop"]').count()) === 0) throw new Error('More has no Remove');
+  const choices = await page.$$eval('.dialog .menu-list > .choice', (found) => found.map((c) => c.dataset.choice));
+  if (choices.join() !== 'stop-after,drop') throw new Error(`the playing track's More holds ${choices.join(', ')}`);
+  await choicesInLine(page);
 });
 // From the top of the track, so it does not end (and stop) while these pages are looked at.
 await api('POST', '/guilds/local/player/seek', { positionMs: 0 });
@@ -1670,6 +1884,10 @@ async function sleepSet(page) {
   const after = await listeningBar(page);
   const problems = [];
   if (!before.stop || !before.sleep) problems.push(`the keys say "${before.stop}" and "${before.sleep}"`);
+  // The Listen key while listening says so ("Listening"), as the timer's key says the time it is set to: "Stop" said
+  // what the player's Stop says, which stops the music for everyone, and Korean "끄기" did not say what it turned off.
+  if (!/^(Listening(\shere)?|(여기서\s)?듣는\s중)$/.test(before.stop))
+    problems.push(`listening, the Listen key says "${before.stop}"`);
   if (!/^\d+:\d\d$/.test(after.sleep)) problems.push(`the set timer's key says "${after.sleep}", not the time left`);
   if (after.face === before.face) problems.push('the set timer looks as one not set');
   for (const bar of [before, after])
@@ -1901,6 +2119,10 @@ await sweep(
       (found) => found.filter((element) => element.getClientRects().length > 0).length,
     );
     if (unusable > 0) throw new Error(`a View login's add card shows ${unusable} field and keys it cannot use`);
+    // Nor anywhere else: no heart (it may not like), no list key on the history's rows, no tool but Playlists.
+    await nothingDead(page);
+    await libraryKeys(page, '');
+    await listenersEnd(page);
   },
   { login: false },
 );
@@ -2036,13 +2258,23 @@ await sweep(
     // What a login may do is no state of the music: its lamp unlit (in the pause colour it read as "paused").
     const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
     if (!lamp.includes('tone-idle')) throw new Error(`the bar's "${said}" is ${lamp}`);
+    // The vote the one key of the transport, here and in the bar (a dim Pause stood beside the bar's Skip), and the
+    // history's rows with their hearts alone (three dim add keys on every row at 2560 px).
+    await nothingDead(page);
+    await libraryKeys(page, 'like');
   },
   { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } } },
 );
 // The same person once their vote is in: the key says they voted.
-await sweep('vote-skip-voted', SIZES, (page) => skipSays(page, true), {
-  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } },
-});
+await sweep(
+  'vote-skip-voted',
+  SIZES,
+  async (page) => {
+    await skipSays(page, true);
+    await nothingDead(page);
+  },
+  { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } } },
+);
 // The menu of someone who manages the server, with the server's settings under the DJ role.
 await sweep(
   'menu-settings',
@@ -2267,6 +2499,9 @@ await sweep('liked-menu', [[360, 780]], async (page) => {
   await page.click('.library-seg [data-view="liked"]');
   await page.locator('.history .row .lib-more:visible').first().click();
   await page.waitForSelector('.dialog .menu-list .choice');
+  // In the add card's order, as every list of the keys that add a track.
+  await oneOrder(page);
+  await choicesInLine(page);
 });
 await sweep('history-keys', DISCOVERY, async (page) => {
   await page.click('.library-seg [data-view="history"]');
@@ -2292,6 +2527,8 @@ await sweep(
   ],
   async (page) => {
     await page.waitForSelector('.auto-note:not([hidden])');
+    // Autoplay's key and Playlists stay; nothing else in the empty queue's head (above).
+    await queueAtRest(page);
   },
 );
 await sweep(

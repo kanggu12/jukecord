@@ -15,7 +15,7 @@ import type { Live } from '../live.ts';
 import { SoundGraph } from '../sound.ts';
 import { keep, mayControl, maySkip, positionNow, skipTitle, state, t, update, watch } from '../state.ts';
 import { followMusic } from './light.ts';
-import { act, disc, listenerFace, skipOrVote } from './player.ts';
+import { act, disc, listenerFace, setShown, skipOrVote } from './player.ts';
 import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
@@ -259,15 +259,17 @@ export function listenBar(live: Live): HTMLElement {
 
   // A key's icon and words, changed only when they differ: replacing the inside of a key while it is being pressed
   // can lose the click. `short`, when given, is what a narrow bar shows of the words (style.css picks one); the whole
-  // words stay the key's name and title. `spin` turns the icon (the loader while the track gets ready).
+  // words stay the key's title. `spin` turns the icon (the loader while the track gets ready). `title`, when given, is
+  // what a press does where the words say a state (the Listen key while listening: "Listening here", and a press stops
+  // it); the key's name for screen readers is then the words it shows, its state said by aria-pressed.
   const label = (
     key: HTMLButtonElement,
     name: Parameters<typeof icon>[0] | null,
     words: string,
     text: boolean,
-    { short = '', spin = false } = {},
+    { short = '', spin = false, title = '' } = {},
   ) => {
-    const sign = `${name}|${words}|${text}|${short}|${spin}`;
+    const sign = `${name}|${words}|${text}|${short}|${spin}|${title}`;
     if (key.dataset.sign === sign) return;
     key.dataset.sign = sign;
     // The Listen key says what it does in words, its dancing bars before them while it is pressed (style.css).
@@ -278,8 +280,9 @@ export function listenBar(live: Live): HTMLElement {
       text ? h('span', { class: short ? 'label long' : 'label' }, words) : null,
       text && short ? h('span', { class: 'label short' }, short) : null,
     );
-    key.title = words;
-    key.setAttribute('aria-label', words);
+    key.title = title || words;
+    if (title) key.removeAttribute('aria-label');
+    else key.setAttribute('aria-label', words);
   };
 
   const draw = () => {
@@ -290,9 +293,12 @@ export function listenBar(live: Live): HTMLElement {
     toggle.setAttribute('aria-pressed', String(state.listening && !retry));
     // The key's bars dance only while sound plays here (in time), and rest while paused or catching up.
     toggle.classList.toggle('sounding', state.listening && sync === 'in-sync' && player?.status === 'playing');
-    // Listening, the key stops it: in short words on a narrow bar ("Stop" beside the dancing bars), where the whole
-    // words, the timer's key and the title did not fit (a phone showed the bars alone, which said nothing).
-    if (state.listening && !retry) label(toggle, null, words.stopListening, true, { short: words.stopListeningShort });
+    // Listening, the key is on and says so, as the timer's key beside it shows the time it is set to: "Listening here",
+    // in short words on a narrow bar ("Listening"), where the whole words, the timer's key and the title did not fit.
+    // A press stops it, which its title says. ("Stop" said what the player's Stop says, and that one stops the music
+    // for everyone; Korean "끄기" did not say what it turned off.)
+    if (state.listening && !retry)
+      label(toggle, null, words.listeningOn, true, { short: words.listeningOnShort, title: words.stopListening });
     else label(toggle, null, words.listenHere, true);
     // The sleep timer stops this browser's listening: there only while it listens.
     sleep.hidden = !state.listening;
@@ -339,11 +345,19 @@ export function listenBar(live: Live): HTMLElement {
     // playing or loading shows pause; paused or idle shows play, which also starts a waiting queue.
     const moving = player?.status === 'playing' || player?.status === 'loading';
     const queued = (state.queue?.items.length ?? 0) > 0;
-    const pauseWords = moving ? words.pause : player?.status === 'paused' ? words.resume : words.play;
-    // While the track gets ready the key is at work, as the playing card's is: the loader turning in its place, and
-    // presses let go (pause then only marked the track to start paused, which nothing showed).
+    // While the track gets ready there is nothing to press, as on the playing card: the key's place says the state, the
+    // loader turning in the quiet ink, not dimmed as a key turned off is (style.css), and its name says it in words
+    // ("Getting ready"); presses are let go (pause then only marked the track to start paused, which nothing showed).
     const getting = player?.status === 'loading';
+    const pauseWords = getting
+      ? words.loading
+      : moving
+        ? words.pause
+        : player?.status === 'paused'
+          ? words.resume
+          : words.play;
     label(pauseKey, getting ? 'loader-circle' : moving ? 'pause' : 'play', pauseWords, false, { spin: getting });
+    pauseKey.classList.toggle('getting', getting);
     if (!pauseKey.classList.contains('busy')) {
       if (getting) pauseKey.setAttribute('aria-disabled', 'true');
       else pauseKey.removeAttribute('aria-disabled');
@@ -352,11 +366,18 @@ export function listenBar(live: Live): HTMLElement {
     // once the person's vote is in, that they voted (as the playing card's Skip is).
     skipKey.title = skipTitle();
     skipKey.setAttribute('aria-label', skipKey.title);
-    // A key turned off with the focus on it (Skip on the last track) hands it to the other key, or to Listen here.
-    setOff(pauseKey, !player || !mayControl() || (!player.track && !queued), toggle);
-    setOff(skipKey, !maySkip() || !player?.track, pauseKey, toggle);
-    // A guest has neither: it can never press them.
-    mini.hidden = state.me?.kind === 'guest';
+    // Each only for a login that can press it, as on the playing card: a login without the DJ role had a dim Pause beside
+    // the Skip that is its vote. And neither with nothing to play (no track, an empty queue), as the playing card has no
+    // keys then: a dim Play and Skip did nothing. A key left out or turned off with the focus on it (Skip on the last
+    // track) hands it to the other key, or to Listen here.
+    const playable = Boolean(player?.track) || queued;
+    setShown(pauseKey, mayControl() && playable, skipKey, toggle);
+    // A guest has no vote either (its Skip has nobody's name to count): as on the playing card, no keys at all.
+    setShown(skipKey, maySkip() && state.me?.kind !== 'guest' && playable, pauseKey, toggle);
+    setOff(pauseKey, !player, toggle);
+    setOff(skipKey, !player?.track, pauseKey, toggle);
+    // With neither (a guest, a login that may only look, nothing to play), the pair is not there at all.
+    mini.hidden = pauseKey.hidden && skipKey.hidden;
     // Who else listens: the faces built again only when the people change (their pictures would load again).
     const people = state.listeners.people.slice(0, 5);
     refill(
