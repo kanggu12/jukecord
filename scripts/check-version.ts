@@ -43,10 +43,12 @@ for (const path of GUIDES) {
   if (!fs.existsSync(path)) continue;
   let text = fs.readFileSync(path, 'utf8');
   if (write) {
+    const before = text;
     // Each mention keeps its words; only its version becomes this one.
     for (const pattern of NAMED)
       text = text.replace(pattern, (whole: string, named: string) => whole.replace(named, VERSION));
-    fs.writeFileSync(path, text);
+    // A guide already on the version is left as it is, its time of change too.
+    if (text !== before) fs.writeFileSync(path, text);
   }
   // Every mention of another version, in the order of the guide's lines.
   const others = NAMED.flatMap((pattern) => [...text.matchAll(pattern)])
