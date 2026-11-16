@@ -2343,7 +2343,7 @@ await sweep(
     await page
       .locator('.dialog .paste')
       .fill(
-        ['https://media.example/demo001', 'https://media.example/demo002', 'Example Band - Velvet Hours'].join('\n'),
+        ['https://media.example/demo001', 'https://media.example/demo002', 'Quiet Atlas - Velvet Hours'].join('\n'),
       );
     // Filled, each field still shows its name (a placeholder alone went with the first letter), and Import is the
     // dialog's own key beside Close (it stood in the body, Close alone on a row under it).
