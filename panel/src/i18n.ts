@@ -106,6 +106,9 @@ const EN = {
   daysAgo: (n: number) => (n === 1 ? 'yesterday' : `${n} days ago`),
   // The listening bar.
   listenHere: 'Listen here',
+  // The Listen key while this browser listens says so, as a key that is on (pressed again, it stops: its title says
+  // that). "Stop" said what the player's Stop says, which stops the music for everyone.
+  listeningOn: 'Listening here',
   stopListening: 'Stop listening here',
   inSync: 'In sync',
   catchingUp: 'Catching up',
@@ -114,8 +117,8 @@ const EN = {
   listenFailed: 'This browser cannot play the track',
   volume: 'Volume',
   listeners: (n: number) => (n === 1 ? '1 listening' : `${n} listening`),
-  // The bar's Stop and sleep timer keys in short words, where the bar is narrow (their whole words are their names).
-  stopListeningShort: 'Stop',
+  // The bar's Listen and sleep timer keys in short words, where the bar is narrow (their whole words elsewhere).
+  listeningOnShort: 'Listening',
   sleepShort: 'Sleep',
   sleepEndShort: 'Track end',
   // Menu.
@@ -655,6 +658,7 @@ const KO: Strings = {
   hoursAgo: (n: number) => `${n}시간 전`,
   daysAgo: (n: number) => (n === 1 ? '어제' : `${n}일 전`),
   listenHere: '여기서 듣기',
+  listeningOn: '여기서 듣는 중',
   stopListening: '여기서 그만 듣기',
   inSync: '맞춰 재생 중',
   catchingUp: '위치 맞추는 중',
@@ -663,7 +667,7 @@ const KO: Strings = {
   listenFailed: '이 브라우저는 이 곡을 틀 수 없음',
   volume: '음량',
   listeners: (n: number) => `${n}명 듣는 중`,
-  stopListeningShort: '끄기',
+  listeningOnShort: '듣는 중',
   sleepShort: '타이머',
   sleepEndShort: '이 곡까지',
   theme: '테마',

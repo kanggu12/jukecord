@@ -1689,6 +1689,10 @@ async function sleepSet(page) {
   const after = await listeningBar(page);
   const problems = [];
   if (!before.stop || !before.sleep) problems.push(`the keys say "${before.stop}" and "${before.sleep}"`);
+  // The Listen key while listening says so ("Listening"), as the timer's key says the time it is set to: "Stop" said
+  // what the player's Stop says, which stops the music for everyone, and Korean "끄기" did not say what it turned off.
+  if (!/^(Listening(\shere)?|(여기서\s)?듣는\s중)$/.test(before.stop))
+    problems.push(`listening, the Listen key says "${before.stop}"`);
   if (!/^\d+:\d\d$/.test(after.sleep)) problems.push(`the set timer's key says "${after.sleep}", not the time left`);
   if (after.face === before.face) problems.push('the set timer looks as one not set');
   for (const bar of [before, after])

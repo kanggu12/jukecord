@@ -259,15 +259,17 @@ export function listenBar(live: Live): HTMLElement {
 
   // A key's icon and words, changed only when they differ: replacing the inside of a key while it is being pressed
   // can lose the click. `short`, when given, is what a narrow bar shows of the words (style.css picks one); the whole
-  // words stay the key's name and title. `spin` turns the icon (the loader while the track gets ready).
+  // words stay the key's title. `spin` turns the icon (the loader while the track gets ready). `title`, when given, is
+  // what a press does where the words say a state (the Listen key while listening: "Listening here", and a press stops
+  // it); the key's name for screen readers is then the words it shows, its state said by aria-pressed.
   const label = (
     key: HTMLButtonElement,
     name: Parameters<typeof icon>[0] | null,
     words: string,
     text: boolean,
-    { short = '', spin = false } = {},
+    { short = '', spin = false, title = '' } = {},
   ) => {
-    const sign = `${name}|${words}|${text}|${short}|${spin}`;
+    const sign = `${name}|${words}|${text}|${short}|${spin}|${title}`;
     if (key.dataset.sign === sign) return;
     key.dataset.sign = sign;
     // The Listen key says what it does in words, its dancing bars before them while it is pressed (style.css).
@@ -278,8 +280,9 @@ export function listenBar(live: Live): HTMLElement {
       text ? h('span', { class: short ? 'label long' : 'label' }, words) : null,
       text && short ? h('span', { class: 'label short' }, short) : null,
     );
-    key.title = words;
-    key.setAttribute('aria-label', words);
+    key.title = title || words;
+    if (title) key.removeAttribute('aria-label');
+    else key.setAttribute('aria-label', words);
   };
 
   const draw = () => {
@@ -290,9 +293,12 @@ export function listenBar(live: Live): HTMLElement {
     toggle.setAttribute('aria-pressed', String(state.listening && !retry));
     // The key's bars dance only while sound plays here (in time), and rest while paused or catching up.
     toggle.classList.toggle('sounding', state.listening && sync === 'in-sync' && player?.status === 'playing');
-    // Listening, the key stops it: in short words on a narrow bar ("Stop" beside the dancing bars), where the whole
-    // words, the timer's key and the title did not fit (a phone showed the bars alone, which said nothing).
-    if (state.listening && !retry) label(toggle, null, words.stopListening, true, { short: words.stopListeningShort });
+    // Listening, the key is on and says so, as the timer's key beside it shows the time it is set to: "Listening here",
+    // in short words on a narrow bar ("Listening"), where the whole words, the timer's key and the title did not fit.
+    // A press stops it, which its title says. ("Stop" said what the player's Stop says, and that one stops the music
+    // for everyone; Korean "끄기" did not say what it turned off.)
+    if (state.listening && !retry)
+      label(toggle, null, words.listeningOn, true, { short: words.listeningOnShort, title: words.stopListening });
     else label(toggle, null, words.listenHere, true);
     // The sleep timer stops this browser's listening: there only while it listens.
     sleep.hidden = !state.listening;

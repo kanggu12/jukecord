@@ -4167,8 +4167,9 @@ kbd {
   .listen .volume input {
     width: 84px;
   }
-  /* Stop and the sleep timer's key in short words ("Stop", "Sleep"): beside their whole words and the player's keys the
-     title had no room at 600 px, and 82 px at 744. The whole words stay their names and titles. */
+  /* The Listen key while listening and the sleep timer's key in short words ("Listening", "Sleep"): beside their whole
+     words and the player's keys the title had no room at 600 px, and 82 px at 744. The whole words stay their
+     titles. */
   .listen .label.long {
     display: none;
   }
@@ -4272,12 +4273,17 @@ kbd {
   .listen > .key[data-act="listen"] {
     padding: 0 var(--s-12);
   }
-  /* Listening, Stop and the timer's key say theirs in short words with 8 px inside them, and the small disc gives its
-     room to them and the title (with the disc, a Korean title kept 3 px at 360). Before, the two keys were a circle of
-     bars and a moon that said nothing: a set timer's moon looked like one not set. */
+  /* Listening, the Listen key and the timer's key say theirs in short words with 8 px inside them, and the small disc
+     gives its room to them and the title (with the disc, a Korean title kept 3 px at 360). Before, the two keys were a
+     circle of bars and a moon that said nothing: a set timer's moon looked like one not set. */
   .listen > .key[data-act="listen"][aria-pressed="true"],
   .listen > .key.sleep {
     padding: 0 var(--s-8);
+  }
+  /* Listening, the key's word says so ("Listening"): its dancing bars give their room to the track's title (beside
+     them, an English title kept 41 px of a 360 px phone). */
+  .listen > .key[data-act="listen"][aria-pressed="true"] .eq {
+    display: none;
   }
   .listen.here .disc-box {
     display: none;
