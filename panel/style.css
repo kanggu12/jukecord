@@ -439,9 +439,10 @@ img {
    under the head's rule, a dialog's list ending on a whole row with more hidden under it). The whole fade as soon as
    anything lies beyond: grown with what lay beyond, a list resting with a few pixels of its last row out of sight
    faded over those few, and the rest of the row showed the top halves of its letters. The fade is eased (its ink the
-   square of the way in): a line the edge cuts in half is all but gone (linear, a lyric's top half still showed at
-   1.4:1), and the line before it comes in whole. With nothing to scroll there is no mask. --fade is a length
-   (registered), so what it computes to can be read as one (tests/ui/walk.mjs). */
+   cube of the way in): a line the edge cuts is all but gone, at 1.2:1 or less (linear, a lyric's top half still
+   showed at 1.4:1, and squared, two thirds of one at 1.36:1), and the line before it comes in whole. With nothing to
+   scroll there is no mask. --fade is a length (registered), so what it computes to can be read as one
+   (tests/ui/walk.mjs). */
 @property --fade {
   syntax: "<length>";
   inherits: false;
@@ -474,18 +475,18 @@ img {
   /* Each edge's fade, at most the box's own. */
   --above: min(var(--fade-above, 0px), var(--fade));
   --below: min(var(--fade-below, 0px), var(--fade));
-  /* The ink at a quarter, a half and three quarters of the way in: the squares of those (6, 25 and 56 %). */
+  /* The ink at a quarter, a half and three quarters of the way in: the cubes of those (2, 12 and 42 %). */
   mask-image: linear-gradient(
     to bottom,
     transparent,
-    rgb(0 0 0 / 6%) calc(var(--above) * 0.25),
-    rgb(0 0 0 / 25%) calc(var(--above) * 0.5),
-    rgb(0 0 0 / 56%) calc(var(--above) * 0.75),
+    rgb(0 0 0 / 2%) calc(var(--above) * 0.25),
+    rgb(0 0 0 / 12%) calc(var(--above) * 0.5),
+    rgb(0 0 0 / 42%) calc(var(--above) * 0.75),
     #000 var(--above),
     #000 calc(100% - var(--below)),
-    rgb(0 0 0 / 56%) calc(100% - var(--below) * 0.75),
-    rgb(0 0 0 / 25%) calc(100% - var(--below) * 0.5),
-    rgb(0 0 0 / 6%) calc(100% - var(--below) * 0.25),
+    rgb(0 0 0 / 42%) calc(100% - var(--below) * 0.75),
+    rgb(0 0 0 / 12%) calc(100% - var(--below) * 0.5),
+    rgb(0 0 0 / 2%) calc(100% - var(--below) * 0.25),
     transparent
   );
   /* A fade comes in as the box leaves its end, rather than at once. */
