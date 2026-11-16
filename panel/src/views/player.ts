@@ -141,6 +141,23 @@ function guild(): string {
 }
 
 /**
+ * Draws a key or leaves it out: what a login cannot press, or what does nothing here, is not drawn (a dim key promises
+ * what it cannot do). Left out with the keyboard's focus on it (in it, for a field), it hands the focus to the first of
+ * `instead` that can take it, as a key turned off does (dom.ts setOff), never to the page.
+ */
+export function setShown(key: HTMLElement, shown: boolean, ...instead: (HTMLElement | null | undefined)[]): void {
+  // Whether this change takes the focus away (not one it had lost already).
+  const losing = !shown && !key.hidden && key.contains(document.activeElement);
+  key.hidden = !shown;
+  if (!losing) return;
+  const next = instead.find(
+    (element): element is HTMLElement =>
+      element instanceof HTMLElement && !(element as HTMLButtonElement).disabled && element.getClientRects().length > 0,
+  );
+  next?.focus({ preventScroll: true });
+}
+
+/**
  * Presses Skip: the track goes, or (without the DJ role, where Skip is a vote) the vote is cast and a toast says how it
  * stands. Returns whether the track went, as far as this answer says (undefined when refused).
  */
@@ -195,8 +212,9 @@ function mayLike(): boolean {
   return Boolean(state.me) && state.me?.scope !== 'read';
 }
 
-// A heart that likes a track (pressed: liked), small for rows.
-function heartKey(track: Track): HTMLButtonElement {
+// A heart that likes a track (pressed: liked), small for rows; none for a login that may not like (it had one, dim).
+function heartKey(track: Track): HTMLButtonElement | null {
+  if (!mayLike()) return null;
   const words = t();
   const heart = h(
     'button',
@@ -210,7 +228,6 @@ function heartKey(track: Track): HTMLButtonElement {
     },
     icon('heart'),
   );
-  heart.disabled = !mayLike();
   heart.onclick = () => void toggleLike(track);
   return heart;
 }
@@ -571,12 +588,12 @@ export function nowCard(live: Live): HTMLElement {
     }
     bar.setAttribute('aria-disabled', String(!control || !track || status === 'loading'));
     bar.setAttribute('aria-label', words.seekLabel);
-    // A guest has no likes (as it has no keys); someone who may only look sees the heart, not to press.
-    like.hidden = !track || state.me?.kind === 'guest';
+    // Only for a login that may like: a guest has no likes (as it has no keys), and a login that may only look (a View
+    // link) had a dim heart it could not press.
+    like.hidden = !track || state.me?.kind === 'guest' || !mayLike();
     like.title = words.like;
     like.setAttribute('aria-label', words.like);
     like.setAttribute('aria-pressed', String(track !== null && isLiked(track.id)));
-    like.disabled = !mayLike();
     tick();
   };
 
@@ -759,9 +776,9 @@ export function queueCard(): HTMLElement {
     autoKey.title = label;
     autoKey.setAttribute('aria-label', label);
     autoKey.classList.toggle('on', mode !== 'off');
-    autoKey.disabled = !mayControl() || !state.player;
-    // A guest changes nothing: no key, as for the queue's other tools.
-    autoKey.hidden = state.me?.kind === 'guest';
+    // Only for whoever may change the music, as the queue's other tools (a login that may only look had it dim), and
+    // once the player's state says which mode is on.
+    autoKey.hidden = !mayControl() || !state.player;
   };
   autoKey.onclick = () => autoplayDialog();
   watch(['player', 'lang', 'guild', 'me'], drawAutoplay);
@@ -986,11 +1003,51 @@ export function queueCard(): HTMLElement {
     return element;
   };
 
+  // The queue's tools. Only those this login can press, and that do something with the queue as it is, are drawn: a
+  // login that may only look had five dim keys and Autoplay's, and an empty queue five dead keys under a live search.
+  // Playlists stays for anyone (anyone may look at the saved playlists; the dialog keeps its keys for whoever may
+  // change the music); a guest has no tools at all. Before the first state, none: nothing is known to act on.
+  const drawTools = () => {
+    const control = mayControl();
+    const known = Boolean(state.queue);
+    const items = state.queue?.items.length ?? 0;
+    tools.hidden = state.me?.kind === 'guest' || !known;
+    // A tool left out, or turned off, with the keyboard's focus on it (Clear, Remove duplicates with nothing left to
+    // remove) hands it to the queue's search, Playlists, or the add field: the list may be empty now.
+    const addField = document.getElementById('add-input');
+    for (const key of [shuffle, turns, dedupe, clear]) setShown(key, control && items > 0, search, load, addField);
+    // Save keeps the queue as a playlist, or the track playing alone when nothing waits.
+    setShown(save, control && (items > 0 || Boolean(state.player?.track)), search, load, addField);
+    // Drawn but off while they can do nothing with the tracks there are (one track to shuffle).
+    setOff(shuffle, items < 2, search, load, addField);
+    setOff(turns, items < 2, search, load, addField);
+    setOff(dedupe, items < 2, search, load, addField);
+    // The key that lists the tools a narrow card has no room for, for whoever may change the music. For anyone else
+    // Playlists is the one tool, and stands in its own place, with its words (style.css shows the narrow card's list
+    // key only beside it).
+    if (!control && toolsMore.isConnected) {
+      if (toolsMore.contains(document.activeElement)) load.focus({ preventScroll: true });
+      toolsMore.remove();
+    } else if (control && !toolsMore.isConnected) {
+      tools.append(toolsMore);
+    }
+  };
+
   const draw = () => {
     const words = t();
     const items = state.queue?.items ?? [];
     const control = mayControl();
     (card.querySelector('#queue-h .name') as HTMLElement).textContent = words.queue;
+    // With nothing queued there is nothing to search (a search field over an empty list was live and found nothing):
+    // left out, and a search typed before the queue ran out is let go with it, so the rows show whole when tracks
+    // come again. The keyboard on it goes on to the add field above.
+    const queued = items.length > 0;
+    if (!queued) search.value = '';
+    setShown(searchField, queued, document.getElementById('add-input'));
+    // The card ends at its message where its column may end, the head holding its title and the keys that still do
+    // something (style.css).
+    card.classList.toggle('nothing-queued', !queued);
+    drawTools();
     const total = items.reduce((sum, item) => sum + (item.track.durationMs ?? 0), 0);
     // "13 tracks · 39 min in all": the number with its unit, and the length in words as every length of time is
     // written (a track's own length stays a clock).
@@ -1014,7 +1071,6 @@ export function queueCard(): HTMLElement {
     clearSearch.hidden = !searching;
     clearSearch.title = words.clearSearch;
     clearSearch.setAttribute('aria-label', words.clearSearch);
-    tools.hidden = state.me?.kind === 'guest';
     for (const [button, label] of [
       [shuffle, words.shuffle],
       [turns, words.takeTurnsKey],
@@ -1034,19 +1090,6 @@ export function queueCard(): HTMLElement {
     turns.setAttribute('aria-label', words.takeTurnsNow);
     toolsMore.title = words.queueTools;
     toolsMore.setAttribute('aria-label', words.queueTools);
-    // Open for everyone: Playlists is in it on a phone, and anyone may look at the saved playlists (the tools in it
-    // keep their own states).
-    toolsMore.disabled = !state.queue;
-    // A tool turned off with the focus on it (Clear, Remove duplicates with nothing left to remove) hands it to the
-    // queue's search, or the add field: the list may be empty now.
-    const addField = document.getElementById('add-input');
-    setOff(shuffle, !control || items.length < 2, search, addField);
-    setOff(turns, !control || items.length < 2, search, addField);
-    setOff(dedupe, !control || items.length < 2, search, addField);
-    setOff(clear, !control || items.length === 0, search, addField);
-    setOff(save, !control || (items.length === 0 && !state.player?.track), search, addField);
-    // Anyone may look at the saved playlists: the dialog keeps its keys for those who may change the music.
-    load.disabled = !state.queue;
     // The rows, filtered by the search; the scroll position survives the redraw.
     const query = search.value.trim().toLowerCase();
     const shown = query
@@ -1190,14 +1233,15 @@ export function queueCard(): HTMLElement {
       const result = await api.dedupe(guild());
       toast(t().deduped(result.removed));
     });
-  // The tools the card hides (a phone's, a short window's), as a list with their words; each runs what its key would.
-  // Only those hidden: Shuffle, and autoplay's key on a card that shows it, are not listed again.
+  // The tools the card hides for want of room (a phone's, a short window's), as a list with their words; each runs what
+  // its key would. Only those hidden for room: Shuffle, and autoplay's key on a card that shows it, are not listed
+  // again, nor a tool left out because it cannot be pressed or does nothing here (drawTools).
   toolsMore.onclick = () => {
     const words = t();
     const box = h('div', { class: 'menu-list' });
     const dialog = showDialog(words.queue, box);
     const choice = (source: HTMLButtonElement, name: IconName, text: string, bad = false) => {
-      if (source.getClientRects().length > 0) return null;
+      if (source.hidden || source.getClientRects().length > 0) return null;
       const button = h(
         'button',
         // Named after the key it stands for, so tests (and people reading the page) can tell the choices apart.
@@ -1265,9 +1309,8 @@ export function queueCard(): HTMLElement {
     drawnIds = null;
   });
   watch(['queue', 'lang', 'guild', 'me'], draw);
-  watch(['player'], () => {
-    save.disabled = !mayControl() || ((state.queue?.items.length ?? 0) === 0 && !state.player?.track);
-  });
+  // Whether there is anything to save (a track playing, with nothing queued) follows the player too.
+  watch(['player'], drawTools);
   draw();
   return card;
 }
@@ -1393,7 +1436,8 @@ function trackMenu(id: number): void {
     };
     return button;
   };
-  // Like or Unlike: the track's, whoever may change the music.
+  // Like or Unlike: the track's, for whoever may like (the row's key opens this list for them alone, or for whoever
+  // may change the music, who may like too).
   const liked = isLiked(item.track.id);
   const likeChoice = h(
     'button',
@@ -1401,7 +1445,6 @@ function trackMenu(id: number): void {
     icon('heart'),
     h('span', { class: 'grow' }, liked ? words.unlike : words.like),
   );
-  likeChoice.disabled = !mayLike();
   likeChoice.onclick = () => {
     dialog.close();
     void toggleLike(item.track);
@@ -1418,7 +1461,7 @@ function trackMenu(id: number): void {
     control && item.position < length - 1
       ? choice('arrow-down', words.moveDown, (position) => api.move(guild(), id, position + 1))
       : null,
-    likeChoice,
+    mayLike() ? likeChoice : null,
     control ? choice('x', words.remove, () => api.remove(guild(), id), true) : null,
   );
 }
@@ -2240,16 +2283,20 @@ export function voiceCard(): HTMLElement {
     h('span', { class: 'label' }),
   );
   invite.onclick = () => inviteDialog();
-  // The voice channel's sound on one row, so the card grows by no more than a row: its volume (with a bot only), and
-  // its preset, which browsers listening apply too, on a key that opens the presets (named in short on the key, in
-  // whole in its title and for screen readers).
+  // The voice channel's sound on one row, so the card grows by no more than a row: its icon, as every row of the card
+  // starts with one (its words in their column), its volume (with a bot only), and its preset, which browsers listening
+  // apply too, on a key that opens the presets (named in short on the key, in whole in its title and for screen
+  // readers).
   const volume = h('input', { type: 'range', min: '0', max: '200', step: '5' });
   const volumeLevel = h('span', { class: 'num level' });
-  const volumePart = h('label', { class: 'volume-part' }, icon('volume-2'), volume, volumeLevel);
-  // Browser-only has no voice volume: the row says what the key is for instead.
+  const volumePart = h('label', { class: 'volume-part' }, volume, volumeLevel);
+  // Without the volume (browser-only has none; a login that may not change the music has no slider to move), the row
+  // says what it is about instead.
   const soundWord = h('span', { class: 'sound-word' });
   const presetKey = h('button', { class: 'key sm', type: 'button', 'aria-haspopup': 'dialog', 'data-act': 'sound' });
-  const soundBox = h('div', { class: 'sound' }, volumePart, soundWord, presetKey);
+  // For a login that may not change it, the preset in words where the key would be: what plays, not a key to press.
+  const presetWords = h('span', { class: 'preset-words' });
+  const soundBox = h('div', { class: 'sound' }, icon('volume-2'), volumePart, soundWord, presetKey, presetWords);
   const card = h(
     'section',
     { class: 'card', 'aria-labelledby': 'voice-h' },
@@ -2287,11 +2334,11 @@ export function voiceCard(): HTMLElement {
         current && people !== undefined ? h('span', { class: 'faint' }, ` · ${words.people(people)}`) : null,
       );
       refill(leave, words.leave, icon('log-out'), words.leave);
-      leave.hidden = !current;
-      leave.disabled = !mayControl();
+      const control = mayControl();
+      // Leave and the channels' Join keys only for whoever may move the bot (a login that may only look had them dim).
+      leave.hidden = !current || !control;
       // The channel the bot is in is the box's, not the list's (it showed twice).
       const list = (voice?.channels ?? []).filter((channel) => channel.id !== current?.channelId);
-      const control = mayControl();
       // Rebuilt only when a channel, its people, the bot's place or the rights change: a listener coming or going
       // must not take the Join key from under the pointer.
       const sign = JSON.stringify([list, current?.channelId ?? null, control, state.lang]);
@@ -2306,7 +2353,6 @@ export function voiceCard(): HTMLElement {
           ...list.map((channel) => {
             const here = channel.id === current?.channelId;
             const join = h('button', { class: 'key sm', type: 'button' }, words.join);
-            join.disabled = !control;
             join.onclick = () =>
               void act(join, async () => {
                 const id = guild();
@@ -2321,23 +2367,25 @@ export function voiceCard(): HTMLElement {
               // One line, cut short when long, its whole name the title (style.css).
               h('span', { class: 'name', title: channel.name, 'data-clip': 'ok' }, channel.name),
               h('span', { class: 'faint num' }, words.people(channel.people)),
-              here ? h('span', { class: 'badge tone-play' }, words.botHere) : join,
+              here ? h('span', { class: 'badge tone-play' }, words.botHere) : control ? join : null,
             );
           }),
         );
       }
     }
-    // The voice channel's sound. The volume is the voice channel's alone (browser-only has none).
+    // The voice channel's sound. The volume is the voice channel's alone (browser-only has none), and its slider and
+    // the presets' key are for whoever may change the music; anyone else reads the preset in words (the sound, which
+    // they hear), with no slider or key to press (both were dim).
     const sound = state.sound;
     const control = mayControl();
-    volumePart.hidden = browserOnly;
-    soundWord.hidden = !browserOnly;
+    const sliding = control && !browserOnly;
+    volumePart.hidden = !sliding;
+    soundWord.hidden = sliding;
     soundWord.textContent = words.soundName;
     volume.setAttribute('aria-label', words.voiceVolume);
     volume.title = words.voiceVolume;
     if (!held) volume.value = String(sound.volume);
     volumeLevel.textContent = `${held ? volume.value : sound.volume}%`;
-    volume.disabled = !control;
     refill(
       presetKey,
       `${sound.preset}|${state.lang}`,
@@ -2349,7 +2397,9 @@ export function voiceCard(): HTMLElement {
     const presetLabel = `${words.soundName}: ${words.presets[sound.preset] ?? sound.preset}`;
     presetKey.setAttribute('aria-label', presetLabel);
     presetKey.title = presetLabel;
-    presetKey.disabled = !control;
+    setShown(presetKey, control);
+    presetWords.hidden = control;
+    presetWords.textContent = words.presets[sound.preset] ?? sound.preset;
     drawListening();
   };
   // Who listens in browsers: the words, as many faces as the row holds with Invite at its end (six at most), and the
@@ -2493,28 +2543,13 @@ function libraryView(): 'history' | 'liked' {
 }
 
 /**
- * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and keys to add it at
- * the end, play it next or play it now. A narrow card, or a wide window short of height, keeps the heart and puts the
- * rest behind one key (see libraryMenu).
+ * A row of the history or of the liked tracks: its album, title and a line under it, its heart, and one key that lists
+ * in words what adds it again (see libraryMenu), at every width: on a wide card (the owner's 2560 px screen) the list
+ * gave way to three bare icons. Each only for a login that can press it: the heart for one that may like, the list for
+ * one that may change the music (a login that may only look had them dim, three add icons on every row).
  */
 function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTMLElement {
   const words = t();
-  const control = mayControl();
-  const key = (name: IconName, label: string, data: string, run: () => Promise<unknown>) => {
-    const button = h(
-      'button',
-      { class: 'key sm square quiet', type: 'button', title: label, 'aria-label': label, dataset: { key: data } },
-      icon(name),
-    );
-    button.disabled = !control;
-    button.onclick = () => void act(button, run);
-    return button;
-  };
-  const now = key('play', words.playNow, 'now', async () => added(await api['play-now'](guild(), track.url)));
-  const next = key('arrow-up-to-line', words.playNext, 'next', async () =>
-    added(await api.add(guild(), track.url, 'next')),
-  );
-  const again = key('list-plus', words.addAgain, 'again', async () => added(await api.add(guild(), track.url)));
   const more = h(
     'button',
     {
@@ -2526,7 +2561,6 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
     },
     icon('ellipsis'),
   );
-  more.disabled = !control;
   more.onclick = () => libraryMenu(track);
   return h(
     'li',
@@ -2543,19 +2577,25 @@ function libraryRow(track: Track, id: string, sub: (HTMLElement | null)[]): HTML
       ),
       subLine(...sub),
     ),
-    // The heart, then the add card's order (Add again, Play next, Play now), then the key that lists them.
-    h('div', { class: 'acts' }, heartKey(track), again, next, now, more),
+    // The heart, then the key that lists the rest.
+    h('div', { class: 'acts' }, heartKey(track), mayControl() ? more : null),
   );
 }
 
-// A history or liked row's keys as a list, on a narrow card or a short window, in the order of the keys: add, play
-// next, play now.
+// A history or liked row's keys as a list, titled with the track, in the add card's order (from the gentlest to the one
+// that cuts off what everyone hears): add again, play next, play now.
 function libraryMenu(track: Track): void {
   const words = t();
   const box = h('div', { class: 'menu-list' });
   const dialog = showDialog(track.title, box);
-  const choice = (name: IconName, text: string, run: () => Promise<unknown>) => {
-    const button = h('button', { class: 'choice', type: 'button' }, icon(name), h('span', { class: 'grow' }, text));
+  // Each named for what it does (data-choice), as the row's keys were, so their order can be told.
+  const choice = (key: string, name: IconName, text: string, run: () => Promise<unknown>) => {
+    const button = h(
+      'button',
+      { class: 'choice', type: 'button', dataset: { choice: key } },
+      icon(name),
+      h('span', { class: 'grow' }, text),
+    );
     button.onclick = () => {
       dialog.close();
       void act(null, run);
@@ -2564,9 +2604,9 @@ function libraryMenu(track: Track): void {
   };
   fill(
     box,
-    choice('list-plus', words.addAgain, async () => added(await api.add(guild(), track.url))),
-    choice('arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
-    choice('play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
+    choice('again', 'list-plus', words.addAgain, async () => added(await api.add(guild(), track.url))),
+    choice('next', 'arrow-up-to-line', words.playNext, async () => added(await api.add(guild(), track.url, 'next'))),
+    choice('now', 'play', words.playNow, async () => added(await api['play-now'](guild(), track.url))),
   );
 }
 
@@ -2625,8 +2665,8 @@ export function historyCard(): HTMLElement {
     count.textContent = '';
     drawChoices();
     fill(addAll, icon('list-plus'), words.addAll);
-    addAll.hidden = view !== 'liked';
-    addAll.disabled = !mayControl() || (state.liked?.length ?? 0) === 0;
+    // With the liked tracks shown, for whoever may add them, while there are some to add (a dim key otherwise).
+    setShown(addAll, view === 'liked' && mayControl() && (state.liked?.length ?? 0) > 0);
     keepingFocus(list, () => {
       if (view === 'liked') {
         const liked = state.liked ?? [];

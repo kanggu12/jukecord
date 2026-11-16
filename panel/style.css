@@ -972,6 +972,13 @@ img {
     margin-left: 0;
   }
 }
+/* A list that holds nothing says so in its middle where its card fills a column (two columns end together, the room
+   left over inside the cards): the queue's message stood at the top of a card the column's height, 225 px of blank
+   glass under it. In one column the card ends at its message. */
+.card .list.scroll:has(> .empty:only-child) {
+  flex: 1 1 auto;
+  justify-content: center;
+}
 .card-body {
   padding: var(--pad);
 }
@@ -2472,13 +2479,9 @@ img {
 .queue-list .row .acts > .more-key {
   display: inline-flex;
 }
-/* History and liked rows: the heart and three keys; on a narrow card the heart and one key for the rest. Narrow is up
-   to 420 px: the side column of a 1440 px window (389 px) with three keys left the line under a title "3:00 added
-   by ..." on every row, and who added it was never read. */
-.history .row .acts > .lib-more {
-  display: none;
-}
-/* A history row's words answer to their own width (its keys take more of the row on a touch screen). */
+/* History and liked rows: the heart and one key that lists in words what adds the track again (player.ts), at every
+   width: on a wide card (the owner's 2560 px screen) the list gave way to three bare icons. A history row's words
+   answer to their own width (its keys take more of the row on a touch screen). */
 .history .row .text {
   container: row-text / inline-size;
 }
@@ -2489,41 +2492,13 @@ img {
     display: none;
   }
 }
-@container card (max-width: 420px) {
-  .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
-    display: none;
-  }
-  .history .row .acts > .lib-more {
-    display: inline-flex;
-  }
-}
-/* By touch the keys are a finger wide, so the row runs out of room sooner. */
-@media (pointer: coarse) {
-  @container card (max-width: 480px) {
-    .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
-      display: none;
-    }
-    .history .row .acts > .lib-more {
-      display: inline-flex;
-    }
-  }
-}
-/* A wide window short of height (two columns, a mouse): the heart and one key too, as the queue's tools there are
-   icons, so a title and the line under it have the room of two more keys and the list under the voice card still
-   shows three whole rows; with four keys, at 1280 by 610, each took two lines and the list showed two rows. */
-@media (width > 1100px) and (max-height: 720px) and (pointer: fine) {
-  .history .row .acts > :is([data-key="now"], [data-key="next"], [data-key="again"]) {
-    display: none;
-  }
-  .history .row .acts > .lib-more {
-    display: inline-flex;
-  }
-}
 
 /* ---- voice ------------------------------------------------------------------------------------------------------ */
 /* The voice card's rows, all at the card's inset and 48 px tall (the channels a step shorter, as a list): where the bot
    is and its Leave key, the other channels, the sound, who listens in browsers. No box inside the card: where the bot
-   is reads as the first row, its icon lit in the colour of playing while it is in a channel. */
+   is reads as the first row, its icon lit in the colour of playing while it is in a channel. Every row has its icon
+   and 8 px between its parts, so the words after the icons stand in one column (they started at 1084, 1080 and, for
+   "Sound" with no icon, 1056 px); the people listening have no more room for wider gaps beside Invite (at 1024 px). */
 .voice-now {
   display: flex;
   /* Its words may take two lines (jukecord with no bot says why): the row's items line up at the top of their line,
@@ -2531,7 +2506,7 @@ img {
   flex-wrap: wrap;
   align-content: center;
   align-items: flex-start;
-  gap: var(--s-12);
+  gap: var(--s-8);
   min-height: 48px;
   padding: var(--s-8) var(--pad);
 }
@@ -2576,6 +2551,10 @@ img {
   flex: 1;
   min-width: 0;
 }
+/* The voice card's channels, 8 px between their parts as every row of the card has (see .voice-now). */
+.channels > .channel {
+  gap: var(--s-8);
+}
 /* A voice channel's name on one line, cut short when long (its whole name is its title): beside the icon, its count
    and its key, a name of two lines left the icon by the second. */
 .channels .channel .name {
@@ -2594,6 +2573,11 @@ img {
   border-top: 1px solid var(--line);
   color: var(--ink-2);
   min-height: 48px;
+}
+/* The row's words take the room left, so who listens (the faces, or "Nobody") stands at its end with Invite or without
+   it, as the other rows' values and keys do (without Invite, "Listening in browsers Nobody" ran together). */
+.listeners > .grow {
+  flex: 1 0 auto;
 }
 .faces {
   display: flex;
@@ -3786,7 +3770,7 @@ kbd {
 .sound {
   display: flex;
   align-items: center;
-  gap: var(--s-12);
+  gap: var(--s-8);
   min-height: 48px;
   padding: 0 var(--pad);
   border-top: 1px solid var(--line);
@@ -3814,10 +3798,16 @@ kbd {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
 }
-/* Browser-only: the row's word, and the key at the row's end as the channels' keys are. */
+/* Without the volume (browser-only, or a login that may not change the sound): the row's word, and the key (or the
+   preset in words) at the row's end as the channels' keys are. */
 .sound .sound-word {
   flex: 1;
   min-width: 0;
+}
+/* The preset in words, for a login that may not change it: the row's value, in the text's own ink. */
+.sound .preset-words {
+  color: var(--ink);
+  white-space: nowrap;
 }
 /* A line over a dialog's choices (who hears the presets, what the sleep timer stops). Its lines are balanced as every
    text's are (body): "pretty" here left a word alone under a full line in Chromium. */
@@ -3954,6 +3944,15 @@ kbd {
     flex: none;
     margin-left: 0;
   }
+}
+/* Nothing queued: no search and no tool that would do nothing (player.ts), so the head is one line at every width, the
+   title and the keys left (Autoplay, Playlists, Save while a track plays, or a phone's list key) at the line's end. */
+.nothing-queued > .queue-head > h2 {
+  flex: none;
+}
+.nothing-queued > .queue-head > .tools {
+  flex: none;
+  margin-left: auto;
 }
 /* Narrower still: a queued track has two keys, not three. */
 @container (max-width: 560px) {
@@ -4757,9 +4756,6 @@ button.lyric {
 .listeners:has(> .key[data-act="invite"]) {
   flex-wrap: wrap;
   row-gap: var(--s-8);
-}
-.listeners:has(> .key[data-act="invite"]) > .grow {
-  flex: 1 0 auto;
 }
 .listeners > .num {
   white-space: nowrap;

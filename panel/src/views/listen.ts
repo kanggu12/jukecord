@@ -15,7 +15,7 @@ import type { Live } from '../live.ts';
 import { SoundGraph } from '../sound.ts';
 import { keep, mayControl, maySkip, positionNow, skipTitle, state, t, update, watch } from '../state.ts';
 import { followMusic } from './light.ts';
-import { act, disc, listenerFace, skipOrVote } from './player.ts';
+import { act, disc, listenerFace, setShown, skipOrVote } from './player.ts';
 import { sleepKey } from './sleep.ts';
 
 // How far this browser may drift from the server before it jumps back in line.
@@ -366,11 +366,18 @@ export function listenBar(live: Live): HTMLElement {
     // once the person's vote is in, that they voted (as the playing card's Skip is).
     skipKey.title = skipTitle();
     skipKey.setAttribute('aria-label', skipKey.title);
-    // A key turned off with the focus on it (Skip on the last track) hands it to the other key, or to Listen here.
-    setOff(pauseKey, !player || !mayControl() || (!player.track && !queued), toggle);
-    setOff(skipKey, !maySkip() || !player?.track, pauseKey, toggle);
-    // A guest has neither: it can never press them.
-    mini.hidden = state.me?.kind === 'guest';
+    // Each only for a login that can press it, as on the playing card: a login without the DJ role had a dim Pause beside
+    // the Skip that is its vote. And neither with nothing to play (no track, an empty queue), as the playing card has no
+    // keys then: a dim Play and Skip did nothing. A key left out or turned off with the focus on it (Skip on the last
+    // track) hands it to the other key, or to Listen here.
+    const playable = Boolean(player?.track) || queued;
+    setShown(pauseKey, mayControl() && playable, skipKey, toggle);
+    // A guest has no vote either (its Skip has nobody's name to count): as on the playing card, no keys at all.
+    setShown(skipKey, maySkip() && state.me?.kind !== 'guest' && playable, pauseKey, toggle);
+    setOff(pauseKey, !player, toggle);
+    setOff(skipKey, !player?.track, pauseKey, toggle);
+    // With neither (a guest, a login that may only look, nothing to play), the pair is not there at all.
+    mini.hidden = pauseKey.hidden && skipKey.hidden;
     // Who else listens: the faces built again only when the people change (their pictures would load again).
     const people = state.listeners.people.slice(0, 5);
     refill(

@@ -489,7 +489,10 @@ async function oneOrder(page) {
     return {
       'the add card': [of('.add', 'at'), 'end,next,now'],
       'a result': [of('#add-found .picks', 'pick'), 'end,next,now'],
-      'a history row': [of('.history .row .acts', 'key'), 'like,again,next,now,more'],
+      // A history row's heart and the key that lists the rest in words, at every width (libraryKeys).
+      'a history row': [of('.history .row .acts', 'key'), 'like,more'],
+      // That list, open: the add card's order.
+      "a history row's list": [of('.dialog .menu-list:has([data-choice="again"])', 'choice'), 'again,next,now'],
       'a queued row': [of('.queue-list .row:not(.next) .acts', 'key'), 'next,jump,remove,more'],
     };
   });
@@ -514,6 +517,61 @@ async function pageCentred(page) {
     return Math.abs(across) > 1 ? `the page's content stands ${across.toFixed(1)} px off the window's middle` : null;
   });
   if (off) throw new Error(off);
+}
+
+// What this login cannot press is not drawn, nor what does nothing here: every key, field and slider shown on the
+// page's cards and in the listening bar can be pressed, but a key at work for a moment (busy, or the main key's place
+// while the track gets ready). A login that may only look saw about 45 dim keys (the queue's tools, Autoplay, the
+// sound's key, Leave, Join and the volume, a Pause beside the Skip that was its vote, three add keys on every history
+// row), and an empty queue five dead tools under a live search.
+async function nothingDead(page) {
+  const dead = await page.evaluate(() =>
+    [...document.querySelectorAll('.main :is(button, input, select), .listen :is(button, input)')]
+      .filter((control) => control.getClientRects().length > 0 && getComputedStyle(control).visibility !== 'hidden')
+      .filter(
+        (control) =>
+          control.disabled || (control.getAttribute('aria-disabled') === 'true' && !control.matches('.busy, .getting')),
+      )
+      .map(
+        (control) =>
+          control.dataset.act ??
+          control.dataset.key ??
+          control.getAttribute('aria-label') ??
+          control.textContent.trim(),
+      ),
+  );
+  if (dead.length > 0) throw new Error(`keys drawn that cannot be pressed: ${dead.slice(0, 6).join(', ')}`);
+}
+
+// A history row's keys, at every width: its heart and the key that lists the rest in words, each for a login that can
+// press it (at 2560 px the list gave way to three bare icons, and a login that may only look had them all, dim).
+async function libraryKeys(page, want) {
+  const shown = await page.evaluate(() => [
+    ...new Set(
+      [...document.querySelectorAll('.history .row')]
+        .filter((row) => row.getClientRects().length > 0)
+        .map((row) =>
+          [...row.querySelectorAll('.acts > *')]
+            .filter((key) => key.getClientRects().length > 0 && getComputedStyle(key).visibility !== 'hidden')
+            .map((key) => key.dataset.key)
+            .join(),
+        ),
+    ),
+  ]);
+  const wrong = shown.filter((keys) => keys !== want);
+  if (wrong.length > 0) throw new Error(`history rows show "${wrong.join('" | "')}", not "${want}"`);
+}
+
+// Who listens in browsers stands at the end of its row (the faces, or "Nobody"), with Invite after it or without it: for
+// a login that may not invite, "Listening in browsers Nobody" ran together.
+async function listenersEnd(page) {
+  const apart = await page.evaluate(() => {
+    const row = document.querySelector('.listeners');
+    const last = [...row.children].filter((part) => part.getClientRects().length > 0).at(-1);
+    const end = row.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(row).paddingRight);
+    return end - last.getBoundingClientRect().right;
+  });
+  if (apart > 0.5) throw new Error(`who listens in browsers stands ${apart.toFixed(1)} px short of the row's end`);
 }
 
 // ---- the walk ---------------------------------------------------------------------------------------------------
@@ -563,6 +621,25 @@ await sweep(
   },
   { touch: true },
 );
+// The voice card's words in one column, after each row's icon: the bot's place, the channels, the sound and who listens
+// (they started at 1084, 1080 and, for "Sound" with no icon, 1056 px).
+async function voiceColumn(page) {
+  const starts = await page.evaluate(() => {
+    const card = document.querySelector('.card[aria-labelledby="voice-h"]');
+    return [...card.querySelectorAll(':scope > .voice-now, .channels > .channel, :scope > .sound, :scope > .listeners')]
+      .filter((row) => row.getClientRects().length > 0)
+      .map((row) => {
+        // The first thing after the row's icon: its words (or the slider that stands in their place).
+        const first = [...row.children].find((part) => part.getClientRects().length > 0 && !part.matches('.icon'));
+        return [row.classList[0], first ? first.getBoundingClientRect().left : null];
+      })
+      .filter(([, left]) => left !== null);
+  });
+  const lefts = starts.map(([, left]) => left);
+  if (Math.max(...lefts) - Math.min(...lefts) > 0.5)
+    throw new Error(`the voice card's words start at ${starts.map(([row, left]) => `${row} ${left}`).join(', ')}`);
+}
+
 // A tablet held sideways: wide, touched, and short (its keys a finger's size): the queue must still show rows. The
 // voice card's keys of a finger's size keep apart from each other and from the lines between its rows (in rows as tall
 // as the keys, the channels' Join keys were a pixel apart and the sound's key on the line above it).
@@ -1137,8 +1214,32 @@ for (let i = 0; i < 16; i += 1) await api('POST', '/guilds/local/playlists/Frida
 await sweep('long-queue', FEW);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
+// Nothing queued: the queue's card has no search and no tool that would do nothing (a live search over the empty list
+// and five dead tools), and its message stands in the middle of the card where the card fills its column (two
+// columns), or the card ends at it (one column): it stood at the top of a card the column's height.
+async function queueAtRest(page) {
+  const problems = await page.evaluate(() => {
+    const found = [];
+    const card = document.querySelector('.card[aria-labelledby="queue-h"]');
+    const list = card.querySelector('.queue-list');
+    const message = list.querySelector(':scope > .empty');
+    if (card.querySelector('.head-search')?.getClientRects().length) found.push('a search field');
+    const box = list.getBoundingClientRect();
+    const said = message?.getBoundingClientRect();
+    const side = document.querySelector('.card[aria-labelledby="voice-h"]')?.getBoundingClientRect();
+    if (said && side && side.left >= card.getBoundingClientRect().right) {
+      const off = (said.top + said.bottom) / 2 - (box.top + box.bottom) / 2;
+      if (Math.abs(off) > 1) found.push(`its message ${off.toFixed(1)} px off the middle of the card's room`);
+    } else if (card.getBoundingClientRect().bottom - box.bottom > 1.5) {
+      found.push(`the card runs ${Math.round(card.getBoundingClientRect().bottom - box.bottom)} px past its message`);
+    }
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`the empty queue: ${problems.join('; ')}`);
+  await nothingDead(page);
+}
 // Nothing playing and nothing queued: the playing card has no key that would do nothing (Lyrics for no track, More
-// offering to stop after it, a disabled Play the width of a phone's card).
+// offering to stop after it, a disabled Play the width of a phone's card), nor has the queue's (above).
 await sweep('empty', FEW, async (page) => {
   const live = await page.evaluate(() =>
     [...document.querySelectorAll('.now .keys, [data-act="lyrics"], [data-act="now-more"]')]
@@ -1146,6 +1247,7 @@ await sweep('empty', FEW, async (page) => {
       .map((element) => element.dataset.act ?? 'the transport keys'),
   );
   if (live.length > 0) throw new Error(`with nothing to play, the playing card shows ${live.join(', ')}`);
+  await queueAtRest(page);
 });
 
 // Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
@@ -1417,6 +1519,11 @@ await sweep(
     );
     const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
     if (!lamp.includes('tone-idle')) throw new Error(`the bar's "View only" is ${lamp}`);
+    // Nothing drawn it cannot press: hearts on the history's rows (it may like), the sound in words, and Playlists.
+    await nothingDead(page);
+    await libraryKeys(page, 'like');
+    await voiceColumn(page);
+    await listenersEnd(page);
     await tool(page, 'load');
     await page.waitForSelector('.dialog .channel');
   },
@@ -1936,6 +2043,10 @@ await sweep(
       (found) => found.filter((element) => element.getClientRects().length > 0).length,
     );
     if (unusable > 0) throw new Error(`a View login's add card shows ${unusable} field and keys it cannot use`);
+    // Nor anywhere else: no heart (it may not like), no list key on the history's rows, no tool but Playlists.
+    await nothingDead(page);
+    await libraryKeys(page, '');
+    await listenersEnd(page);
   },
   { login: false },
 );
@@ -2071,13 +2182,23 @@ await sweep(
     // What a login may do is no state of the music: its lamp unlit (in the pause colour it read as "paused").
     const lamp = (await page.locator('.bar .pill').getAttribute('class')) ?? '';
     if (!lamp.includes('tone-idle')) throw new Error(`the bar's "${said}" is ${lamp}`);
+    // The vote the one key of the transport, here and in the bar (a dim Pause stood beside the bar's Skip), and the
+    // history's rows with their hearts alone (three dim add keys on every row at 2560 px).
+    await nothingDead(page);
+    await libraryKeys(page, 'like');
   },
   { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: false } } },
 );
 // The same person once their vote is in: the key says they voted.
-await sweep('vote-skip-voted', SIZES, (page) => skipSays(page, true), {
-  discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } },
-});
+await sweep(
+  'vote-skip-voted',
+  SIZES,
+  async (page) => {
+    await skipSays(page, true);
+    await nothingDead(page);
+  },
+  { discord: { control: false, votes: { on: true, votes: 1, needed: 2, voted: true } } },
+);
 // The menu of someone who manages the server, with the server's settings under the DJ role.
 await sweep(
   'menu-settings',
@@ -2327,6 +2448,8 @@ await sweep(
   ],
   async (page) => {
     await page.waitForSelector('.auto-note:not([hidden])');
+    // Autoplay's key and Playlists stay; nothing else in the empty queue's head (above).
+    await queueAtRest(page);
   },
 );
 await sweep(
