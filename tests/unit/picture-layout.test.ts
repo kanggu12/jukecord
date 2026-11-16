@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type Block, squareBlock, storyBlock } from '../../panel/src/views/picture.ts';
+import { type Block, squareBlock, storyBlock } from '../../panel/src/views/picture-layout.ts';
 
 // What the layout reads of a picture's content: whether there is a song (or a first track), and how many tracks,
 // people and moments it lists. The words themselves do not matter here.
