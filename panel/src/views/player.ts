@@ -338,7 +338,7 @@ export function nowCard(live: Live): HTMLElement {
       }
     });
   whenLyricsChange(() => lyricsKey.setAttribute('aria-expanded', String(lyricsOpen())));
-  // More for the playing track, as a list titled with it (stop after it, invite, remove it).
+  // More for the playing track, as a list titled with it (stop after it, remove it).
   const moreKey = h(
     'button',
     { class: 'key sm square quiet', type: 'button', 'data-act': 'now-more', 'aria-haspopup': 'dialog' },
@@ -1315,9 +1315,11 @@ export function queueCard(): HTMLElement {
   return card;
 }
 
-// The playing card's More menu, as a list titled with the track, as a queued track's is: stop after it (pressed again,
-// play on after it), invite someone to listen along, and remove it without a play in the history. A choice acts only
-// on the track the list was opened for: another one may be playing by the time it is pressed.
+// The playing card's More menu, as a list titled with the track, as a queued track's is: what can be done to the track,
+// for whoever may change the music (its key is there only for them): stop after it (pressed again, play on after it),
+// and remove it without a play in the history. Inviting someone to listen is not about the track: it lives beside the
+// people listening, and in the menu. A choice acts only on the track the list was opened for: another one may be
+// playing by the time it is pressed.
 function nowMenu(): void {
   const words = t();
   const track = state.player?.track;
@@ -1338,21 +1340,9 @@ function nowMenu(): void {
     h('span', { class: 'grow' }, words.stopAfter),
     icon('check', 'check'),
   );
-  stopAfter.disabled = !mayControl();
   stopAfter.onclick = () => {
     dialog.close();
     if (still()) void act(null, () => api['stop-after'](guild(), !state.player?.stopAfter));
-  };
-  // Inviting someone to listen along: the same place as the key beside the listeners.
-  const invite = h(
-    'button',
-    { class: 'choice', type: 'button', dataset: { choice: 'invite' } },
-    icon('user-plus'),
-    h('span', { class: 'grow' }, words.inviteToListen),
-  );
-  invite.onclick = () => {
-    dialog.close();
-    inviteDialog();
   };
   // Gone for everyone like a skip, and kept out of the history (and out of a looping queue): what tells it from Skip
   // is said under its name. Last and in the colour of what cannot be undone, as a queued track's Remove is.
@@ -1367,12 +1357,11 @@ function nowMenu(): void {
       h('span', { class: 'choice-hint' }, words.dropHint),
     ),
   );
-  drop.disabled = !mayControl();
   drop.onclick = () => {
     dialog.close();
     if (still()) void act(null, () => api['remove-current'](guild()));
   };
-  fill(box, stopAfter, mayInvite() ? invite : null, drop);
+  fill(box, stopAfter, drop);
 }
 
 // Autoplay's three modes to choose from, each with what it does; the one in use marked.
