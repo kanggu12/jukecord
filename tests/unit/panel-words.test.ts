@@ -138,6 +138,17 @@ describe('one name for one thing', () => {
     }
   });
 
+  it("names Wrapped on its page and its picture with the key's word, in both languages", () => {
+    for (const lang of ['en', 'ko'] as const) {
+      const said = words(lang);
+      const name = said.wrapped.toLowerCase();
+      for (const time of [said.wrappedTwelve, said.wrappedYear('2026'), said.wrappedMonth('2026', 11)])
+        assert.ok(said.wrappedTitle(time).toLowerCase().includes(name), `${lang}: ${said.wrappedTitle(time)}`);
+      for (const year of [null, '2026'])
+        assert.ok(said.inMusic(year).toLowerCase().includes(name), `${lang}: ${said.inMusic(year)}`);
+    }
+  });
+
   it('counts plays one way in Korean, and says why the player paused without saying "Paused" again', () => {
     // "224번 재생" beside "224회" on one page (the 0.3.3 review).
     assert.ok(!lines(words('ko')).some((line) => /\d번/.test(line)));

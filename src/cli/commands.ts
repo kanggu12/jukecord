@@ -338,7 +338,8 @@ function showWrapped(answer: unknown): string {
   const { period } = wrapped;
   // "2026", "2026-03" or "the last 12 months", in the title and the song's line.
   const time = period.kind === 'last-12-months' ? 'the last 12 months' : period.key;
-  const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)} in music (${period.from} to ${period.to})`];
+  // The feature's name after the time, as the command and the panel's page name it ("2026, wrapped").
+  const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)}, wrapped (${period.from} to ${period.to})`];
   if (wrapped.plays === 0) return [...lines, 'Nothing was played in this period'].join('\n');
   // Each count with its word in the singular or the plural, as it reads.
   const many = (count: number, one: string, more: string) => `${count} ${count === 1 ? one : more}`;

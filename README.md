@@ -107,7 +107,7 @@ Discord account.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wrapped-dark.webp">
-    <img alt="Wrapped's picture for a made-up server, Night Owls: the last 12 months in music, with the song of the year on its cover and record, the plays, hours, tracks and days with music, the most played tracks and the people who added most." src="docs/assets/wrapped-light.webp" width="420">
+    <img alt="Wrapped's picture for a made-up server, Night Owls, over the last 12 months: the song of the last 12 months on its cover and record, the plays, hours, tracks and days with music, the most played tracks and whose picks played most." src="docs/assets/wrapped-light.webp" width="420">
   </picture>
 </p>
 

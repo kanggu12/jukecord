@@ -273,8 +273,10 @@ const EN = {
   wrappedMonth: (year: string, month: number) =>
     `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month - 1]} ${year}`,
   wrappedTwelve: 'the last 12 months',
-  // The page's title and the song's card, from the time's name (the title starts with a capital).
-  wrappedTitle: (time: string) => `${time.charAt(0).toUpperCase()}${time.slice(1)} in music`,
+  // The page's title and the song's card, from the time's name (the title starts with a capital). The title says the
+  // feature's name, as the key that opens it does ("The last 12 months, wrapped" under the key "Wrapped"; Korean's
+  // "음악 결산" is the key's word too).
+  wrappedTitle: (time: string) => `${time.charAt(0).toUpperCase()}${time.slice(1)}, wrapped`,
   wrappedSong: (time: string) => `Song of ${time}`,
   // Its days and plays; its plays alone when it played on one day ("played on 1 day" says nothing more).
   songFacts: (days: number, plays: number) =>
@@ -343,7 +345,8 @@ const EN = {
   notDrawn: 'Could not draw the picture',
   share: 'Share',
   pictureAlt: (title: string, server: string) => `${server}: ${title}`,
-  // The picture's time, big, and the words under it: "2026" over "in music", "November" over "2026 in music".
+  // The picture's time, big, and the words under it, which name the feature as the page's title does: "2026" over
+  // "wrapped", "November" over "2026, wrapped" (the key keeps its name, inMusic, from before).
   monthName: (month: number) =>
     [
       'January',
@@ -360,7 +363,7 @@ const EN = {
       'December',
     ][month - 1] ?? '',
   twelveMonths: '12 months',
-  inMusic: (year: string | null) => (year ? `${year} in music` : 'in music'),
+  inMusic: (year: string | null) => (year ? `${year}, wrapped` : 'wrapped'),
   // The song's facts apart, for a picture that sets each on its own line when they do not fit one.
   songFactsApart: (days: number, plays: number) =>
     days === 1
