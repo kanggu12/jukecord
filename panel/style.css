@@ -3191,13 +3191,16 @@ kbd {
   flex-direction: column;
   gap: var(--gap);
 }
-/* A page's title: the type scale's display size (the track playing has it too), on the line of the page's tools. */
+/* A page's title: the type scale's display size (the track playing has it too), on the line of the page's tools. Never
+   narrower than its longest word, so the tools beside it go to the next line rather than squeeze it (with the page's
+   anywhere-breaking, a phone's head left "통계" two letters wide, one over the other). */
 .page-head h1 {
   margin: 0;
   font-size: var(--fs-xl);
   line-height: var(--lh-xl);
   font-weight: 650;
   letter-spacing: -0.01em;
+  overflow-wrap: break-word;
 }
 .page-head .page-tools {
   margin-left: auto;
@@ -4280,8 +4283,10 @@ kbd {
     flex: 1 1 100%;
     width: auto;
   }
-  /* The statistics' head: the title with Wrapped at the line's end, the range of days under them (the range and
-     Wrapped side by side under the title left Wrapped alone on a third line of a phone's head). */
+  /* The statistics' head: the title with Wrapped at the line's end, the range of days on a line of its own under them,
+     across it, its choices sharing the line (the range and Wrapped side by side under the title left Wrapped alone on
+     a third line of a phone's head; the range beside the title when it fitted squeezed the Korean "통계" into
+     "통" over "계"). */
   .page-head.stats-head h1 {
     flex: 1 1 0;
   }
@@ -4290,6 +4295,10 @@ kbd {
   }
   .page-head.stats-head .seg {
     order: 1;
+    flex: 1 1 100%;
+  }
+  .page-head.stats-head .seg button {
+    flex: 1;
   }
 }
 @media (max-width: 400px) {

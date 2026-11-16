@@ -31,6 +31,7 @@
  * - load-colour: the loading colour used for anything but a track getting ready (a rule, or the loading tone);
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - lone-word: words that wrap with a word or two alone on their last line (a fifth of their longest line or less);
+ * - broken: a title (h1, h2, h3) broken inside a word;
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
  *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
@@ -1255,6 +1256,25 @@ window.__audit = () => {
     const last = lines.at(-1).width;
     if (longest >= 120 && last <= longest / 5)
       add('lone-word', box, `its last line ${px(last)} px wide under lines of ${px(longest)}`);
+  }
+
+  // A title (a page's, a card's, a dialog's, a section's) never breaks inside a word: each word of it on one line (the
+  // statistics' Korean title, squeezed beside its range on a phone, broke into "통" over "계").
+  for (const title of document.querySelectorAll('h1, h2, h3')) {
+    if (!seen(title)) continue;
+    const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const word of node.textContent.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        // The lines its letters stand on: one top per line.
+        const tops = new Set(
+          [...range.getClientRects()].filter((rect) => rect.width >= 0.5).map((rect) => Math.round(rect.top)),
+        );
+        if (tops.size > 1) add('broken', title, `"${word[0]}" breaks over ${tops.size} lines`);
+      }
+    }
   }
 
   // The space between things comes from one scale. Read as the stylesheet resolved it (the typed object model gives
