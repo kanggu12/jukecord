@@ -556,9 +556,10 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
   const words = t();
   const time = timeName(wrapped.period);
   const [year = '', month] = wrapped.period.key.split('-');
-  // The time, big: the year, the month's name, or the last 12 months; the words beside it name the rest.
-  const big =
-    wrapped.period.kind === 'last-12-months' ? words.twelveMonths : month ? words.monthName(Number(month)) : year;
+  // The time, big: the year, the month's name, or the last 12 months by the name the title gives them, so the story's
+  // two lines say what the square's one line and the page's title say (the story said "12 months", the square "The
+  // last 12 months"); the words beside it name the rest.
+  const big = wrapped.period.kind === 'last-12-months' ? capital(time) : month ? words.monthName(Number(month)) : year;
   const sub = words.inMusic(wrapped.period.kind === 'month' ? year : null);
   // The figures as the page shows them: the lengths agreeing, the moments only where they are habits, the song only
   // when it played more than once.
@@ -614,15 +615,38 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
       cover: coverUrl(guild.id, entry.track),
     })),
     momentsLabel: words.momentsLabel,
+    // Each on one line in the card of moments, and as the page's tile says it for a moment alone: its fact, and its
+    // plays (the longest day's length first) under it.
     moments: [
-      ...(day >= 0 ? [{ label: words.busiestDay, value: words.weekdaysMany[day] ?? '' }] : []),
-      ...(hour >= 0 ? [{ label: words.busiestHour, value: hourSpanText(hour, state.lang) }] : []),
+      ...(day >= 0
+        ? [
+            {
+              label: words.busiestDay,
+              value: words.weekdaysMany[day] ?? '',
+              main: words.weekdaysMany[day] ?? '',
+              sub: words.playsCount(wrapped.weekdays[day] ?? 0),
+            },
+          ]
+        : []),
+      ...(hour >= 0
+        ? [
+            {
+              label: words.busiestHour,
+              value: hourSpanText(hour, state.lang),
+              main: hourSpanText(hour, state.lang),
+              sub: words.playsCount(wrapped.hours[hour] ?? 0),
+            },
+          ]
+        : []),
       ...(wrapped.longestDay
         ? [
             {
               label: words.longestDay,
-              // Without its year: the days at the foot give it, and twelve months hold each date once.
-              value: `${dayText(wrapped.longestDay.day, state.lang, false)} · ${lengthText(longest, state.lang)}`,
+              // Without its year, as the page has it: the days at the foot give it, and twelve months hold each
+              // date once.
+              value: `${dayName(wrapped.longestDay.day)} · ${lengthText(longest, state.lang)}`,
+              main: dayName(wrapped.longestDay.day),
+              sub: `${lengthText(longest, state.lang)} · ${words.playsCount(wrapped.longestDay.plays)}`,
             },
           ]
         : []),
