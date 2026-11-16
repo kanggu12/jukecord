@@ -782,6 +782,11 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(600);
+  // The track at the moment the README's other pictures show it (1:12 of 3:00, in "How it works" and on the Discord
+  // card; the shot itself lands a second later), its progress bar lit a good way along. Where it stood was the walk's
+  // chance: 1:05 in one run, 0:02 in the next, a bar with nothing lit.
+  await api('POST', '/guilds/local/player/seek', { positionMs: 72_000 });
+  await page.waitForFunction(() => document.querySelector('.progress .times .num')?.textContent === '1:12');
   await page.screenshot({ path: path.join(OUT, `readme-panel-${theme}.png`) });
   await context.close();
 }
@@ -2895,9 +2900,15 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     await page.waitForTimeout(600);
     await page.screenshot({ path: path.join(OUT, `readme-phone-${n}-${theme}.png`) });
   };
-  // The lyrics, as the sheet a phone opens.
+  // The lyrics, as the sheet a phone opens, while a line is sung: its first, from 32 s to 36 s (a line every four
+  // seconds). Where the track stood was the walk's chance, and one theme's picture lit the note of a pause instead.
   await page.evaluate(() => window.scrollTo(0, 0));
+  await api('POST', '/guilds/local/player/seek', { positionMs: 32_500 });
   await openLyrics(page);
+  // A line's words follow its time for screen readers ("0:32 Fold ...").
+  await page.waitForFunction(() =>
+    document.querySelector('.lyrics .lyric.lit')?.textContent.endsWith('Fold the morning into paper'),
+  );
   await shot(4);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
