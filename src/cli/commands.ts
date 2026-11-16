@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import { busiestHour, busiestWeekday, hasSong } from '../core/facts.ts';
 import { type Length, withLongest } from '../core/lengths.ts';
-import { sayNotice } from '../core/say.ts';
+import { sayFailure, sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
 import { Snowflake } from '../web/schemas.ts';
@@ -177,7 +177,8 @@ function showPlayer(answer: unknown): string {
   // What the player did by itself (a track taken out of the loop), on a line of its own.
   const notice = player.notice ? `\n${sayNotice(player.notice, 'en')}` : '';
   if (!player.track)
-    return `${player.error ? `Nothing is playing (${player.error})` : 'Nothing is playing'}${repeat}${notice}`;
+    // A track that could not be played, on a line of its own as one sentence, as the panel says it.
+    return `Nothing is playing${player.error ? `\n${sayFailure(player.error, 'en')}` : ''}${repeat}${notice}`;
   // Where it is now: the snapshot's position plus the time since it was taken, while playing.
   const position =
     player.status === 'playing' ? player.positionMs + Math.max(0, Date.now() - player.at) : player.positionMs;
@@ -337,7 +338,8 @@ function showWrapped(answer: unknown): string {
   const { period } = wrapped;
   // "2026", "2026-03" or "the last 12 months", in the title and the song's line.
   const time = period.kind === 'last-12-months' ? 'the last 12 months' : period.key;
-  const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)} in music (${period.from} to ${period.to})`];
+  // The feature's name after the time, as the command and the panel's page name it ("2026, wrapped").
+  const lines = [`${time.charAt(0).toUpperCase()}${time.slice(1)}, wrapped (${period.from} to ${period.to})`];
   if (wrapped.plays === 0) return [...lines, 'Nothing was played in this period'].join('\n');
   // Each count with its word in the singular or the plural, as it reads.
   const many = (count: number, one: string, more: string) => `${count} ${count === 1 ? one : more}`;
@@ -923,7 +925,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     request: (words) => ({ body: { on: onOff(words.args[0]) } }),
     show: (answer) =>
       (answer as { voteSkip: boolean }).voteSkip
-        ? 'Skip from someone without the DJ role is a vote'
+        ? 'People without the DJ role can skip when half of the listeners agree'
         : 'Skip needs the DJ role',
   },
   'take-turns': {
@@ -933,7 +935,7 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     request: (words) => ({ body: { on: onOff(words.args[0]) } }),
     show: (answer) =>
       (answer as { takeTurns: boolean }).takeTurns
-        ? "Tracks added go in their person's turn"
+        ? 'The queue plays one track from each person in turn'
         : 'Tracks added go at the end',
   },
   'turns-now': {
@@ -944,14 +946,14 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     show: (answer) => {
       const moved = (answer as { moved: number }).moved;
       return moved === 0
-        ? 'Already in turns: nothing moved'
+        ? 'The queue already takes turns'
         : `Moved ${moved} ${moved === 1 ? 'track' : 'tracks'} so people take turns`;
     },
   },
   'person-limit': {
     name: 'limit',
     usage: '<tracks, 0 for none>',
-    summary: 'The most tracks one person may have queued',
+    summary: 'How many tracks each person may have queued',
     request: (words) => {
       const text = words.args[0];
       // The most the API takes, said here rather than as its field's range ("tracks is 0 to 1000") after asking.

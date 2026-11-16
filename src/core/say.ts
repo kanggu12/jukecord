@@ -127,7 +127,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [REASONS.nothingFound, '검색 결과 없음'],
   [REASONS.failed, '가져오지 못함'],
   [REASONS.offline, 'jukecord가 인터넷에 연결하지 못함'],
-  [/^the site answered (\d{3})$/, '사이트가 $1 오류로 응답함'],
+  // A site's answer by its status ("the site answered 404") is said in words, in either language: siteAnswer() below.
   // The audio of a long track for a browser that needs MP3, while its copy is still being made.
   [
     'jukecord is making the MP3 copy of this track; try again in a moment',
@@ -140,8 +140,9 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['the track is getting ready', '곡을 준비하는 중'],
   // A voice channel at its member limit.
   [/^the voice channel (.+) is full$/, '$1 음성 채널이 가득 참'],
-  // A player that paused by itself with nobody hearing it anywhere (app/rest.ts).
-  ['paused with nobody listening', '듣는 사람이 없어 일시정지함'],
+  // A player that paused by itself with nobody hearing it anywhere (app/rest.ts): why, beside the state that says it
+  // is paused ("일시정지" over "듣는 사람이 없어 일시정지함" said it twice).
+  ['paused with nobody listening', '듣는 사람이 없었음'],
   // Choosing the alerts channel (app/alerts.ts).
   [
     'only people who can manage the server can choose the alerts channel',
@@ -254,6 +255,75 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['that search result has no picture', '이미지가 없는 검색 결과'],
 ];
 
+// The few messages people read in other English words than the API's: [the API's message, the words for people].
+const ENGLISH: readonly (readonly [string, string])[] = [
+  // Why the player paused itself, shown beside the state that already says "Paused" ("Paused" over "Paused with
+  // nobody listening" said it twice), in the panel, the bot's card and the command line alike.
+  ['paused with nobody listening', 'nobody was listening'],
+  // "This server" meant the machine jukecord runs on; beside a Discord server's name it read as that server.
+  [REASONS.botCheck, 'YouTube is refusing this jukecord for now'],
+];
+
+// A site's answer by its HTTP status, as the API says it ("the site answered 404", from yt-dlp's "HTTP Error 404").
+const SITE_ANSWERED = /^the site answered (\d{3})$/;
+
+/**
+ * What a site's answer means for the track, in words: its number says nothing to most people ("the site answered
+ * 404" read as a code to look up). In English; in Korean as a state, for a reason after a colon ("추가하지 못함:
+ * 사이트에 없음"); and in Korean as the cause in a sentence (sayFailure: "사이트에 없는 곡이라 ...").
+ */
+function siteAnswer(status: number): { readonly en: string; readonly ko: string; readonly koCause: string } {
+  // Not there: an address that was wrong, or a track taken down.
+  if (status === 404) return { en: 'the site does not have it', ko: '사이트에 없음', koCause: '사이트에 없는 곡이라' };
+  // Taken down for good, as the site says.
+  if (status === 410)
+    return { en: 'the site has removed it', ko: '사이트에서 지워짐', koCause: '사이트에서 지운 곡이라' };
+  // Withheld for legal reasons (a court's order, a country's law).
+  if (status === 451)
+    return {
+      en: 'the site blocks it for legal reasons',
+      ko: '법적인 이유로 막힘',
+      koCause: '법적인 이유로 막힌 곡이라',
+    };
+  // Too many requests: the site wants fewer from jukecord for a while.
+  if (status === 429)
+    return {
+      en: 'the site asked jukecord to slow down',
+      ko: '사이트가 요청을 줄여 달라고 함',
+      koCause: '사이트가 요청을 줄여 달라고 해서',
+    };
+  // The site's own trouble (500, 502, 503 ...), which may pass.
+  if (status >= 500)
+    return { en: 'the site is having trouble', ko: '사이트에 문제가 생김', koCause: '사이트에 문제가 생겨' };
+  // Any other answer is a refusal (403 most of all, which YouTube gives an address it will not serve).
+  return { en: 'the site refused it', ko: '사이트가 거절함', koCause: '사이트가 거절해' };
+}
+
+// Why a track could not be played, as the cause in the one sentence that names it (sayFailure): in English after
+// "because", in Korean before the track ("...이라", "...어서"). One for each short reason of core/reasons.ts; a site's
+// answer has its own (siteAnswer above).
+const CAUSES: ReadonlyMap<string, { readonly en: string; readonly ko: string }> = new Map<
+  string,
+  { readonly en: string; readonly ko: string }
+>([
+  [
+    REASONS.botCheck,
+    { en: 'YouTube is refusing this jukecord for now', ko: '지금은 YouTube가 이 jukecord를 막고 있어' },
+  ],
+  [REASONS.privateNetwork, { en: 'its address is on a private network', ko: '사설망 주소라' }],
+  [REASONS.unavailable, { en: 'the video is unavailable', ko: '볼 수 없는 영상이라' }],
+  [REASONS.notYet, { en: 'it has not started yet', ko: '아직 시작 전이라' }],
+  // Not "재생할 수 있는 것이 없는": the sentence ends in 재생하지 못함.
+  [REASONS.nothingToPlay, { en: 'there is nothing to play at its address', ko: '들을 수 있는 소리가 없는 주소라' }],
+  [REASONS.tooLarge, { en: 'the file is too large', ko: '파일이 너무 커서' }],
+  [REASONS.tooLong, { en: 'getting it took too long', ko: '가져오는 데 너무 오래 걸려' }],
+  [REASONS.noSuchSite, { en: 'there is no such site', ko: '사이트를 찾을 수 없어' }],
+  [REASONS.nothingFound, { en: 'nothing was found', ko: '검색 결과가 없어' }],
+  // Not "it could not be downloaded": after "Could not play ... because" it said "could not" twice.
+  [REASONS.failed, { en: 'the download failed', ko: '다운로드에 실패해' }],
+  [REASONS.offline, { en: 'jukecord cannot reach the internet', ko: 'jukecord가 인터넷에 연결되지 않아' }],
+]);
+
 // The no-break space: a line that wraps never breaks at it. Made from its code, so no editor turns it into a plain space
 // unseen (Pretendard's subset that holds the space holds it too).
 const NBSP = String.fromCharCode(0xa0);
@@ -270,6 +340,9 @@ const TOGETHER: readonly (readonly [RegExp, string])[] = [
   ],
   // "ago" with its time: "15 h ago".
   [/ ago\b/g, `${NBSP}ago`],
+  // English's "a" and "an" with the word they come before: a line that ended in "a" ("Skip ... is a / vote") read as
+  // cut short. Only the word itself: after the line's start, a space or a bracket, and before a plain space.
+  [/(^|[\s(])(an?|An?) (?=\S)/g, `$1$2${NBSP}`],
   // Korean words that never start a line, kept with the word before: 수 of "쓸 수 있음" and "바꿀 수 없음" (with what
   // follows it too), ...
   [/ 수 (?=[있없])/g, `${NBSP}수${NBSP}`],
@@ -294,42 +367,64 @@ export function together(text: string): string {
   return kept;
 }
 
-/** A message from the actions in the person's language, as it is (for a reason inside a sentence). */
+/**
+ * A message from the actions in the person's language, as it is (for a reason inside a sentence). English is the
+ * message itself, but for the few that people read in other words (a site's answer in words, not its number).
+ */
 export function translate(message: string, lang: Lang): string {
-  if (lang === 'ko') {
-    for (const [english, korean] of KOREAN) {
-      if (typeof english === 'string' ? english === message : english.test(message)) {
-        // Read by people: a line that wraps keeps "할 수 있음" whole.
-        return together(typeof english === 'string' ? korean : message.replace(english, korean));
-      }
+  // A site's answer, in words in either language.
+  const status = SITE_ANSWERED.exec(message)?.[1];
+  if (status) return together(siteAnswer(Number(status))[lang]);
+  for (const [english, said] of lang === 'ko' ? KOREAN : ENGLISH) {
+    if (typeof english === 'string' ? english === message : english.test(message)) {
+      // Read by people: a line that wraps keeps "할 수 있음" whole.
+      return together(typeof english === 'string' ? said : message.replace(english, said));
     }
   }
   return message;
 }
 
 /**
- * A player's failure, "the track's title: the reason" (core/player.ts), with the reason in the person's language. The
- * reasons have no colon in them, so the last colon is where the reason starts, whatever the title holds.
+ * A player's failure ("the track's title: the reason", core/player.ts) as one sentence that names the track and says
+ * why in words: "Could not play Neon Rain because the site does not have it", "사이트에 없는 곡이라 Neon Rain 재생하지
+ * 못함" (not "Could not play: Neon Rain: the site answered 404", two colons and a number). Korean says the cause
+ * first, so no particle follows the title, whatever letters it ends in. The reasons have no colon in them, so the last
+ * colon is where the reason starts, whatever the title holds.
  */
-export function sayFailure(message: string, lang: Lang): string {
-  const at = message.lastIndexOf(': ');
-  if (at < 0) return translate(message, lang);
-  return `${message.slice(0, at)}: ${translate(message.slice(at + 2), lang)}`;
+export function sayFailure(error: string, lang: Lang): string {
+  const at = error.lastIndexOf(': ');
+  // Not a title and its reason (the player always gives both): the message as a sentence.
+  if (at < 0) return sayError(error, lang);
+  const title = error.slice(0, at);
+  const reason = error.slice(at + 2);
+  const status = SITE_ANSWERED.exec(reason)?.[1];
+  const answer = status ? siteAnswer(Number(status)) : null;
+  const cause = answer ? { en: answer.en, ko: answer.koCause } : CAUSES.get(reason);
+  // A reason with no cause here yet is still said, after the track (one colon): never lost, only less plain.
+  if (!cause)
+    return together(
+      lang === 'ko' ? `${title} 재생하지 못함: ${translate(reason, 'ko')}` : `Could not play ${title}: ${reason}`,
+    );
+  return together(lang === 'ko' ? `${cause.ko} ${title} 재생하지 못함` : `Could not play ${title} because ${cause.en}`);
 }
 
 /**
- * What the player did by itself (PlayerSnapshot.notice) as people read it: after a track's title, like a failure
- * ("Title: taken out of the looping queue"); on its own, as a sentence ("Paused with nobody listening").
+ * What the player did by itself (PlayerSnapshot.notice) as people read it: after a track's title, what happened to it
+ * ("Neon Rain: taken out of the looping queue"); on its own, as a sentence ("Nobody was listening", beside the state
+ * that says it paused).
  */
 export function sayNotice(message: string, lang: Lang): string {
-  return message.includes(': ') ? sayFailure(message, lang) : sayError(message, lang);
+  // The last colon, as for a failure: what happened has none, a title may.
+  const at = message.lastIndexOf(': ');
+  if (at < 0) return sayError(message, lang);
+  return `${message.slice(0, at)}: ${translate(message.slice(at + 2), lang)}`;
 }
 
 /** A message from the actions as the person reads it: a sentence in their language. */
 export function sayError(message: string, lang: Lang): string {
   const said = translate(message, lang);
   // Korean has no capitals: a translation is shown as it is, and a word in Latin letters at its start keeps its case.
-  if (said !== message) return said;
+  if (lang === 'ko' && said !== message) return said;
   // English (or Korean without an entry): the message as a sentence, with its capital; jukecord's name has none. Read
   // by people as a translation is: a number keeps its unit on its line ("500 tracks").
   if (said.startsWith('jukecord')) return together(said);

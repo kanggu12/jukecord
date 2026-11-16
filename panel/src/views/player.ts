@@ -452,7 +452,8 @@ export function nowCard(live: Live): HTMLElement {
       error,
       `${state.lang}|${player?.error ?? ''}`,
       player?.error ? icon('circle-alert') : null,
-      player?.error ? words.couldNotPlay(sayFailure(player.error, state.lang)) : null,
+      // One sentence that names the track and says why ("Could not play Neon Rain because the site does not have it").
+      player?.error ? sayFailure(player.error, state.lang) : null,
     );
     // Refused for good, or turned away for now (jukecord full): the reason, which the bar keeps in its title only.
     const why = liveWhy();

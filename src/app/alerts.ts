@@ -199,7 +199,8 @@ export function leftLoopAlert(guildId: string, title: string, trackId: number, r
     about: String(trackId),
     // The player logged it, with the full reason.
     logged: true,
-    en: `${title}: taken out of the looping queue (${short})`,
+    // The reason as people read it in either language: a site's answer in words, not its number.
+    en: `${title}: taken out of the looping queue (${translate(short, 'en')})`,
     ko: `${title}: 대기열 반복에서 뺌(${translate(short, 'ko')})`,
   };
 }

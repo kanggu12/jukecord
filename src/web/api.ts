@@ -619,7 +619,7 @@ export const API = {
   'take-turns': op({
     method: 'PUT',
     path: '/guilds/{guild}/settings/take-turns',
-    summary: "Take turns: a track added goes in its person's turn, not at the end; needs Manage Server",
+    summary: 'Take turns: the queue plays one track from each person in turn; needs Manage Server',
     tag: 'server',
     access: 'admin',
     params: InGuild,
@@ -638,7 +638,7 @@ export const API = {
   'person-limit': op({
     method: 'PUT',
     path: '/guilds/{guild}/settings/person-limit',
-    summary: 'The most tracks one person may have queued (0: no limit); needs Manage Server',
+    summary: 'How many tracks each person may have queued (0: no limit); needs Manage Server',
     tag: 'server',
     access: 'admin',
     params: InGuild,

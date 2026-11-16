@@ -93,7 +93,7 @@ describe('lengths of time in words', () => {
 
   it('says "under a minute" for a part in minutes that rounds to none though music played in it', () => {
     const { parts } = apportioned([10 * 60_000, 10_000, 0]);
-    assert.equal(lengthText(parts[1] ?? rounded(0), 'en'), 'under a minute');
+    assert.equal(lengthText(parts[1] ?? rounded(0), 'en'), kept('under a⍽minute'));
     assert.equal(lengthText(parts[1] ?? rounded(0), 'ko'), kept('1분⍽미만'));
     assert.equal(lengthText(parts[2] ?? rounded(1), 'en'), kept('0⍽min'));
   });

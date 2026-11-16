@@ -180,8 +180,8 @@ playlist) so a program does not need to ask again.
 | `listen-link-revoke` Revoke a listening link: its guests are out at once (its maker, or Manage Server) | `DELETE /api/v1/guilds/{guild}/listen-links/{id}` | control | `jukecord unshare` | `/share revoke` |
 | `stay` Stay in voice when everyone has left (off: leave after the host's time alone); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/stay` | admin | `jukecord stay` | `/stay` |
 | `vote-skip` Whether Skip from someone without the DJ role is a vote (on) or refused (off); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/vote-skip` | admin | `jukecord voteskip` | `/voteskip` |
-| `take-turns` Take turns: a track added goes in its person's turn, not at the end; needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/take-turns` | admin | `jukecord turns` | `/turns set` |
-| `person-limit` The most tracks one person may have queued (0: no limit); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/person-limit` | admin | `jukecord limit` | `/limit` |
+| `take-turns` Take turns: the queue plays one track from each person in turn; needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/take-turns` | admin | `jukecord turns` | `/turns set` |
+| `person-limit` How many tracks each person may have queued (0: no limit); needs Manage Server | `PUT /api/v1/guilds/{guild}/settings/person-limit` | admin | `jukecord limit` | `/limit` |
 
 ### Your login
 

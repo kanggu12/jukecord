@@ -484,12 +484,14 @@ export function relativePeriod(choice: string | null, offsetMinutes: number, now
 
 // Wrapped's words, side by side as above.
 const WRAPPED = {
-  title: { en: (time: string) => `${time} in music`, ko: (time: string) => `${time} 음악 결산` },
+  // The feature's name after the time, as the panel's page and the /wrapped command name it ("2026, wrapped").
+  title: { en: (time: string) => `${time}, wrapped`, ko: (time: string) => `${time} 음악 결산` },
   song: { en: (time: string) => `Song of ${time}`, ko: (time: string) => `${time}의 노래` },
   songFacts: {
     en: (days: number, plays: number) =>
       `${days === 1 ? '' : `played on ${days} days, `}${plays === 1 ? 'once' : `${plays} times`}`,
-    ko: (days: number, plays: number) => (days === 1 ? `${plays}번 재생` : `${days}일에 걸쳐 ${plays}번 재생`),
+    // Plays counted with 회, as the card's totals and lists count them ("재생 1,798회", "224회").
+    ko: (days: number, plays: number) => (days === 1 ? `${plays}회 재생` : `${days}일에 걸쳐 ${plays}회 재생`),
   },
   lastYear: { en: 'the last 12 months', ko: '최근 12개월' },
   busiestDay: { en: 'Busiest day', ko: '가장 많이 들은 요일' },
@@ -542,7 +544,7 @@ export function wrappedCard(
   offsetMinutes: number,
 ) {
   const time = timeName(view.period, lang);
-  // The title begins with a capital in English ("The last 12 months in music").
+  // The title begins with a capital in English ("The last 12 months, wrapped").
   const title = WRAPPED.title[lang](lang === 'en' ? `${time.charAt(0).toUpperCase()}${time.slice(1)}` : time);
   const embed = new EmbedBuilder()
     .setColor(COLOUR.neutral)

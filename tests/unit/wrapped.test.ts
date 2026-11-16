@@ -273,7 +273,7 @@ describe('Wrapped in the jukecord command', () => {
   });
 
   it('refuses a year and a month of another year, and says which to keep, before anything is asked', async () => {
-    // The month with its own year won, unseen: "2025-03 in music" for --year 2026.
+    // The month with its own year won, unseen: "2025-03, wrapped" for --year 2026.
     assert.throws(
       () => request('--year 2026 --month 2025-03'),
       (error: Error) =>
@@ -315,7 +315,7 @@ describe('Wrapped in the jukecord command', () => {
       song: { track, plays: 9, days: 4 },
       keptFrom: null,
     });
-    assert.match(text, /^2026 in music \(2026-01-01 to 2026-11-11\)/);
+    assert.match(text, /^2026, wrapped \(2026-01-01 to 2026-11-11\)/);
     assert.match(text, /12 plays · 1 h 5 min · 3 tracks · 2 people · music on 8 days/);
     assert.match(text, /Song of 2026: Morning Light \(played on 4 days, 9 times\)/);
     // The counts say they are plays, of a track and of what a person added.
@@ -370,7 +370,7 @@ describe('Wrapped in the jukecord command', () => {
       period: { kind: 'last-12-months', key: 'last-12-months', from: '2025-11-12', to: '2026-11-11' },
       plays: 0,
     });
-    assert.equal(empty, 'The last 12 months in music (2025-11-12 to 2026-11-11)\nNothing was played in this period');
+    assert.equal(empty, 'The last 12 months, wrapped (2025-11-12 to 2026-11-11)\nNothing was played in this period');
   });
 });
 
@@ -406,7 +406,7 @@ describe('Wrapped in Discord', () => {
       const view = actions.wrapped(look, '2026', 540, NOW);
       const english = wrappedCard(view, 'en', 'Night Owls', 'https://music.example.com', 540);
       const card = english.embeds[0]?.toJSON();
-      assert.equal(card?.title, 'Night Owls · 2026 in music');
+      assert.equal(card?.title, 'Night Owls · 2026, wrapped');
       assert.match(
         card?.description ?? '',
         /\*\*1\*\* play · listened \*\*1 h 7 min\*\* · \*\*1\*\* track · \*\*1\*\* person · music on \*\*1\*\* day/,
@@ -439,7 +439,7 @@ describe('Wrapped in Discord', () => {
       assert.equal(korean.components.length, 0);
       // Nothing played: said in the card, which keeps its title.
       const quiet = wrappedCard(actions.wrapped(look, '2026-03', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
-      assert.equal(quiet?.title, 'March 2026 in music');
+      assert.equal(quiet?.title, 'March 2026, wrapped');
       assert.equal(quiet?.description, 'Nothing was played in this period');
       const twelve = wrappedCard(
         actions.wrapped(look, 'last-12-months', 540, NOW),
@@ -448,7 +448,7 @@ describe('Wrapped in Discord', () => {
         null,
         540,
       ).embeds[0]?.toJSON();
-      assert.equal(twelve?.title, 'The last 12 months in music');
+      assert.equal(twelve?.title, 'The last 12 months, wrapped');
     } finally {
       await server.close();
     }
