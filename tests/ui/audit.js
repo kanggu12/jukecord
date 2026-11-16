@@ -33,8 +33,10 @@
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
  *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
- *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track or a
- *   chart's bar in the canvas's own colour (a contrast theme paints every background in its canvas colour);
+ *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track, a
+ *   chart's bar or the bar's line under the page in use in the canvas's own colour (a contrast theme paints every
+ *   background in its canvas colour);
+ * - see-through: in a contrast theme, a bar whose glass shows the page under it;
  * - unsafe: on a screen with a notch, rounded corners or a home bar (safe-area insets), a key, a field or a card
  *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
@@ -389,6 +391,8 @@ window.__audit = () => {
     ['.switch', '::before', "the switch's track"],
     ['.bars .slot:not(.zero) .b', null, "a chart's bar"],
     ['.rank .meter i', null, "a rank's meter"],
+    // The bar's line under the page in use (in the brand's blue, a contrast theme painted it as the canvas: a gap).
+    ['.nav a[aria-current="page"]', '::after', "the page in use's line"],
   ];
   for (const [selector, pseudo, what] of filled) {
     const element = [...document.querySelectorAll(selector)].find(shown);
@@ -399,6 +403,17 @@ window.__audit = () => {
     const same =
       Math.abs(colour[0] - ground[0]) + Math.abs(colour[1] - ground[1]) + Math.abs(colour[2] - ground[2]) < 8;
     if (colour[3] < 0.05 || same) add('unmarked', element, `${what} is drawn in the canvas's colour`);
+  }
+
+  // In a contrast theme the bars are solid, with nothing blurred behind them: their glass became the canvas thinned,
+  // and on a phone the page under the listening bar showed through as a haze behind the track's boxed title.
+  if (matchMedia('(forced-colors: active)').matches) {
+    for (const bar of document.querySelectorAll('.bar, .listen')) {
+      if (!shown(bar)) continue;
+      const look = getComputedStyle(bar);
+      if (look.backdropFilter !== 'none' || rgba(look.backgroundColor)[3] < 0.99)
+        add('see-through', bar, `${look.backgroundColor} over ${look.backdropFilter}`);
+    }
   }
 
   // The safe area: what the screen's notch, corners and home bar leave (read from the browser itself, through a

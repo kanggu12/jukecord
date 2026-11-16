@@ -4488,6 +4488,21 @@ kbd {
   .moment .spark i.top {
     background: Highlight;
   }
+  /* The page in use: its line under the bar's link in the text's colour (in the brand's blue, a contrast theme painted
+     it as the canvas, and it showed as a gap in the bar's own line). */
+  .nav a[aria-current="page"]::after {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  /* The bars solid, with nothing blurred behind them: their glass was the canvas thinned, and on a phone the page under
+     the listening bar showed through as a haze (the charts' bars behind the track's boxed title). */
+  .bar,
+  .listen,
+  .toasts {
+    background: Canvas;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 /* ---- less transparency --------------------------------------------------------------------------------------- */
