@@ -3519,14 +3519,14 @@ kbd {
     line-height: var(--lh-lg);
     font-weight: 650;
   }
-  /* The moments: as many columns as there are (a tie or too few days can leave a busiest one out). */
-  .tiles.moments {
-    grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr));
-  }
 }
-/* Two moments a row on a narrower window: an odd last one across the row, not beside a hole. */
+/* The moments are tiles of the page's grid, as wide as the totals' (four a row on a wide window: a time of few days has
+   two, and the row ends where they do; stretched to fill it, they were 696 px each on a laptop). On a narrower window,
+   two a row, a moment with a chart takes its row: its chart and its span of an hour need the room (in a phone's half,
+   "20:00 ~ 21:00" took two lines). The longest day and the days with music, which every time with plays has, share
+   theirs: no row has a hole, and no tile of one figure is stretched across one. */
 @media (max-width: 1100px) {
-  .tiles.moments > :last-child:nth-child(odd) {
+  .tiles.moments > .moment:has(> .spark) {
     grid-column: 1 / -1;
   }
 }

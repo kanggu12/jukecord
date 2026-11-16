@@ -25,9 +25,12 @@ export function timeName(period: Wrapped['period']): string {
   return month ? words.wrappedMonth(year, Number(month)) : words.wrappedYear(year);
 }
 
-/** A day of the time as the panel writes days ("Jun 24", "6월 24일"), with its year when the time spans two. */
-export function dayName(day: string, period: Wrapped['period']): string {
-  return dayText(day, state.lang, period.kind === 'last-12-months');
+/**
+ * A day of the time as the panel writes days ("Jun 24", "6월 24일"), without its year: the head over it gives the
+ * time's days, and twelve months hold each date once (with it, "2026년 6월 26일" took two lines of a phone's tile).
+ */
+export function dayName(day: string): string {
+  return dayText(day, state.lang, false);
 }
 
 /** A count as people read it: "1,806" ("1,806" in Korean too). */
@@ -312,7 +315,7 @@ export function wrappedPage(): HTMLElement {
       longest
         ? moment(
             words.longestDay,
-            dayName(longest.day, wrapped.period),
+            dayName(longest.day),
             `${lengthText(longestLength, state.lang)} · ${words.playsCount(longest.plays)}`,
             null,
           )
@@ -320,8 +323,9 @@ export function wrappedPage(): HTMLElement {
       // A count of days, bare as the other counts are (in Korean "2일" beside a date read as the second of a month).
       moment(words.tileDays, count(wrapped.days), null, null),
     ].filter((tile) => tile !== null);
-    // As many columns as there are moments, so the row has no hole where one is left out.
-    const moments = h('div', { class: 'tiles moments', style: `--n:${shownMoments.length}` }, ...shownMoments);
+    // In the page's grid of tiles, each as wide as a total's tile (style.css: a short row ends where its tiles do; two
+    // days' moments stretched across a laptop's row were 696 px each).
+    const moments = h('div', { class: 'tiles moments' }, ...shownMoments);
     fill(
       content,
       // The history reaches back only so far: said once, at the top.

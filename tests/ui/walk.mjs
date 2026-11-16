@@ -1222,6 +1222,25 @@ async function wrappedIsTrue(page, period) {
       song: Boolean(song),
       side: Boolean(song && first && song.getBoundingClientRect().top === first.getBoundingClientRect().top),
       fill: row && first && head ? row.offsetHeight / (first.offsetHeight - head.offsetHeight) : 1,
+      // The busiest hour as the page says it, and the moments' grid: its columns, and each moment's width in it.
+      hourSaid:
+        moments.find((tile) => tile.querySelectorAll('.spark i').length === 24)?.querySelector('.v')?.textContent ??
+        null,
+      grid: (() => {
+        const grid = document.querySelector('.wrapped .tiles.moments');
+        if (!grid) return null;
+        const columns = getComputedStyle(grid).gridTemplateColumns.split(' ').map(Number.parseFloat);
+        return {
+          columns: columns.length,
+          column: columns[0] ?? 0,
+          across: grid.getBoundingClientRect().width,
+          tiles: [...grid.children].map((tile) => ({
+            width: tile.getBoundingClientRect().width,
+            chart: Boolean(tile.querySelector('.spark')),
+          })),
+        };
+      })(),
+      window: window.innerWidth,
       // The first track's card's share of the page's width, on a window wide enough for two columns.
       wide:
         first && window.innerWidth > 1100
@@ -1247,6 +1266,22 @@ async function wrappedIsTrue(page, period) {
   // Its column's width, with or without the song beside it (alone across the row, a laptop's card was 1,408 px wide
   // with its row in the first 360).
   if (facts.wide > 0.5) problems.push(`the first track's card is ${Math.round(facts.wide * 100)} % of the row wide`);
+  // The busiest hour as the span it is, as the picture, the statistics' tip and the Discord card say it (the page said
+  // "11:00", its picture "11:00 – 12:00").
+  if (facts.hourSaid !== null && !/^\d{2}:00 [–~] \d{2}:00$/.test(facts.hourSaid))
+    problems.push(`the busiest hour reads "${facts.hourSaid}"`);
+  // The moments are tiles of the page's grid, as wide as the totals': four a row on a wide window, two on a narrower
+  // one, where a moment with a chart takes its row (two days' moments were stretched across a laptop's row, 696 px).
+  const grid = facts.grid;
+  if (grid) {
+    const wide = facts.window > 1100;
+    if (grid.columns !== (wide ? 4 : 2)) problems.push(`the moments in ${grid.columns} columns`);
+    for (const tile of grid.tiles) {
+      const meant = !wide && tile.chart ? grid.across : grid.column;
+      if (Math.abs(tile.width - meant) > 1)
+        problems.push(`a moment ${Math.round(tile.width)} px wide in columns of ${Math.round(grid.column)}`);
+    }
+  }
   problems.push(...(await placesShared(page)));
   if (problems.length > 0) throw new Error(`Wrapped says what is not true: ${problems.join('; ')}`);
 }
