@@ -514,8 +514,11 @@ img {
   display: flex;
   align-items: center;
   gap: 12px;
-  /* Its parts below the notch and clear of the corners; its glass reaches the edges. */
-  padding: var(--safe-top) max(16px, var(--safe-right)) 0 max(16px, var(--safe-left));
+  /* Its parts below the notch and clear of the corners, and in the page's column (as .main's sides, past --page-max
+     half of what is left on each side); its glass reaches the edges. Against the window's sides, on the owner's 2560 px
+     screen the logo and the account stood 420 px outside the cards on each side. */
+  padding: var(--safe-top) max(var(--gap), 16px, var(--safe-right), (100% - var(--page-max)) / 2) 0
+    max(var(--gap), 16px, var(--safe-left), (100% - var(--page-max)) / 2);
   height: var(--bar-h);
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
   background: color-mix(in srgb, var(--bg) 90%, transparent);
@@ -2613,8 +2616,10 @@ img {
   align-items: center;
   gap: 12px;
   height: var(--listen-h);
-  /* Its parts above the home bar and clear of the corners; its glass reaches the edges. */
-  padding: 0 max(16px, var(--safe-right)) var(--safe-bottom) max(16px, var(--safe-left));
+  /* Its parts above the home bar and clear of the corners, and in the page's column as the top bar's are; its glass
+     reaches the edges. */
+  padding: 0 max(var(--gap), 16px, var(--safe-right), (100% - var(--page-max)) / 2) var(--safe-bottom)
+    max(var(--gap), 16px, var(--safe-left), (100% - var(--page-max)) / 2);
   /* Mostly solid: the bar carries words, and through thinner glass the words passing under it showed among them. */
   background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: var(--glass);

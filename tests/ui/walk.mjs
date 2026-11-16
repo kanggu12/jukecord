@@ -526,18 +526,36 @@ async function oneOrder(page) {
 }
 
 // Past the widest the page's content grows (1680 px), it stands in the middle at that width: on a 2560 px screen the
-// queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px.
+// queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px. The bars' contents stand
+// in the same column, their glass across the window (the logo and the account stood 420 px outside the cards at 2560).
 async function pageCentred(page) {
   const off = await page.evaluate(() => {
+    // Where a box's content starts and ends, inside its padding.
+    const inside = (element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return {
+        left: box.left + Number.parseFloat(style.paddingLeft),
+        right: box.right - Number.parseFloat(style.paddingRight),
+      };
+    };
     const main = document.querySelector('.main:not([hidden])') ?? document.querySelector('.page');
-    const style = getComputedStyle(main);
-    const box = main.getBoundingClientRect();
-    const left = box.left + Number.parseFloat(style.paddingLeft);
-    const right = box.right - Number.parseFloat(style.paddingRight);
+    const { left, right } = inside(main);
     if (right - left > 1680.5) return `the page's content is ${Math.round(right - left)} px wide`;
     const window = document.documentElement.clientWidth;
     const across = left - (window - right);
-    return Math.abs(across) > 1 ? `the page's content stands ${across.toFixed(1)} px off the window's middle` : null;
+    if (Math.abs(across) > 1) return `the page's content stands ${across.toFixed(1)} px off the window's middle`;
+    for (const [selector, name] of [
+      ['.bar', 'the top bar'],
+      ['.listen', 'the listening bar'],
+    ]) {
+      const bar = document.querySelector(selector);
+      if (!bar?.getClientRects().length) continue;
+      const edges = inside(bar);
+      if (Math.abs(edges.left - left) > 0.5 || Math.abs(edges.right - right) > 0.5)
+        return `${name}'s contents span ${Math.round(edges.left)} to ${Math.round(edges.right)}, the page's ${Math.round(left)} to ${Math.round(right)}`;
+    }
+    return null;
   });
   if (off) throw new Error(off);
 }
