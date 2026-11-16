@@ -2216,21 +2216,43 @@ const DISCOVERY = [
   [1440, 900],
 ];
 // A made-up search: the seeded tracks as YouTube would list them (title, channel, length, cover), put between the
-// page and jukecord, so no search reaches a site.
+// page and jukecord, so no search reaches a site. Every seeded track, the most recently played first (the history
+// paged back until it has them all), so a search finds what it is asked for.
 const FOUND = [];
 // Each made-up result's picture, by the result's address: the seed's covers are pictures in jukecord's cache (their
 // own addresses lead nowhere), sent where the panel asks jukecord for a search result's picture.
 const PICTURES = new Map();
-for (const entry of await api('GET', '/guilds/local/history?limit=60')) {
-  if (FOUND.length >= 8 || FOUND.some((found) => found.url === entry.track.url)) continue;
-  const { id, url, title, uploader, durationMs, thumbnail } = entry.track;
-  PICTURES.set(url, `${BASE}/api/v1/guilds/local/tracks/${id}/cover`);
-  FOUND.push({ url, title, uploader, durationMs, thumbnail });
+for (let before = null; ; ) {
+  const played = await api('GET', `/guilds/local/history?limit=200${before ? `&before=${before}` : ''}`);
+  for (const entry of played) {
+    if (FOUND.some((found) => found.url === entry.track.url)) continue;
+    const { id, url, title, uploader, durationMs, thumbnail } = entry.track;
+    PICTURES.set(url, `${BASE}/api/v1/guilds/local/tracks/${id}/cover`);
+    FOUND.push({ url, title, uploader, durationMs, thumbnail });
+  }
+  // The history's end, or every seeded track found.
+  if (played.length < 200 || FOUND.length >= 30) break;
+  before = played.at(-1).id;
+}
+// What the made-up search lists for some words, eight results as a search shows a page of them, the best match first:
+// each searched word that starts a word of the title counts twice, one that starts a word of the artist's name once;
+// the rest after them, as they were (searching "paper boats" listed "여름밤 옥상에서" first and the match fourth).
+function foundFor(words) {
+  const asked = words.toLowerCase().split(/\s+/).filter(Boolean);
+  const matched = (text) => {
+    const own = (text ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u);
+    return asked.filter((word) => own.some((part) => part.startsWith(word))).length;
+  };
+  return FOUND.map((found, at) => ({ found, at, score: matched(found.title) * 2 + matched(found.uploader) }))
+    .sort((a, b) => b.score - a.score || a.at - b.at)
+    .slice(0, 8)
+    .map((entry) => entry.found);
 }
 async function searchFor(page, words) {
-  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
-    route.fulfill({ json: { query: new URL(route.request().url()).searchParams.get('q') ?? '', results: FOUND } }),
-  );
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) => {
+    const query = new URL(route.request().url()).searchParams.get('q') ?? '';
+    return route.fulfill({ json: { query, results: foundFor(query) } });
+  });
   // jukecord would fetch a result's picture from the address the search found; here it is the seed's cover.
   await page.route(/\/api\/v1\/guilds\/[^/]+\/search\/cover\?/, (route) => {
     const cover = PICTURES.get(new URL(route.request().url()).searchParams.get('url') ?? '');
@@ -2470,6 +2492,16 @@ await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
 // The README's second row of phone pictures, beside the first (the player, the queue, the statistics): the lyrics, a
 // search's results and a listening link's QR code, in each theme, with a Discord bot, while a track plays. The link's
 // words are an example address: the walk's own is its container's name and a code from a throwaway server.
+// The queue as a server has it, first: the states before left it as each needed it (the track playing was the queue's
+// next as well). Nothing playing and nothing queued, then a saved playlist loaded, which starts its first track and
+// queues the rest; the search is for a track in neither.
+const README_SEARCH = 'golden hour';
+if (!ONLY || ONLY.has('readme')) {
+  await api('POST', '/guilds/local/player/stop').catch(() => {});
+  await api('DELETE', '/guilds/local/queue');
+  await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+  await until('playing');
+}
 for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await api('POST', '/guilds/local/player/resume').catch(() => {});
   await until('playing');
@@ -2478,6 +2510,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     deviceScaleFactor: 2,
     colorScheme: theme,
     locale: 'en-US',
+    timezoneId: ZONE,
     isMobile: true,
     hasTouch: true,
   });
@@ -2502,9 +2535,31 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await page.waitForTimeout(300);
   // What a search found, under the add field.
   await page.locator('#add-input').scrollIntoViewIfNeeded();
-  await searchFor(page, 'paper boats');
+  await searchFor(page, README_SEARCH);
   await page.evaluate(() => document.querySelector('.add-card')?.scrollIntoView({ block: 'start' }));
   await shot(5);
+  // As a stranger reads the picture: the first result is what was searched for, and the queue's next track is not
+  // the one playing (the picture showed "Morning Light" playing and next, and the match for its words fourth).
+  const seen = {
+    ...(await page.evaluate(() => ({
+      first: document.querySelector('#add-found [role="option"] .name')?.textContent ?? '',
+      next: document.querySelector('.queue-list .row .name')?.textContent ?? '',
+    }))),
+    playing: (await api('GET', '/guilds/local/player')).track?.title ?? '',
+  };
+  const odd = [];
+  if (!README_SEARCH.split(' ').every((word) => seen.first.toLowerCase().includes(word)))
+    odd.push(`searching "${README_SEARCH}" lists "${seen.first}" first`);
+  if (!seen.next || seen.next === seen.playing)
+    odd.push(`the queue's next track is "${seen.next}", playing "${seen.playing}"`);
+  report.push({
+    state: 'readme-search',
+    theme,
+    lang: 'en',
+    width: 412,
+    findings: odd.map((detail) => ({ kind: 'walk', where: 'readme-phone-5', detail })),
+    errors: [],
+  });
   await page.keyboard.press('Escape');
   await page.fill('#add-input', '');
   // A listening link and its QR code.
@@ -2588,7 +2643,6 @@ await sweep(
       const played = await api('POST', '/guilds/local/player/play', { input: `https://media.example/${cover}` });
       const title = played.items[0]?.track.title ?? '';
       // The page shows it, and its light is on (motion is off on the walk's pages: no fade to wait for).
-    timezoneId: ZONE,
       await page.waitForFunction((title) => document.title.startsWith(title), title);
       await page.waitForSelector('.ambient > div.on');
       await page.waitForTimeout(300);
