@@ -23,9 +23,11 @@ message comes back.
 
 ## A track does not play
 
-The error under the title says why: the video is unavailable (private, deleted, age-restricted, for members only, or
-not in this country), it has not started yet (a premiere, a live stream to come), there is nothing to play at that
-address, or the site answered with an error. The site's own message, from yt-dlp, is in `./jukecord logs`.
+The player names the track and says why in one sentence ("Could not play Neon Rain because the site does not have
+it"): the video is unavailable (private, deleted, age-restricted, for members only, or not in this country), it has
+not started yet (a premiere, a live stream to come), there is nothing to play at its address, or the site turned it
+away (it does not have it, has removed it, blocks it, asked jukecord to slow down, or is having trouble). The site's
+own message, from yt-dlp, is in `./jukecord logs`.
 
 - A failure that looks passing (a 5xx answer, a timeout) is tried once more by itself.
 - A track longer than `JUKECORD_TRACK_MAX` is refused when it is added.
