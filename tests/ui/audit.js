@@ -41,6 +41,7 @@
  *   a dialog that scrolls while the window has room for more of it below;
  * - adrift: the listen bar off the foot of the window: the page ran past the window and its bars scrolled with it (the
  *   search's results once pushed the queue's column 170 px past a 900 px window, and nothing above said so);
+ * - under-bar: a box that scrolls whose foot or top stays under a bar however far the page scrolls;
  * - sizes: the font sizes in use (reported, not a finding);
  * - distinct: how many different font sizes, control heights, corner radii, paddings and gaps the page shows (reported,
  *   not a finding: the fewer, the more the page reads as one system).
@@ -575,6 +576,22 @@ window.__audit = () => {
   // The bars' edges: the page's content passes under them.
   const barFoot = topBar && shown(topBar) ? topBar.getBoundingClientRect().bottom : 0;
   const listenTop = bottomBar && shown(bottomBar) ? bottomBar.getBoundingClientRect().top : window.innerHeight;
+  // A box that scrolls on the page ends clear of the bars as far as the page itself scrolls: its foot can be brought up
+  // over the listening bar, its top down under the top bar (the log's card on a phone, on a page of the window's
+  // height, ran 20 px under the listening bar for good, its newest record cut there with no fade). Not a layer's (a
+  // sheet and a dialog stand between the bars).
+  const further = {
+    down: document.documentElement.scrollHeight - window.innerHeight - window.scrollY,
+    up: window.scrollY,
+  };
+  for (const box of document.querySelectorAll('.scroll, .found-list')) {
+    if (!shown(box) || box.closest('.bar, .listen, .sheet, .dialog')) continue;
+    const r = box.getBoundingClientRect();
+    const low = r.bottom - listenTop - Math.max(0, further.down);
+    const high = barFoot - r.top - Math.max(0, further.up);
+    if (low > 0.5) add('under-bar', box, `its foot stays ${Math.round(low)} px under the listening bar`);
+    if (high > 0.5) add('under-bar', box, `its top stays ${Math.round(high)} px under the top bar`);
+  }
   // Whether an element is drawn where it can be seen: shown(), but a decoration hidden from screen readers counts (the
   // eye sees it), and only what is not scrolled away or under a bar.
   function seen(element) {

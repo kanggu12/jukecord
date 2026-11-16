@@ -430,10 +430,12 @@ async function rowsWhole(page) {
   if (problems.length > 0) throw new Error(`the rows' lines: ${problems.join('; ')}`);
 }
 
-// A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond up to about a row of what
-// it holds (--fade): a row the edge cuts reads as going on out of sight, not as cut through its words (the log's first
-// record sliced through its letters, a sliver of a cover at the queue's foot, lyric lines halved at both edges, a
-// dialog's list ending on a whole row with two more under it and nothing to say so). With nothing to scroll, no fade.
+// A box that scrolls fades out at an edge with more beyond it, over a row of what it holds and a line and its gap at
+// least (--fade, 38 px or more: a lyric's line), as soon as a pixel lies beyond: a row the edge cuts reads as going on
+// out of sight, not as cut through its words (the log's first record sliced through its letters, a sliver of a cover at
+// the queue's foot, lyric lines halved at both edges, a dialog's list ending on a whole row with two more under it and
+// nothing to say so; faded over only what lay beyond, the Invite dialog's third link showed the top halves of its
+// letters under a 10 px fade). With nothing to scroll, no fade.
 async function edgesFade(page) {
   await twoFrames(page);
   const problems = await page.evaluate(() => {
@@ -466,11 +468,13 @@ async function edgesFade(page) {
       const row = rows[Math.floor(rows.length / 2)];
       if (row !== undefined && most + 0.5 < row)
         found.push(`${name} fades over ${most} px at most, its rows are ${row}`);
-      // Each edge's fade as drawn (what the page told the box, up to --fade) against what lies beyond it.
+      if (most < 38) found.push(`${name} fades over ${most} px, less than a line and its gap (38)`);
+      // Each edge's fade as drawn (what the page told the box, up to --fade): the whole fade with a pixel or more
+      // beyond it, none at an end.
       const drawn = (edge) => Math.min(most, Number.parseFloat(box.style.getPropertyValue(`--fade-${edge}`)) || 0);
       const beyond = { above: box.scrollTop, below: box.scrollHeight - box.clientHeight - box.scrollTop };
       for (const [edge, length] of Object.entries(beyond)) {
-        if (Math.abs(drawn(edge) - Math.min(most, length)) > 1)
+        if (Math.abs(drawn(edge) - (length >= 1 ? most : 0)) > 1)
           found.push(`${name} fades ${edge} over ${drawn(edge)} px, ${Math.round(length)} beyond`);
       }
     }

@@ -432,18 +432,22 @@ img {
   background: var(--line-2);
   border-radius: 6px;
 }
-/* A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond (ui/fade.ts says how much)
-   up to --fade, about a row of what it holds: a row the edge cuts reads as going on out of sight, not as cut through
-   its words (the log's first record, a sliver of a cover at the queue's foot, a lyric line halved under the head's
-   rule, a dialog's list ending on a whole row with more hidden under it). With nothing to scroll there is no mask.
-   --fade is a length (registered), so what it computes to can be read as one (tests/ui/walk.mjs). */
+/* A box that scrolls fades out at an edge with more beyond it (ui/fade.ts says which edges), over --fade: a row of what
+   it holds, and a line and its gap at least (38 px, a lyric's), so a row the edge cuts reads as going on out of sight,
+   not as cut through its words (the log's first record, a sliver of a cover at the queue's foot, a lyric line halved
+   under the head's rule, a dialog's list ending on a whole row with more hidden under it). The whole fade as soon as
+   anything lies beyond: grown with what lay beyond, a list resting with a few pixels of its last row out of sight
+   faded over those few, and the rest of the row showed the top halves of its letters. The fade is eased (its ink the
+   square of the way in): a line the edge cuts in half is all but gone (linear, a lyric's top half still showed at
+   1.4:1), and the line before it comes in whole. With nothing to scroll there is no mask. --fade is a length
+   (registered), so what it computes to can be read as one (tests/ui/walk.mjs). */
 @property --fade {
   syntax: "<length>";
   inherits: false;
   initial-value: 48px;
 }
-/* How much lies beyond each edge (ui/fade.ts, up to --fade): the box's own, not its rows' (set as it scrolls, they
-   would make every row's style be worked out again on each frame). */
+/* How much of each edge is faded (ui/fade.ts: --fade, or none): the box's own, not its rows' (set as it scrolls, they
+   would make every row's style be worked out again on each frame). Lengths, so a fade comes and goes in a moment. */
 @property --fade-above {
   syntax: "<length>";
   inherits: false;
@@ -466,13 +470,27 @@ img {
 }
 .scroll[data-fade],
 .found-list[data-fade] {
+  /* Each edge's fade, at most the box's own. */
+  --above: min(var(--fade-above, 0px), var(--fade));
+  --below: min(var(--fade-below, 0px), var(--fade));
+  /* The ink at a quarter, a half and three quarters of the way in: the squares of those (6, 25 and 56 %). */
   mask-image: linear-gradient(
     to bottom,
     transparent,
-    #000 min(var(--fade-above, 0px), var(--fade)),
-    #000 calc(100% - min(var(--fade-below, 0px), var(--fade))),
+    rgb(0 0 0 / 6%) calc(var(--above) * 0.25),
+    rgb(0 0 0 / 25%) calc(var(--above) * 0.5),
+    rgb(0 0 0 / 56%) calc(var(--above) * 0.75),
+    #000 var(--above),
+    #000 calc(100% - var(--below)),
+    rgb(0 0 0 / 56%) calc(100% - var(--below) * 0.75),
+    rgb(0 0 0 / 25%) calc(100% - var(--below) * 0.5),
+    rgb(0 0 0 / 6%) calc(100% - var(--below) * 0.25),
     transparent
   );
+  /* A fade comes in as the box leaves its end, rather than at once. */
+  transition:
+    --fade-above 160ms ease-out,
+    --fade-below 160ms ease-out;
 }
 
 /* ---- the frame: bar, main, listening bar ------------------------------------------------------------------- */
@@ -3865,6 +3883,15 @@ kbd {
     /* The page scrolls on past the end of the list: a wheel over the queue moved nothing once the list was at its end,
        and the page under it is where the rest of the cards are. */
     overscroll-behavior: auto;
+  }
+  /* A page of the window's height (the log) keeps its card to the room under its head, its list scrolling inside: at
+     its rows' own length up to 68 % of the window, the log's card ran 20 px under the listening bar, its newest record
+     cut there with no fade, where the page does not scroll. */
+  .page > .card.fill {
+    flex: 1;
+  }
+  .page > .card.fill .scroll {
+    max-height: none;
   }
   /* A guest's cards one under another as anyone's, the guest's card under the queue: a phone's listening bar has no
      room for the faces of who listens (and the lyrics open as a sheet here, see lyrics.ts), with a sheet open too. */

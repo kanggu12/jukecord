@@ -1,12 +1,13 @@
 /**
- * A box whose content scrolls fades out at an edge with more beyond it, over as much as there is beyond, up to about a
- * row of what it holds (its --fade in style.css), so a row the edge cuts reads as one going on out of sight, not as one
- * cut through its words: the log's first record sliced through its letters, a sliver of a cover at the queue's foot,
- * a dialog's list ending on a whole row with two more hidden under it and nothing saying so.
+ * A box whose content scrolls fades out at an edge with more beyond it, over a row of what it holds (its --fade in
+ * style.css, a line and its gap at least), so a row the edge cuts reads as one going on out of sight, not as one cut
+ * through its words: the log's first record sliced through its letters, a sliver of a cover at the queue's foot, a
+ * dialog's list ending on a whole row with two more hidden under it and nothing saying so.
  *
- * The page tells the stylesheet how much there is beyond each edge (--fade-above and --fade-below, in pixels), and the
- * stylesheet draws the fade (a mask over the box, while it scrolls at all): from nothing at the start of a list to its
- * full height a row on, so a list moved by two pixels is not faded as if half its first row were gone.
+ * The page tells the stylesheet which edges have more beyond them (--fade-above and --fade-below: the box's --fade, or
+ * none), and the stylesheet draws the fade (a mask over the box, while it scrolls at all). The whole fade as soon as a
+ * pixel lies beyond: faded over only what lay beyond, a list resting with a few pixels of its last row out of sight
+ * (the Invite dialog's links) faded over those few, and the rest of the row showed the top halves of its letters.
  */
 
 // Each box's way to look again, for the one listener below (the boxes are found in the page, so a box gone from it
@@ -26,15 +27,14 @@ export function fadeEdges(box: HTMLElement): void {
   let said = '';
   const look = () => {
     asked = 0;
-    // The fade at its fullest (a length: style.css registers it), so a list scrolled far from its ends, faded fully at
-    // both, writes nothing as it goes on scrolling.
+    // The fade at its fullest (a length: style.css registers it).
     const most = Number.parseFloat(getComputedStyle(box).getPropertyValue('--fade')) || 0;
-    // How far it is from each end (the box's own size, as its scrollbar sees it; a hidden box is 0 by 0), up to that.
-    const above = Math.min(most, Math.max(0, box.scrollTop));
-    const below = Math.min(most, Math.max(0, box.scrollHeight - box.clientHeight - box.scrollTop));
-    // Within a pixel of an end is at it (a zoomed page leaves fractions).
+    // Whether anything lies beyond each edge (the box's own size, as its scrollbar sees it; a hidden box is 0 by 0):
+    // within a pixel of an end is at it (a zoomed page leaves fractions).
+    const above = box.scrollTop >= 1;
+    const below = box.scrollHeight - box.clientHeight - box.scrollTop >= 1;
     const scrolls = box.scrollHeight > box.clientHeight + 1;
-    const now = scrolls ? `${Math.round(above)}|${Math.round(below)}` : '';
+    const now = scrolls ? `${above}|${below}|${most}` : '';
     if (now === said) return;
     said = now;
     if (!scrolls) {
@@ -45,9 +45,10 @@ export function fadeEdges(box: HTMLElement): void {
       return;
     }
     box.dataset.fade = '';
-    // As much as lies beyond each edge, up to the box's --fade (lengths that its rows do not inherit: style.css).
-    box.style.setProperty('--fade-above', `${Math.round(above)}px`);
-    box.style.setProperty('--fade-below', `${Math.round(below)}px`);
+    // The box's whole fade at each edge with more beyond it, none at an end (lengths its rows do not inherit:
+    // style.css).
+    box.style.setProperty('--fade-above', `${above ? most : 0}px`);
+    box.style.setProperty('--fade-below', `${below ? most : 0}px`);
   };
   const soon = () => {
     if (!asked) asked = window.requestAnimationFrame(look);
