@@ -66,6 +66,40 @@ export function qrSvg(code: QrCode, label: string): SVGSVGElement {
   return svg;
 }
 
+/**
+ * Copies a text for a Copy key, in its click: through the clipboard where the browser gives one (https, this machine),
+ * else by selecting the text where it is shown and copying the selection, as the browser's own Copy does (a page on
+ * plain http at a LAN address, the usual way to run jukecord at home, gets no clipboard at all, and Copy said "copy it
+ * by hand" every time). Resolves whether it was copied; when not, the text stays selected, ready for Ctrl+C.
+ */
+export async function copyText(text: string, shown: HTMLElement): Promise<boolean> {
+  // The clipboard, where there is one; refused (no permission), the selection is tried as where there is none.
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // On to the selection, still within the click's time to copy.
+    }
+  }
+  // The text selected where it is shown...
+  const range = document.createRange();
+  range.selectNodeContents(shown);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  let copied = false;
+  try {
+    // ...and copied as the browser's Copy would copy it (allowed in a click; the only way on plain http).
+    copied = document.execCommand('copy');
+  } catch {
+    // A browser that refuses outright: not copied.
+  }
+  // Copied: the selection goes (the text plain again). Not: it stays, for the person's own Copy.
+  if (copied) selection?.removeAllRanges();
+  return copied;
+}
+
 // A link just made: its QR code, the link itself (selectable), a copy key, and what it is good for.
 function made(url: string, notes: string[]): HTMLElement {
   const words = t();
@@ -80,19 +114,11 @@ function made(url: string, notes: string[]): HTMLElement {
     words.copy,
   );
   copy.onclick = async () => {
-    try {
-      // Browsers give pages on plain http (a LAN address) no clipboard at all.
-      if (!navigator.clipboard) throw new Error('no clipboard here');
-      await navigator.clipboard.writeText(url);
+    // Copied, or (only when no way worked) selected for copying by hand, and the words say which.
+    if (await copyText(url, link)) {
       result.className = 'copy-result';
       fill(result, icon('check'), words.copied);
-    } catch {
-      // Not copied: the link is selected instead, ready for Ctrl+C, and the words say so.
-      const range = document.createRange();
-      range.selectNodeContents(link);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
+    } else {
       result.className = 'copy-result text-bad';
       fill(result, icon('circle-alert'), words.linkNotCopied);
     }

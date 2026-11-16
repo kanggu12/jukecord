@@ -7,7 +7,7 @@ import { avatarUrl, face, fill, guildIconUrl, h, icon, keepingFocus } from '../d
 import { pickLang } from '../i18n.ts';
 import { keep, state, t, update } from '../state.ts';
 import { confirmDialog, problem, sheet, showDialog } from '../ui/layers.ts';
-import { inviteDialog, mayInvite, when } from './invite.ts';
+import { copyText, inviteDialog, mayInvite, when } from './invite.ts';
 import { act, ago } from './player.ts';
 
 /** The servers this login can open, in a dialog; picking one switches the panel to it. */
@@ -502,19 +502,11 @@ async function drawTokens(box: HTMLElement): Promise<void> {
     const result = h('p', { class: 'copy-result', role: 'status' });
     const copy = h('button', { class: 'key primary', type: 'button' }, icon('copy'), words.copy);
     copy.onclick = async () => {
-      try {
-        // Browsers give pages on plain http (a LAN address) no clipboard at all.
-        if (!navigator.clipboard) throw new Error('no clipboard here');
-        await navigator.clipboard.writeText(created.token);
+      // Copied (on plain http too, by the selection), or selected for copying by hand when no way worked.
+      if (await copyText(created.token, secret)) {
         result.className = 'copy-result';
         fill(result, icon('check'), words.copied);
-      } catch {
-        // Not copied: the token is selected instead, ready for Ctrl+C, and the words say so.
-        const range = document.createRange();
-        range.selectNodeContents(secret);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
+      } else {
         result.className = 'copy-result text-bad';
         fill(result, icon('circle-alert'), words.notCopied);
       }
@@ -579,10 +571,11 @@ function fillTokens(
           const scopeName = { read: words.scopeRead, control: words.scopeControl, admin: words.scopeAdmin }[
             token.scope
           ];
+          // Its name and how it is used, beside its Revoke, as a listening link's row (a key's icon before the two lines
+          // stood on their middle, 9.5 px under the name it marks).
           return h(
             'div',
             { class: 'line', dataset: { id: String(token.id) } },
-            icon('key-round'),
             h(
               'div',
               { class: 'grow' },

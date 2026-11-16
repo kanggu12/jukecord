@@ -1713,13 +1713,53 @@ async function linkShown(page) {
   if (shown.cut) problems.push("Copy is cut by the dialog's room");
   if (problems.length > 0) throw new Error(`with a link shown: ${problems.join('; ')}`);
 }
+// Copy on a page over plain http (the walk's own address, of a LAN address's kind), where browsers give no clipboard at
+// all: the text is copied through its selection, as the browser's own Copy copies (it said "copy it by hand" every
+// time, the usual self-hosting); and where that is refused too, the text stays selected and the line says so. `key`
+// presses Copy, `shown` is where the text is shown in the dialog.
+async function copies(page, key, shown) {
+  const here = await page.evaluate(() => ({ clipboard: Boolean(navigator.clipboard), secure: window.isSecureContext }));
+  if (here.clipboard || here.secure) throw new Error(`the walk's page is not plain http: ${JSON.stringify(here)}`);
+  // The selection's Copy refused as well (a browser that allows neither): the text selected, the line saying so.
+  await page.evaluate(() => {
+    document.execCommand = () => false;
+  });
+  await page.click(key);
+  const refused = await page.evaluate(
+    (shown) => ({
+      line: document.querySelector('.dialog .copy-result')?.className ?? '',
+      selected: window.getSelection()?.toString() === document.querySelector(shown)?.textContent,
+    }),
+    shown,
+  );
+  if (!refused.line.includes('text-bad') || !refused.selected)
+    throw new Error(`Copy with no way to copy: ${JSON.stringify(refused)}`);
+  // The browser's own again: copied through the selection, the text shown and nothing left selected.
+  await page.evaluate(() => {
+    delete document.execCommand;
+    window.copied = null;
+    document.addEventListener('copy', () => {
+      window.copied = window.getSelection()?.toString() ?? '';
+    });
+  });
+  await page.click(key);
+  const done = await page.evaluate(
+    (shown) => ({
+      line: document.querySelector('.dialog .copy-result')?.className ?? '',
+      copied: window.copied === document.querySelector(shown)?.textContent,
+      left: window.getSelection()?.toString() ?? '',
+    }),
+    shown,
+  );
+  if (done.line.includes('text-bad') || !done.copied || done.left)
+    throw new Error(`Copy on plain http: ${JSON.stringify(done)}`);
+}
 await sweep('invite', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
   await page.waitForSelector('.dialog .qr');
-  // Copy on a page over plain http (a LAN address), where browsers give no clipboard: the link is selected instead,
-  // and the line says so (it said "the token is selected", the tokens' words).
-  await page.click('.dialog [data-act="invite-copy"]');
+  await copies(page, '.dialog [data-act="invite-copy"]', '.dialog .invite-url');
+  // The line says what happened to a link (it said "the token is selected", the tokens' words).
   const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
   if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
   await linkShown(page);
@@ -1772,6 +1812,17 @@ await sweep('invite-friend', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-friend"]');
   await page.waitForSelector('.dialog [data-pane="friend"] .qr');
   await linkShown(page);
+});
+// An API token made in the menu, shown once in its dialog and copied there (on plain http too). Revoked once seen, so
+// the menus after it list the seed's tokens alone.
+await sweep('token', FEW, async (page) => {
+  await page.click('[data-act="menu"]');
+  await page.fill('.sheet [data-key="token-name"]', 'Walk');
+  await page.click('.sheet [data-key="token-create"]');
+  await page.waitForSelector('.dialog .secret');
+  await copies(page, '.dialog .dialog-keys .key.primary', '.dialog .secret');
+  for (const token of await api('GET', '/tokens'))
+    if (token.name === 'Walk') await api('DELETE', `/tokens/${token.id}`);
 });
 // Listening links made by the host, for the guests' states below: each guest's page takes one of a link's 25 places, so
 // a new link every twenty pages (a server keeps at most fifty links).

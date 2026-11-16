@@ -21,7 +21,9 @@
  * All of these to half a pixel: a careful eye sees one.
  * - crossing: a floating layer (toast, sheet, chart tip) whose edge cuts across another box;
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
- *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest;
+ *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest; a sheet under a
+ *   dialog aside;
+ * - shade: the shade under a dialog or a sheet leaving the page's words under it readable (over 2.7:1);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - sticky: on a touch screen (no hover), a :hover rule in effect: the browser keeps :hover on what was tapped last,
  *   so a key stays boxed or a row lit after a tap;
@@ -310,6 +312,8 @@ window.__audit = () => {
   const dialogs = [...document.querySelectorAll('.dialog')].filter(shown);
   for (const layer of [...document.querySelectorAll('.sheet, .dialog, .toast')].filter(shown)) {
     if (layer.matches('.dialog') && layer !== dialogs.at(-1)) continue;
+    // A sheet under a dialog (a token made in the menu, shown once in its dialog) is under the dialog's shade by design.
+    if (layer.matches('.sheet') && dialogs.length > 0) continue;
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);
