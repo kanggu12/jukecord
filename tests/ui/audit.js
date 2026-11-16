@@ -319,6 +319,21 @@ window.__audit = () => {
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);
   }
 
+  // The shade under a dialog or a sheet hides what is under it: the page's words on its ground, under the shade, at
+  // 2.7:1 at most, as the dark theme leaves them (the light theme's thinner shade left 3.8:1, and a phone's dialog edge
+  // sliced "Voice channel" and "lay now", which still read). A contrast theme's shade is the system's: not held to it.
+  if (!matchMedia('(forced-colors: active)').matches) {
+    const shade = [...document.querySelectorAll('.scrim')].find(shown);
+    if (shade) {
+      const veil = rgba(getComputedStyle(shade).backgroundColor);
+      const page = getComputedStyle(document.body);
+      const ground = rgba(page.backgroundColor);
+      const words = over(rgba(page.color), ground);
+      const value = ratio(over(veil, words), over(veil, ground));
+      if (value > 2.7) add('shade', shade, `the words under it read at ${value.toFixed(2)}:1 (2.7 at most)`);
+    }
+  }
+
   // The playing card's keys: wrapped onto more rows, the last row must not hold one key alone under several.
   for (const keys of document.querySelectorAll('.now .keys')) {
     if (!shown(keys)) continue;
