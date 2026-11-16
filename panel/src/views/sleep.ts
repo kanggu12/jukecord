@@ -75,7 +75,7 @@ export function sleepKey(hooks: SleepHooks): HTMLButtonElement {
   const end = () => {
     clear();
     hooks.stop();
-    toast(t().sleepStopped, 'load', 'timer');
+    toast(t().sleepStopped, 'done', 'timer');
   };
 
   // Once a second while a time is set: the minutes on the key, and the fade in the last seconds.

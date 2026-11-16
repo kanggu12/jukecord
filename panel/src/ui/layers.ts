@@ -16,7 +16,13 @@ import type { IconName } from '../icons.ts';
 import { state, t } from '../state.ts';
 import { fadeEdges } from './fade.ts';
 
-type Tone = 'play' | 'load' | 'pause' | 'bad';
+/**
+ * What a toast says by its icon's colour: something done (no colour: the second ink), something to look at (the pause
+ * colour, which the log's warnings wear too), or a problem. Not the play or load colours: they are the player's states,
+ * and a toast saying something was done is neither playing nor getting ready (its tick was the sky blue of "Getting
+ * ready", a vote's the pause amber, an import's the play green).
+ */
+type Tone = 'done' | 'pause' | 'bad';
 
 let toastTimer = 0;
 // The toast shown now, and when its time ends.
@@ -27,7 +33,7 @@ let shown: { element: HTMLElement; ends: number } | null = null;
  * so the message is said in the dialog instead, and moves to the bar for the rest of its time if the dialog closes
  * first.
  */
-export function toast(message: string, tone: Tone = 'load', name: IconName = 'check'): void {
+export function toast(message: string, tone: Tone = 'done', name: IconName = 'check'): void {
   const box = toastBox();
   if (!box) return;
   window.clearTimeout(toastTimer);
@@ -36,7 +42,8 @@ export function toast(message: string, tone: Tone = 'load', name: IconName = 'ch
   const lasts = tone === 'bad' ? 6000 : 3500;
   const element = h(
     'div',
-    { class: `toast tone-${tone}`, role: tone === 'bad' ? 'alert' : 'status' },
+    // Something done takes no tone: its icon in the second ink (style.css .toast .icon).
+    { class: tone === 'done' ? 'toast' : `toast tone-${tone}`, role: tone === 'bad' ? 'alert' : 'status' },
     icon(name),
     // Two lines at most in the bar; a longer message is cut, and its whole text is the title.
     h('span', { title: message, 'data-clip': 'ok' }, message),

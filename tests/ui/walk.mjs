@@ -436,10 +436,12 @@ async function rowsWhole(page) {
   if (problems.length > 0) throw new Error(`the rows' lines: ${problems.join('; ')}`);
 }
 
-// A box that scrolls fades out at an edge with more beyond it, over as much as lies beyond up to about a row of what
-// it holds (--fade): a row the edge cuts reads as going on out of sight, not as cut through its words (the log's first
-// record sliced through its letters, a sliver of a cover at the queue's foot, lyric lines halved at both edges, a
-// dialog's list ending on a whole row with two more under it and nothing to say so). With nothing to scroll, no fade.
+// A box that scrolls fades out at an edge with more beyond it, over a row of what it holds and a line and its gap at
+// least (--fade, 38 px or more: a lyric's line), as soon as a pixel lies beyond: a row the edge cuts reads as going on
+// out of sight, not as cut through its words (the log's first record sliced through its letters, a sliver of a cover at
+// the queue's foot, lyric lines halved at both edges, a dialog's list ending on a whole row with two more under it and
+// nothing to say so; faded over only what lay beyond, the Invite dialog's third link showed the top halves of its
+// letters under a 10 px fade). With nothing to scroll, no fade.
 async function edgesFade(page) {
   await twoFrames(page);
   const problems = await page.evaluate(() => {
@@ -472,17 +474,41 @@ async function edgesFade(page) {
       const row = rows[Math.floor(rows.length / 2)];
       if (row !== undefined && most + 0.5 < row)
         found.push(`${name} fades over ${most} px at most, its rows are ${row}`);
-      // Each edge's fade as drawn (what the page told the box, up to --fade) against what lies beyond it.
+      if (most < 38) found.push(`${name} fades over ${most} px, less than a line and its gap (38)`);
+      // Each edge's fade as drawn (what the page told the box, up to --fade): the whole fade with a pixel or more
+      // beyond it, none at an end.
       const drawn = (edge) => Math.min(most, Number.parseFloat(box.style.getPropertyValue(`--fade-${edge}`)) || 0);
       const beyond = { above: box.scrollTop, below: box.scrollHeight - box.clientHeight - box.scrollTop };
       for (const [edge, length] of Object.entries(beyond)) {
-        if (Math.abs(drawn(edge) - Math.min(most, length)) > 1)
+        if (Math.abs(drawn(edge) - (length >= 1 ? most : 0)) > 1)
           found.push(`${name} fades ${edge} over ${drawn(edge)} px, ${Math.round(length)} beyond`);
       }
     }
     return found;
   });
   if (problems.length > 0) throw new Error(`the scrolling boxes' edges: ${problems.join('; ')}`);
+}
+
+// Every choice made is marked in the brand's blue, as a chosen segment is (its soft blue): a choice in a list (the
+// menu's page in use was a grey row beside the blue segments) and the history's two lists in its head (by weight alone,
+// "Recently played | Liked" read as a heading and a stray word).
+async function choicesInBlue(page) {
+  const wrong = await page.evaluate(() => {
+    // The token as the browser computes it, to compare with what the choices are drawn in.
+    const probe = document.createElement('i');
+    probe.style.background = 'var(--accent-soft)';
+    document.body.append(probe);
+    const soft = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    // A choice in a list in use, and the choice made in a row of choices.
+    const inUse = '[aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]';
+    const chosen = document.querySelectorAll(`.choice:is(${inUse}), .seg button[aria-pressed="true"]`);
+    return [...chosen]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => getComputedStyle(element).backgroundColor !== soft)
+      .map((element) => `"${element.textContent.trim()}" on ${getComputedStyle(element).backgroundColor}`);
+  });
+  if (wrong.length > 0) throw new Error(`choices made out of the brand's blue: ${wrong.slice(0, 3).join(', ')}`);
 }
 
 // One order for adding a track, from the gentlest to the one that cuts off what everyone hears: the add card's keys
@@ -509,18 +535,37 @@ async function oneOrder(page) {
 }
 
 // Past the widest the page's content grows (1680 px), it stands in the middle at that width: on a 2560 px screen the
-// queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px.
+// queue's rows were 1,950 px wide, a title 1,700 px from its keys, and the add field 1,650 px. The bars' contents stand
+// in the same column, their glass across the window (the logo and the account stood 420 px outside the cards at 2560).
 async function pageCentred(page) {
   const off = await page.evaluate(() => {
+    // Where a box's content starts and ends, inside its padding.
+    const inside = (element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return {
+        left: box.left + Number.parseFloat(style.paddingLeft),
+        right: box.right - Number.parseFloat(style.paddingRight),
+      };
+    };
     const main = document.querySelector('.main:not([hidden])') ?? document.querySelector('.page');
-    const style = getComputedStyle(main);
-    const box = main.getBoundingClientRect();
-    const left = box.left + Number.parseFloat(style.paddingLeft);
-    const right = box.right - Number.parseFloat(style.paddingRight);
+    const { left, right } = inside(main);
     if (right - left > 1680.5) return `the page's content is ${Math.round(right - left)} px wide`;
     const window = document.documentElement.clientWidth;
     const across = left - (window - right);
-    return Math.abs(across) > 1 ? `the page's content stands ${across.toFixed(1)} px off the window's middle` : null;
+    if (Math.abs(across) > 1) return `the page's content stands ${across.toFixed(1)} px off the window's middle`;
+    for (const [selector, name] of [
+      ['.bar', 'the top bar'],
+      ['.listen', 'the listening bar'],
+    ]) {
+      const bar = document.querySelector(selector);
+      if (!bar?.getClientRects().length) continue;
+      const edges = inside(bar);
+      const span = (from, to) => `${Math.round(from)} to ${Math.round(to)}`;
+      if (Math.abs(edges.left - left) > 0.5 || Math.abs(edges.right - right) > 0.5)
+        return `${name}'s contents span ${span(edges.left, edges.right)}, the page's ${span(left, right)}`;
+    }
+    return null;
   });
   if (off) throw new Error(off);
 }
@@ -599,6 +644,8 @@ await sweep('playing', SIZES, async (page) => {
   await libraryKeys(page, 'like,more');
   await voiceColumn(page);
   await heartAfterTitle(page);
+  // The history's list shown, in its head.
+  await choicesInBlue(page);
 });
 await sweep('discord', SIZES, null, { discord: true });
 // The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
@@ -854,6 +901,8 @@ await sweep('menu', [...FEW, [2560, 1400]], async (page) => {
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet .section');
   await page.waitForTimeout(400);
+  // The page in use (in the menu on a phone) and the theme and language chosen, in the brand's blue.
+  await choicesInBlue(page);
 });
 // A queue tool: its own key on a wide card, the list behind the tools key on a narrow one (phones).
 async function tool(page, act) {
@@ -1624,7 +1673,23 @@ async function settingsLook(page) {
     }
     return problems;
   });
+  await choicesInBlue(page).catch((error) => wrong.push(error.message));
   if (wrong.length > 0) throw new Error(wrong.join('; '));
+}
+// The vote to skip, with no DJ role chosen (everyone may skip: nothing to vote on): its switch dimmed and taking no
+// presses, its hint saying why and read with it (bright and on, it read as working). With a role, a switch as any.
+async function voteSwitch(page, role) {
+  const vote = await page.evaluate(() => {
+    const toggle = document.querySelector('.sheet .settings .switch');
+    const hint = document.getElementById(toggle?.getAttribute('aria-describedby') ?? '');
+    return {
+      disabled: toggle?.disabled ?? null,
+      opacity: toggle ? Number(getComputedStyle(toggle).opacity) : null,
+      why: hint?.textContent ?? '',
+    };
+  });
+  const right = role ? vote.disabled === false : vote.disabled === true && vote.opacity < 0.6 && vote.why !== '';
+  if (!right) throw new Error(`the vote's switch ${role ? 'with' : 'without'} a DJ role: ${JSON.stringify(vote)}`);
 }
 // The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
 await sweep(
@@ -2031,13 +2096,53 @@ async function linkShown(page) {
   if (shown.cut) problems.push("Copy is cut by the dialog's room");
   if (problems.length > 0) throw new Error(`with a link shown: ${problems.join('; ')}`);
 }
+// Copy on a page over plain http (the walk's own address, of a LAN address's kind), where browsers give no clipboard at
+// all: the text is copied through its selection, as the browser's own Copy copies (it said "copy it by hand" every
+// time, the usual self-hosting); and where that is refused too, the text stays selected and the line says so. `key`
+// presses Copy, `shown` is where the text is shown in the dialog.
+async function copies(page, key, shown) {
+  const here = await page.evaluate(() => ({ clipboard: Boolean(navigator.clipboard), secure: window.isSecureContext }));
+  if (here.clipboard || here.secure) throw new Error(`the walk's page is not plain http: ${JSON.stringify(here)}`);
+  // The selection's Copy refused as well (a browser that allows neither): the text selected, the line saying so.
+  await page.evaluate(() => {
+    document.execCommand = () => false;
+  });
+  await page.click(key);
+  const refused = await page.evaluate(
+    (shown) => ({
+      line: document.querySelector('.dialog .copy-result')?.className ?? '',
+      selected: window.getSelection()?.toString() === document.querySelector(shown)?.textContent,
+    }),
+    shown,
+  );
+  if (!refused.line.includes('text-bad') || !refused.selected)
+    throw new Error(`Copy with no way to copy: ${JSON.stringify(refused)}`);
+  // The browser's own again: copied through the selection, the text shown and nothing left selected.
+  await page.evaluate(() => {
+    delete document.execCommand;
+    window.copied = null;
+    document.addEventListener('copy', () => {
+      window.copied = window.getSelection()?.toString() ?? '';
+    });
+  });
+  await page.click(key);
+  const done = await page.evaluate(
+    (shown) => ({
+      line: document.querySelector('.dialog .copy-result')?.className ?? '',
+      copied: window.copied === document.querySelector(shown)?.textContent,
+      left: window.getSelection()?.toString() ?? '',
+    }),
+    shown,
+  );
+  if (done.line.includes('text-bad') || !done.copied || done.left)
+    throw new Error(`Copy on plain http: ${JSON.stringify(done)}`);
+}
 await sweep('invite', FEW, async (page) => {
   await invite(page);
   await page.click('.dialog [data-act="invite-make"]');
   await page.waitForSelector('.dialog .qr');
-  // Copy on a page over plain http (a LAN address), where browsers give no clipboard: the link is selected instead,
-  // and the line says so (it said "the token is selected", the tokens' words).
-  await page.click('.dialog [data-act="invite-copy"]');
+  await copies(page, '.dialog [data-act="invite-copy"]', '.dialog .invite-url');
+  // The line says what happened to a link (it said "the token is selected", the tokens' words).
   const said = (await page.locator('.dialog .copy-result').textContent()) ?? '';
   if (/token|토큰/i.test(said)) throw new Error(`Copy on a listening link says: ${said}`);
   await linkShown(page);
@@ -2090,6 +2195,17 @@ await sweep('invite-friend', FEW, async (page) => {
   await page.click('.dialog [data-act="invite-friend"]');
   await page.waitForSelector('.dialog [data-pane="friend"] .qr');
   await linkShown(page);
+});
+// An API token made in the menu, shown once in its dialog and copied there (on plain http too). Revoked once seen, so
+// the menus after it list the seed's tokens alone.
+await sweep('token', FEW, async (page) => {
+  await page.click('[data-act="menu"]');
+  await page.fill('.sheet [data-key="token-name"]', 'Walk');
+  await page.click('.sheet [data-key="token-create"]');
+  await page.waitForSelector('.dialog .secret');
+  await copies(page, '.dialog .dialog-keys .key.primary', '.dialog .secret');
+  for (const token of await api('GET', '/tokens'))
+    if (token.name === 'Walk') await api('DELETE', `/tokens/${token.id}`);
 });
 // Listening links made by the host, for the guests' states below: each guest's page takes one of a link's 25 places, so
 // a new link every twenty pages (a server keeps at most fifty links).
@@ -2374,6 +2490,7 @@ await sweep(
     await page.click('[data-act="menu"]');
     await page.waitForSelector('.sheet .settings .switch');
     await page.waitForTimeout(400);
+    await voteSwitch(page, false);
   },
   { discord: true },
 );
@@ -2388,6 +2505,7 @@ await sweep(
     const problems = [];
     await settingsLook(page).catch((error) => problems.push(error.message));
     await noLostHue(page).catch((error) => problems.push(error.message));
+    await voteSwitch(page, true).catch((error) => problems.push(error.message));
     if (problems.length > 0) throw new Error(problems.join('; '));
   },
   { discord: { djRole: true } },

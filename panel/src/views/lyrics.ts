@@ -361,7 +361,7 @@ export function lyricsView(live: Live): HTMLElement {
       setOpen(true);
       return;
     }
-    toast(lyrics.kind === 'instrumental' ? t().lyricsInstrumental : t().lyricsNone, 'load', 'mic-vocal');
+    toast(lyrics.kind === 'instrumental' ? t().lyricsInstrumental : t().lyricsNone, 'done', 'mic-vocal');
   };
   toggle = async () => {
     if (open) setOpen(false);

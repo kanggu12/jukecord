@@ -12,26 +12,33 @@
  *   labels and words standing in that row, at different centres; a sheet's close key off the centre of its first row;
  * - icon: an icon (or a lamp, a face, a swatch) off the centre of the line of words beside it;
  * - label: the words of a key, a pill, a badge or a face off the middle of their frame: upright their capitals (Korean,
- *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are;
+ *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are; a
+ *   badge and a face as drawn, their edges and their words' baseline each rounded to the screen's pixels;
  * - cards: cards side by side that do not share their top and their bottom (the player's two columns too);
  * - column: things stacked in a frame (a card, a sheet, a dialog, a page) whose left edges, or the right edges of boxes
  *   that end together, almost meet: a few pixels apart, which reads as a mistake rather than an indent;
  * - baseline: words side by side on one line (a title and its count, a name and its version) on different baselines;
- * - spacing: a padding, a margin or a gap off the spacing scale;
+ * - spacing: a padding, a margin or a gap off the spacing scale (but the 1 px that lowers a badge's or a face's words);
  * All of these to half a pixel: a careful eye sees one.
  * - crossing: a floating layer (toast, sheet, chart tip) whose edge cuts across another box;
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
- *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest;
+ *   the bar's toast, a dialog's shade over the bar); of dialogs opened one over another, the newest; a sheet under a
+ *   dialog aside;
+ * - shade: the shade under a dialog or a sheet leaving the page's words under it readable (over 2.7:1);
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - sticky: on a touch screen (no hover), a :hover rule in effect: the browser keeps :hover on what was tapped last,
  *   so a key stays boxed or a row lit after a tap;
+ * - load-colour: the loading colour used for anything but a track getting ready (a rule, or the loading tone);
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - lone-word: words that wrap with a word or two alone on their last line (a fifth of their longest line or less);
+ * - broken: a title (h1, h2, h3) broken inside a word;
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
  *   that is (the shortcuts' list in a short dialog), unless it is a listbox a combobox's field moves through;
  * - unmarked: a state told by a fill alone that is drawn the same as its absence: the choice in use of a row of
- *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track or a
- *   chart's bar in the canvas's own colour (a contrast theme paints every background in its canvas colour);
+ *   choices or a key that is on like one that is not, the seek bar's played part, its knob, the switch's track, a
+ *   chart's bar or the bar's line under the page in use in the canvas's own colour (a contrast theme paints every
+ *   background in its canvas colour);
+ * - see-through: in a contrast theme, a bar whose glass shows the page under it;
  * - unsafe: on a screen with a notch, rounded corners or a home bar (safe-area insets), a key, a field or a card
  *   under them (the bars' keys within the insets above and below, everything within those at the sides);
  * - cramped: a list that scrolls inside its card (the queue, the history) holding more rows than it shows, but with
@@ -39,6 +46,7 @@
  *   a dialog that scrolls while the window has room for more of it below;
  * - adrift: the listen bar off the foot of the window: the page ran past the window and its bars scrolled with it (the
  *   search's results once pushed the queue's column 170 px past a 900 px window, and nothing above said so);
+ * - under-bar: a box that scrolls whose foot or top stays under a bar however far the page scrolls;
  * - sizes: the font sizes in use (reported, not a finding);
  * - distinct: how many different font sizes, control heights, corner radii, paddings and gaps the page shows (reported,
  *   not a finding: the fewer, the more the page reads as one system).
@@ -310,9 +318,27 @@ window.__audit = () => {
   const dialogs = [...document.querySelectorAll('.dialog')].filter(shown);
   for (const layer of [...document.querySelectorAll('.sheet, .dialog, .toast')].filter(shown)) {
     if (layer.matches('.dialog') && layer !== dialogs.at(-1)) continue;
+    // A sheet under a dialog (a token made in the menu, shown once in its dialog) is under the dialog's shade, by
+    // design.
+    if (layer.matches('.sheet') && dialogs.length > 0) continue;
     const box = layer.getBoundingClientRect();
     const hit = document.elementsFromPoint(box.left + box.width / 2, box.top + Math.min(box.height / 2, 120))[0];
     if (!layer.contains(hit)) add('covered', layer, `the middle is ${describe(hit)}`);
+  }
+
+  // The shade under a dialog or a sheet hides what is under it: the page's words on its ground, under the shade, at
+  // 2.7:1 at most, as the dark theme leaves them (the light theme's thinner shade left 3.8:1, and a phone's dialog edge
+  // sliced "Voice channel" and "lay now", which still read). A contrast theme's shade is the system's: not held to it.
+  if (!matchMedia('(forced-colors: active)').matches) {
+    const shade = [...document.querySelectorAll('.scrim')].find(shown);
+    if (shade) {
+      const veil = rgba(getComputedStyle(shade).backgroundColor);
+      const page = getComputedStyle(document.body);
+      const ground = rgba(page.backgroundColor);
+      const words = over(rgba(page.color), ground);
+      const value = ratio(over(veil, words), over(veil, ground));
+      if (value > 2.7) add('shade', shade, `the words under it read at ${value.toFixed(2)}:1 (2.7 at most)`);
+    }
   }
 
   // The playing card's keys: wrapped onto more rows, the last row must not hold one key alone under several.
@@ -368,6 +394,8 @@ window.__audit = () => {
     ['.switch', '::before', "the switch's track"],
     ['.bars .slot:not(.zero) .b', null, "a chart's bar"],
     ['.rank .meter i', null, "a rank's meter"],
+    // The bar's line under the page in use (in the brand's blue, a contrast theme painted it as the canvas: a gap).
+    ['.nav a[aria-current="page"]', '::after', "the page in use's line"],
   ];
   for (const [selector, pseudo, what] of filled) {
     const element = [...document.querySelectorAll(selector)].find(shown);
@@ -378,6 +406,17 @@ window.__audit = () => {
     const same =
       Math.abs(colour[0] - ground[0]) + Math.abs(colour[1] - ground[1]) + Math.abs(colour[2] - ground[2]) < 8;
     if (colour[3] < 0.05 || same) add('unmarked', element, `${what} is drawn in the canvas's colour`);
+  }
+
+  // In a contrast theme the bars are solid, with nothing blurred behind them: their glass became the canvas thinned,
+  // and on a phone the page under the listening bar showed through as a haze behind the track's boxed title.
+  if (matchMedia('(forced-colors: active)').matches) {
+    for (const bar of document.querySelectorAll('.bar, .listen')) {
+      if (!shown(bar)) continue;
+      const look = getComputedStyle(bar);
+      if (look.backdropFilter !== 'none' || rgba(look.backgroundColor)[3] < 0.99)
+        add('see-through', bar, `${look.backgroundColor} over ${look.backdropFilter}`);
+    }
   }
 
   // The safe area: what the screen's notch, corners and home bar leave (read from the browser itself, through a
@@ -482,6 +521,33 @@ window.__audit = () => {
       findings.push({ kind: 'sticky', where: selector, detail: 'a :hover outside @media (hover: hover)' });
   }
 
+  // The loading colour means a track getting ready, and nothing else: the stylesheet paints with it only through the
+  // loading tone (.tone-load: the playing card's lamp, a notice of waiting), and the tone is on nothing but those (the
+  // "Next" and "New" badges, a done toast's tick and every key that was on wore it).
+  const loadRules = new Set();
+  const visitRules = (rules) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSGroupingRule) visitRules(rule.cssRules);
+      // The declarations as written (a shorthand with a var() keeps it there, its longhands read empty), but the
+      // tone's own.
+      else if (rule instanceof CSSStyleRule && rule.style.cssText.includes('var(--load)'))
+        if (rule.selectorText !== '.tone-load') loadRules.add(rule.selectorText);
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      visitRules(sheet.cssRules);
+    } catch {
+      // Another site's stylesheet cannot be read (the panel loads none).
+    }
+  }
+  for (const selector of loadRules)
+    findings.push({ kind: 'load-colour', where: selector, detail: 'paints with the loading colour' });
+  for (const element of document.querySelectorAll('.tone-load')) {
+    if (shown(element) && !element.matches('.pill, .notice'))
+      add('load-colour', element, 'in the loading tone, and not a state of loading');
+  }
+
   // The listen bar stands at the foot of the window in every layout (the page scrolls under it on a phone).
   const listen = document.querySelector('.listen');
   if (listen && shown(listen)) {
@@ -556,6 +622,22 @@ window.__audit = () => {
   // The bars' edges: the page's content passes under them.
   const barFoot = topBar && shown(topBar) ? topBar.getBoundingClientRect().bottom : 0;
   const listenTop = bottomBar && shown(bottomBar) ? bottomBar.getBoundingClientRect().top : window.innerHeight;
+  // A box that scrolls on the page ends clear of the bars as far as the page itself scrolls: its foot can be brought up
+  // over the listening bar, its top down under the top bar (the log's card on a phone, on a page of the window's
+  // height, ran 20 px under the listening bar for good, its newest record cut there with no fade). Not a layer's (a
+  // sheet and a dialog stand between the bars).
+  const further = {
+    down: document.documentElement.scrollHeight - window.innerHeight - window.scrollY,
+    up: window.scrollY,
+  };
+  for (const box of document.querySelectorAll('.scroll, .found-list')) {
+    if (!shown(box) || box.closest('.bar, .listen, .sheet, .dialog')) continue;
+    const r = box.getBoundingClientRect();
+    const low = r.bottom - listenTop - Math.max(0, further.down);
+    const high = barFoot - r.top - Math.max(0, further.up);
+    if (low > 0.5) add('under-bar', box, `its foot stays ${Math.round(low)} px under the listening bar`);
+    if (high > 0.5) add('under-bar', box, `its top stays ${Math.round(high)} px under the top bar`);
+  }
   // Whether an element is drawn where it can be seen: shown(), but a decoration hidden from screen readers counts (the
   // eye sees it), and only what is not scrolled away or under a bar.
   function seen(element) {
@@ -871,11 +953,21 @@ window.__audit = () => {
       bottom: outer.bottom - Number.parseFloat(style.borderBottomWidth),
     };
     if (height(inner) > 3 * height(lines[0])) continue;
+    // A badge and a face are measured as drawn: the screen puts the frame's edges and the words' baseline each on whole
+    // pixels, rounded apart (half up), so in a frame of 18 or 24 px a half pixel of layout that rounds the other way
+    // shows as a whole one (a queue row's "Next", laid out 0.45 px high in a pill at y 534.5, was drawn a pixel high:
+    // the pill at 535, the baseline at 547). Their words' line stands on a whole pixel of the frame (style.css), so
+    // both round alike wherever the frame is.
+    const asDrawn = frame.matches('.badge, .avatar, .guild-icon');
+    const ratioOf = window.devicePixelRatio || 1;
+    const snap = (value) => (asDrawn ? Math.round(value * ratioOf) / ratioOf : value);
+    inner.top = snap(inner.top);
+    inner.bottom = snap(inner.bottom);
     // Upright: from the highest capital or syllable to the baseline, or to the syllables' foot when there are some.
     let top = Number.POSITIVE_INFINITY;
     let bottom = Number.NEGATIVE_INFINITY;
     for (const piece of pieces) {
-      const base = piece.rect.top + footOf(piece.style);
+      const base = snap(piece.rect.top + footOf(piece.style));
       const korean = (piece.text.match(KOREAN) ?? []).join('');
       if (/[A-Za-z0-9]/.test(piece.text)) {
         top = Math.min(top, base - inkOf(piece.style, 'H').up);
@@ -1167,6 +1259,25 @@ window.__audit = () => {
       add('lone-word', box, `its last line ${px(last)} px wide under lines of ${px(longest)}`);
   }
 
+  // A title (a page's, a card's, a dialog's, a section's) never breaks inside a word: each word of it on one line (the
+  // statistics' Korean title, squeezed beside its range on a phone, broke into "통" over "계").
+  for (const title of document.querySelectorAll('h1, h2, h3')) {
+    if (!seen(title)) continue;
+    const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const word of node.textContent.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        // The lines its letters stand on: one top per line.
+        const tops = new Set(
+          [...range.getClientRects()].filter((rect) => rect.width >= 0.5).map((rect) => Math.round(rect.top)),
+        );
+        if (tops.size > 1) add('broken', title, `"${word[0]}" breaks over ${tops.size} lines`);
+      }
+    }
+  }
+
   // The space between things comes from one scale. Read as the stylesheet resolved it (the typed object model gives
   // "auto" as a word, where the plain computed style gives the room it took).
   // A 4 px grid up to 24 (with 2 and 6 for the tightest), an 8 px one beyond.
@@ -1186,9 +1297,13 @@ window.__audit = () => {
     const spaces = [];
     // The room a screen's notch, corners or home bar take (its safe-area insets) is the device's, not the design's.
     const device = (value) => Object.values(safe).some((inset) => inset > 0 && Math.abs(value - inset) < 0.05);
+    // The one nudge off the scale, and only this one: a badge's and a face's words a pixel lower (padding-top: 1px).
+    // The 11 px face's capitals stand half a pixel above the middle of its line, and their frames (18 px a badge, 24
+    // and 20 px a face) put the 15 px line on a half pixel: drawn, the words stood a pixel high (style.css .badge).
+    const nudged = element.matches('.badge, .avatar, .guild-icon');
     for (const side of ['top', 'right', 'bottom', 'left']) {
       const padding = lengthOf(map, `padding-${side}`);
-      if (padding && !device(padding)) {
+      if (padding && !device(padding) && !(nudged && side === 'top' && padding === 1)) {
         spaces.push(['padding', padding]);
         used.paddings.add(px(padding));
       }

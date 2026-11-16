@@ -7,7 +7,7 @@ import { avatarUrl, face, fill, guildIconUrl, h, icon, keepingFocus } from '../d
 import { pickLang } from '../i18n.ts';
 import { keep, state, t, update } from '../state.ts';
 import { confirmDialog, problem, sheet, showDialog } from '../ui/layers.ts';
-import { inviteDialog, mayInvite, when } from './invite.ts';
+import { copyText, inviteDialog, mayInvite, when } from './invite.ts';
 import { act, ago } from './player.ts';
 
 /** The servers this login can open, in a dialog; picking one switches the panel to it. */
@@ -29,7 +29,9 @@ export function serversSheet(choose: (id: string) => void): void {
         },
         h('span', { class: 'guild-icon' }, iconUrl ? h('img', { src: iconUrl, alt: '' }) : guild.name.slice(0, 1)),
         h('span', { class: 'grow' }, guild.name),
-        guild.mayControl ? null : h('span', { class: 'badge tone-pause' }, words.lookOnly),
+        // What this login may do there, plain: no state of the music (in the pause colour it read as "paused", as the
+        // bar's own "View only" did).
+        guild.mayControl ? null : h('span', { class: 'badge' }, words.lookOnly),
         icon('check', 'check'),
       );
       button.onclick = () => {
@@ -376,15 +378,30 @@ function drawAlerts(box: HTMLElement, guild: string, settings: Settings, again: 
   );
 }
 
+// How many settings' hints have been named, for each its own id.
+let switchHints = 0;
+
 // A setting that is on or off: its name and what it does, and its switch, saved at each press. A refusal puts the
-// switch back and says why.
-function switchLine(name: string, hint: string, on: boolean, save: (on: boolean) => Promise<unknown>): HTMLElement {
+// switch back and says why. One that can do nothing yet (`idle`: a vote to skip with no DJ role) is dimmed and takes no
+// presses, its hint saying why; it keeps its state, which works once the hint's condition is met.
+function switchLine(
+  name: string,
+  hint: string,
+  on: boolean,
+  save: (on: boolean) => Promise<unknown>,
+  idle = false,
+): HTMLElement {
+  // The hint, named so the switch can point at it: a screen reader says why it is dimmed with it.
+  switchHints += 1;
+  const hintId = `setting-hint-${switchHints}`;
   const toggle = h('button', {
     class: 'switch',
     type: 'button',
     role: 'switch',
     'aria-checked': String(on),
     'aria-label': name,
+    'aria-describedby': idle ? hintId : null,
+    disabled: idle,
   });
   toggle.onclick = async () => {
     const next = toggle.getAttribute('aria-checked') !== 'true';
@@ -395,7 +412,7 @@ function switchLine(name: string, hint: string, on: boolean, save: (on: boolean)
   return h(
     'div',
     { class: 'line' },
-    h('div', { class: 'grow' }, h('div', null, name), h('div', { class: 'faint' }, hint)),
+    h('div', { class: 'grow' }, h('div', null, name), h('div', { class: 'faint', id: hintId }, hint)),
     toggle,
   );
 }
@@ -445,6 +462,8 @@ function drawShare(box: HTMLElement, guild: string, settings: Settings): void {
       settings.djRoleId === null ? words.voteSkipNoRole : words.voteSkipHint,
       settings.voteSkip,
       (on) => api['vote-skip'](guild, on),
+      // Dimmed until a role is chosen: while everyone may skip, there is nothing to vote on.
+      settings.djRoleId === null,
     ),
     switchLine(words.takeTurns, words.takeTurnsHint, settings.takeTurns, (on) => api['take-turns'](guild, on)),
     limitLine(settings.personLimit, (tracks) => api['person-limit'](guild, tracks)),
@@ -502,19 +521,11 @@ async function drawTokens(box: HTMLElement): Promise<void> {
     const result = h('p', { class: 'copy-result', role: 'status' });
     const copy = h('button', { class: 'key primary', type: 'button' }, icon('copy'), words.copy);
     copy.onclick = async () => {
-      try {
-        // Browsers give pages on plain http (a LAN address) no clipboard at all.
-        if (!navigator.clipboard) throw new Error('no clipboard here');
-        await navigator.clipboard.writeText(created.token);
+      // Copied (on plain http too, by the selection), or selected for copying by hand when no way worked.
+      if (await copyText(created.token, secret)) {
         result.className = 'copy-result';
         fill(result, icon('check'), words.copied);
-      } catch {
-        // Not copied: the token is selected instead, ready for Ctrl+C, and the words say so.
-        const range = document.createRange();
-        range.selectNodeContents(secret);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
+      } else {
         result.className = 'copy-result text-bad';
         fill(result, icon('circle-alert'), words.notCopied);
       }
@@ -579,10 +590,11 @@ function fillTokens(
           const scopeName = { read: words.scopeRead, control: words.scopeControl, admin: words.scopeAdmin }[
             token.scope
           ];
+          // Its name and how it is used, beside its Revoke, as a listening link's row (a key's icon before the two
+          // lines stood on their middle, 9.5 px under the name it marks).
           return h(
             'div',
             { class: 'line', dataset: { id: String(token.id) } },
-            icon('key-round'),
             h(
               'div',
               { class: 'grow' },
