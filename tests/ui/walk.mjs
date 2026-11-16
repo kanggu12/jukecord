@@ -1003,15 +1003,62 @@ await sweep('stats', SIZES, async (page) => {
   if (apart > 1) problems.push(`Wrapped stands ${Math.round(apart)} px off the title's line`);
   if (problems.length > 0) throw new Error(problems.join('; '));
 });
+// The column a chart's tip is about: lit, alone, and the tip at it, over it with its point at the column's middle, or
+// beside its top (a column too tall for the tip over it) with its point on it; the column never under the tip. The
+// last hour's tip stood over hours 18 to 22, pushed back inside the chart, its own column the others' grey.
+async function tipAtColumn(page) {
+  const off = await page.evaluate(() => {
+    const tip = [...document.querySelectorAll('.chart-tip')].find((element) => !element.hidden);
+    const lit = [...document.querySelectorAll('.bars .slot.on')];
+    if (!tip || lit.length !== 1) return `${lit.length} columns lit, ${tip ? 'a' : 'no'} tip shown`;
+    const slot = lit[0];
+    const colour = (column) => getComputedStyle(column.firstElementChild).backgroundColor;
+    const others = [...slot.parentElement.children].filter((other) => other !== slot && !other.matches('.zero'));
+    if (others.some((other) => colour(other) === colour(slot))) return 'the lit column is the colour of the others';
+    const box = tip.getBoundingClientRect();
+    const bar = slot.firstElementChild.getBoundingClientRect();
+    const point = Number.parseFloat(tip.style.getPropertyValue('--point'));
+    const found = [];
+    if (tip.dataset.side === 'above') {
+      const aim = box.left + point - (bar.left + bar.width / 2);
+      if (Math.abs(aim) > 1) found.push(`its point ${aim.toFixed(1)} px off the column's middle`);
+      if (box.bottom > bar.top + 0.5) found.push('it lies over its column');
+    } else {
+      const at = box.top + point;
+      if (at < bar.top - 0.5 || at > bar.bottom + 0.5)
+        found.push(
+          `its point at ${Math.round(at)}, the column from ${Math.round(bar.top)} to ${Math.round(bar.bottom)}`,
+        );
+      const apart = tip.dataset.side === 'right' ? box.left - bar.right : bar.left - box.right;
+      if (apart < 0 || apart > 12) found.push(`it stands ${apart.toFixed(1)} px from its column`);
+    }
+    // A step inside its card at least (pushed to the chart's side, it stood 2 px from the card's edge).
+    const card = tip.closest('.card').getBoundingClientRect();
+    const side = Math.min(box.left - card.left, card.right - box.right);
+    if (side < 7.5) found.push(`it stands ${side.toFixed(1)} px from its card's edge`);
+    return found.length > 0 ? `the tip: ${found.join(', ')}` : null;
+  });
+  if (off) throw new Error(off);
+}
 await sweep('stats-tip', FEW, async (page) => {
   await page.goto(`${BASE}/stats`);
   await page.waitForSelector('.bars .slot');
   // In the middle of the window, as a person would have it when pointing at it (not under the bottom bar).
   await page
     .locator('.bars')
-    .first()
+    .nth(1)
     .evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  // A short column of the hours, with the room for the tip over it.
+  const short = await page.evaluate(() => {
+    const columns = [...document.querySelectorAll('.bars')[1].querySelectorAll('.slot:not(.zero)')];
+    const heights = columns.map((column) => column.firstElementChild.getBoundingClientRect().height);
+    return heights.indexOf(Math.min(...heights));
+  });
+  await page.hover(`.bars >> nth=1 >> .slot:not(.zero) >> nth=${short}`);
+  await tipAtColumn(page);
+  // The last hour (an evening's, as tall as most), its tip kept inside the chart: the one photographed.
   await page.hover('.bars .slot:not(.zero) >> nth=-1');
+  await tipAtColumn(page);
 });
 await sweep('logs', FEW, async (page) => {
   await page.goto(`${BASE}/logs`);
