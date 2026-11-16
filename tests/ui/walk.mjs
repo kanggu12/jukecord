@@ -906,6 +906,10 @@ await sweep('menu', [...FEW, [2560, 1400]], async (page) => {
 });
 // A queue tool: its own key on a wide card, the list behind the tools key on a narrow one (phones).
 async function tool(page, act) {
+  // The tools are drawn once the queue's state has come (none before it: nothing is known to act on). Asked at once,
+  // a first state slower than usual (a Discord login's, on a tablet) read as a narrow card's, and the walk waited for
+  // the list key of a wide one, which never shows.
+  await page.waitForSelector('.queue-head .tools:not([hidden])');
   const key = page.locator(`[data-act="${act}"]`);
   if (await key.isVisible()) {
     await key.click();

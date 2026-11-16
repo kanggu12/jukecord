@@ -544,7 +544,8 @@ window.__audit = () => {
   for (const selector of loadRules)
     findings.push({ kind: 'load-colour', where: selector, detail: 'paints with the loading colour' });
   for (const element of document.querySelectorAll('.tone-load')) {
-    if (shown(element) && !element.matches('.pill, .notice'))
+    // A pill, a notice and a lamp (the playing card's head while a track gets ready) are states of loading themselves.
+    if (shown(element) && !element.matches('.pill, .notice, .dot'))
       add('load-colour', element, 'in the loading tone, and not a state of loading');
   }
 
