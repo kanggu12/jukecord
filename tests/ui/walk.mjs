@@ -1106,11 +1106,23 @@ await sweep('failed', FEW, async (page) => {
   });
   await page.waitForTimeout(200);
 });
+// No live connection: before any state, the playing card's head says the connection's (connecting, in the colour of a
+// wait, as the bar's label), and its body claims nothing (it said "Now playing" over "Connecting…", beside the bar's
+// "Connecting").
 await sweep('disconnected', FEW, async (page) => {
   await page.routeWebSocket(/\/api\/v1\/events/, (ws) => ws.close({ code: 1006, reason: 'gone' }).catch(() => {}));
   await page.reload();
   await page.waitForSelector('.app .card');
   await page.waitForTimeout(1500);
+  const head = await page.evaluate(() => ({
+    words: document.querySelector('#now-h')?.textContent ?? '',
+    lamp: document.querySelector('#now-h .dot')?.className ?? '',
+    title: document.querySelector('.now .title')?.getClientRects().length > 0,
+  }));
+  if (!/^(Connecting|연결\s중)$/.test(head.words) || !head.lamp.includes('tone-pause') || head.title)
+    throw new Error(
+      `connecting, the playing card says "${head.words}" (${head.lamp})${head.title ? ' over a title' : ''}`,
+    );
 });
 // The seed's longest title playing, on phones and the tablet: the bar at the bottom shows it on one line.
 {

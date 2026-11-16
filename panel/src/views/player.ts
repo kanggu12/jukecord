@@ -401,25 +401,37 @@ export function nowCard(live: Live): HTMLElement {
             : { playing: words.playing, paused: words.paused, loading: words.loading }[status];
     refill(pill, label, h('span', { class: 'dot' }), label);
     // Stopped, the head says so (its lamp unlit): "Now playing" over "Nothing is playing" said the opposite of the title
-    // under it. Before the first state nothing is claimed: the card's name alone.
-    const headWords = !player ? words.nowPlaying : status === 'idle' ? words.stopped : label;
+    // under it. Before the first state the head says the connection's, as the bar's label does and in its colours:
+    // connecting (the colour of a wait), or no live updates (refused for good, the colour of a problem). It said "Now
+    // playing" there, over a body saying "Connecting" beside the bar's "Connecting".
+    const headWords = !player
+      ? state.live === 'refused'
+        ? words.refused
+        : words.connectingLive
+      : status === 'idle'
+        ? words.stopped
+        : label;
+    const headTone = !player ? (state.live === 'refused' ? 'bad' : 'pause') : tone;
     refill(
       card.querySelector('#now-h') as HTMLElement,
-      `${tone}|${headWords}`,
-      h('span', { class: `dot tone-${tone}` }),
+      `${headTone}|${headWords}`,
+      h('span', { class: `dot tone-${headTone}` }),
       headWords,
     );
     // The track. Everything below is redrawn only when what it shows changes (refill): the title link and the keys
     // must stay the same elements while snapshots arrive, or a click on them is lost.
     const track = player?.track ?? null;
     const by = addedBy(player?.addedBy ?? null, player?.addedByName ?? null);
+    // No state yet: nothing to say of the player, whose state the head says is not known (connecting, or no live
+    // updates); why, when there is a reason, under it (liveNote). The body said "Connecting" too, beside the head's
+    // name and the bar's label. An empty heading is no heading: left out.
+    title.hidden = !player;
     if (track) {
       refill(
         title,
         `${track.id}|${track.title}`,
         h('a', { href: track.url, target: '_blank', rel: 'noopener noreferrer' }, track.title),
       );
-      title.removeAttribute('aria-hidden');
       refill(
         meta,
         `${track.uploader}|${by}`,
@@ -427,17 +439,12 @@ export function nowCard(live: Live): HTMLElement {
         h('span', null, icon('users'), by),
       );
     } else if (!player) {
-      // No state yet: nothing is claimed about the player, only that the panel is connecting, or (refused for good)
-      // that there are no live updates; why is said under it.
-      const heading = state.live === 'refused' ? words.refused : `${words.connectingLive}…`;
-      refill(title, `unknown|${heading}`, h('span', { class: 'muted' }, heading));
+      refill(title, 'unknown');
       refill(meta, 'unknown');
-      title.removeAttribute('aria-hidden');
     } else {
       // Nothing playing: with tracks waiting, the Play key starts them; with none, adding one plays it.
       const hint = (state.queue?.items.length ?? 0) > 0 ? words.idleQueued : words.idleHint;
       refill(title, `idle|${words.idle}`, h('span', { class: 'muted' }, words.idle));
-      title.removeAttribute('aria-hidden');
       refill(meta, `idle|${hint}`, h('span', null, hint));
     }
     notice.hidden = !player?.notice;
