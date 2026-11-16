@@ -489,7 +489,8 @@ const WRAPPED = {
   songFacts: {
     en: (days: number, plays: number) =>
       `${days === 1 ? '' : `played on ${days} days, `}${plays === 1 ? 'once' : `${plays} times`}`,
-    ko: (days: number, plays: number) => (days === 1 ? `${plays}번 재생` : `${days}일에 걸쳐 ${plays}번 재생`),
+    // Plays counted with 회, as the card's totals and lists count them ("재생 1,798회", "224회").
+    ko: (days: number, plays: number) => (days === 1 ? `${plays}회 재생` : `${days}일에 걸쳐 ${plays}회 재생`),
   },
   lastYear: { en: 'the last 12 months', ko: '최근 12개월' },
   busiestDay: { en: 'Busiest day', ko: '가장 많이 들은 요일' },

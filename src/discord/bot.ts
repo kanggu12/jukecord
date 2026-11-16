@@ -700,7 +700,11 @@ export class Bot implements Directory, AlertSink {
           await interaction.editReply({
             embeds: [
               settings.voteSkip
-                ? note(lang, 'Skip from someone without the DJ role is a vote', 'DJ 역할이 없으면 건너뛰기가 투표가 됨')
+                ? note(
+                    lang,
+                    'People without the DJ role can skip when half of the listeners agree',
+                    'DJ 역할이 없어도 듣는 사람 절반이 찬성하면 건너뜀',
+                  )
                 : note(lang, 'Skip needs the DJ role', '건너뛰기에 DJ 역할이 필요함'),
             ],
           });
@@ -712,7 +716,7 @@ export class Bot implements Directory, AlertSink {
             await interaction.editReply({
               embeds: [
                 moved === 0
-                  ? note(lang, 'Already in turns: nothing moved', '대기열이 이미 번갈아 놓여 있음')
+                  ? note(lang, 'The queue already takes turns', '대기열이 이미 번갈아 놓여 있음')
                   : note(
                       lang,
                       `Moved ${moved === 1 ? '1 track' : `${moved} tracks`} so people take turns`,
@@ -726,7 +730,11 @@ export class Bot implements Directory, AlertSink {
           await interaction.editReply({
             embeds: [
               settings.takeTurns
-                ? note(lang, "Tracks added go in their person's turn", '추가하는 곡이 사람마다 번갈아 들어감')
+                ? note(
+                    lang,
+                    'The queue plays one track from each person in turn',
+                    '추가하는 곡이 사람마다 번갈아 들어감',
+                  )
                 : note(lang, 'Tracks added go at the end', '추가하는 곡이 맨 뒤로 들어감'),
             ],
           });

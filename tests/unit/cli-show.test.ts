@@ -29,4 +29,14 @@ describe('the jukecord command shows', () => {
     );
     assert.equal(COMMANDS.status.show({ ...status, uptimeMs: 3_723_000 }).split('\n')[2], 'Up for 1:02:03');
   });
+
+  it('a track that could not be played as one sentence under "Nothing is playing", as the panel says it', () => {
+    const player = { status: 'idle', track: null, repeat: 'off', autoplay: 'off', notice: null, positionMs: 0 };
+    // Not "Nothing is playing (Neon Rain: the site answered 404)": the track named, why in words.
+    assert.equal(
+      COMMANDS['now-playing'].show({ ...player, error: 'Neon Rain: the site answered 404' }),
+      'Nothing is playing\nCould not play Neon Rain because the site does not have it',
+    );
+    assert.equal(COMMANDS['now-playing'].show({ ...player, error: null }), 'Nothing is playing');
+  });
 });

@@ -54,13 +54,14 @@ const EN = {
   rowBy: (name: string) => `by ${name}`,
   rowByHost: 'by the host',
   rowByAutoplay: 'by Autoplay',
-  couldNotPlay: (reason: string) => `Could not play: ${reason}`,
   // Queue.
   queue: 'Queue',
   shuffle: 'Shuffle',
   dedupe: 'Remove duplicates',
   save: 'Save',
-  load: 'Load',
+  // A playlist's key in the playlists dialog: it adds the playlist's tracks to the queue, as its toast then says
+  // ("Added 4 tracks"), and as Korean's 추가 says.
+  load: 'Add',
   clear: 'Clear',
   searchQueue: 'Search the queue',
   queueEmpty: 'The queue is empty',
@@ -378,7 +379,7 @@ const EN = {
   // The queue search's clear key.
   clearSearch: 'Clear the search',
   // Why the playlists' keys are off for someone who may only look.
-  playlistsLookOnly: 'Only the DJ role can load or change playlists in this server',
+  playlistsLookOnly: 'Only the DJ role can add playlists to the queue or change them in this server',
   // Lyrics.
   lyrics: 'Lyrics',
   lyricsClose: 'Close the lyrics',
@@ -454,8 +455,9 @@ const EN = {
   stay: 'Stay in voice',
   stayHint: 'The bot stays in its channel when everyone has left',
   voteSkip: 'Vote to skip',
-  voteSkipHint: 'Skip from anyone without the DJ role is a vote: it skips when half of the listeners agree',
-  voteSkipNoRole: 'Works once a DJ role is chosen above: then Skip from anyone else is a vote',
+  voteSkipHint: 'People without the DJ role can skip when half of the listeners agree',
+  // With everyone a DJ (no role chosen), there is nobody to vote: the switch waits for a role.
+  voteSkipNoRole: 'Works once a DJ role is chosen above',
   voteToSkip: 'Vote to skip',
   // The count of a vote to skip on the Skip key, saying what it counts and whether this person's vote is in it.
   votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? 'vote cast' : 'votes'} ${votes}/${needed}`,
@@ -463,13 +465,13 @@ const EN = {
   skipVotes: (votes: number, needed: number) => `${votes} of ${needed} votes`,
   votedToSkip: (votes: number, needed: number) => `Voted to skip: ${votes} of ${needed}`,
   takeTurns: 'Take turns',
-  takeTurnsHint: "A track added goes in its person's turn",
+  takeTurnsHint: 'The queue plays one track from each person in turn',
   takeTurnsNow: 'Take turns now',
   takeTurnsKey: 'Take turns',
   tookTurns: (n: number) =>
-    n === 0 ? 'Already in turns: nothing moved' : `Moved ${n === 1 ? '1 track' : `${n} tracks`} so people take turns`,
+    n === 0 ? 'The queue already takes turns' : `Moved ${n === 1 ? '1 track' : `${n} tracks`} so people take turns`,
   personLimit: 'Tracks per person',
-  personLimitHint: 'The most one person may have in the queue',
+  personLimitHint: 'How many tracks each person may have in the queue',
   noLimit: 'None',
   leftLimit: (n: number) => `${n} left out: your limit in the queue`,
   voiceVolume: 'Voice volume',
@@ -609,7 +611,6 @@ const KO: Strings = {
   rowBy: (name: string) => `${name} 님이 추가`,
   rowByHost: '호스트가 추가',
   rowByAutoplay: '자동 재생이 추가',
-  couldNotPlay: (reason: string) => `재생하지 못함: ${reason}`,
   queue: '대기열',
   shuffle: '섞기',
   dedupe: '중복 제거',
@@ -803,10 +804,11 @@ const KO: Strings = {
   wrappedTwelve: '최근 12개월',
   wrappedTitle: (time: string) => `${time} 음악 결산`,
   wrappedSong: (time: string) => `${time}의 노래`,
+  // Plays counted with 회, as every count of plays on the page is ("224회" in the most played).
   songFacts: (days: number, plays: number) =>
     days === 1
-      ? `${plays.toLocaleString('ko-KR')}번 재생`
-      : `${days.toLocaleString('ko-KR')}일에 걸쳐 ${plays.toLocaleString('ko-KR')}번 재생`,
+      ? `${plays.toLocaleString('ko-KR')}회 재생`
+      : `${days.toLocaleString('ko-KR')}일에 걸쳐 ${plays.toLocaleString('ko-KR')}회 재생`,
   wrappedPeriods: '기간',
   wrappedThisYear: (year: string) => `올해(${year})`,
   // A count of days, said as one ("곡 수" beside it): "2일" next to "11월 21일" read as the second of a month.
@@ -851,8 +853,8 @@ const KO: Strings = {
   inMusic: (year: string | null) => (year ? `${year}년 음악 결산` : '음악 결산'),
   songFactsApart: (days: number, plays: number) =>
     days === 1
-      ? [`${plays.toLocaleString('ko-KR')}번 재생`]
-      : [`${days.toLocaleString('ko-KR')}일에 걸쳐`, `${plays.toLocaleString('ko-KR')}번 재생`],
+      ? [`${plays.toLocaleString('ko-KR')}회 재생`]
+      : [`${days.toLocaleString('ko-KR')}일에 걸쳐`, `${plays.toLocaleString('ko-KR')}회 재생`],
   waitingTurn: '다운로드 대기 중',
   alerts: '알림 채널',
   alertsHint: 'jukecord가 이 서버에 문제를 알릴 채널: YouTube 차단, 다시 시작, 디스크 부족 등',
@@ -924,8 +926,8 @@ const KO: Strings = {
   stay: '음성 채널에 머물기',
   stayHint: '모두 나가도 봇이 채널에 남음',
   voteSkip: '건너뛰기 투표',
-  voteSkipHint: 'DJ 역할이 없는 사람이 누른 건너뛰기는 투표가 됨. 듣는 사람 절반이 찬성하면 넘어감',
-  voteSkipNoRole: '위에서 DJ 역할을 정해야 작동함. 그러면 다른 사람이 누른 건너뛰기는 투표가 됨',
+  voteSkipHint: 'DJ 역할이 없어도 듣는 사람 절반이 찬성하면 건너뜀',
+  voteSkipNoRole: '위에서 DJ 역할을 정하면 작동함',
   voteToSkip: '건너뛰기 투표',
   votesCount: (votes: number, needed: number, voted: boolean) => `${voted ? '투표 완료' : '투표'} ${votes}/${needed}`,
   skipVotes: (votes: number, needed: number) => `${needed}표 중 ${votes}표`,

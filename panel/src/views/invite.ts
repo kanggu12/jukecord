@@ -221,8 +221,8 @@ export function inviteDialog(): void {
             'span',
             { class: 'name' },
             h('b', null, words.inviteLinkUntil(when(link.expiresAt))),
-            // The rest on one line under it, as a queue row's line: its parts 8 px apart, the last cut short when the
-            // row is narrow (whole in the line's title). Run on after a dot, "· made by Host" wrapped alone.
+            // The rest on one line under it, as a queue row's line: its parts apart by a dot that never starts or ends
+            // a line (style.css), the last cut short when the row is narrow (whole in the line's title).
             subLine(
               link.id === fresh ? h('span', { class: 'badge tone-load' }, words.inviteNew) : null,
               h('span', null, words.inviteGuestsIn(link.guests, link.maxGuests)),

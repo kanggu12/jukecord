@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { words } from '../../panel/src/i18n.ts';
-import { sayError, together, translate } from '../../src/core/say.ts';
+import { sayError, sayNotice, together, translate } from '../../src/core/say.ts';
 
 // Where a no-break space stands, an expected text writes "⍽", so it can be seen.
 const NBSP = String.fromCharCode(0xa0);
@@ -59,6 +59,13 @@ describe('lines that wrap keep what reads as one', () => {
     // "중복" and a count of tracks ("곡 수") are words of their own.
     assert.equal(together('중복 제거'), '중복 제거');
     assert.equal(together('한 사람당 곡 수'), '한 사람당 곡 수');
+  });
+
+  it('keeps English\'s "a" and "an" with the word they come before, as the review saw "is a / vote"', () => {
+    assert.equal(together('Skip is a vote'), kept('Skip is a⍽vote'));
+    assert.equal(together('A link (a test) for an hour'), kept('A⍽link (a⍽test) for an⍽hour'));
+    // Words that only start like them, and an "a" that ends the line, are left alone.
+    assert.equal(together('as about Anna and Mina a'), 'as about Anna and Mina a');
   });
 
   it('changes nothing the second time', () => {
@@ -118,6 +125,27 @@ describe('one name for one thing', () => {
     const korean = lines(words('ko')).join('\n');
     assert.ok(!/유튜브|사운드클라우드/.test(korean));
     for (const lang of ['en', 'ko'] as const) assert.ok(!/[()]/.test(words(lang).queueEmptyHint), lang);
+  });
+
+  it("names a playlist's key in the playlists dialog as its toast says what it did, in both languages", () => {
+    // It adds the playlist's tracks to the queue: "Load" beside "Added 4 tracks" and Korean's 추가 said two things.
+    for (const lang of ['en', 'ko'] as const) {
+      const said = words(lang);
+      assert.ok(
+        said.added(4).toLowerCase().includes(said.load.toLowerCase()),
+        `${lang}: ${said.load} / ${said.added(4)}`,
+      );
+    }
+  });
+
+  it('counts plays one way in Korean, and says why the player paused without saying "Paused" again', () => {
+    // "224번 재생" beside "224회" on one page (the 0.3.3 review).
+    assert.ok(!lines(words('ko')).some((line) => /\d번/.test(line)));
+    assert.equal(words('ko').songFacts(141, 224), '141일에 걸쳐 224회 재생');
+    for (const lang of ['en', 'ko'] as const) {
+      const why = sayNotice('paused with nobody listening', lang);
+      assert.ok(!why.toLowerCase().includes(words(lang).paused.toLowerCase()), `${lang}: ${why}`);
+    }
   });
 
   it('says on Skip that the vote is cast in words apart from the count before it, and no "투표함" (a ballot box)', () => {

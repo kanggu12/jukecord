@@ -4807,15 +4807,19 @@ button.lyric {
   color: var(--ink-2);
 }
 /* A listening link's row: until when it works, over a line of the rest (the new one's mark, its guests, who made it
-   and when), its parts 8 px apart with no dots between them. One line where it fits; where it does not (a phone), a
-   whole part goes to the next line, never a word of one ("· made by Host" wrapped alone after its dot), and a part
-   longer than the row (a long name) is cut short, whole in the line's title. */
+   and when), its parts apart by a dot ("0 of 25 guests · made 5 h ago by the host": with a gap alone the two facts
+   ran on as one, "guests made 5 h ago"). One line where it fits; where it does not (a phone), a whole part goes to
+   the next line, never a word of one, and a part longer than the row (a long name) is cut short, whole in the line's
+   title. */
 .invite-links .sub {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  column-gap: var(--s-8);
+  /* 16 px between the parts, their dot in the middle of it (below). */
+  column-gap: var(--s-16);
   min-width: 0;
+  /* What lies left of the line's edge is not drawn: the dot of a part that starts a line (below). */
+  overflow: hidden;
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--ink-3);
@@ -4825,6 +4829,28 @@ button.lyric {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* A part in words carries its dot in the 16 px before it, drawn back into the gap: between two parts the dot stands in
+   the gap's middle, and a part that starts a line has it left of the line's edge, cut off there. So no dot starts a
+   line, and none ends one: a part that wraps takes its dot along ("· made by Host" once wrapped alone, its dot first). */
+.invite-links .sub > :not(.badge) {
+  position: relative;
+  margin-left: calc(-1 * var(--s-16));
+  padding-left: var(--s-16);
+}
+.invite-links .sub > :not(.badge)::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  width: var(--s-16);
+  text-align: center;
+}
+/* The new link's mark is set apart by its own fill: 8 px after it, as before, and no dot. */
+.invite-links .sub > .badge {
+  margin-right: calc(-1 * var(--s-8));
+}
+.invite-links .sub > .badge + *::before {
+  content: none;
 }
 /* A QR code: dark on light whatever the theme (cameras read it so), on a white tile with rounded corners. */
 .qr-box {

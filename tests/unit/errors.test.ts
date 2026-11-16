@@ -36,8 +36,11 @@ describe('sayError', () => {
   });
 
   it('says what the player did by itself as a sentence, or after the title of the track it is about', () => {
-    assert.equal(sayNotice('paused with nobody listening', 'en'), 'Paused with nobody listening');
-    assert.equal(sayNotice('paused with nobody listening', 'ko'), '듣는 사람이 없어 일시정지함');
+    // Why it paused, beside the state that says "Paused": the word not said twice (the 0.3.3 review).
+    assert.equal(sayNotice('paused with nobody listening', 'en'), 'Nobody was listening');
+    assert.equal(sayNotice('paused with nobody listening', 'ko'), '듣는 사람이 없었음');
+    // The notice's message as it is, for the API.
+    assert.equal(translate('paused with nobody listening', 'ko'), '듣는 사람이 없었음');
     assert.equal(
       sayNotice('Neon Rain: taken out of the looping queue', 'en'),
       'Neon Rain: taken out of the looping queue',
@@ -58,7 +61,7 @@ describe('sayError', () => {
       'jukecord is making the MP3 copy of this track; try again in a moment',
     );
     // A track taken out of a loop, after its title.
-    assert.equal(sayFailure('Neon Rain: taken out of the looping queue', 'ko'), 'Neon Rain: 대기열 반복에서 뺌');
+    assert.equal(sayNotice('Neon Rain: taken out of the looping queue', 'ko'), 'Neon Rain: 대기열 반복에서 뺌');
   });
 
   it('has Korean for why a live connection, a change or audio is turned away', () => {
@@ -78,7 +81,8 @@ describe('sayError', () => {
   it('translates the messages with values, and every short reason', () => {
     assert.equal(sayError('the queue is full (1000 tracks)', 'ko'), '대기열이 가득 참(1000곡)');
     assert.equal(sayError('there is no playlist named "Road trip"', 'ko'), '"Road trip" 플레이리스트 없음');
-    assert.equal(sayError('the site answered 404', 'ko'), kept('사이트가 404⍽오류로 응답함'));
+    // A site's answer in words, not its number.
+    assert.equal(sayError('the site answered 404', 'ko'), '사이트에 없음');
     assert.equal(sayError('position 9 is outside the queue (0-3)', 'ko'), '대기열 범위를 벗어난 위치(0~3)');
     assert.equal(
       sayError('Discord did not answer: timed out', 'ko'),
@@ -86,8 +90,7 @@ describe('sayError', () => {
     );
     for (const reason of Object.values(REASONS))
       assert.notEqual(sayError(reason, 'ko'), sayError(reason, 'en'), reason);
-    // A value goes where Korean needs no particle after it: "403으로" and "404로" cannot both follow one pattern
-    // (the site's answer above has its particle after 오류, not after the number).
+    // A value goes where Korean needs no particle after it: "403으로" and "404로" cannot both follow one pattern.
     assert.equal(
       sayError('"half past" is not a time in the track (examples: 83, 1:23, 1m23s)', 'ko'),
       kept('시간으로 읽을⍽수⍽없음: "half past"(예: 83, 1:23, 1m23s)'),
@@ -110,12 +113,12 @@ describe('sayError', () => {
     // jukecord's name keeps its small letter at the start of a sentence, as everywhere else.
     assert.equal(
       sayError('jukecord runs without a Discord bot here, so there are no roles', 'en'),
-      'jukecord runs without a Discord bot here, so there are no roles',
+      kept('jukecord runs without a⍽Discord bot here, so there are no roles'),
     );
   });
 
   it('gives a reason as it is for the middle of a sentence, and the bot the same words as the panel', () => {
-    // No capital: "Could not play: no such site".
+    // No capital: "Could not add: no such site".
     assert.equal(translate('no such site', 'en'), 'no such site');
     assert.equal(translate('no such site', 'ko'), kept('사이트를 찾을⍽수⍽없음'));
     assert.equal(translate('something new', 'ko'), 'something new');
@@ -123,16 +126,48 @@ describe('sayError', () => {
     assert.equal(sayInDiscord, sayError);
   });
 
-  it('translates the reason of a failed track and leaves its title alone', () => {
-    assert.equal(sayFailure('Neon Rain: the site answered 404', 'ko'), kept('Neon Rain: 사이트가 404⍽오류로 응답함'));
-    // A title with a colon of its own: only what follows the last one is the reason.
+  it('says a failed track in one sentence that names it and says why, in words', () => {
+    // Not "Could not play: Neon Rain: the site answered 404" (two colons and a number, the 0.3.3 review).
+    assert.equal(
+      sayFailure('Neon Rain: the site answered 404', 'en'),
+      'Could not play Neon Rain because the site does not have it',
+    );
+    // Korean says the cause first: no particle follows the title, whatever letters it ends in.
+    assert.equal(sayFailure('Neon Rain: the site answered 404', 'ko'), '사이트에 없는 곡이라 Neon Rain 재생하지 못함');
+    // A title with a colon of its own: only what follows the last one is the reason, and the sentence adds no colon.
+    assert.equal(
+      sayFailure('Part II: The Valley: no such site', 'en'),
+      'Could not play Part II: The Valley because there is no such site',
+    );
     assert.equal(
       sayFailure('Part II: The Valley: no such site', 'ko'),
-      kept('Part II: The Valley: 사이트를 찾을⍽수⍽없음'),
+      kept('사이트를 찾을⍽수⍽없어 Part II: The Valley 재생하지 못함'),
     );
-    assert.equal(sayFailure('Neon Rain: no such site', 'en'), 'Neon Rain: no such site');
-    // Every reason a player can give ends a failure this way.
-    for (const reason of Object.values(REASONS))
-      assert.notEqual(sayFailure(`A title: ${reason}`, 'ko'), `A title: ${reason}`, reason);
+    // Every reason a player can give, and a site's every kind of answer, reads so in both languages.
+    const statuses = [400, 401, 403, 404, 410, 429, 451, 500, 502, 503].map((status) => `the site answered ${status}`);
+    for (const reason of [...Object.values(REASONS), ...statuses]) {
+      const english = sayFailure(`Neon Rain: ${reason}`, 'en');
+      const korean = sayFailure(`Neon Rain: ${reason}`, 'ko');
+      assert.ok(english.startsWith('Could not play Neon Rain because '), english);
+      assert.ok(korean.endsWith(' Neon Rain 재생하지 못함'), korean);
+      for (const sentence of [english, korean]) {
+        assert.ok(!sentence.includes(':'), `a colon in "${sentence}"`);
+        assert.ok(!/\d{3}/.test(sentence), `a status number in "${sentence}"`);
+      }
+    }
+    // A reason with no words here yet is still said, after the track.
+    assert.equal(sayFailure('Neon Rain: something new', 'en'), 'Could not play Neon Rain: something new');
+    assert.equal(sayFailure('Neon Rain: something new', 'ko'), 'Neon Rain 재생하지 못함: something new');
+  });
+
+  it("says a site's answer in words wherever people read a reason, and leaves the API's message as it is", () => {
+    for (const status of [403, 404, 410, 429, 451, 500, 503])
+      for (const lang of ['en', 'ko'] as const)
+        assert.ok(!/\d/.test(translate(`the site answered ${status}`, lang)), `${status} in ${lang}`);
+    assert.equal(sayError('the site answered 404', 'en'), 'The site does not have it');
+    assert.equal(translate('the site answered 503', 'en'), 'the site is having trouble');
+    assert.equal(sayError('the site answered 403', 'ko'), '사이트가 거절함');
+    // "This server" read as the Discord server beside its name: jukecord is the one YouTube refuses.
+    assert.equal(sayError(REASONS.botCheck, 'en'), 'YouTube is refusing this jukecord for now');
   });
 });

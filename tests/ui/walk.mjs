@@ -1066,6 +1066,11 @@ await sweep('failed', FEW, async (page) => {
     },
   });
   await page.waitForTimeout(200);
+  // One sentence that names the track and says why in words: the 0.3.3 review read "Could not play: Neon Rain: the
+  // site answered 404", two colons and a number.
+  const said = (await page.locator('.now .error').textContent()) ?? '';
+  if (!said.includes('Neon Rain') || said.includes(':') || /\d{3}/.test(said))
+    throw new Error(`the failed track reads "${said}"`);
 });
 await sweep('disconnected', FEW, async (page) => {
   await page.routeWebSocket(/\/api\/v1\/events/, (ws) => ws.close({ code: 1006, reason: 'gone' }).catch(() => {}));
@@ -1285,6 +1290,10 @@ await sweep('notice', FEW, async (page) => {
     notice: 'paused with nobody listening',
   });
   await page.waitForSelector('.now .player-note:not([hidden])');
+  // Why it paused, without the state's word again: "Paused" over "Paused with nobody listening" said it twice.
+  const state = ((await page.locator('#now-h').textContent()) ?? '').trim().toLowerCase();
+  const why = ((await page.locator('.now .player-note').textContent()) ?? '').toLowerCase();
+  if (!state || why.includes(state)) throw new Error(`the notice "${why}" says the head's "${state}" again`);
 });
 // A track whose fetch waits for its turn among every server's fetches. Nothing plays yet, so the main key and the
 // listening bar's are at work, as a key whose press is under way is: the loader turning in place of Pause, and presses
