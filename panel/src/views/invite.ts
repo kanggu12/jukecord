@@ -250,7 +250,8 @@ export function inviteDialog(): void {
             // The rest on one line under it, as a queue row's line: its parts 8 px apart, the last cut short when the
             // row is narrow (whole in the line's title). Run on after a dot, "· made by Host" wrapped alone.
             subLine(
-              link.id === fresh ? h('span', { class: 'badge tone-load' }, words.inviteNew) : null,
+              // A label, plain: the sky blue it wore is a track getting ready's.
+              link.id === fresh ? h('span', { class: 'badge' }, words.inviteNew) : null,
               h('span', null, words.inviteGuestsIn(link.guests, link.maxGuests)),
               h('span', null, by),
             ),

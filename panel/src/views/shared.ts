@@ -88,7 +88,7 @@ export function addPage(navigate: (path: string) => void, chooseServer: () => vo
                 at === 'now' ? api['play-now'](server.id, input) : api.add(server.id, input, at),
               );
               if (!result) return;
-              toast(words.added(result.items.length), 'play');
+              toast(words.added(result.items.length));
               navigate('/');
             };
             return key;

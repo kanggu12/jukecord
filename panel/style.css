@@ -367,8 +367,9 @@ a {
 img {
   display: block;
 }
+/* What is selected (a link to copy by hand): the brand's blue, the colour of what is chosen. */
 ::selection {
-  background: color-mix(in srgb, var(--load) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 :focus-visible {
   outline: 2px solid var(--focus);
@@ -1109,9 +1110,11 @@ img {
 .key.sm.square {
   width: var(--control-sm);
 }
+/* A key that is on (Repeat, a vote cast, the table): the brand's soft blue and its line, as a choice in use (the sky
+   blue it had is the colour of a track getting ready). */
 .key[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--load) 16%, transparent);
-  border-color: color-mix(in srgb, var(--load) 40%, transparent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--ink);
 }
 .key:disabled,
@@ -2305,8 +2308,8 @@ img {
 /* ---- autoplay --------------------------------------------------------------------------------------------------- */
 /* The queue's autoplay key: on, it takes the tint of a key that is on (a contrast theme fills it, below). */
 .autoplay-key.on {
-  background: color-mix(in srgb, var(--load) 16%, transparent);
-  border-color: color-mix(in srgb, var(--load) 40%, transparent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 /* The key says what it is in words, as the head's tools do. A card of 640 px or less (a phone's, a narrow window's)
    lists autoplay, named with its mode, with the tools behind the queue's tools key (see toolsMore), at the width the

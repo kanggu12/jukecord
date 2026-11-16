@@ -29,7 +29,9 @@ export function serversSheet(choose: (id: string) => void): void {
         },
         h('span', { class: 'guild-icon' }, iconUrl ? h('img', { src: iconUrl, alt: '' }) : guild.name.slice(0, 1)),
         h('span', { class: 'grow' }, guild.name),
-        guild.mayControl ? null : h('span', { class: 'badge tone-pause' }, words.lookOnly),
+        // What this login may do there, plain: no state of the music (in the pause colour it read as "paused", as the
+        // bar's own "View only" did).
+        guild.mayControl ? null : h('span', { class: 'badge' }, words.lookOnly),
         icon('check', 'check'),
       );
       button.onclick = () => {

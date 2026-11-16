@@ -27,6 +27,7 @@
  * - small-target: on a touch screen, a control smaller than 44 x 44;
  * - sticky: on a touch screen (no hover), a :hover rule in effect: the browser keeps :hover on what was tapped last,
  *   so a key stays boxed or a row lit after a tap;
+ * - load-colour: the loading colour used for anything but a track getting ready (a rule, or the loading tone);
  * - lone-key: the playing card's keys wrapped so that the last row holds one key alone (it reads as a close key);
  * - lone-word: words that wrap with a word or two alone on their last line (a fifth of their longest line or less);
  * - unreachable: a box whose content scrolls that the keyboard cannot reach: not focusable itself, with nothing in it
@@ -500,6 +501,33 @@ window.__audit = () => {
     }
     for (const selector of sticky)
       findings.push({ kind: 'sticky', where: selector, detail: 'a :hover outside @media (hover: hover)' });
+  }
+
+  // The loading colour means a track getting ready, and nothing else: the stylesheet paints with it only through the
+  // loading tone (.tone-load: the playing card's lamp, a notice of waiting), and the tone is on nothing but those (the
+  // "Next" and "New" badges, a done toast's tick and every key that was on wore it).
+  const loadRules = new Set();
+  const visitRules = (rules) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSGroupingRule) visitRules(rule.cssRules);
+      // The declarations as written (a shorthand with a var() keeps it there, its longhands read empty), but the
+      // tone's own.
+      else if (rule instanceof CSSStyleRule && rule.style.cssText.includes('var(--load)'))
+        if (rule.selectorText !== '.tone-load') loadRules.add(rule.selectorText);
+    }
+  };
+  for (const sheet of document.styleSheets) {
+    try {
+      visitRules(sheet.cssRules);
+    } catch {
+      // Another site's stylesheet cannot be read (the panel loads none).
+    }
+  }
+  for (const selector of loadRules)
+    findings.push({ kind: 'load-colour', where: selector, detail: 'paints with the loading colour' });
+  for (const element of document.querySelectorAll('.tone-load')) {
+    if (shown(element) && !element.matches('.pill, .notice'))
+      add('load-colour', element, 'in the loading tone, and not a state of loading');
   }
 
   // The listen bar stands at the foot of the window in every layout (the page scrolls under it on a phone).

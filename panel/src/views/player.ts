@@ -153,7 +153,8 @@ export async function skipOrVote(button: HTMLButtonElement | null): Promise<bool
   if (answer.votes) {
     // The vote is in: Skip says "voted" at once, before the live update that says the same to every page of theirs.
     if (state.guild?.id === id) update({ votes: { on: true, ...answer.votes, voted: true } });
-    toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'pause', 'skip-forward');
+    // A vote cast is something done (no colour): the pause amber read as the music paused.
+    toast(t().votedToSkip(answer.votes.votes, answer.votes.needed), 'done', 'skip-forward');
   }
   return answer.votes === null;
 }
@@ -896,7 +897,8 @@ export function queueCard(): HTMLElement {
         ),
         // Next, who added it, its length: the person before the length, so a narrow row leaves out the length.
         subLine(
-          item.position === 0 ? h('span', { class: 'badge tone-load' }, words.next) : null,
+          // A label, plain: the sky blue it wore is a track getting ready's.
+          item.position === 0 ? h('span', { class: 'badge' }, words.next) : null,
           rowBy(item.addedBy, item.addedByName),
           item.track.durationMs !== null ? h('span', { class: 'num' }, clock(item.track.durationMs)) : null,
         ),
@@ -1660,7 +1662,8 @@ function importDialog(done: () => void): void {
     const result = await act(go, () => api['playlist-import'](guild(), title, paste.value));
     fill(go, icon('upload'), words.importKey);
     if (!result) return;
-    toast(words.imported(result.playlist.name, result.tracks, result.leftOut), result.leftOut > 0 ? 'pause' : 'play');
+    // Done, or done with some left out (to look at): no colour of the player's states.
+    toast(words.imported(result.playlist.name, result.tracks, result.leftOut), result.leftOut > 0 ? 'pause' : 'done');
     dialog.close();
     done();
   };
@@ -1684,7 +1687,7 @@ function added(result: {
   // A link of another service: its tracks not found on YouTube.
   const notFound = result.skippedNotFound ?? 0;
   if (notFound > 0) parts.push(words.leftNotFound(notFound));
-  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + limited + notFound > 0 ? 'pause' : 'play');
+  toast(parts.join(' · '), result.skippedTooLong + result.skippedFull + limited + notFound > 0 ? 'pause' : 'done');
 }
 
 // An add's refusal as the add card says it: "Could not add:" and jukecord's reason in the panel's language, in the middle
