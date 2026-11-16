@@ -4287,8 +4287,10 @@ kbd {
   }
 }
 @media (max-width: 400px) {
-  /* The narrowest phones give the version's place to the server's name (/version and the status still say it). */
-  .bar .version {
+  /* The narrowest phones give the version's place to the server's name (/version and the status still say it): the
+     mark stands alone, its name hidden already (below). The empty group kept the mark's 8 px gap after it, a 29 px hole
+     between the mark and the connection's lamp. */
+  .bar .wordmark {
     display: none;
   }
 }
@@ -4631,6 +4633,16 @@ kbd {
   .nav a {
     min-width: 44px;
     justify-content: center;
+  }
+}
+@media (pointer: coarse) and (max-width: 400px) {
+  /* The mark alone (the narrowest phones hide the version): its link's finger's width reaches into the bar's side,
+     left of the mark, which stays over the cards' edge (16 px in, its box 0 to 44 with 2 px after the mark), so what
+     follows stands the bar's 8 px after it. The width past the mark read as a 29 px hole before the connection's lamp. */
+  .bar .brand {
+    justify-content: flex-end;
+    margin-left: calc(-1 * var(--s-16));
+    padding-right: var(--s-2);
   }
 }
 /* Keyboard shortcuts mean nothing on a touch screen without a keyboard. */
