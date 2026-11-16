@@ -43,6 +43,11 @@ const SHOOT = new Set([412, 390, 1440, 1366, 2560]);
 // alone, ONLY=pictures the panel's pictures and ONLY=listening the playing-along check. A whole walk leaves it unset,
 // or walks in groups at once whose names together are every state and those three.
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
+// Every page looked at from the example people's time zone: the seed's evenings are theirs (UTC+9), and looked at from
+// the walk's own (UTC) the statistics' hours peaked at 10 to 16 and "Night Owls" were busiest at 11:00.
+const ZONE = 'Asia/Seoul';
+// Its offset in minutes east of UTC, for the walk's own requests that take one (Seoul keeps no summer time).
+const ZONE_MINUTES = 540;
 const report = [];
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -87,6 +92,7 @@ async function open({
     deviceScaleFactor: 1,
     colorScheme: theme,
     locale: lang === 'ko' ? 'ko-KR' : 'en-US',
+    timezoneId: ZONE,
     isMobile: touch,
     hasTouch: touch,
     // A contrast theme, as Windows has: the system's few colours on every surface.
@@ -615,6 +621,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     deviceScaleFactor: 1.6,
     colorScheme: theme,
     locale: 'en-US',
+    timezoneId: ZONE,
   });
   await context.addInitScript(() => localStorage.setItem('jukecord.lang', 'en'));
   const page = await context.newPage();
@@ -637,6 +644,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     deviceScaleFactor: 2,
     colorScheme: theme,
     locale: 'en-US',
+    timezoneId: ZONE,
     isMobile: true,
     hasTouch: true,
   });
@@ -1099,7 +1107,8 @@ await sweep('empty', FEW, async (page) => {
 
 // Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
 // choose from, the picture to save, and the page in a contrast theme.
-const year = await api('GET', '/guilds/local/wrapped?period=last-12-months');
+// Its months as the pages count them, in their time zone.
+const year = await api('GET', `/guilds/local/wrapped?period=last-12-months&tz=${ZONE_MINUTES}`);
 const firstMonth = year.months.at(-1) ?? 'last-12-months';
 async function wrappedAt(page, period) {
   await page.goto(`${BASE}/stats/wrapped?period=${period}`);
@@ -2497,6 +2506,7 @@ await sweep(
       const played = await api('POST', '/guilds/local/player/play', { input: `https://media.example/${cover}` });
       const title = played.items[0]?.track.title ?? '';
       // The page shows it, and its light is on (motion is off on the walk's pages: no fade to wait for).
+    timezoneId: ZONE,
       await page.waitForFunction((title) => document.title.startsWith(title), title);
       await page.waitForSelector('.ambient > div.on');
       await page.waitForTimeout(300);
