@@ -583,12 +583,16 @@ await sweep('login', FEW);
 await api('POST', '/guilds/local/player/resume');
 await until('playing');
 // A track playing, at every width: the queue's head steady with its longest words, every row's line whole with who
-// added the track, the lists faded at their edges, the content in the middle past its widest.
+// added the track, the lists faded at their edges, the content in the middle past its widest; the history's rows with
+// their heart and list key, the voice card's words in one column, the heart after the title.
 await sweep('playing', SIZES, async (page) => {
   await headSteady(page);
   await rowsWhole(page);
   await edgesFade(page);
   await pageCentred(page);
+  await libraryKeys(page, 'like,more');
+  await voiceColumn(page);
+  await heartAfterTitle(page);
 });
 await sweep('discord', SIZES, null, { discord: true });
 // The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
@@ -676,6 +680,28 @@ await sweep(
       return found;
     });
     if (close.length > 0) throw new Error(`the voice card's keys are too close: ${close.join(', ')}`);
+    // And as far apart as each other, one under another: Leave from the first Join as the Joins (16 px against 8), and
+    // the heads side by side as one line, of one height with their rules level (the voice card's was 13 px shorter, its
+    // title 7 px higher than the playing card's).
+    const uneven = await page.evaluate(() => {
+      const found = [];
+      const keys = [...document.querySelectorAll('.voice-now > .key, .channels .key')]
+        .filter((key) => key.getClientRects().length > 0)
+        .map((key) => key.getBoundingClientRect())
+        .sort((a, b) => a.top - b.top);
+      const gaps = keys.slice(1).map((key, at) => key.top - keys[at].bottom);
+      if (gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) > 0.5)
+        found.push(`the voice card's keys ${gaps.map((gap) => gap.toFixed(1)).join(', ')} px apart`);
+      const heads = ['now-h', 'voice-h'].map((id) =>
+        document.querySelector(`.card[aria-labelledby="${id}"] > .card-head`).getBoundingClientRect(),
+      );
+      // Side by side only (one column stacks them).
+      if (heads[0].right <= heads[1].left && Math.abs(heads[0].bottom - heads[1].bottom) > 0.5)
+        found.push(`the heads side by side end ${Math.abs(heads[0].bottom - heads[1].bottom).toFixed(1)} px apart`);
+      return found;
+    });
+    if (uneven.length > 0) throw new Error(uneven.join('; '));
+    await voiceColumn(page);
     // Its finger-sized keys leave the history's words the least room of any window: who added each track whole.
     await rowsWhole(page);
     await headSteady(page);
@@ -1201,17 +1227,36 @@ await sweep('disconnected', FEW, async (page) => {
       `connecting, the playing card says "${head.words}" (${head.lamp})${head.title ? ' over a title' : ''}`,
     );
 });
+// The playing track's heart right after the title's last word, on the line the title ends on, however it wraps (beside
+// a title of two balanced lines it stood at the column's end, 320 px from the words).
+async function heartAfterTitle(page) {
+  const off = await page.evaluate(() => {
+    const heart = document.querySelector('.now .title-row .like-key');
+    const title = document.querySelector('.now .title');
+    if (!heart?.getClientRects().length || !title?.getClientRects().length) return null;
+    // The title's lines, one box each (it runs inline with the heart).
+    const last = [...title.getClientRects()].at(-1);
+    const key = heart.getBoundingClientRect();
+    const middle = (key.top + key.bottom) / 2;
+    if (middle < last.top || middle > last.bottom) return "the heart is not on the title's last line";
+    const apart = key.left - last.right;
+    return apart < 0 || apart > 8.5 ? `the heart stands ${apart.toFixed(1)} px after the title's last word` : null;
+  });
+  if (off) throw new Error(off);
+}
+
 // The seed's longest title playing, on phones and the tablet: the bar at the bottom shows it on one line.
 {
   const queue = await api('GET', '/guilds/local/queue');
   const long = queue.items.find((item) => item.track.title.length > 60);
   if (long) await api('POST', `/guilds/local/queue/${long.id}/play`).catch(() => {});
   await until('playing');
-  await sweep('long-title', NARROW);
+  // The heart after the title's last word, which wraps here.
+  await sweep('long-title', NARROW, heartAfterTitle);
 }
-// A queue of two hundred tracks (saved playlists loaded over and over).
+// A queue of two hundred tracks (saved playlists loaded over and over), the long title still playing.
 for (let i = 0; i < 16; i += 1) await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
-await sweep('long-queue', FEW);
+await sweep('long-queue', FEW, heartAfterTitle);
 await api('DELETE', '/guilds/local/queue');
 await api('POST', '/guilds/local/player/stop').catch(() => {});
 // Nothing queued: the queue's card has no search and no tool that would do nothing (a live search over the empty list
@@ -1717,8 +1762,27 @@ await sweep('lyrics-none', FEW, async (page) => {
   if (opened) throw new Error('the lyrics opened to say there are none');
 });
 await sweep('lyrics-forced', FEW, openLyrics, { forced: true });
-// The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it), and the
-// card while the player is to stop after this track.
+// A list of choices holds its rows' words alike: each row's first line as far from its top as the others' (beside a row
+// of one line, whose words stand in the middle of its height, a row with a hint under its name started them at its
+// padding, and the rows' lines stood 46, then 42 px apart).
+async function choicesInLine(page) {
+  const offsets = await page.evaluate(() => {
+    // The dialog on top: the last in the page.
+    const dialog = [...document.querySelectorAll('.dialog')].at(-1);
+    return [...dialog.querySelectorAll('.menu-list > .choice')]
+      .filter((choice) => choice.getClientRects().length > 0)
+      .map((choice) => {
+        // Its first line: the name over a hint, or its words alone.
+        const first = (choice.querySelector('.choice-name') ?? choice.querySelector('.grow')).getBoundingClientRect();
+        return Math.round(((first.top + first.bottom) / 2 - choice.getBoundingClientRect().top) * 2) / 2;
+      });
+  });
+  if (Math.max(...offsets) - Math.min(...offsets) > 0.5)
+    throw new Error(`the choices' first lines stand ${offsets.join(', ')} px under their tops`);
+}
+// The playing card's More menu (titled with the track, as a queued track's is, with Remove this track in it): what can
+// be done to the track alone (Invite to listen, which is not about the track, lives beside the people listening and in
+// the menu), its rows alike.
 await sweep('now-more', FEW, async (page) => {
   await page.click('[data-act="now-more"]');
   await page.waitForSelector('.dialog [data-choice="stop-after"]');
@@ -1728,6 +1792,9 @@ await sweep('now-more', FEW, async (page) => {
   ]);
   if (title !== track) throw new Error(`the playing track's More is titled "${title}", not "${track}"`);
   if ((await page.locator('.dialog [data-choice="drop"]').count()) === 0) throw new Error('More has no Remove');
+  const choices = await page.$$eval('.dialog .menu-list > .choice', (found) => found.map((c) => c.dataset.choice));
+  if (choices.join() !== 'stop-after,drop') throw new Error(`the playing track's More holds ${choices.join(', ')}`);
+  await choicesInLine(page);
 });
 // From the top of the track, so it does not end (and stop) while these pages are looked at.
 await api('POST', '/guilds/local/player/seek', { positionMs: 0 });
@@ -2423,6 +2490,9 @@ await sweep('liked-menu', [[360, 780]], async (page) => {
   await page.click('.library-seg [data-view="liked"]');
   await page.locator('.history .row .lib-more:visible').first().click();
   await page.waitForSelector('.dialog .menu-list .choice');
+  // In the add card's order, as every list of the keys that add a track.
+  await oneOrder(page);
+  await choicesInLine(page);
 });
 await sweep('history-keys', DISCOVERY, async (page) => {
   await page.click('.library-seg [data-view="history"]');

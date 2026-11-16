@@ -395,6 +395,8 @@ const EN = {
   // The playing card's More menu.
   nowMore: 'More for the playing track',
   stopAfter: 'Stop after this track',
+  // Under it in the playing track's More, as Remove this track says how it differs from Skip: how it differs from Stop.
+  stopAfterHint: 'Lets it finish, then stops',
   stopsAfter: 'Stops after this track',
   keepPlaying: 'Keep playing',
   keepPlayingHint: 'Keep playing after this track',
@@ -876,6 +878,7 @@ const KO: Strings = {
   lyricsGoTo: (time: string) => `${time}부터 재생`,
   nowMore: '지금 곡 메뉴',
   stopAfter: '이 곡이 끝나면 정지',
+  stopAfterHint: '끝까지 재생하고 멈춤',
   stopsAfter: '이 곡이 끝나면 멈춤',
   keepPlaying: '계속 재생',
   keepPlayingHint: '이 곡 뒤에도 계속 재생',

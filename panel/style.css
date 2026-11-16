@@ -2454,19 +2454,22 @@ img {
 .key.like-key[aria-pressed="true"] .icon svg {
   fill: currentColor;
 }
-/* The playing track's title and its heart side by side, the heart at the height of the title's first line. */
+/* The playing track's title and its heart in one run of words: the heart right after the title's last word, on the line
+   the title ends on however it wraps (side by side, the title's box took the column's width whatever its balanced
+   lines did, and beside a title of two lines the heart stood 320 px from its words). The run's lines are the title's
+   own size, so the heart's line is as tall as the title's. */
 .now .title-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s-4);
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
 }
 .title-row .title {
-  flex: 0 1 auto;
-  min-width: 0;
+  display: inline;
 }
-/* The heart centred on the title's first line however tall a key is: as tall as that line with a mouse (28 px both),
-   and for fingers (44 px) reaching as far above the line as below, so the row keeps the title's height. */
+/* The heart on the line's height however tall a key is: as tall as the line with a mouse (28 px both), and for fingers
+   (44 px) reaching as far above it as below, so the line keeps the title's height; 4 px after the last word. */
 .now .title-row .like-key {
+  vertical-align: top;
+  margin-left: var(--s-4);
   margin-block: calc((var(--lh-xl) - var(--control-sm)) / 2);
 }
 /* The history card's title: its two lists, as a row of two choices, each with its count. */
@@ -2513,6 +2516,12 @@ img {
 /* With its Leave key (the bot in a channel, one line of words), the line is centred on the key. */
 .voice-now:has(> .key:not([hidden])) {
   align-items: center;
+}
+/* With the other channels under it, it is the first row of their list, as tall as theirs: Leave as far from the first
+   Join as the Joins are from each other (16 px under Leave against 12 between the Joins; by touch, 16 against 8). */
+.voice-now:has(> .key:not([hidden])):has(+ .channels:not([hidden])) {
+  min-height: 40px;
+  padding-block: 0;
 }
 /* (As heavy as the playing card's rule for its icons, which comes first.) */
 .card .voice-now.joined > .icon {
@@ -3836,6 +3845,14 @@ kbd {
   .sound {
     padding-block: var(--s-8);
   }
+  /* The bot's row over the channels' list: 8 px from the head's line to Leave, and 8 from Leave to the first Join (its
+     4 and the channel row's 4), as from Join to Join. */
+  .voice-now:has(> .key:not([hidden])):has(+ .channels:not([hidden])) {
+    padding-block: var(--s-8) var(--s-4);
+  }
+  .voice-now:has(> .key:not([hidden])) + .channels {
+    padding-top: 0;
+  }
 }
 
 /* The queue's tools on a narrow card: Take turns now waits behind the tools key with the others (see the rule for
@@ -4594,10 +4611,12 @@ kbd {
   align-items: center;
   gap: var(--s-4);
 }
-/* A finger's keys are taller than the head's least height: the playing card's head keeps their height while they are
-   not there (nothing playing), so the card does not jump by it as tracks start and stop. */
+/* A finger's keys are taller than the head's least height: every card head of the player's page is as tall as one with
+   a finger's key in it, keys or not. The playing card's keeps that height while its keys are not there (nothing
+   playing), so the card does not jump by it as tracks start and stop; and heads side by side (a tablet's playing card
+   and voice card) stand as one line, their titles and rules level (the voice card's was 13 px shorter). */
 @media (pointer: coarse) {
-  .card[aria-labelledby="now-h"] > .card-head {
+  .main .card > .card-head {
     min-height: calc(var(--control-sm) + 2 * var(--s-8) + 1px);
   }
 }

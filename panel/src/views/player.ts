@@ -1337,7 +1337,14 @@ function nowMenu(): void {
       dataset: { choice: 'stop-after' },
     },
     icon('circle-stop'),
-    h('span', { class: 'grow' }, words.stopAfter),
+    // With what tells it from Stop under its name, as Remove has what tells it from Skip: the list's rows alike, each
+    // first line where the other's is (beside a row of one line the rows stood 46, then 42 px apart).
+    h(
+      'span',
+      { class: 'grow' },
+      h('span', { class: 'choice-name' }, words.stopAfter),
+      h('span', { class: 'choice-hint' }, words.stopAfterHint),
+    ),
     icon('check', 'check'),
   );
   stopAfter.onclick = () => {
