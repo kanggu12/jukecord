@@ -16,7 +16,6 @@ import {
   dayRangeText,
   dayText,
   hourSpanText,
-  hourText,
   lengthParts,
   lengthText,
   momentText,
@@ -247,9 +246,10 @@ export function statsPage(): HTMLElement {
       [tickOf(0), tickOf(middle), tickOf(buckets.length - 1)],
       [span > 1 ? words.weekColumn : words.dayColumn, words.playsColumn],
     );
-    // Each hour by its start in the table ("09:00"), as the span it is in the tooltip ("09:00 – 10:00").
+    // Each hour as the span it is ("09:00 – 10:00"), in the tooltip, the table and for screen readers alike: one way
+    // for an hour on every page (the table's "09:00" beside the tip's span was two).
     const hourValues = stats.hours.map((value, hour) => ({
-      label: hourText(hour),
+      label: hourSpanText(hour, state.lang),
       tip: hourSpanText(hour, state.lang),
       value,
     }));

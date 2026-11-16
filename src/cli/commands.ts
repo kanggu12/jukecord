@@ -7,7 +7,7 @@
  */
 
 import fs from 'node:fs';
-import { busiestHour, busiestWeekday, hasSong } from '../core/facts.ts';
+import { busiestHour, busiestWeekday, hasSong, hourSpan } from '../core/facts.ts';
 import { type Length, withLongest } from '../core/lengths.ts';
 import { sayNotice } from '../core/say.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
@@ -373,8 +373,8 @@ function showWrapped(answer: unknown): string {
   const weekday = busiestWeekday(wrapped);
   const hour = busiestHour(wrapped);
   const names = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
-  const two = (value: number) => String(value).padStart(2, '0');
-  const busiest = [weekday >= 0 ? names[weekday] : null, hour >= 0 ? `${two(hour)}:00-${two(hour + 1)}:00` : null];
+  // The hour as the panel and the Discord card write it ("20:00 – 21:00"): one way everywhere (core/facts.ts).
+  const busiest = [weekday >= 0 ? names[weekday] : null, hour >= 0 ? hourSpan(hour, 'en') : null];
   if (busiest.some(Boolean)) lines.push(`Busiest: ${busiest.filter(Boolean).join(', ')}`);
   if (wrapped.longestDay) {
     const day = wrapped.longestDay;

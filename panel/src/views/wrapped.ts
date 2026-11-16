@@ -12,16 +12,7 @@ import { busiestHour, busiestWeekday, hasSong, ranks } from '../../../src/core/f
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
 import { state, t, watch } from '../state.ts';
-import {
-  dayRangeText,
-  dayText,
-  hourSpanText,
-  hourText,
-  lengthParts,
-  lengthText,
-  momentText,
-  withLongest,
-} from '../time.ts';
+import { dayRangeText, dayText, hourSpanText, lengthParts, lengthText, momentText, withLongest } from '../time.ts';
 import { goTo, problem, showDialog } from '../ui/layers.ts';
 import { drawPicture, type PictureContent, type Shape } from './picture.ts';
 import { album } from './player.ts';
@@ -306,11 +297,13 @@ export function wrappedPage(): HTMLElement {
       hour >= 0
         ? moment(
             words.busiestHour,
-            hourText(hour),
+            // The span it is, as the picture, the statistics' tip and the Discord card write an hour ("11:00" here
+            // beside "11:00 – 12:00" in the picture).
+            hourSpanText(hour, state.lang),
             words.playsCount(wrapped.hours[hour] ?? 0),
             spark(
               wrapped.hours,
-              wrapped.hours.map((_, index) => hourText(index)),
+              wrapped.hours.map((_, index) => hourSpanText(index, state.lang)),
               words.byHour,
               hour,
             ),

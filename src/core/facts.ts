@@ -67,6 +67,18 @@ export function busiestHour(wrapped: Pick<Wrapped, 'hours' | 'days' | 'plays' | 
 }
 
 /**
+ * An hour of the day as every place writes it (the panel's page, its pictures and its statistics, the Discord card,
+ * the command line): the span it is, on the 24-hour clock, with the dash a span takes in each language ("20:00 –
+ * 21:00", "20:00 ~ 21:00"). The page said "11:00", its picture "11:00 – 12:00", and the card "11:00-12:00".
+ */
+export function hourSpan(hour: number, lang: 'en' | 'ko'): string {
+  // Two digits each, as a clock writes them; the last hour ends at 24:00, the end of its day.
+  const at = (value: number) => `${String(value).padStart(2, '0')}:00`;
+  // The panel's own dash for a span (i18n.ts rangeOf), so an hour reads as its days' spans do.
+  return `${at(hour)} ${lang === 'ko' ? '~' : '–'} ${at(hour + 1)}`;
+}
+
+/**
  * The places of a list's entries by their counts, most first: entries of the same count share a place, and the next
  * count's place is its own position (1, 2, 2, 4), as a tie is ranked in a race. Numbered one after another, two tracks
  * played once each were first and second, as if the second had played less.
