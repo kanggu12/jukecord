@@ -91,7 +91,7 @@ Discord account.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phones-features-dark.webp">
-    <img alt="The panel on a phone, three screens. The lyrics of the track playing, the line being sung lit. A search for paper boats, with what YouTube found under the add field, each to play now, next or later. The Invite dialog with a listening link for seven days and its QR code." src="docs/assets/phones-features-light.webp" width="100%">
+    <img alt="The panel on a phone, three screens. The lyrics of the track playing, the line being sung lit. A search for golden hour, with what YouTube found under the add field, each to play now, next or later. The Invite dialog with a listening link for seven days and its QR code." src="docs/assets/phones-features-light.webp" width="100%">
   </picture>
 </p>
 
