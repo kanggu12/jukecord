@@ -66,8 +66,8 @@ search words. A link pasted anywhere on the page, or dropped on it, is added too
 
 ### The rest of the page
 
-- **Invite** (in the voice card, the player's **⋯** and the menu) makes a listening link for guests and, for the host,
-  a login link for a friend, each with a QR code ([friends and guests](#friends-and-guests)).
+- **Invite** (in the voice card and the menu) makes a listening link for guests and, for the host, a login link for
+  a friend, each with a QR code ([friends and guests](#friends-and-guests)).
 - **The menu** (your name, top right) has the theme, language, motion, API tokens and keyboard shortcuts, and for
   people who can manage the server, its settings.
 - **Log** (the host only) is jukecord's log, filtered by level and part.
