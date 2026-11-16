@@ -365,7 +365,6 @@ const EN = {
       'November',
       'December',
     ][month - 1] ?? '',
-  twelveMonths: '12 months',
   inMusic: (year: string | null) => (year ? `${year}, wrapped` : 'wrapped'),
   // The song's facts apart, for a picture that sets each on its own line when they do not fit one.
   songFactsApart: (days: number, plays: number) =>
@@ -858,7 +857,6 @@ const KO: Strings = {
   share: '공유',
   pictureAlt: (title: string, server: string) => `${server}: ${title}`,
   monthName: (month: number) => `${month}월`,
-  twelveMonths: '최근 12개월',
   inMusic: (year: string | null) => (year ? `${year}년 음악 결산` : '음악 결산'),
   songFactsApart: (days: number, plays: number) =>
     days === 1

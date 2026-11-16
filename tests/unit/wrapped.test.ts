@@ -422,11 +422,12 @@ describe('Wrapped in Discord', () => {
       assert.deepEqual(
         card?.fields?.map((field) => [field.name, field.value]),
         [
-          ['Longest day', 'June 19 · 1 h 7 min'],
-          ['First track', '[Track 1](https://example.com/watch?v=v1) · June 19'],
+          ['Longest day', 'Jun 19 · 1 h 7 min'],
+          ['First track', '[Track 1](https://example.com/watch?v=v1) · Jun 19'],
         ],
       );
-      assert.equal(card?.footer?.text, '2026-01-01 to 2026-11-11');
+      // The time's span as the page writes it (it was the API's ISO days).
+      assert.equal(card?.footer?.text, 'Jan 1 – Nov 11, 2026');
       const link = english.components[0]?.toJSON().components[0] as { url?: string } | undefined;
       assert.equal(link?.url, 'https://music.example.com/stats/wrapped?period=2026');
       const korean = wrappedCard(view, 'ko', 'Night Owls', null, 540);
@@ -437,6 +438,7 @@ describe('Wrapped in Discord', () => {
       assert.match(kard?.description ?? '', /음악을 들은 날수 \*\*1\*\*/);
       assert.match(kard?.description ?? '', /<@300000000000000001> · 1회/);
       assert.deepEqual(kard?.fields?.map((field) => field.value).slice(0, 1), ['6월 19일 · 1시간 7분']);
+      assert.equal(kard?.footer?.text, '2026년 1월 1일 ~ 11월 11일');
       assert.equal(korean.components.length, 0);
       // Nothing played: said in the card, which keeps its title.
       const quiet = wrappedCard(actions.wrapped(look, '2026-03', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();

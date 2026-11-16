@@ -503,7 +503,6 @@ const WRAPPED = {
     ko: ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'],
   },
   kept: { en: (day: string) => `The history goes back to ${day}`, ko: (day: string) => `기록은 ${day}부터 남아 있음` },
-  between: { en: 'to', ko: '~' },
 } as const;
 
 // A time's name in a sentence: "2026", "November 2026" or "the last 12 months" (Korean "2026년", "2026년 11월",
@@ -521,15 +520,30 @@ function timeName(period: WrappedView['period'], lang: Lang): string {
 }
 
 // A day of the time as people say it ("June 24", "6월 24일"), with its year when the time spans two.
-function dayName(day: string, period: WrappedView['period'], lang: Lang): string {
-  const [year, month, date] = day.split('-').map(Number);
-  const withYear = period.kind === 'last-12-months';
-  if (lang === 'ko') return `${withYear ? `${year}년 ` : ''}${month}월 ${date}일`;
-  const name = new Date(Date.UTC(2000, (month ?? 1) - 1, 1)).toLocaleString('en-US', {
-    month: 'long',
-    timeZone: 'UTC',
-  });
-  return `${name} ${date}${withYear ? `, ${year}` : ''}`;
+// The months as the panel writes them in a day (panel/src/i18n.ts dayOf): the card says days as the page does.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// A day of the time, as the Wrapped page writes it: "Nov 22" ("11월 22일"), its year in the card's footer.
+function dayName(day: string, lang: Lang): string {
+  const [, month = 1, date = 1] = day.split('-').map(Number);
+  return lang === 'ko' ? `${month}월 ${date}일` : `${MONTHS[month - 1] ?? ''} ${date}`;
+}
+
+// The time's span, as the Wrapped page writes it (panel/src/i18n.ts dayRange): the year once at the end, the month
+// once when it does not change, each end with its year across a new year: "Jan 1 – Nov 13, 2026", "Nov 14, 2025 –
+// Nov 13, 2026" ("2026년 1월 1일 ~ 11월 13일", "2025년 11월 14일 ~ 2026년 11월 13일"). It was the API's ISO days.
+function spanName(from: string, to: string, lang: Lang): string {
+  const [fromYear = 0, fromMonth = 1, fromDay = 1] = from.split('-').map(Number);
+  const [toYear = 0, toMonth = 1, toDay = 1] = to.split('-').map(Number);
+  if (lang === 'ko') {
+    if (fromYear !== toYear) return `${fromYear}년 ${fromMonth}월 ${fromDay}일 ~ ${toYear}년 ${toMonth}월 ${toDay}일`;
+    if (fromMonth !== toMonth) return `${fromYear}년 ${fromMonth}월 ${fromDay}일 ~ ${toMonth}월 ${toDay}일`;
+    return `${fromYear}년 ${fromMonth}월 ${fromDay}일 ~ ${toDay}일`;
+  }
+  const month = (number: number) => MONTHS[number - 1] ?? '';
+  if (fromYear !== toYear) return `${month(fromMonth)} ${fromDay}, ${fromYear} – ${month(toMonth)} ${toDay}, ${toYear}`;
+  if (fromMonth !== toMonth) return `${month(fromMonth)} ${fromDay} – ${month(toMonth)} ${toDay}, ${toYear}`;
+  return `${month(fromMonth)} ${fromDay} – ${toDay}, ${toYear}`;
 }
 
 /**
@@ -549,7 +563,7 @@ export function wrappedCard(
   const embed = new EmbedBuilder()
     .setColor(COLOUR.neutral)
     .setTitle(guildName ? `${guildName} · ${title}` : title)
-    .setFooter({ text: `${view.period.from} ${WRAPPED.between[lang]} ${view.period.to}` });
+    .setFooter({ text: spanName(view.period.from, view.period.to, lang) });
   // The panel's page of the same time, where it can be saved as a picture.
   const components = panelUrl
     ? [
@@ -616,7 +630,7 @@ export function wrappedCard(
     const day = view.longestDay;
     embed.addFields({
       name: WRAPPED.longestDay[lang],
-      value: `${dayName(day.day, view.period, lang)} · ${lengthWords(longest, lang)}`,
+      value: `${dayName(day.day, lang)} · ${lengthWords(longest, lang)}`,
       inline: true,
     });
   }
@@ -626,7 +640,7 @@ export function wrappedCard(
     const day = new Date(first.playedAt + offsetMinutes * 60_000).toISOString().slice(0, 10);
     embed.addFields({
       name: WRAPPED.firstTrack[lang],
-      value: `${line(first.track.title, first.track.url, null, null, lang)} · ${dayName(day, view.period, lang)}`,
+      value: `${line(first.track.title, first.track.url, null, null, lang)} · ${dayName(day, lang)}`,
     });
   }
   return { embeds: [embed], components };
