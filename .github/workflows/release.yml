@@ -1,7 +1,9 @@
 # A version tag (v1.2.3) publishes a release: the image for linux/amd64 and linux/arm64 to the GitHub Container
-# Registry (each built on its own processor's runner, then joined under one tag), the Helm chart as an OCI artifact
-# and a .tgz, checksums, signed build provenance, and the GitHub release whose notes are the version's CHANGELOG.md
-# section. A tag with a pre-release part (v1.2.3-rc.1) publishes as a pre-release, without the `latest` tag.
+# Registry (each built on its own processor's runner, then joined under one tag), the Helm chart as an OCI artifact,
+# signed build provenance, and the GitHub release whose notes are the version's CHANGELOG.md section, with the chart
+# and its checksums attached under names that say what they are and which version (jukecord-1.2.3-helm-chart.tgz,
+# jukecord-1.2.3-checksums.txt). A tag with a pre-release part (v1.2.3-rc.1) publishes as a pre-release, without the
+# `latest` tag.
 name: release
 
 on:
@@ -21,7 +23,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      - name: One version in the tag, the code and the chart
+      - name: One version in the tag, the code, the chart and the guides
         run: node scripts/check-version.ts "$GITHUB_REF_NAME"
       - name: The release notes, from CHANGELOG.md
         # Written to a file first: through a pipe the step would pass even when the script fails.
@@ -173,12 +175,20 @@ jobs:
             --app-version "${{ steps.v.outputs.version }}" --destination dist
           printf '%s' "$TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm push "dist/jukecord-${{ steps.v.outputs.version }}.tgz" "oci://ghcr.io/${{ steps.v.outputs.owner }}/charts"
-      - name: Checksums
-        run: (cd dist && sha256sum "jukecord-${{ steps.v.outputs.version }}.tgz" > SHA256SUMS && cat SHA256SUMS)
+      # The files attached to the release, named for what they are and their version: Helm's own name for the chart
+      # (jukecord-1.2.3.tgz, as helm pull writes it) read on a release page as an archive of jukecord itself, and a
+      # bare SHA256SUMS said nothing of which release it checks.
+      - name: The release's files
+        run: |
+          cd dist
+          cp "jukecord-${{ steps.v.outputs.version }}.tgz" "jukecord-${{ steps.v.outputs.version }}-helm-chart.tgz"
+          sha256sum "jukecord-${{ steps.v.outputs.version }}-helm-chart.tgz" > "jukecord-${{ steps.v.outputs.version }}-checksums.txt"
+          cat "jukecord-${{ steps.v.outputs.version }}-checksums.txt"
       - name: Where the chart was built, signed by GitHub
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/jukecord-${{ steps.v.outputs.version }}.tgz
+          # The same bytes as the chart pushed above: the provenance answers for both.
+          subject-path: dist/jukecord-${{ steps.v.outputs.version }}-helm-chart.tgz
       - uses: actions/download-artifact@v8
         with:
           name: release-notes
@@ -192,5 +202,5 @@ jobs:
           # The notes are the version's CHANGELOG.md section alone, not followed by GitHub's list of pull requests.
           generate_release_notes: false
           files: |
-            dist/jukecord-${{ steps.v.outputs.version }}.tgz
-            dist/SHA256SUMS
+            dist/jukecord-${{ steps.v.outputs.version }}-helm-chart.tgz
+            dist/jukecord-${{ steps.v.outputs.version }}-checksums.txt

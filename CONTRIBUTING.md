@@ -91,11 +91,11 @@ raises the minor number, a fix the patch.
 1. Move the `Unreleased` section of [CHANGELOG.md](CHANGELOG.md) under the new version with today's date. That section
    is the release's notes.
 2. Set the version in `src/version.ts`, `package.json` and `deploy/helm/jukecord/Chart.yaml` (its `version`,
-   `appVersion` and the image's tag in `artifacthub.io/images`), run `sh .github/badges.sh` and
-   `node scripts/api-doc.ts`, and commit.
+   `appVersion` and the image's tag in `artifacthub.io/images`), run `sh .github/badges.sh` (it also brings the
+   guides' install lines to the version) and `node scripts/api-doc.ts`, and commit.
 3. Tag `vX.Y.Z` and push the tag. `release.yml` checks the versions and the notes, runs the tests and the chart test,
    publishes the image for amd64 and arm64 and the chart to ghcr.io with signed build provenance, and makes the GitHub
-   release.
+   release with the chart and its checksums attached (`jukecord-X.Y.Z-helm-chart.tgz`, `jukecord-X.Y.Z-checksums.txt`).
 4. On a machine not logged in to ghcr.io, check that the image and the chart answer, as `docker pull` and
    `helm install` need. A private package answers "unauthorized": make it public on its page under the repository's
    **Packages**.

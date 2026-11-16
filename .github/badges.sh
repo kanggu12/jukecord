@@ -1,7 +1,8 @@
 #!/bin/sh
-# Writes the README's badges into docs/assets/badges/. GitHub shows images from other sites through a proxy that gives
-# up after a few seconds; a badge that is a file in the repository is served without that proxy. Run it after the
-# version is set in src/version.ts:
+# Writes the README's badges into docs/assets/badges/, and brings the guides' lines that name a release (the README's
+# badge text, the image and chart in the install guides, the bug form's example) to the version. GitHub shows images
+# from other sites through a proxy that gives up after a few seconds; a badge that is a file in the repository is
+# served without that proxy. Run it after the version is set in src/version.ts, package.json and the chart:
 #
 #   sh .github/badges.sh
 set -eu
@@ -28,6 +29,7 @@ badge release "release-v$version-2a78d6"
 badge license "license-MIT-2a78d6"
 badge platforms "runs%20on-amd64%20%7C%20arm64-555"
 
-# the README's alt text says the same, for a reader without images
-sed -i -e "s/alt=\"Release v[0-9][0-9.]*\"/alt=\"Release v$version\"/" README.md
 echo "wrote $dir: release v$version"
+# the README's alt text says the same, for a reader without images, and the guides name this release; it then checks
+# the version is the same everywhere a release reads it
+node scripts/check-version.ts --write
