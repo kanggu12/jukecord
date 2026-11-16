@@ -1388,6 +1388,21 @@ async function settingsLook(page) {
   await choicesInBlue(page).catch((error) => wrong.push(error.message));
   if (wrong.length > 0) throw new Error(wrong.join('; '));
 }
+// The vote to skip, with no DJ role chosen (everyone may skip: nothing to vote on): its switch dimmed and taking no
+// presses, its hint saying why and read with it (bright and on, it read as working). With a role, a switch as any.
+async function voteSwitch(page, role) {
+  const vote = await page.evaluate(() => {
+    const toggle = document.querySelector('.sheet .settings .switch');
+    const hint = document.getElementById(toggle?.getAttribute('aria-describedby') ?? '');
+    return {
+      disabled: toggle?.disabled ?? null,
+      opacity: toggle ? Number(getComputedStyle(toggle).opacity) : null,
+      why: hint?.textContent ?? '',
+    };
+  });
+  const right = role ? vote.disabled === false : vote.disabled === true && vote.opacity < 0.6 && vote.why !== '';
+  if (!right) throw new Error(`the vote's switch ${role ? 'with' : 'without'} a DJ role: ${JSON.stringify(vote)}`);
+}
 // The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
 await sweep(
   'menu-discord',
@@ -2142,6 +2157,7 @@ await sweep(
     await page.click('[data-act="menu"]');
     await page.waitForSelector('.sheet .settings .switch');
     await page.waitForTimeout(400);
+    await voteSwitch(page, false);
   },
   { discord: true },
 );
@@ -2156,6 +2172,7 @@ await sweep(
     const problems = [];
     await settingsLook(page).catch((error) => problems.push(error.message));
     await noLostHue(page).catch((error) => problems.push(error.message));
+    await voteSwitch(page, true).catch((error) => problems.push(error.message));
     if (problems.length > 0) throw new Error(problems.join('; '));
   },
   { discord: { djRole: true } },

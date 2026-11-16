@@ -1335,6 +1335,12 @@ img {
 .switch[aria-checked="true"]::after {
   transform: translateX(14px);
 }
+/* A setting that does nothing yet (a vote to skip with no DJ role to stand against): its switch dimmed as a key that
+   cannot be pressed, its words saying why (bright and on, it read as working while everyone may skip). */
+.switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 /* ---- the disc --------------------------------------------------------------------------------------------------- */
 .disc {

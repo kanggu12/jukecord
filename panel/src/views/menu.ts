@@ -378,15 +378,30 @@ function drawAlerts(box: HTMLElement, guild: string, settings: Settings, again: 
   );
 }
 
+// How many settings' hints have been named, for each its own id.
+let switchHints = 0;
+
 // A setting that is on or off: its name and what it does, and its switch, saved at each press. A refusal puts the
-// switch back and says why.
-function switchLine(name: string, hint: string, on: boolean, save: (on: boolean) => Promise<unknown>): HTMLElement {
+// switch back and says why. One that can do nothing yet (`idle`: a vote to skip with no DJ role) is dimmed and takes no
+// presses, its hint saying why; it keeps its state, which works once the hint's condition is met.
+function switchLine(
+  name: string,
+  hint: string,
+  on: boolean,
+  save: (on: boolean) => Promise<unknown>,
+  idle = false,
+): HTMLElement {
+  // The hint, named so the switch can point at it: a screen reader says why it is dimmed with it.
+  switchHints += 1;
+  const hintId = `setting-hint-${switchHints}`;
   const toggle = h('button', {
     class: 'switch',
     type: 'button',
     role: 'switch',
     'aria-checked': String(on),
     'aria-label': name,
+    'aria-describedby': idle ? hintId : null,
+    disabled: idle,
   });
   toggle.onclick = async () => {
     const next = toggle.getAttribute('aria-checked') !== 'true';
@@ -397,7 +412,7 @@ function switchLine(name: string, hint: string, on: boolean, save: (on: boolean)
   return h(
     'div',
     { class: 'line' },
-    h('div', { class: 'grow' }, h('div', null, name), h('div', { class: 'faint' }, hint)),
+    h('div', { class: 'grow' }, h('div', null, name), h('div', { class: 'faint', id: hintId }, hint)),
     toggle,
   );
 }
@@ -447,6 +462,8 @@ function drawShare(box: HTMLElement, guild: string, settings: Settings): void {
       settings.djRoleId === null ? words.voteSkipNoRole : words.voteSkipHint,
       settings.voteSkip,
       (on) => api['vote-skip'](guild, on),
+      // Dimmed until a role is chosen: while everyone may skip, there is nothing to vote on.
+      settings.djRoleId === null,
     ),
     switchLine(words.takeTurns, words.takeTurnsHint, settings.takeTurns, (on) => api['take-turns'](guild, on)),
     limitLine(settings.personLimit, (tracks) => api['person-limit'](guild, tracks)),
