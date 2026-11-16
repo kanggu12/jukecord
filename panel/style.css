@@ -609,6 +609,10 @@ img {
   color: var(--ink-2);
   overflow: hidden;
 }
+/* A server's letter: on a whole pixel of its circle, as a face's letters are (below). */
+.guild-icon:not(:has(> img)) {
+  padding-top: 1px;
+}
 .guild-icon img {
   width: 100%;
   height: 100%;
@@ -758,6 +762,18 @@ img {
 .avatar.sm {
   width: 20px;
   height: 20px;
+}
+/* A face's letters (not a role's person, not a picture): their line half a pixel lower, on a whole pixel of the face, as
+   a badge's (its 15 px line centred in 24 or 20 px stood on a half pixel, and the letters a pixel high as drawn). */
+.avatar:not(.role, :has(> img)) {
+  padding-top: 1px;
+}
+/* A person's picture fills the face (at its own 64 px it stood in the middle of the 24 px circle, a crop of the
+   middle of the face). */
+.avatar > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 /* A role's face (the host, a guest, a friend: no account, so no name to take letters from): a person in the second
    ink on a solid grey, as a server's icon without a picture is shown, with no hue (a role is not one person to tell
@@ -1914,6 +1930,11 @@ img {
   color: var(--tone, var(--ink-2));
   /* As the pill: the tone's tint over the panel's own colour, so a bright cover's light does not show through it. */
   background: color-mix(in oklch, var(--tone, var(--ink-3)) var(--soft), var(--panel-solid));
+  /* Its line half a pixel lower, on a whole pixel of the pill (1.5 px down in 18 had it on a half): the screen draws
+     the pill's edges and the words' baseline each on whole pixels, rounded apart, and the words stood a pixel high on
+     a queue row (4 px over the capitals, 6 under). On a whole pixel the two round together, and the capitals stand in
+     the middle (tests/ui/audit.js measures a badge and a face as drawn). */
+  padding-top: 1px;
 }
 
 /* A row's album: the cover, rounded, with the record peeking out from behind it; under the pointer the record slides

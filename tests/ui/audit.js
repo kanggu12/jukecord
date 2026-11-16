@@ -12,12 +12,13 @@
  *   labels and words standing in that row, at different centres; a sheet's close key off the centre of its first row;
  * - icon: an icon (or a lamp, a face, a swatch) off the centre of the line of words beside it;
  * - label: the words of a key, a pill, a badge or a face off the middle of their frame: upright their capitals (Korean,
- *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are;
+ *   their syllables), across their icon and inked letters, when the frame centres them or is as wide as they are; a
+ *   badge and a face as drawn, their edges and their words' baseline each rounded to the screen's pixels;
  * - cards: cards side by side that do not share their top and their bottom (the player's two columns too);
  * - column: things stacked in a frame (a card, a sheet, a dialog, a page) whose left edges, or the right edges of boxes
  *   that end together, almost meet: a few pixels apart, which reads as a mistake rather than an indent;
  * - baseline: words side by side on one line (a title and its count, a name and its version) on different baselines;
- * - spacing: a padding, a margin or a gap off the spacing scale;
+ * - spacing: a padding, a margin or a gap off the spacing scale (but the 1 px that lowers a badge's or a face's words);
  * All of these to half a pixel: a careful eye sees one.
  * - crossing: a floating layer (toast, sheet, chart tip) whose edge cuts across another box;
  * - covered: the middle of a sheet, a dialog or a toast is not that layer (something is drawn over it: a sheet over
@@ -950,11 +951,21 @@ window.__audit = () => {
       bottom: outer.bottom - Number.parseFloat(style.borderBottomWidth),
     };
     if (height(inner) > 3 * height(lines[0])) continue;
+    // A badge and a face are measured as drawn: the screen puts the frame's edges and the words' baseline each on whole
+    // pixels, rounded apart (half up), so in a frame of 18 or 24 px a half pixel of layout that rounds the other way
+    // shows as a whole one (a queue row's "Next", laid out 0.45 px high in a pill at y 534.5, was drawn a pixel high:
+    // the pill at 535, the baseline at 547). Their words' line stands on a whole pixel of the frame (style.css), so
+    // both round alike wherever the frame is.
+    const asDrawn = frame.matches('.badge, .avatar, .guild-icon');
+    const ratioOf = window.devicePixelRatio || 1;
+    const snap = (value) => (asDrawn ? Math.round(value * ratioOf) / ratioOf : value);
+    inner.top = snap(inner.top);
+    inner.bottom = snap(inner.bottom);
     // Upright: from the highest capital or syllable to the baseline, or to the syllables' foot when there are some.
     let top = Number.POSITIVE_INFINITY;
     let bottom = Number.NEGATIVE_INFINITY;
     for (const piece of pieces) {
-      const base = piece.rect.top + footOf(piece.style);
+      const base = snap(piece.rect.top + footOf(piece.style));
       const korean = (piece.text.match(KOREAN) ?? []).join('');
       if (/[A-Za-z0-9]/.test(piece.text)) {
         top = Math.min(top, base - inkOf(piece.style, 'H').up);
@@ -1265,9 +1276,13 @@ window.__audit = () => {
     const spaces = [];
     // The room a screen's notch, corners or home bar take (its safe-area insets) is the device's, not the design's.
     const device = (value) => Object.values(safe).some((inset) => inset > 0 && Math.abs(value - inset) < 0.05);
+    // The one nudge off the scale, and only this one: a badge's and a face's words a pixel lower (padding-top: 1px).
+    // The 11 px face's capitals stand half a pixel above the middle of its line, and their frames (18 px a badge, 24
+    // and 20 px a face) put the 15 px line on a half pixel: drawn, the words stood a pixel high (style.css .badge).
+    const nudged = element.matches('.badge, .avatar, .guild-icon');
     for (const side of ['top', 'right', 'bottom', 'left']) {
       const padding = lengthOf(map, `padding-${side}`);
-      if (padding && !device(padding)) {
+      if (padding && !device(padding) && !(nudged && side === 'top' && padding === 1)) {
         spaces.push(['padding', padding]);
         used.paddings.add(px(padding));
       }
