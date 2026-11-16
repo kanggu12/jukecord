@@ -6,6 +6,83 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-17
+
+Every defect that the panel's walk and independent reviews still found in 0.3.2, fixed: true figures in Wrapped, words
+that say what they mean in both languages, and the last awkward corners on phones, tablets and wide screens.
+
+### Changed
+
+- Wrapped and the statistics say only what is true: a busiest day or hour only when it stands alone at the top of more
+  than a week of days with music, a song of the time only when it played more than once, the time listened and the
+  longest day rounded together, tied places sharing a rank, and an hour written one way everywhere ("20:00 – 21:00").
+  The page, its pictures, the Discord card and `jukecord wrapped` say the same.
+- "Added most" is "Whose picks played most", and its counts say they are plays.
+- One style for dates, times and lengths in each language ("Nov 22, 19:30", "11월 22일 19:30"; "1 h 9 min in all"),
+  on the bot's Wrapped card too.
+- On a wide screen the page and its bars stand in the middle, at most 1680 pixels wide; a guest's player and queue are
+  one column in the middle, with the lyrics beside them when open.
+- A row says who added a track first ("by Mina"), so a narrow column never cuts it off.
+- Add is the add card's main key, as Enter is; result rows, history and the queue list their keys in one order: Add,
+  Play next, Play now; history rows keep the heart and ⋯ at every width.
+- The playing card shows only keys that work: Remove this track moved into More, with what it does in words; "Stop
+  after this track" sits under the track with a Keep playing key; while a track gets ready its key says so quietly;
+  while the panel connects its head says so. The keys no longer move when the music pauses.
+- A login that may not change the music sees no keys it cannot press, and an empty queue no tools that do nothing.
+- On a phone the listening bar's keys keep their words ("Listening here", the sleep timer's time left).
+- Skip says it is a vote and whether you voted (투표 1/2, 투표 완료), in the panel and on the bot's card; the bar says
+  "Skip by vote" rather than "View only" to someone whose Skip is a vote; Vote to skip waits, dimmed, for a DJ role.
+- The host, guests and friends have a person for a face; people keep their own colour in Wrapped's pictures, which no
+  longer put the "playing now" rainbow on records.
+- The sound presets are effects on the sound, with one name each ("Original", "Night mode"; 음향 효과, 효과 없음,
+  밤 모드). Autoplay's mode from this server's history is "Past plays" (들은 곡) everywhere.
+- Every choice made is the brand's blue (ticks, switches, pressed keys, the page in use, the list shown); the loading
+  colour means loading only, and a done toast is neutral.
+- Invite, in the voice card and the menu (no longer in the player's ⋯), says when each listening link was made and by
+  whom, marks the new one, and once a link shows makes Copy its main key; a question over a dialog hides the dialog
+  under it; the light theme's shade is as deep as the dark one's.
+- The playlists dialog keeps Add on each row and the rest behind ⋯ with words; the queue's key that opens it is
+  Playlists. Importing keeps its fields' names and puts Import beside Close.
+- The share page is one column in the middle, says what came as words, and has a way back; a guest sees it as a shared
+  link, not as adding.
+- Every scrolling box fades its edge over a whole line where more lies beyond: lyrics, lists, dialogs and sheets.
+- The statistics' tip marks the column it is about. Wrapped's pictures of a time with few plays fill their room, and a
+  time with one moment shows it as a card of its own.
+- A failed track says why in one sentence, in words ("Could not play Neon Rain because the site does not have it").
+- Plainer words in both languages across the panel, the bot and the command line ("Waiting to download", "In sync",
+  "Active links", "The last 12 months, wrapped", 번갈아 재생, 공유받은 링크, 시간별 재생 and others); numbers stay with
+  their units on one line, and Korean counts plays one way (회).
+- The README's pictures show believable example data, in the example people's evening time zone, and what jukecord
+  runs on is a short table again.
+- The release's files are named with their version: `jukecord-0.3.3-helm-chart.tgz` and
+  `jukecord-0.3.3-checksums.txt` (they were `jukecord-0.3.2.tgz` and `SHA256SUMS`). The chart on ghcr.io keeps Helm's
+  name. CI fails when a guide's install line names another version.
+
+### Fixed
+
+- Copy failed on a panel served over plain http (the usual address on a home network): it copies the selected link.
+- The light theme's bars, dim lyric lines and charts were tinted pink: colours mixed with transparency lost their hue.
+- The sleep timer's "when this track ends" never ended while the track repeated, and ended when jukecord restarted.
+- On a phone a toast lay across the playing card's head; it hangs above the listening bar, on a solid strip.
+- The Korean statistics title broke inside its word on a phone, and Wrapped's longest day in Korean over two lines.
+- On a phone the end of the log stayed under the listening bar, and on some phones the top bar left a gap after the
+  logo.
+- In a contrast theme the bars were see-through and the page in use was hard to tell.
+- A badge's or a face's letters stood a pixel high, a face's picture showed only its middle at 64 pixels, and the API
+  token row's icon stood off its name.
+- A failed add said its reason twice.
+- Hover highlights stuck after a tap on touch screens.
+- A word was left alone on the last line of dialogs, hints and toasts.
+- The menu's close key stood off its first row; a tablet's voice card keys touched; "Everyone" stood off the DJ roles.
+- A second Escape in the add field kept its words.
+- An empty Wrapped offered to save a picture of nothing.
+- `./jukecord backup` printed a JSON blob when it failed; it says why, with the command's exit code.
+- A copy put in the backups folder by hand counted as one of jukecord's backups (never pruned, shown as the newest,
+  and putting off the day's backup).
+- `jukecord wrapped --year 2026 --month 2025-03` used the month silently; it refuses the pair.
+- The bot's likes and lyrics cards said nothing for a page past the end.
+- The Kubernetes guide's backup copied the pod's root when the backup failed.
+
 ## [0.3.2] - 2026-11-13
 
 A README that shows more and says less, and dialogs that use the window.
@@ -557,7 +634,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/kanggu12/jukecord/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/kanggu12/jukecord/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kanggu12/jukecord/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kanggu12/jukecord/compare/v0.2.1...v0.3.0
