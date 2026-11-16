@@ -6,7 +6,7 @@
  */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, escapeMarkdown } from 'discord.js';
 import type { AddResult, SettingsView, StatsView, WrappedView } from '../app/actions.ts';
-import { busiestHour, busiestWeekday, hasSong, ranks } from '../core/facts.ts';
+import { busiestHour, busiestWeekday, hasSong, hourSpan, ranks } from '../core/facts.ts';
 import { type Length, withLongest } from '../core/lengths.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
@@ -608,7 +608,8 @@ export function wrappedCard(
   if (hour >= 0)
     embed.addFields({
       name: WRAPPED.busiestHour[lang],
-      value: `${String(hour).padStart(2, '0')}:00-${String(hour + 1).padStart(2, '0')}:00`,
+      // As the panel's page and picture write it ("20:00 – 21:00"): one way everywhere (core/facts.ts).
+      value: hourSpan(hour, lang),
       inline: true,
     });
   if (view.longestDay) {

@@ -43,6 +43,11 @@ const SHOOT = new Set([412, 390, 1440, 1366, 2560]);
 // alone, ONLY=pictures the panel's pictures and ONLY=listening the playing-along check. A whole walk leaves it unset,
 // or walks in groups at once whose names together are every state and those three.
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
+// Every page looked at from the example people's time zone: the seed's evenings are theirs (UTC+9), and looked at from
+// the walk's own (UTC) the statistics' hours peaked at 10 to 16 and "Night Owls" were busiest at 11:00.
+const ZONE = 'Asia/Seoul';
+// Its offset in minutes east of UTC, for the walk's own requests that take one (Seoul keeps no summer time).
+const ZONE_MINUTES = 540;
 const report = [];
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -87,6 +92,7 @@ async function open({
     deviceScaleFactor: 1,
     colorScheme: theme,
     locale: lang === 'ko' ? 'ko-KR' : 'en-US',
+    timezoneId: ZONE,
     isMobile: touch,
     hasTouch: touch,
     // A contrast theme, as Windows has: the system's few colours on every surface.
@@ -718,6 +724,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     deviceScaleFactor: 1.6,
     colorScheme: theme,
     locale: 'en-US',
+    timezoneId: ZONE,
   });
   await context.addInitScript(() => localStorage.setItem('jukecord.lang', 'en'));
   const page = await context.newPage();
@@ -740,6 +747,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     deviceScaleFactor: 2,
     colorScheme: theme,
     locale: 'en-US',
+    timezoneId: ZONE,
     isMobile: true,
     hasTouch: true,
   });
@@ -1101,15 +1109,62 @@ await sweep('stats', SIZES, async (page) => {
   if (apart > 1) problems.push(`Wrapped stands ${Math.round(apart)} px off the title's line`);
   if (problems.length > 0) throw new Error(problems.join('; '));
 });
+// The column a chart's tip is about: lit, alone, and the tip at it, over it with its point at the column's middle, or
+// beside its top (a column too tall for the tip over it) with its point on it; the column never under the tip. The
+// last hour's tip stood over hours 18 to 22, pushed back inside the chart, its own column the others' grey.
+async function tipAtColumn(page) {
+  const off = await page.evaluate(() => {
+    const tip = [...document.querySelectorAll('.chart-tip')].find((element) => !element.hidden);
+    const lit = [...document.querySelectorAll('.bars .slot.on')];
+    if (!tip || lit.length !== 1) return `${lit.length} columns lit, ${tip ? 'a' : 'no'} tip shown`;
+    const slot = lit[0];
+    const colour = (column) => getComputedStyle(column.firstElementChild).backgroundColor;
+    const others = [...slot.parentElement.children].filter((other) => other !== slot && !other.matches('.zero'));
+    if (others.some((other) => colour(other) === colour(slot))) return 'the lit column is the colour of the others';
+    const box = tip.getBoundingClientRect();
+    const bar = slot.firstElementChild.getBoundingClientRect();
+    const point = Number.parseFloat(tip.style.getPropertyValue('--point'));
+    const found = [];
+    if (tip.dataset.side === 'above') {
+      const aim = box.left + point - (bar.left + bar.width / 2);
+      if (Math.abs(aim) > 1) found.push(`its point ${aim.toFixed(1)} px off the column's middle`);
+      if (box.bottom > bar.top + 0.5) found.push('it lies over its column');
+    } else {
+      const at = box.top + point;
+      if (at < bar.top - 0.5 || at > bar.bottom + 0.5)
+        found.push(
+          `its point at ${Math.round(at)}, the column from ${Math.round(bar.top)} to ${Math.round(bar.bottom)}`,
+        );
+      const apart = tip.dataset.side === 'right' ? box.left - bar.right : bar.left - box.right;
+      if (apart < 0 || apart > 12) found.push(`it stands ${apart.toFixed(1)} px from its column`);
+    }
+    // A step inside its card at least (pushed to the chart's side, it stood 2 px from the card's edge).
+    const card = tip.closest('.card').getBoundingClientRect();
+    const side = Math.min(box.left - card.left, card.right - box.right);
+    if (side < 7.5) found.push(`it stands ${side.toFixed(1)} px from its card's edge`);
+    return found.length > 0 ? `the tip: ${found.join(', ')}` : null;
+  });
+  if (off) throw new Error(off);
+}
 await sweep('stats-tip', FEW, async (page) => {
   await page.goto(`${BASE}/stats`);
   await page.waitForSelector('.bars .slot');
   // In the middle of the window, as a person would have it when pointing at it (not under the bottom bar).
   await page
     .locator('.bars')
-    .first()
+    .nth(1)
     .evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  // A short column of the hours, with the room for the tip over it.
+  const short = await page.evaluate(() => {
+    const columns = [...document.querySelectorAll('.bars')[1].querySelectorAll('.slot:not(.zero)')];
+    const heights = columns.map((column) => column.firstElementChild.getBoundingClientRect().height);
+    return heights.indexOf(Math.min(...heights));
+  });
+  await page.hover(`.bars >> nth=1 >> .slot:not(.zero) >> nth=${short}`);
+  await tipAtColumn(page);
+  // The last hour (an evening's, as tall as most), its tip kept inside the chart: the one photographed.
   await page.hover('.bars .slot:not(.zero) >> nth=-1');
+  await tipAtColumn(page);
 });
 await sweep('logs', FEW, async (page) => {
   await page.goto(`${BASE}/logs`);
@@ -1302,7 +1357,8 @@ await sweep('empty', FEW, async (page) => {
 
 // Wrapped: the seed's year of plays, the server's first month (a few plays), and a time with none; the times to
 // choose from, the picture to save, and the page in a contrast theme.
-const year = await api('GET', '/guilds/local/wrapped?period=last-12-months');
+// Its months as the pages count them, in their time zone.
+const year = await api('GET', `/guilds/local/wrapped?period=last-12-months&tz=${ZONE_MINUTES}`);
 const firstMonth = year.months.at(-1) ?? 'last-12-months';
 async function wrappedAt(page, period) {
   await page.goto(`${BASE}/stats/wrapped?period=${period}`);
@@ -1369,6 +1425,25 @@ async function wrappedIsTrue(page, period) {
       song: Boolean(song),
       side: Boolean(song && first && song.getBoundingClientRect().top === first.getBoundingClientRect().top),
       fill: row && first && head ? row.offsetHeight / (first.offsetHeight - head.offsetHeight) : 1,
+      // The busiest hour as the page says it, and the moments' grid: its columns, and each moment's width in it.
+      hourSaid:
+        moments.find((tile) => tile.querySelectorAll('.spark i').length === 24)?.querySelector('.v')?.textContent ??
+        null,
+      grid: (() => {
+        const grid = document.querySelector('.wrapped .tiles.moments');
+        if (!grid) return null;
+        const columns = getComputedStyle(grid).gridTemplateColumns.split(' ').map(Number.parseFloat);
+        return {
+          columns: columns.length,
+          column: columns[0] ?? 0,
+          across: grid.getBoundingClientRect().width,
+          tiles: [...grid.children].map((tile) => ({
+            width: tile.getBoundingClientRect().width,
+            chart: Boolean(tile.querySelector('.spark')),
+          })),
+        };
+      })(),
+      window: window.innerWidth,
       // The first track's card's share of the page's width, on a window wide enough for two columns.
       wide:
         first && window.innerWidth > 1100
@@ -1394,6 +1469,22 @@ async function wrappedIsTrue(page, period) {
   // Its column's width, with or without the song beside it (alone across the row, a laptop's card was 1,408 px wide
   // with its row in the first 360).
   if (facts.wide > 0.5) problems.push(`the first track's card is ${Math.round(facts.wide * 100)} % of the row wide`);
+  // The busiest hour as the span it is, as the picture, the statistics' tip and the Discord card say it (the page said
+  // "11:00", its picture "11:00 – 12:00").
+  if (facts.hourSaid !== null && !/^\d{2}:00 [–~] \d{2}:00$/.test(facts.hourSaid))
+    problems.push(`the busiest hour reads "${facts.hourSaid}"`);
+  // The moments are tiles of the page's grid, as wide as the totals': four a row on a wide window, two on a narrower
+  // one, where a moment with a chart takes its row (two days' moments were stretched across a laptop's row, 696 px).
+  const grid = facts.grid;
+  if (grid) {
+    const wide = facts.window > 1100;
+    if (grid.columns !== (wide ? 4 : 2)) problems.push(`the moments in ${grid.columns} columns`);
+    for (const tile of grid.tiles) {
+      const meant = !wide && tile.chart ? grid.across : grid.column;
+      if (Math.abs(tile.width - meant) > 1)
+        problems.push(`a moment ${Math.round(tile.width)} px wide in columns of ${Math.round(grid.column)}`);
+    }
+  }
   problems.push(...(await placesShared(page)));
   if (problems.length > 0) throw new Error(`Wrapped says what is not true: ${problems.join('; ')}`);
 }
@@ -2366,21 +2457,43 @@ const DISCOVERY = [
   [1440, 900],
 ];
 // A made-up search: the seeded tracks as YouTube would list them (title, channel, length, cover), put between the
-// page and jukecord, so no search reaches a site.
+// page and jukecord, so no search reaches a site. Every seeded track, the most recently played first (the history
+// paged back until it has them all), so a search finds what it is asked for.
 const FOUND = [];
 // Each made-up result's picture, by the result's address: the seed's covers are pictures in jukecord's cache (their
 // own addresses lead nowhere), sent where the panel asks jukecord for a search result's picture.
 const PICTURES = new Map();
-for (const entry of await api('GET', '/guilds/local/history?limit=60')) {
-  if (FOUND.length >= 8 || FOUND.some((found) => found.url === entry.track.url)) continue;
-  const { id, url, title, uploader, durationMs, thumbnail } = entry.track;
-  PICTURES.set(url, `${BASE}/api/v1/guilds/local/tracks/${id}/cover`);
-  FOUND.push({ url, title, uploader, durationMs, thumbnail });
+for (let before = null; ; ) {
+  const played = await api('GET', `/guilds/local/history?limit=200${before ? `&before=${before}` : ''}`);
+  for (const entry of played) {
+    if (FOUND.some((found) => found.url === entry.track.url)) continue;
+    const { id, url, title, uploader, durationMs, thumbnail } = entry.track;
+    PICTURES.set(url, `${BASE}/api/v1/guilds/local/tracks/${id}/cover`);
+    FOUND.push({ url, title, uploader, durationMs, thumbnail });
+  }
+  // The history's end, or every seeded track found.
+  if (played.length < 200 || FOUND.length >= 30) break;
+  before = played.at(-1).id;
+}
+// What the made-up search lists for some words, eight results as a search shows a page of them, the best match first:
+// each searched word that starts a word of the title counts twice, one that starts a word of the artist's name once;
+// the rest after them, as they were (searching "paper boats" listed "여름밤 옥상에서" first and the match fourth).
+function foundFor(words) {
+  const asked = words.toLowerCase().split(/\s+/).filter(Boolean);
+  const matched = (text) => {
+    const own = (text ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u);
+    return asked.filter((word) => own.some((part) => part.startsWith(word))).length;
+  };
+  return FOUND.map((found, at) => ({ found, at, score: matched(found.title) * 2 + matched(found.uploader) }))
+    .sort((a, b) => b.score - a.score || a.at - b.at)
+    .slice(0, 8)
+    .map((entry) => entry.found);
 }
 async function searchFor(page, words) {
-  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) =>
-    route.fulfill({ json: { query: new URL(route.request().url()).searchParams.get('q') ?? '', results: FOUND } }),
-  );
+  await page.route(/\/api\/v1\/guilds\/[^/]+\/search\?/, (route) => {
+    const query = new URL(route.request().url()).searchParams.get('q') ?? '';
+    return route.fulfill({ json: { query, results: foundFor(query) } });
+  });
   // jukecord would fetch a result's picture from the address the search found; here it is the seed's cover.
   await page.route(/\/api\/v1\/guilds\/[^/]+\/search\/cover\?/, (route) => {
     const cover = PICTURES.get(new URL(route.request().url()).searchParams.get('url') ?? '');
@@ -2589,7 +2702,7 @@ await sweep(
     await page
       .locator('.dialog .paste')
       .fill(
-        ['https://media.example/demo001', 'https://media.example/demo002', 'Example Band - Velvet Hours'].join('\n'),
+        ['https://media.example/demo001', 'https://media.example/demo002', 'Quiet Atlas - Velvet Hours'].join('\n'),
       );
     // Filled, each field still shows its name (a placeholder alone went with the first letter), and Import is the
     // dialog's own key beside Close (it stood in the body, Close alone on a row under it).
@@ -2625,6 +2738,16 @@ await api('PUT', '/guilds/local/player/autoplay', { mode: 'off' });
 // The README's second row of phone pictures, beside the first (the player, the queue, the statistics): the lyrics, a
 // search's results and a listening link's QR code, in each theme, with a Discord bot, while a track plays. The link's
 // words are an example address: the walk's own is its container's name and a code from a throwaway server.
+// The queue as a server has it, first: the states before left it as each needed it (the track playing was the queue's
+// next as well). Nothing playing and nothing queued, then a saved playlist loaded, which starts its first track and
+// queues the rest; the search is for a track in neither.
+const README_SEARCH = 'golden hour';
+if (!ONLY || ONLY.has('readme')) {
+  await api('POST', '/guilds/local/player/stop').catch(() => {});
+  await api('DELETE', '/guilds/local/queue');
+  await api('POST', '/guilds/local/playlists/Friday%20night/load', { at: 'end' });
+  await until('playing');
+}
 for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await api('POST', '/guilds/local/player/resume').catch(() => {});
   await until('playing');
@@ -2633,6 +2756,7 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
     deviceScaleFactor: 2,
     colorScheme: theme,
     locale: 'en-US',
+    timezoneId: ZONE,
     isMobile: true,
     hasTouch: true,
   });
@@ -2657,9 +2781,31 @@ for (const theme of ONLY && !ONLY.has('readme') ? [] : ['light', 'dark']) {
   await page.waitForTimeout(300);
   // What a search found, under the add field.
   await page.locator('#add-input').scrollIntoViewIfNeeded();
-  await searchFor(page, 'paper boats');
+  await searchFor(page, README_SEARCH);
   await page.evaluate(() => document.querySelector('.add-card')?.scrollIntoView({ block: 'start' }));
   await shot(5);
+  // As a stranger reads the picture: the first result is what was searched for, and the queue's next track is not
+  // the one playing (the picture showed "Morning Light" playing and next, and the match for its words fourth).
+  const seen = {
+    ...(await page.evaluate(() => ({
+      first: document.querySelector('#add-found [role="option"] .name')?.textContent ?? '',
+      next: document.querySelector('.queue-list .row .name')?.textContent ?? '',
+    }))),
+    playing: (await api('GET', '/guilds/local/player')).track?.title ?? '',
+  };
+  const odd = [];
+  if (!README_SEARCH.split(' ').every((word) => seen.first.toLowerCase().includes(word)))
+    odd.push(`searching "${README_SEARCH}" lists "${seen.first}" first`);
+  if (!seen.next || seen.next === seen.playing)
+    odd.push(`the queue's next track is "${seen.next}", playing "${seen.playing}"`);
+  report.push({
+    state: 'readme-search',
+    theme,
+    lang: 'en',
+    width: 412,
+    findings: odd.map((detail) => ({ kind: 'walk', where: 'readme-phone-5', detail })),
+    errors: [],
+  });
   await page.keyboard.press('Escape');
   await page.fill('#add-input', '');
   // A listening link and its QR code.

@@ -12,6 +12,7 @@
  * are, as the panel does when a picture does not load).
  */
 import { hueOf, initials } from '../dom.ts';
+import { LIST, SQUARE, STORY, squareBlock, storyBlock } from './picture-layout.ts';
 
 /** The two shapes: a phone's story, and a square for a post. */
 export type Shape = 'story' | 'square';
@@ -48,9 +49,19 @@ export interface PictureContent {
     readonly rank: number;
     readonly cover: string | null;
   }[];
-  /** The moments' head, and the moments: the busiest day and hour (where they are habits), the longest day. */
+  /**
+   * The moments' head, and the moments: the busiest day and hour (where they are habits), the longest day. In the card
+   * of moments each says itself on one line under its label (`value`: "Jun 26 · 1 h 21 min"); a moment alone there (a
+   * time too short for a habit has only its longest day) is drawn as the page's tile, its `main` big ("Jun 26") with
+   * its `sub` under it ("1 h 21 min · 46 plays").
+   */
   readonly momentsLabel: string;
-  readonly moments: readonly { readonly label: string; readonly value: string }[];
+  readonly moments: readonly {
+    readonly label: string;
+    readonly value: string;
+    readonly main: string;
+    readonly sub: string;
+  }[];
   /** Whose picks played most: up to three, each with a face and the plays of what they added (a role, the host, with a
    * person for a face). */
   readonly peopleLabel: string;
@@ -229,12 +240,23 @@ class Ink {
     return y + Math.max(0, lines.length - 1) * type.size * leading;
   }
 
-  /** Writes the largest size of a type (down to a floor) at which a text fits a width on one line. */
-  fit(text: string, x: number, y: number, type: Type, width: number, floor: number): void {
+  /** The largest size of a type (down to a floor) at which a text fits a width on one line. */
+  fitSize(text: string, type: Type, width: number, floor: number): number {
     let size = type.size;
     // Two pixels smaller at a time until it fits; at the floor, the ellipsis cuts what is left over.
     while (size > floor && this.width(text, { ...type, size }) > width) size -= 2;
-    this.write(text, x, y, { ...type, size }, width, 1);
+    return size;
+  }
+
+  /** Writes a text at the largest size of a type (down to a floor) at which it fits a width on one line. */
+  fit(text: string, x: number, y: number, type: Type, width: number, floor: number): void {
+    this.write(text, x, y, { ...type, size: this.fitSize(text, type, width, floor) }, width, 1);
+  }
+
+  /** How far a text's letters rise over its baseline in a type (its capitals', or its tallest letters'). */
+  ascent(text: string, type: Type): number {
+    this.use(type);
+    return this.ctx.measureText(text).actualBoundingBoxAscent;
   }
 }
 
@@ -728,12 +750,14 @@ function numbers(ink: Ink, content: PictureContent, x: number, y: number, w: num
   const cells = content.numbers;
   // The card's width shared evenly; each cell's words start a little inside it.
   const each = w / cells.length;
-  const labelSize = Math.round(big * 0.4);
+  const room = each - 52;
+  // The labels at one size, the largest at which each fits its cell (down to a floor): fitted one by one, a drawing
+  // made larger set "Plays" larger than "Days with music".
+  const labelType: Type = { size: Math.round(big * 0.4), weight: 500, colour: look.ink2 };
+  const labelSize = Math.min(...cells.map((cell) => ink.fitSize(cell.label, labelType, room, labelType.size - 6)));
   cells.forEach((cell, index) => {
     const left = x + index * each + 34;
-    const room = each - 52;
-    // The label as large as fits its cell, down to a floor.
-    ink.fit(cell.label, left, y + h * 0.36, { size: labelSize, weight: 500, colour: look.ink2 }, room, labelSize - 6);
+    ink.write(cell.label, left, y + h * 0.36, { ...labelType, size: labelSize }, room);
     // The value big, its unit beside it smaller; a long one is made smaller to fit.
     const unitType: Type = { size: Math.round(big * 0.42), weight: 500, colour: look.ink2 };
     // A little apart from the value, as the panel's tiles set it.
@@ -812,10 +836,6 @@ function songCard(
     line += factType.size * 1.25;
   }
 }
-
-// A list card's parts at its scale: its head's baseline, where its first row starts, a row's height, and the room
-// under its last row. A card of moments beside a list sets its own rows on the same lines (momentsCard).
-const LIST = { head: 62, top: 86, row: 56, foot: 18 } as const;
 
 // A card listing tracks on their covers (or people on their faces), each with its count at the end of the line; its
 // rows `pitch` apart (a row's height at the card's scale unless said).
@@ -908,6 +928,39 @@ function momentsCard(
   });
 }
 
+// A moment alone, as the page's tile shows one: its label for the card's head (on the line of the head beside it), its
+// main fact big and the rest under it ("Nov 23", "3 min · 1 play"), the two lines in the middle of the room the rows
+// beside it take.
+function momentTile(
+  ink: Ink,
+  moment: PictureContent['moments'][number],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  scale: number,
+  pitch: number,
+): void {
+  const { ctx, look } = ink;
+  glass(ctx, look, x, y, w, h);
+  const pad = 44 * scale;
+  head(ink, moment.label, x + pad, y + LIST.head * scale, Math.round(25 * scale), w - pad * 2);
+  // Big and bold as a total's figure, set a touch tight; its line under it in the second ink, as a row's count.
+  const mainType: Type = { size: Math.round(52 * scale), weight: 700, colour: look.ink, spacing: -0.6 };
+  const subType: Type = { size: Math.round(27 * scale), weight: 500, colour: look.ink2 };
+  const main = { ...mainType, size: ink.fitSize(moment.main, mainType, w - pad * 2, Math.round(30 * scale)) };
+  // The room the rows beside it take, from the first row's top to the card's foot.
+  const top = y + LIST.top * scale;
+  const room = Math.max(pitch, y + h - LIST.foot * scale - top);
+  // The two lines' block: the main fact's letters, the step to the line under it, and that line's foot.
+  const rise = ink.ascent(moment.main, main);
+  const step = subType.size * 1.6;
+  const tall = rise + step + subType.size * 0.25;
+  const baseline = top + (room - tall) / 2 + rise;
+  ink.write(moment.main, x + pad, baseline, main, w - pad * 2);
+  ink.write(moment.sub, x + pad, baseline + step, subType, w - pad * 2);
+}
+
 // jukecord's mark and name at the foot, with the time's days at the other end.
 function foot(ink: Ink, content: PictureContent, x: number, baseline: number, w: number, scale: number): void {
   const size = 44 * scale;
@@ -960,98 +1013,95 @@ function peopleRows(ink: Ink, content: PictureContent, faces: readonly (HTMLImag
   }));
 }
 
-// How tall a card listing `rows` is, at a scale, its rows `pitch` apart (a row's height at the scale unless said).
-function listHeight(rows: number, scale: number, pitch = LIST.row * scale): number {
-  return Math.round((LIST.top + LIST.foot) * scale + rows * pitch);
-}
-
 // The story: the server and the time at the top, the song of the time on its record, the totals, the most played,
-// whose picks played most beside the moments, and jukecord's mark at the foot. The cards are one block, set in the
-// middle of the room between the time and the foot, so a time with a few plays sits as well as a full year.
+// whose picks played most beside the moments, and jukecord's mark at the foot.
 function story(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent, pictures: Pictures): void {
   const { look } = ink;
-  const m = 72;
+  const m = STORY.margin;
   const w = 1080 - m * 2;
-  const gap = 28;
-  server(ink, content, pictures.icon, m, 128, 72);
-  ink.fit(content.big, m - 6, 384, { size: 184, weight: 800, colour: look.ink, spacing: -5 }, w, 96);
-  ink.write(content.sub, m, 458, { size: 56, weight: 650, colour: look.ink, spacing: -1 }, w);
-  // The block's parts and their heights. The last row's two cards (whose picks played most, the moments) share their
-  // head and their rows' lines: a row tall enough for a moment's two lines, as many rows as the longer list has.
-  const song = content.song ? 360 : 0;
-  const totals = 156;
-  const tracks = listHeight(content.tracks.length, 1);
-  const lowScale = 0.88;
-  const pitch = 70;
-  const low = listHeight(Math.max(1, content.people.length, content.moments.length), lowScale, pitch);
-  const block = (song ? song + gap : 0) + totals + gap + tracks + gap + low;
-  const room = { top: 498, bottom: 1784 };
-  let y = room.top + Math.max(0, (room.bottom - room.top - block) / 2);
-  if (content.song) {
-    songCard(ink, content, pictures.songCover, m, y, w, song, 1);
-    y += song + gap;
-  }
-  numbers(ink, content, m, y, w, totals, 58);
-  y += totals + gap;
-  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 5), m, y, w, tracks, 1);
-  y += tracks + gap;
+  server(ink, content, pictures.icon, m, STORY.server, 72);
+  // The time, big: as large as fits the width (184 px at most), its letters' top where a year's or a month's are, so a
+  // long name set smaller ("The last 12 months") leaves no hole over itself; its words under it.
+  const bigType: Type = { size: 184, weight: 800, colour: look.ink, spacing: -5 };
+  const size = ink.fitSize(content.big, bigType, w, 96);
+  const baseline = STORY.bigTop + ink.ascent(content.big, { ...bigType, size });
+  ink.write(content.big, m - 6, baseline, { ...bigType, size }, w);
+  const sub = baseline + 74;
+  ink.write(content.sub, m, sub, { size: 56, weight: 650, colour: look.ink, spacing: -1 }, w);
+  // The cards, filling the room from a little under the words to the foot.
+  const block = storyBlock(content, sub + 40);
+  const scale = block.scale;
+  if (content.song && block.song) songCard(ink, content, pictures.songCover, m, block.song.y, w, block.song.h, scale);
+  numbers(ink, content, m, block.totals.y, w, block.totals.h, 58 * scale);
+  if (block.tracks)
+    listCard(
+      ink,
+      content.tracksLabel,
+      trackRows(ink, content, pictures.trackCovers, 5),
+      m,
+      block.tracks.y,
+      w,
+      block.tracks.h,
+      scale,
+    );
   // Whose picks played most, and the moments, side by side; either alone (no person added any, all autoplay) across
-  // the row.
+  // the row. Their rows share their lines: a row tall enough for a moment's two lines.
+  const { y, h } = block.low;
+  const gap = Math.round(28 * scale);
   const half = (w - gap) / 2;
   const people = content.people.length > 0;
   const moments = content.moments.length > 0;
+  const lowScale = 0.88 * scale;
+  const pitch = 70 * scale;
   if (people) {
     const width = moments ? half : w;
-    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m, y, width, low, lowScale, pitch);
+    listCard(ink, content.peopleLabel, peopleRows(ink, content, pictures.faces), m, y, width, h, lowScale, pitch);
   }
   if (moments) {
     const left = people ? m + half + gap : m;
-    momentsCard(ink, content, left, y, people ? half : w, low, lowScale, pitch);
+    const width = people ? half : w;
+    // A moment alone is a card of its own, as the page's tile: under "When it played most", the longest day alone
+    // sat on the first row of a card two rows tall.
+    const lone = content.moments.length === 1 ? content.moments[0] : undefined;
+    if (lone) momentTile(ink, lone, left, y, width, h, lowScale, pitch);
+    else momentsCard(ink, content, left, y, width, h, lowScale, pitch);
   }
-  foot(ink, content, m, 1846, w, 1);
+  foot(ink, content, m, STORY.foot, w, 1);
   void ctx;
 }
 
 // The square: the server and the time across the top, the song of the time, the totals, the three most played beside
-// whose picks played most, and jukecord's mark at the foot; the cards a block in the middle of their room, as in the
-// story.
+// whose picks played most, and jukecord's mark at the foot; the cards filling the room between them, as in the story.
 function square(ctx: CanvasRenderingContext2D, ink: Ink, content: PictureContent, pictures: Pictures): void {
   const { look } = ink;
-  const m = 56;
+  const m = SQUARE.margin;
   const w = 1080 - m * 2;
   const gap = 24;
-  server(ink, content, pictures.icon, m, 48, 60);
-  ink.fit(content.title, m - 3, 194, { size: 84, weight: 800, colour: look.ink, spacing: -2 }, w, 48);
-  const song = content.song ? 316 : 0;
-  const totals = 140;
-  // The two lists' cards as tall as the longer one's rows, three at most (always three tall, two rows of a time with
-  // few plays had 80 px of nothing under them).
-  const low = listHeight(Math.max(1, Math.min(3, content.tracks.length), Math.min(3, content.people.length)), 0.8);
-  const block = (song ? song + gap : 0) + totals + gap + low;
-  const room = { top: 228, bottom: 988 };
-  let y = room.top + Math.max(0, (room.bottom - room.top - block) / 2);
-  if (content.song) {
-    songCard(ink, content, pictures.songCover, m, y, w, song, 0.86);
-    y += song + gap;
-  }
-  numbers(ink, content, m, y, w, totals, 50);
-  y += totals + gap;
+  server(ink, content, pictures.icon, m, SQUARE.server, 60);
+  ink.fit(content.title, m - 3, SQUARE.title, { size: 84, weight: 800, colour: look.ink, spacing: -2 }, w, 48);
+  const block = squareBlock(content);
+  const scale = block.scale;
+  if (content.song && block.song)
+    songCard(ink, content, pictures.songCover, m, block.song.y, w, block.song.h, 0.86 * scale);
+  numbers(ink, content, m, block.totals.y, w, block.totals.h, 50 * scale);
   // The most played the wider, three fifths of the row, as the page sets them (a title is longer than a name, and each
   // count says "plays"); alone across the row when no person added any.
   const people = content.people.length > 0;
-  const wide = people ? Math.round((w - gap) * 0.6) : w;
-  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 3), m, y, wide, low, 0.8);
+  const between = Math.round(gap * scale);
+  const wide = people ? Math.round((w - between) * 0.6) : w;
+  const { y, h } = block.low;
+  listCard(ink, content.tracksLabel, trackRows(ink, content, pictures.trackCovers, 3), m, y, wide, h, 0.8 * scale);
   if (people)
     listCard(
       ink,
       content.peopleLabel,
       peopleRows(ink, content, pictures.faces),
-      m + wide + gap,
+      m + wide + between,
       y,
-      w - gap - wide,
-      low,
-      0.8,
+      w - between - wide,
+      h,
+      0.8 * scale,
     );
-  foot(ink, content, m, 1036, w, 0.8);
+  foot(ink, content, m, SQUARE.foot, w, 0.8);
   void ctx;
 }

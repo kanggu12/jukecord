@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { words } from '../../panel/src/i18n.ts';
 import {
   apportioned,
   clockTime,
@@ -18,6 +19,7 @@ import {
   rounded,
   withLongest,
 } from '../../panel/src/time.ts';
+import { hourSpan } from '../../src/core/facts.ts';
 
 // The words keep a no-break space where a wrapped line must not break (core/say.ts together(): a number with its unit,
 // a month with its day, Korean's "할 수 있음"): an expected text writes it as "⍽", so it can be seen.
@@ -42,6 +44,16 @@ describe('days and times as the panel writes them', () => {
     assert.equal(hourText(9), '09:00');
     assert.equal(hourSpanText(9, 'en'), '09:00 – 10:00');
     assert.equal(hourSpanText(23, 'ko'), '23:00 ~ 24:00');
+  });
+
+  it('writes every hour as the panel writes a span, the one way the card and the command line take too', () => {
+    // core/facts.ts hourSpan() is what the Discord card and the command line write; the panel's span of two times
+    // (i18n.ts rangeOf) has the same dash: the page said "11:00", its picture "11:00 – 12:00", the card "11:00-12:00".
+    for (const lang of ['en', 'ko'] as const)
+      for (let hour = 0; hour < 24; hour += 1) {
+        assert.equal(hourSpan(hour, lang), words(lang).rangeOf(hourText(hour), hourText(hour + 1)));
+        assert.equal(hourSpanText(hour, lang), hourSpan(hour, lang));
+      }
   });
 
   it('writes a moment as its day and its time, with the year only when it is not this one or when asked', () => {

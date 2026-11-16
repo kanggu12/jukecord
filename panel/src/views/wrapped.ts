@@ -12,16 +12,7 @@ import { busiestHour, busiestWeekday, hasSong, ranks } from '../../../src/core/f
 import { api, coverUrl, type Guild, type Wrapped } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, subLine } from '../dom.ts';
 import { state, t, watch } from '../state.ts';
-import {
-  dayRangeText,
-  dayText,
-  hourSpanText,
-  hourText,
-  lengthParts,
-  lengthText,
-  momentText,
-  withLongest,
-} from '../time.ts';
+import { dayRangeText, dayText, hourSpanText, lengthParts, lengthText, momentText, withLongest } from '../time.ts';
 import { goTo, problem, showDialog } from '../ui/layers.ts';
 import { drawPicture, type PictureContent, type Shape } from './picture.ts';
 import { album } from './player.ts';
@@ -34,9 +25,12 @@ export function timeName(period: Wrapped['period']): string {
   return month ? words.wrappedMonth(year, Number(month)) : words.wrappedYear(year);
 }
 
-/** A day of the time as the panel writes days ("Jun 24", "6월 24일"), with its year when the time spans two. */
-export function dayName(day: string, period: Wrapped['period']): string {
-  return dayText(day, state.lang, period.kind === 'last-12-months');
+/**
+ * A day of the time as the panel writes days ("Jun 24", "6월 24일"), without its year: the head over it gives the
+ * time's days, and twelve months hold each date once (with it, "2026년 6월 26일" took two lines of a phone's tile).
+ */
+export function dayName(day: string): string {
+  return dayText(day, state.lang, false);
 }
 
 /** A count as people read it: "1,806" ("1,806" in Korean too). */
@@ -306,11 +300,13 @@ export function wrappedPage(): HTMLElement {
       hour >= 0
         ? moment(
             words.busiestHour,
-            hourText(hour),
+            // The span it is, as the picture, the statistics' tip and the Discord card write an hour ("11:00" here
+            // beside "11:00 – 12:00" in the picture).
+            hourSpanText(hour, state.lang),
             words.playsCount(wrapped.hours[hour] ?? 0),
             spark(
               wrapped.hours,
-              wrapped.hours.map((_, index) => hourText(index)),
+              wrapped.hours.map((_, index) => hourSpanText(index, state.lang)),
               words.byHour,
               hour,
             ),
@@ -319,7 +315,7 @@ export function wrappedPage(): HTMLElement {
       longest
         ? moment(
             words.longestDay,
-            dayName(longest.day, wrapped.period),
+            dayName(longest.day),
             `${lengthText(longestLength, state.lang)} · ${words.playsCount(longest.plays)}`,
             null,
           )
@@ -327,8 +323,9 @@ export function wrappedPage(): HTMLElement {
       // A count of days, bare as the other counts are (in Korean "2일" beside a date read as the second of a month).
       moment(words.tileDays, count(wrapped.days), null, null),
     ].filter((tile) => tile !== null);
-    // As many columns as there are moments, so the row has no hole where one is left out.
-    const moments = h('div', { class: 'tiles moments', style: `--n:${shownMoments.length}` }, ...shownMoments);
+    // In the page's grid of tiles, each as wide as a total's tile (style.css: a short row ends where its tiles do; two
+    // days' moments stretched across a laptop's row were 696 px each).
+    const moments = h('div', { class: 'tiles moments' }, ...shownMoments);
     fill(
       content,
       // The history reaches back only so far: said once, at the top.
@@ -559,9 +556,10 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
   const words = t();
   const time = timeName(wrapped.period);
   const [year = '', month] = wrapped.period.key.split('-');
-  // The time, big: the year, the month's name, or the last 12 months; the words beside it name the rest.
-  const big =
-    wrapped.period.kind === 'last-12-months' ? words.twelveMonths : month ? words.monthName(Number(month)) : year;
+  // The time, big: the year, the month's name, or the last 12 months by the name the title gives them, so the story's
+  // two lines say what the square's one line and the page's title say (the story said "12 months", the square "The
+  // last 12 months"); the words beside it name the rest.
+  const big = wrapped.period.kind === 'last-12-months' ? capital(time) : month ? words.monthName(Number(month)) : year;
   const sub = words.inMusic(wrapped.period.kind === 'month' ? year : null);
   // The figures as the page shows them: the lengths agreeing, the moments only where they are habits, the song only
   // when it played more than once.
@@ -617,15 +615,38 @@ function pictureContent(wrapped: Wrapped, guild: Guild): PictureContent {
       cover: coverUrl(guild.id, entry.track),
     })),
     momentsLabel: words.momentsLabel,
+    // Each on one line in the card of moments, and as the page's tile says it for a moment alone: its fact, and its
+    // plays (the longest day's length first) under it.
     moments: [
-      ...(day >= 0 ? [{ label: words.busiestDay, value: words.weekdaysMany[day] ?? '' }] : []),
-      ...(hour >= 0 ? [{ label: words.busiestHour, value: hourSpanText(hour, state.lang) }] : []),
+      ...(day >= 0
+        ? [
+            {
+              label: words.busiestDay,
+              value: words.weekdaysMany[day] ?? '',
+              main: words.weekdaysMany[day] ?? '',
+              sub: words.playsCount(wrapped.weekdays[day] ?? 0),
+            },
+          ]
+        : []),
+      ...(hour >= 0
+        ? [
+            {
+              label: words.busiestHour,
+              value: hourSpanText(hour, state.lang),
+              main: hourSpanText(hour, state.lang),
+              sub: words.playsCount(wrapped.hours[hour] ?? 0),
+            },
+          ]
+        : []),
       ...(wrapped.longestDay
         ? [
             {
               label: words.longestDay,
-              // Without its year: the days at the foot give it, and twelve months hold each date once.
-              value: `${dayText(wrapped.longestDay.day, state.lang, false)} · ${lengthText(longest, state.lang)}`,
+              // Without its year, as the page has it: the days at the foot give it, and twelve months hold each
+              // date once.
+              value: `${dayName(wrapped.longestDay.day)} · ${lengthText(longest, state.lang)}`,
+              main: dayName(wrapped.longestDay.day),
+              sub: `${lengthText(longest, state.lang)} · ${words.playsCount(wrapped.longestDay.plays)}`,
             },
           ]
         : []),

@@ -16,7 +16,6 @@ import {
   dayRangeText,
   dayText,
   hourSpanText,
-  hourText,
   lengthParts,
   lengthText,
   momentText,
@@ -53,21 +52,22 @@ function columns(
       h('div', { class: 'b', style: `height:${(entry.value / top) * 100}%` }),
     );
     const show = () => {
+      // The column the tip is about, lit (one at a time: the pointer on one, the keyboard's focus on another).
+      for (const other of bars.querySelectorAll('.slot.on')) other.classList.remove('on');
+      slot.classList.add('on');
       tip.hidden = false;
       // The count with its unit ("5 plays"), then when (and for how long, a day's or a week's).
       fill(tip, h('b', { class: 'value' }, t().playsCount(entry.value)), entry.tip);
-      // Above the column, kept inside the chart so it never crosses the card's edge.
-      const box = slot.getBoundingClientRect();
-      const frame = plot.getBoundingClientRect();
-      const half = tip.offsetWidth / 2;
-      const x = Math.min(frame.width - half, Math.max(half, box.left - frame.left + box.width / 2));
-      tip.style.left = `${x}px`;
-      tip.style.top = `${Math.max(tip.offsetHeight, box.top - frame.top + box.height * (1 - entry.value / top) - 6)}px`;
+      placeTip(tip, slot, plot);
+    };
+    const hide = () => {
+      slot.classList.remove('on');
+      tip.hidden = true;
     };
     slot.onpointerenter = show;
     slot.onfocus = show;
-    slot.onpointerleave = () => (tip.hidden = true);
-    slot.onblur = () => (tip.hidden = true);
+    slot.onpointerleave = hide;
+    slot.onblur = hide;
     bars.append(slot);
   }
   const plot = h(
@@ -107,6 +107,53 @@ function columns(
     ),
   );
   return { plot, table };
+}
+
+// Where a chart's tip stands: over its column, the point under it at the column's middle, when the chart has the room
+// above the column; else beside the column's top, on the chart's wider side, the point at its side. Inside the chart's
+// body either way (into its padding, a step short of the card's edge), so it never crosses the card's edge. (Centred
+// over the column and pushed back inside the plot, a tip of the last hour stood over hours 18 to 22, its own column
+// unmarked.)
+function placeTip(tip: HTMLElement, slot: HTMLElement, plot: HTMLElement): void {
+  // The tip's place is the plot's (its offset parent); its room across is the chart's body, padding and all.
+  const frame = plot.getBoundingClientRect();
+  const body = (plot.parentElement ?? plot).getBoundingClientRect();
+  // The column's mark (its height is the count's) and the bars' box (the tip keeps above their baseline).
+  const mark = (slot.firstElementChild ?? slot).getBoundingClientRect();
+  const bars = (slot.parentElement ?? slot).getBoundingClientRect();
+  const width = tip.offsetWidth;
+  const height = tip.offsetHeight;
+  // Apart from the column by the spacing scale's step, the point's length.
+  const gap = 8;
+  // The point clear of the tip's rounded corners: the corner (--r, 8 px) and half the turned square's width.
+  const corner = 14;
+  // The column's middle and its top, in the plot's coordinates; the body's sides in them too, a step inside them (at
+  // the body's very side, the tip stood 2 px from the card's edge).
+  const middle = mark.left + mark.width / 2 - frame.left;
+  const top = mark.top - frame.top;
+  const first = body.left - frame.left + gap;
+  const last = body.right - frame.left - gap;
+  const within = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
+  if (top - gap - height >= 0) {
+    // Above: centred on the column as far as the chart's sides let it be.
+    const left = within(middle - width / 2, first, last - width);
+    tip.dataset.side = 'above';
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top - gap - height}px`;
+    // The point under the column's middle.
+    tip.style.setProperty('--point', `${within(middle - left, corner, width - corner)}px`);
+    return;
+  }
+  // Beside: a column too tall for the tip over it, the tip on the side with more of the chart.
+  const right = middle < frame.width / 2;
+  const left = right ? mark.right - frame.left + gap : mark.left - frame.left - gap - width;
+  // Its top at the column's top, kept above the bars' baseline.
+  const y = within(top, 0, bars.bottom - frame.top - height);
+  tip.dataset.side = right ? 'right' : 'left';
+  tip.style.left = `${left}px`;
+  tip.style.top = `${y}px`;
+  // The point a little under the column's top, clear of the tip's corners.
+  tip.style.setProperty('--point', `${within(top + corner - y, corner, height - corner)}px`);
 }
 
 // A chart card with a key that switches between the chart and its table.
@@ -247,9 +294,10 @@ export function statsPage(): HTMLElement {
       [tickOf(0), tickOf(middle), tickOf(buckets.length - 1)],
       [span > 1 ? words.weekColumn : words.dayColumn, words.playsColumn],
     );
-    // Each hour by its start in the table ("09:00"), as the span it is in the tooltip ("09:00 – 10:00").
+    // Each hour as the span it is ("09:00 – 10:00"), in the tooltip, the table and for screen readers alike: one way
+    // for an hour on every page (the table's "09:00" beside the tip's span was two).
     const hourValues = stats.hours.map((value, hour) => ({
-      label: hourText(hour),
+      label: hourSpanText(hour, state.lang),
       tip: hourSpanText(hour, state.lang),
       value,
     }));

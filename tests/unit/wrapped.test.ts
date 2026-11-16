@@ -321,7 +321,8 @@ describe('Wrapped in the jukecord command', () => {
     // The counts say they are plays, of a track and of what a person added.
     assert.match(text, /Most played:\n {5}9 plays {2}Morning Light\n/);
     assert.match(text, /Whose picks played most:\n {4}10 plays {2}Alice\n {5}2 plays {2}the host\n/);
-    assert.match(text, /Busiest: Fridays, 22:00-23:00/);
+    // The hour as the panel's page and picture write it (core/facts.ts hourSpan()).
+    assert.match(text, /Busiest: Fridays, 22:00 – 23:00/);
     assert.match(text, /Longest day: 2026-07-04, 40 min \(4 plays\)/);
     assert.match(text, /First track: .*Morning Light, added by Alice/);
     // A quiet month reads in the singular.
@@ -514,7 +515,8 @@ describe('Wrapped in Discord', () => {
       const card = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
       const fields = Object.fromEntries((card?.fields ?? []).map((field) => [field.name, field.value]));
       assert.equal(fields['Busiest day'], 'Fridays');
-      assert.equal(fields['Busiest hour'], '21:00-22:00');
+      // The hour as the panel's page and picture write it, not "21:00-22:00" (core/facts.ts hourSpan()).
+      assert.equal(fields['Busiest hour'], '21:00 – 22:00');
       // Eight Tuesdays more, at 11:00: as many Tuesdays as Fridays, a tie, and the card names no busiest day.
       for (let week = 0; week < 8; week += 1)
         store.history.add({

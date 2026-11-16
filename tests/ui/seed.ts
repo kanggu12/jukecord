@@ -58,7 +58,9 @@ const TITLES = [
   'Polaroid Summer',
   'Ferris Wheel',
 ];
-const ARTISTS = ['Example Band', 'The Placeholders', '예시 밴드', 'Demo Orchestra', 'Sample Sound', '가상의 가수'];
+// Made-up artists who read as artists, in both languages, as the titles are (named "Example Band" and "가상의 가수",
+// "fictional singer", they read as placeholders in the README's pictures). No act of these names was found.
+const ARTISTS = ['Quiet Atlas', 'Pale Orchard', '구름다방', 'Little Comet Club', 'Sundial Youth', '서랍 속 여름'];
 // People who add tracks: made-up names with made-up IDs.
 const PEOPLE = [
   { id: '300000000000000001', name: 'Mina' },

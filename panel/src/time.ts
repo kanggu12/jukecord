@@ -14,6 +14,7 @@
  * Kept apart from the pages, as axis.ts is: the language is given and the time zone is the browser's (a Date's own
  * fields), so it is tested as it is.
  */
+import { hourSpan } from '../../src/core/facts.ts';
 import type { Length } from '../../src/core/lengths.ts';
 import { type Lang, words } from './i18n.ts';
 
@@ -49,9 +50,12 @@ export function hourText(hour: number): string {
   return `${two(hour)}:00`;
 }
 
-/** An hour of the day as the span it is: "09:00 – 10:00" ("09:00 ~ 10:00"). */
+/**
+ * An hour of the day as the span it is: "09:00 – 10:00" ("09:00 ~ 10:00"), the one way every page, picture, card and
+ * the command line write an hour (core/facts.ts hourSpan()).
+ */
 export function hourSpanText(hour: number, lang: Lang): string {
-  return words(lang).rangeOf(hourText(hour), hourText(hour + 1));
+  return hourSpan(hour, lang);
 }
 
 /**
