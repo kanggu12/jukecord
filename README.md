@@ -132,10 +132,13 @@ hashes, and nothing is sent as telemetry ([what leaves your computer](docs/FAQ.m
 
 ## What it runs on
 
-Linux, macOS and Windows (WSL) with Docker Compose 2.24 or newer, on amd64 or arm64, a Raspberry Pi 4 or 5 with a
-64-bit system included; a Kubernetes cluster, k3s too, through the Helm chart; or Node 24.11 or newer with ffmpeg and
-yt-dlp. It takes 430 MB for the image and 2 GiB for its cache. Listening needs only a current browser, on a computer or
-a phone.
+|                    | Needs                                                                                                                                   |
+| :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| **Docker Compose** | Linux, macOS or Windows (WSL) on amd64 or arm64, with Compose 2.24 or newer; 430 MB for the image, 2 GiB for the cache                  |
+| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system, through Docker Compose with a [released image](docs/INSTALL.md#raspberry-pi-and-other-arm64-machines) |
+| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume                                                               |
+| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                                    |
+| **Listening**      | A current browser on a computer or a phone                                                                                              |
 
 ## Guides
 
