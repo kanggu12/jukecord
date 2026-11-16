@@ -1236,9 +1236,9 @@ img {
 .card-head .field {
   height: var(--control-sm);
 }
-/* A row of choices in a head (the history and the likes): words, the one shown in the weight and ink of a card's title,
-   the other quieter, a key to it (a framed row of choices in a head was a box in a box). The first word starts at the
-   head's inset, its pane under the pointer reaching out of it. */
+/* A row of choices in a head (the history and the likes): words, the one shown on the brand's soft blue (below), the
+   other quieter, a key to it, with no frame round the row (a framed row of choices in a head was a box in a box). The
+   first word starts at the head's inset, its pane reaching out of it. */
 .card-head .seg {
   height: var(--control-sm);
   margin-left: calc(-1 * var(--s-8));
@@ -1259,10 +1259,12 @@ img {
     color: var(--ink-2);
   }
 }
+/* The list shown: in the weight of a card's title, on the brand's soft blue with its line as every choice in use is
+   (by weight alone, "Recently played | Liked" read as a heading and a stray word). */
 .card-head .seg button[aria-pressed="true"] {
-  background: none;
-  box-shadow: none;
-  color: var(--ink-2);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--ink);
   font-weight: 650;
 }
 
@@ -3006,9 +3008,11 @@ img {
 .choice:has(.choice-hint, .hint) {
   align-items: flex-start;
 }
+/* The choice in use: the brand's soft blue and its line, as a chosen segment's (the menu's page in use was a grey row
+   beside the blue segments, while the bar marks the page with a blue line). */
 .choice:is([aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]) {
-  background: var(--raised);
-  box-shadow: inset 0 0 0 1px var(--line-2);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   font-weight: 600;
 }
 /* The check of the choice made, in the brand's blue as a chosen segment's frame (green is the colour of playing). */
@@ -4440,6 +4444,21 @@ kbd {
   /* The Listen key's dancing bars in the key's own colour on it. */
   .listen .key[data-act="listen"][aria-pressed="true"] .eq {
     color: HighlightText;
+  }
+  /* A row of choices in a card's head (the history's two lists): the one shown filled as every choice in use is. */
+  .card-head .seg button[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  /* The choice in use in a list (the page in the menu, the DJ role, the period): framed in the highlight's colour (its
+     tint and its line are a fill and a shadow, which a contrast theme drops), its words and hint as they are. With the
+     keyboard on it, the focus ring frames it instead. */
+  .choice:is([aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]):not(
+    :focus-visible
+  ) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
   /* The main key solid, as it is in the panel's own colours: filled with the buttons' text colour, its words in
      theirs. */

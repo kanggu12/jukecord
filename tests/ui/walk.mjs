@@ -483,6 +483,28 @@ async function edgesFade(page) {
   if (problems.length > 0) throw new Error(`the scrolling boxes' edges: ${problems.join('; ')}`);
 }
 
+// Every choice made is marked in the brand's blue, as a chosen segment is (its soft blue): a choice in a list (the
+// menu's page in use was a grey row beside the blue segments) and the history's two lists in its head (by weight alone,
+// "Recently played | Liked" read as a heading and a stray word).
+async function choicesInBlue(page) {
+  const wrong = await page.evaluate(() => {
+    // The token as the browser computes it, to compare with what the choices are drawn in.
+    const probe = document.createElement('i');
+    probe.style.background = 'var(--accent-soft)';
+    document.body.append(probe);
+    const soft = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const chosen = document.querySelectorAll(
+      '.choice:is([aria-checked="true"], [aria-current="true"], [aria-current="page"], [aria-pressed="true"]), .seg button[aria-pressed="true"]',
+    );
+    return [...chosen]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => getComputedStyle(element).backgroundColor !== soft)
+      .map((element) => `"${element.textContent.trim()}" on ${getComputedStyle(element).backgroundColor}`);
+  });
+  if (wrong.length > 0) throw new Error(`choices made out of the brand's blue: ${wrong.slice(0, 3).join(', ')}`);
+}
+
 // One order for adding a track, from the gentlest to the one that cuts off what everyone hears: the add card's keys
 // (Add, Play next, Play now), a search result's picks under them, a history row's keys (after its heart, before its
 // list key), and a queued row's (Play next, Play now, then Remove). The results and the history had them reversed.
@@ -535,6 +557,8 @@ await sweep('playing', SIZES, async (page) => {
   await rowsWhole(page);
   await edgesFade(page);
   await pageCentred(page);
+  // The history's list shown, in its head.
+  await choicesInBlue(page);
 });
 await sweep('discord', SIZES, null, { discord: true });
 // The longest names Discord allows its people (32 letters) and a long server name, where the bar shows both: the
@@ -744,6 +768,8 @@ await sweep('menu', [...FEW, [2560, 1400]], async (page) => {
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet .section');
   await page.waitForTimeout(400);
+  // The page in use (in the menu on a phone) and the theme and language chosen, in the brand's blue.
+  await choicesInBlue(page);
 });
 // A queue tool: its own key on a wide card, the list behind the tools key on a narrow one (phones).
 async function tool(page, act) {
@@ -1341,6 +1367,7 @@ async function settingsLook(page) {
     }
     return problems;
   });
+  await choicesInBlue(page).catch((error) => wrong.push(error.message));
   if (wrong.length > 0) throw new Error(wrong.join('; '));
 }
 // The menu of someone who manages the server, in the made-up Discord: the DJ role and the alerts channel.
