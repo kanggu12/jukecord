@@ -104,13 +104,6 @@ Discord account.
 - **Wrapped:** a server's year in music, saved as a picture for a story or a post.
 - **Steady and small:** one process and one SQLite file, tracks fetched once with their loudness evened out.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/wrapped-dark.webp">
-    <img alt="Wrapped's picture for a made-up server, Night Owls, over the last 12 months: the song of the last 12 months on its cover and record, the plays, hours, tracks and days with music, the most played tracks and whose picks played most." src="docs/assets/wrapped-light.webp" width="420">
-  </picture>
-</p>
-
 ## How it works
 
 <p align="center">
