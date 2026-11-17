@@ -6,6 +6,34 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-17
+
+jukecord as a program for Linux, macOS and Windows, on x64 and arm64: one folder from the release, with its own
+Node.js, FFmpeg and yt-dlp, and nothing to install. jukecord itself is unchanged.
+
+### Added
+
+- The release's programs: `jukecord-0.3.4-linux-x64.tar.gz`, `jukecord-0.3.4-linux-arm64.tar.gz`,
+  `jukecord-0.3.4-macos-arm64.tar.gz`, `jukecord-0.3.4-macos-x64.tar.gz`, `jukecord-0.3.4-windows-x64.zip` and
+  `jukecord-0.3.4-windows-arm64.zip`. Unpack one and run `./jukecord start` (`.\jukecord start` on Windows);
+  `./jukecord open` logs this computer's browser in, and every `jukecord` command works the same way. The settings go
+  in `.env` beside it, as with Compose, and the data in the system's place for a program's data
+  (`~/.local/share/jukecord`, `~/Library/Application Support/jukecord`, `%LOCALAPPDATA%\jukecord`), where a newer
+  release unpacked beside it finds them.
+- Each program carries Node.js 26.13.1, yt-dlp 2026.10.26 and FFmpeg 7.1.5 built with the image's configure line
+  (Opus and MP3 out, every format FFmpeg reads, https). On Linux FFmpeg is one static program, and the folder runs on
+  any distribution with glibc 2.28 or newer, a bare one included.
+- Before a release is published, every program is unpacked and run on its own system and processor (started, a track
+  played through yt-dlp and FFmpeg, stopped), and afterwards again from the published release's addresses. The unit
+  tests run on macOS and Windows too.
+- The checksums file lists every file of the release, and GitHub's signed record of where each was built covers the
+  programs too: `gh attestation verify <file> --repo kanggu12/jukecord`.
+
+### Changed
+
+- The image carries Node.js 26.13.1, as the programs do.
+- The image's FFmpeg comes with the text of the GPL too, which version 3 of the LGPL builds on.
+
 ## [0.3.3] - 2026-11-17
 
 Every defect that the panel's walk and independent reviews still found in 0.3.2, fixed: true figures in Wrapped, words
@@ -634,7 +662,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/kanggu12/jukecord/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/kanggu12/jukecord/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/kanggu12/jukecord/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kanggu12/jukecord/compare/v0.3.0...v0.3.1
