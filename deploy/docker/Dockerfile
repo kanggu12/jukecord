@@ -19,7 +19,7 @@
 # an ARG: Dependabot reads only FROM lines when it proposes a newer digest (.github/dependabot.yml). The release
 # workflow reads this line (AS base) for the image's base labels.
 # Debian (glibc), not Alpine: musl's resolver has failed lookups in Kubernetes clusters, which the Helm chart targets.
-FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS base
+FROM node:26-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS base
 
 # ---- yt-dlp ---------------------------------------------------------------------------------------------------------
 FROM base AS jukecord-ytdlp
@@ -91,6 +91,8 @@ RUN set -eu; \
     strip /opt/ffmpeg/bin/ffmpeg; \
     install -D -m 0644 LICENSE.md /opt/ffmpeg/share/doc/ffmpeg/LICENSE.md; \
     install -D -m 0644 COPYING.LGPLv3 /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv3; \
+    # The LGPL's version 3 is a set of permissions added to the GPL's, so its text comes with it.
+    install -D -m 0644 COPYING.GPLv3 /opt/ffmpeg/share/doc/ffmpeg/COPYING.GPLv3; \
     printf 'FFmpeg %s, built for jukecord from https://ffmpeg.org/releases/ffmpeg-%s.tar.xz (sha256 %s).\n%s\n' \
       "$FFMPEG_VERSION" "$FFMPEG_VERSION" "$FFMPEG_SHA256" "$(/opt/ffmpeg/bin/ffmpeg -hide_banner -version | grep '^configuration:')" \
       > /opt/ffmpeg/share/doc/ffmpeg/SOURCE; \
@@ -112,7 +114,7 @@ RUN echo "jukecord: the npm packages it runs" \
 # Built once on the machine doing the build (it is plain JavaScript and CSS, the same for every architecture), with
 # the development packages (esbuild) that the image itself does not carry. The same base as above, for the machine's
 # own processor.
-FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS jukecord-panel
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS jukecord-panel
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN echo "jukecord: the tools the panel is built with" \
@@ -134,7 +136,7 @@ RUN echo "jukecord: the panel" \
 # out once (scripts/strip-types.ts: by Node's own function, with every line and column left where it is), and the
 # image carries the result. Text in, text out: made on the machine doing the build, like the panel, and the same for
 # every architecture.
-FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS jukecord-source
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS jukecord-source
 WORKDIR /app
 COPY scripts/strip-types.ts ./scripts/
 COPY src ./src
