@@ -1,0 +1,95 @@
+# The release's programs as people download them: from a published release's own addresses (the ones the install
+# guide gives), checked against the release's checksums and GitHub's signed record of where each was built, then
+# unpacked and run on their own system and processor (scripts/bundle-smoke.ts: started, a track played through yt-dlp
+# and FFmpeg, stopped). A release made by the release workflow starts no other workflow, so that workflow calls this
+# one once the release is out.
+name: downloads
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: the release to check, v0.3.4 or later (the latest when left empty)
+        required: false
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  run:
+    name: the ${{ matrix.target }} program, downloaded and run
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: macos-arm64
+            runner: macos-15
+          - target: macos-x64
+            runner: macos-15-intel
+          - target: windows-x64
+            runner: windows-2025
+          - target: windows-arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: The release
+        id: release
+        shell: bash
+        env:
+          WANT: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        # A release typed without its v is the same tag.
+        run: |
+          v=${WANT:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}
+          case "$v" in v*) ;; *) v=v$v ;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      # The check as the release had it, with the versions of Node.js and yt-dlp it pinned.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release.outputs.version }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Downloaded from the release, checked against its checksums and its signed record
+        id: download
+        shell: bash
+        env:
+          V: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The files' names have the version without its v, the addresses with it.
+          case "${{ matrix.target }}" in windows-*) extension=zip ;; *) extension=tar.gz ;; esac
+          file="jukecord-${V#v}-${{ matrix.target }}.$extension"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$V"
+          curl -fsSLO --retry 3 "$base/$file"
+          curl -fsSLO --retry 3 "$base/jukecord-${V#v}-checksums.txt"
+          grep " $file\$" "jukecord-${V#v}-checksums.txt" > this.sha256
+          # sha256sum on Linux and in Git's bash on Windows; shasum on a Mac.
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum -c this.sha256; else shasum -a 256 -c this.sha256; fi
+          gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Unpacked, started, a track played, stopped
+        if: runner.os != 'Linux'
+        shell: bash
+        run: node scripts/bundle-smoke.ts "${{ steps.download.outputs.file }}"
+      # On Linux, in a bare Debian 10, as in bundles.yml: the oldest glibc the programs claim, and nothing installed.
+      - name: Unpacked, started, a track played, stopped, on a bare Debian 10
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD:/w:ro" -w /w \
+            debian:buster-slim@sha256:bb3dc79fddbca7e8903248ab916bb775c96ec61014b3d02b4f06043b604726dc \
+            sh -c 'set -e; mkdir /tmp/program; tar -xzf "$1" -C /tmp/program
+              cd /tmp/program/*/ && here=$PWD && cd /w
+              ldd --version | head -n 1
+              LD_LIBRARY_PATH=$here/lib/node/lib "$here/lib/node/bin/node" scripts/bundle-smoke.ts "$1"' sh "${{ steps.download.outputs.file }}"

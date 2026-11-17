@@ -1,8 +1,9 @@
 # Dependabot proposes newer versions once a week, in as few pull requests as it can: one for the actions the workflows
-# use, one for the Node base image's digest, and one for the npm packages (a new major version of a package, which can
-# break things, comes in a pull request of its own). Each pull request runs ci.yml, which builds and starts the image.
-# yt-dlp and FFmpeg are release files, not packages Dependabot knows: ytdlp-release.yml and ffmpeg-release.yml watch
-# those.
+# use, one for the Node base image's digest, one for the images FFmpeg is built in for the release's programs, and one
+# for the npm packages (a new major version of a package, which can break things, comes in a pull request of its own).
+# Each pull request runs ci.yml, which builds and starts the image, and bundles.yml where the programs are touched.
+# yt-dlp, FFmpeg, OpenSSL and the programs' Node.js are release files, not packages Dependabot knows:
+# ytdlp-release.yml, ffmpeg-release.yml and node-release.yml watch those.
 version: 2
 updates:
   # The actions in .github/workflows, by version tag or by commit (then with the version in a comment).
@@ -25,6 +26,15 @@ updates:
         update-types: ["version-update:semver-major"]
     groups:
       base-image:
+        patterns: ["*"]
+
+  # The FROM lines of deploy/bundle/Dockerfile: Alpine and Debian, where FFmpeg is built for the programs.
+  - package-ecosystem: docker
+    directory: /deploy/bundle
+    schedule:
+      interval: weekly
+    groups:
+      build-images:
         patterns: ["*"]
 
   # package.json and package-lock.json: the packages jukecord runs and the tools it is built and checked with.

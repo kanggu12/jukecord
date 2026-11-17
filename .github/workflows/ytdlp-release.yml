@@ -1,8 +1,9 @@
-# Once a week: whether a newer yt-dlp release is out than the one the image carries. Sites change what yt-dlp has to
-# understand every few weeks, and an old yt-dlp stops finding tracks on them; nothing else would say so, since the
-# image pins one release by version and checksum (and Dependabot does not follow release files). The check fails (red
-# on the Actions page, and a notice to the repository's owner) until YTDLP_VERSION and its two sums are bumped
-# (CONTRIBUTING.md, "yt-dlp"); it prints the new release's sums for that.
+# Once a week: whether a newer yt-dlp release is out than the one the image and the release's programs carry. Sites
+# change what yt-dlp has to understand every few weeks, and an old yt-dlp stops finding tracks on them; nothing else
+# would say so, since both pin one release by version and checksum (and Dependabot does not follow release files). The
+# check fails (red on the Actions page, and a notice to the repository's owner) until the release is moved with
+# `node scripts/pins.ts yt-dlp <version>`, which takes every sum from the release's own list (CONTRIBUTING.md,
+# "yt-dlp").
 name: ytdlp-release
 
 on:
@@ -31,9 +32,6 @@ jobs:
           test -n "$pinned" && test -n "$newest"
           # Versions are dates (2026.10.26), so the later one sorts last.
           if [ "$newest" != "$pinned" ] && [ "$(printf '%s\n%s\n' "$pinned" "$newest" | sort -V | tail -n 1)" = "$newest" ]; then
-            echo "The new release's sums for YTDLP_SHA256_AMD64 and YTDLP_SHA256_ARM64:"
-            curl -fsSL --retry 3 --max-time 60 "https://github.com/yt-dlp/yt-dlp/releases/download/$newest/SHA2-256SUMS" |
-              grep -E ' yt-dlp_linux(_aarch64)?\.zip$' || true
-            echo "::error::yt-dlp $newest is out; the image carries $pinned (bump it: CONTRIBUTING.md, yt-dlp)"
+            echo "::error::yt-dlp $newest is out; the image and the programs carry $pinned (node scripts/pins.ts yt-dlp $newest)"
             exit 1
           fi

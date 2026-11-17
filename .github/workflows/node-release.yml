@@ -1,0 +1,34 @@
+# Once a week: whether a newer Node.js release of the line the programs carry (26) is out than the one they pin
+# (deploy/bundle/pins.json). Each program brings its own Node.js, which serves the panel to the network, so its fixes
+# matter, and nothing else would say so: Dependabot moves the image's base, not a release file. The check fails (red on
+# the Actions page, and a notice to the repository's owner) until the pin is moved with `node scripts/pins.ts node
+# <version>` (CONTRIBUTING.md, "The release's programs").
+name: node-release
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: The newest release of the pinned line, against the pinned one
+        run: |
+          pinned=$(jq -r .node.version deploy/bundle/pins.json)
+          line=${pinned%%.*}
+          # Node.js's list of every release, newest first.
+          newest=$(curl -fsSL --retry 3 --max-time 60 https://nodejs.org/dist/index.json |
+            jq -r --arg line "v$line." '[.[] | select(.version | startswith($line))][0].version' | sed 's/^v//')
+          echo "pinned: $pinned; newest of $line: ${newest:-none found}"
+          test -n "$newest" && test "$newest" != null
+          if [ "$newest" != "$pinned" ]; then
+            echo "::error::Node.js $newest is out; the programs carry $pinned (node scripts/pins.ts node $newest)"
+            exit 1
+          fi

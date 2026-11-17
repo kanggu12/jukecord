@@ -1,7 +1,8 @@
 # Installing jukecord
 
 For the person who hosts jukecord: Docker Compose step by step, an address for friends, logging in with Discord,
-starting with the machine, a Raspberry Pi, running from source, updates and backups.
+starting with the machine, a Raspberry Pi, the release's programs without Docker, running from source, updates and
+backups.
 [Kubernetes](KUBERNETES.md) has the Helm chart.
 
 ## Docker Compose
@@ -165,6 +166,103 @@ sudo systemctl daemon-reload && sudo systemctl enable --now jukecord
 The same commands work on a Raspberry Pi 4 or 5 with a 64-bit system and on ARM servers: the image is built for arm64
 too. Building it on a Pi compiles FFmpeg, which takes a long while; a [released image](#a-released-image) skips that.
 The cache holds up to 2 GiB by default; `JUKECORD_CACHE_MAX` sets a size that fits the card or disk.
+
+## Without Docker
+
+Each release has jukecord for Linux, macOS and Windows, on x64 and on arm64: one folder with its own Node.js, FFmpeg
+and yt-dlp, so nothing else is installed. It runs on Linux with glibc 2.28 or newer (Debian 10, Ubuntu 20.04, a
+64-bit Raspberry Pi OS and later), on macOS 13.5 or newer and on Windows 10 or newer.
+
+**Linux** (x64; on a Raspberry Pi 4 or 5 and other ARM machines, `x64` becomes `arm64`)
+
+```bash
+curl -fL https://github.com/kanggu12/jukecord/releases/download/v0.3.3/jukecord-0.3.3-linux-x64.tar.gz | tar -xz
+cd jukecord-0.3.3-linux-x64 && ./jukecord start
+```
+
+**macOS** (Apple silicon; on Intel, `arm64` becomes `x64`)
+
+```bash
+curl -fL https://github.com/kanggu12/jukecord/releases/download/v0.3.3/jukecord-0.3.3-macos-arm64.tar.gz | tar -xz
+cd jukecord-0.3.3-macos-arm64 && ./jukecord start
+```
+
+**Windows** (PowerShell; on Arm, `x64` becomes `arm64`)
+
+```powershell
+iwr https://github.com/kanggu12/jukecord/releases/download/v0.3.3/jukecord-0.3.3-windows-x64.zip -OutFile jukecord-0.3.3-windows-x64.zip -UseBasicParsing
+tar -xf jukecord-0.3.3-windows-x64.zip
+cd jukecord-0.3.3-windows-x64; .\jukecord start
+```
+
+`jukecord start` runs jukecord in that terminal until Ctrl+C. In a second terminal in the same folder, `./jukecord open`
+(`.\jukecord open` on Windows) logs this computer's browser in to the panel, and every other
+[jukecord command](README.md#the-jukecord-command) works the same way: `./jukecord np`,
+`./jukecord add <address or words>`.
+
+- **Settings**: copy `.env.example` to `.env` in the folder. It takes the settings of Compose's `.env`
+  (`JUKECORD_DISCORD_TOKEN` for the bot); `JUKECORD_HOST=0.0.0.0` opens the panel to the network.
+- **Data**: the database, the cache, the logs and the backups are in `~/.local/share/jukecord` on Linux,
+  `~/Library/Application Support/jukecord` on macOS and `%LOCALAPPDATA%\jukecord` on Windows. `JUKECORD_DATA_DIR`
+  puts them elsewhere.
+- **Updating**: unpack the newer release beside the folder and copy `.env` into it. It finds the same data, and the
+  database moves to the newer schema on the first start, as with Compose.
+- **Downloaded with a browser**, macOS keeps the programs in the folder from starting until they are let through:
+  `xattr -dr com.apple.quarantine jukecord-0.3.3-macos-arm64`. curl, as above, leaves no such mark.
+
+On macOS and Windows it runs while its terminal is open; for a machine that plays around the clock, Docker Compose
+(Docker Desktop starts with the machine) or Linux suits better.
+
+### Starting with the machine, on Linux
+
+A systemd user service keeps it running and starts it at boot. It names one path, so a link points at the release in
+use (after an update, point the link at the new folder and restart the service):
+
+```bash
+ln -sfn "$PWD/jukecord-0.3.3-linux-x64" ~/jukecord
+mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/jukecord.service <<'EOF'
+[Unit]
+Description=jukecord
+
+[Service]
+ExecStart=%h/jukecord/jukecord start
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user enable --now jukecord
+sudo loginctl enable-linger "$USER"   # from boot, before anyone logs in
+```
+
+`journalctl --user -u jukecord` shows its console; `systemctl --user stop jukecord` stops it, saving where every
+server was.
+
+### What each file of a release is
+
+| File                                                                   | What it is                                                                                         |
+| :--------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
+| `jukecord-0.3.3-linux-x64.tar.gz`, `jukecord-0.3.3-linux-arm64.tar.gz` | jukecord for Linux on x64, and on arm64 (a Raspberry Pi 4 or 5, an ARM server)                     |
+| `jukecord-0.3.3-macos-arm64.tar.gz`, `jukecord-0.3.3-macos-x64.tar.gz` | jukecord for macOS on Apple silicon, and on Intel                                                  |
+| `jukecord-0.3.3-windows-x64.zip`, `jukecord-0.3.3-windows-arm64.zip`   | jukecord for Windows on x64, and on Arm                                                            |
+| `jukecord-0.3.3-helm-chart.tgz`                                        | the Helm chart, the same as `oci://ghcr.io/kanggu12/charts/jukecord` ([Kubernetes](KUBERNETES.md)) |
+| `jukecord-0.3.3-checksums.txt`                                         | the SHA-256 of every file above                                                                    |
+
+The image is not a file of the release but `ghcr.io/kanggu12/jukecord:0.3.3` ([a released image](#a-released-image)).
+
+### Checking a download
+
+The checksums file has a SHA-256 for each file, and GitHub keeps a signed record of where each was built:
+
+```bash
+sha256sum -c --ignore-missing jukecord-0.3.3-checksums.txt
+gh attestation verify jukecord-0.3.3-linux-x64.tar.gz --repo kanggu12/jukecord
+```
+
+On macOS `shasum -a 256 -c --ignore-missing` checks the same; on Windows, compare
+`Get-FileHash jukecord-0.3.3-windows-x64.zip` with its line. Each program is unpacked and run on its own system and
+processor (a track played through yt-dlp and FFmpeg) before a release is published, and again from the published
+release's addresses after.
 
 ## From source
 

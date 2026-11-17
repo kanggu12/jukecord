@@ -1,0 +1,77 @@
+{
+  "about": "What the release's programs carry beside jukecord, from each project's own releases: Node.js (the SHA-256 from the release's SHASUMS256.txt, signed by the Node.js release team), yt-dlp (from the release's SHA2-256SUMS, the same release and sums as the image's in deploy/docker/Dockerfile) and, for Linux, libatomic, which Node.js needs and a bare system may lack (Debian's package, from its lasting snapshot archive, whose list gives each file's SHA-1; the SHA-256 is of that file). FFmpeg's release is the image's; the libraries it is built with are in deploy/bundle/ffmpeg.sh. node scripts/pins.ts node <version> and node scripts/pins.ts yt-dlp <version> move those two; libatomic moves by hand (CONTRIBUTING.md).",
+  "node": {
+    "version": "26.13.1",
+    "files": {
+      "linux-x64": {
+        "name": "node-v26.13.1-linux-x64.tar.xz",
+        "sha256": "5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864"
+      },
+      "linux-arm64": {
+        "name": "node-v26.13.1-linux-arm64.tar.xz",
+        "sha256": "89e1853138db51e8b82d3e98ba9c0d3f2956a28e5e55ea1b7e12d25aae92d5dd"
+      },
+      "macos-arm64": {
+        "name": "node-v26.13.1-darwin-arm64.tar.xz",
+        "sha256": "af6202f5370a3a5209e85dc543758dfd9f44c8726626a236730cd603a67a8559"
+      },
+      "macos-x64": {
+        "name": "node-v26.13.1-darwin-x64.tar.xz",
+        "sha256": "2693310b2820f9350d29524f21344e1c623875bab773457d55b2aceb9670716f"
+      },
+      "windows-x64": {
+        "name": "node-v26.13.1-win-x64.zip",
+        "sha256": "e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7"
+      },
+      "windows-arm64": {
+        "name": "node-v26.13.1-win-arm64.zip",
+        "sha256": "181ebe431b90787113a9e4fc80d38ce86d37888a353a0386de44d2872e48cb97"
+      }
+    }
+  },
+  "yt-dlp": {
+    "version": "2026.10.26",
+    "files": {
+      "linux-x64": {
+        "name": "yt-dlp_linux.zip",
+        "sha256": "f34053415136e55073dd64ba5326d161ecc23ce0e98c081d8752867b37809450"
+      },
+      "linux-arm64": {
+        "name": "yt-dlp_linux_aarch64.zip",
+        "sha256": "74708e707e8fa8177c8347e58152337edf320149cd7b225defd453f7cde47822"
+      },
+      "macos-arm64": {
+        "name": "yt-dlp_macos.zip",
+        "sha256": "20d98fa608998eff87d1d35a6e9fb65e4b874639a6cc89addc19da3becde3ef1"
+      },
+      "macos-x64": {
+        "name": "yt-dlp_macos.zip",
+        "sha256": "20d98fa608998eff87d1d35a6e9fb65e4b874639a6cc89addc19da3becde3ef1"
+      },
+      "windows-x64": {
+        "name": "yt-dlp_win.zip",
+        "sha256": "fd51b212cf8380c7a52ee08c0d6be7f3c59b2f2c832eaf7b45acfae6eab57419"
+      },
+      "windows-arm64": {
+        "name": "yt-dlp_win_arm64.zip",
+        "sha256": "5eaa4c61f3c09189f3a551bf1855c13aad61fb865cc33f06012a6c2dbe287a45"
+      }
+    }
+  },
+  "libatomic": {
+    "version": "14.2.0-19",
+    "source": "https://snapshot.debian.org/package/gcc-14/14.2.0-19/",
+    "files": {
+      "linux-x64": {
+        "name": "libatomic1_14.2.0-19_amd64.deb",
+        "url": "https://snapshot.debian.org/archive/debian/20250315T204837Z/pool/main/g/gcc-14/libatomic1_14.2.0-19_amd64.deb",
+        "sha256": "212b399aae2f7299203d261a57e49372e09565a9a5ea971905f94a3960366c05"
+      },
+      "linux-arm64": {
+        "name": "libatomic1_14.2.0-19_arm64.deb",
+        "url": "https://snapshot.debian.org/archive/debian/20250317T031857Z/pool/main/g/gcc-14/libatomic1_14.2.0-19_arm64.deb",
+        "sha256": "7ccff90234484bf21ae5ecb79d25b6a84b2f4038f65dd139085b2e3a937cd8dc"
+      }
+    }
+  }
+}

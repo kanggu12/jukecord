@@ -12,6 +12,20 @@ and the data in.
 
 Without a bot token jukecord runs browser-only and needs no Discord at all, which is also how its tests run.
 
+## A program from the release
+
+A release's program for the machine ([without Docker](INSTALL.md#without-docker)) carries its Node.js, FFmpeg and
+yt-dlp. Download it on a machine with access, check it against the release's checksums, carry it over and unpack it:
+
+```bash
+# on a machine with access
+curl -fLO https://github.com/kanggu12/jukecord/releases/download/v0.3.3/jukecord-0.3.3-linux-arm64.tar.gz
+curl -fLO https://github.com/kanggu12/jukecord/releases/download/v0.3.3/jukecord-0.3.3-checksums.txt
+sha256sum -c --ignore-missing jukecord-0.3.3-checksums.txt
+# on the other machine
+tar -xzf jukecord-0.3.3-linux-arm64.tar.gz && cd jukecord-0.3.3-linux-arm64 && ./jukecord start
+```
+
 ## Building the image without the internet
 
 The build downloads the Node base image, FFmpeg's source and the libraries it is built with, the npm packages and

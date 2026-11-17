@@ -1,0 +1,95 @@
+#!/bin/sh
+# jukecord, run from the folder it was unpacked into (scripts/bundle.ts writes this file into each Linux and macOS
+# program, @YTDLP@ filled in):
+#
+#   ./jukecord start       run jukecord here, until Ctrl+C
+#   ./jukecord open        a login link for this computer's browser, opened when there is one
+#   ./jukecord <command>   anything else goes to the jukecord command: np, add, skip, link, status ...
+#
+# Node.js, FFmpeg and yt-dlp are the ones in lib/ beside this file. The settings are in .env beside it (copy
+# .env.example) or in the environment, which wins over the file. The data (the database, the cache, the logs and the
+# backups) lives in ~/.local/share/jukecord on Linux and in ~/Library/Application Support/jukecord on macOS, unless
+# JUKECORD_DATA_DIR says elsewhere, so a newer release unpacked beside this one finds it.
+set -eu
+
+# This file's folder, through any symbolic link to it (one in a folder on the PATH, say).
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+here=$(cd "$(dirname "$self")" && pwd -P)
+settings=$here/.env
+
+# Whether .env gives a setting a value. Node reads the file and leaves alone what the environment already has, so a
+# default set here would hide the file's value: only settings that neither gives get one.
+given() {
+  [ -f "$settings" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1=[[:space:]]*[^[:space:]#]" "$settings"
+}
+default() {
+  if [ -z "$(printenv "$1" || true)" ] && ! given "$1"; then
+    export "$1=$2"
+  fi
+}
+# Where each system keeps a program's data for its user.
+case $(uname -s) in
+  Darwin) default JUKECORD_DATA_DIR "$HOME/Library/Application Support/jukecord" ;;
+  *) default JUKECORD_DATA_DIR "${XDG_DATA_HOME:-$HOME/.local/share}/jukecord" ;;
+esac
+default JUKECORD_FFMPEG "$here/lib/ffmpeg/ffmpeg"
+default JUKECORD_YTDLP "$here/lib/yt-dlp/@YTDLP@"
+export NODE_ENV=production
+# Node.js's Linux builds load libatomic, which a bare system may not have: the copy in lib/node/lib (macOS has none).
+if [ -d "$here/lib/node/lib" ]; then
+  export LD_LIBRARY_PATH="$here/lib/node/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
+node=$here/lib/node/bin/node
+app=$here/lib/app
+# Node with .env read when there is one, and only then named (Node says so about a file it was given that is not
+# there). The source is already JavaScript, so Node's notice about stripping types would only be noise.
+nodejs() {
+  if [ -f "$settings" ]; then
+    "$node" --env-file="$settings" --disable-warning=ExperimentalWarning "$@"
+  else
+    "$node" --disable-warning=ExperimentalWarning "$@"
+  fi
+}
+# The same in place of this script, so signals (Ctrl+C, a service manager's SIGTERM) reach jukecord itself.
+run() {
+  if [ -f "$settings" ]; then
+    exec "$node" --env-file="$settings" --disable-warning=ExperimentalWarning "$@"
+  fi
+  exec "$node" --disable-warning=ExperimentalWarning "$@"
+}
+
+case ${1:-} in
+  start)
+    shift
+    run "$app/src/main.js" "$@"
+    ;;
+  open)
+    # The link alone on its line (a failure, jukecord not running say, ends here with the command's own words).
+    url=$(nodejs "$app/src/cli/main.js" link)
+    printf '%s\n' "$url"
+    # Opened only where someone looks at the terminal, with the system's own opener.
+    if [ -t 1 ]; then
+      if command -v open >/dev/null 2>&1 && [ "$(uname -s)" = Darwin ]; then open "$url" || true
+      elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1 || true
+      fi
+    fi
+    ;;
+  "" | help | -h | --help)
+    printf '%s\n' \
+      "  start                  run jukecord here, until Ctrl+C" \
+      "  open                   a login link for this computer's browser" \
+      ""
+    run "$app/src/cli/main.js" --help
+    ;;
+  *)
+    run "$app/src/cli/main.js" "$@"
+    ;;
+esac

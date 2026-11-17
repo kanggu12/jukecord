@@ -14,6 +14,22 @@ jukecord itself is MIT-licensed ([LICENSE](../LICENSE)). It uses the following, 
 
 jukecord runs FFmpeg and yt-dlp as separate programs; it does not link to them.
 
+## In the release's programs
+
+Each program (`jukecord-<version>-<system>-<processor>`, [without Docker](INSTALL.md#without-docker)) carries
+jukecord's server, command and panel as in the image, and beside them:
+
+| Part                                                                                                                                                                                                                                     | Licence                                                         | Where its source is                                   |
+| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------- | :---------------------------------------------------- |
+| [Node.js](https://nodejs.org) 26, the official build for each system and processor (`lib/node`, with its `LICENSE`)                                                                                                                      | MIT, with the licences of its bundled parts                     | https://github.com/nodejs/node                        |
+| [FFmpeg](https://ffmpeg.org) 7.1.5, built for audio with the image's configure line by `deploy/bundle/ffmpeg.sh` (`lib/ffmpeg`: its licence, and `SOURCE`, which says where each part's source is)                                       | LGPL-3.0-or-later, with no GPL parts                            | https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz       |
+| Opus, LAME and zlib, and on Linux OpenSSL, the libraries in that FFmpeg, built from their releases (their licences in `lib/ffmpeg/licenses`)                                                                                             | BSD-3-Clause, LGPL-2.0-or-later, Zlib and Apache-2.0            | the addresses in `lib/ffmpeg/SOURCE`                  |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp), its official build for each system, which bundles Python and the libraries it uses; each one's licence text, and where its source is, are in `lib/yt-dlp/_internal/THIRD_PARTY_LICENSES.txt` | Unlicense; the bundled parts under their own licences, some GPL | https://github.com/yt-dlp/yt-dlp                      |
+| libatomic, which Node.js loads on Linux: Debian's libatomic1 14.2.0-19 (`lib/node/lib`, with its licence, the exception and `libatomic-SOURCE`)                                                                                          | GPL-3.0-or-later with the GCC Runtime Library Exception 3.1     | https://snapshot.debian.org/package/gcc-14/14.2.0-19/ |
+| The npm packages below, installed for the system (the build of @snazzah/davey for it)                                                                                                                                                    | as below                                                        | their folders under `lib/app/node_modules`            |
+
+Each program carries this file as its `THIRD_PARTY_NOTICES.md`. It runs FFmpeg and yt-dlp as separate programs too.
+
 ## npm packages the server runs
 
 | Package                                                             | Licence                                                                  |

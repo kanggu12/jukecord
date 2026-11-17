@@ -24,14 +24,17 @@ const GUIDES = [
 ];
 
 // Where a guide names a released version, the version in the first group: the image (ghcr.io/kanggu12/jukecord:1.2.3,
-// and as a copy in a private registry), the chart (--version 1.2.3, and the file helm pull writes), a release's files
-// (jukecord-1.2.3-helm-chart.tgz, jukecord-1.2.3-checksums.txt), the README's badge and the bug form's example. Each is
-// tied to jukecord, so Node 24.11, a Compose or FFmpeg version or a yt-dlp release (2025.10.22) is never taken for one.
+// and as a copy in a private registry), the chart (--version 1.2.3), a release's files and the folders its programs
+// unpack into (jukecord-1.2.3-linux-x64.tar.gz, cd jukecord-1.2.3-linux-x64, jukecord-1.2.3-helm-chart.tgz, and the
+// chart file helm pull writes, jukecord-1.2.3.tgz), a release's addresses (releases/download/v1.2.3/), the README's
+// badge and the bug form's example. Each is tied to jukecord, so Node 24.11, a Compose or FFmpeg version or a yt-dlp
+// release (2025.10.22) is never taken for one.
 const NAMED = [
   /ghcr\.io\/[\w.-]+\/jukecord:(\d+\.\d+\.\d+)\b/g,
   /registry\.example\.internal\/jukecord:(\d+\.\d+\.\d+)\b/g,
   /charts\/jukecord --version (\d+\.\d+\.\d+)\b/g,
-  /\bjukecord-(\d+\.\d+\.\d+)(?:-[a-z-]+)?\.(?:tgz|txt)\b/g,
+  /\bjukecord-(\d+\.\d+\.\d+)\b/g,
+  /\/releases\/download\/v(\d+\.\d+\.\d+)\//g,
   /alt="Release v(\d+\.\d+\.\d+)"/g,
   /^ {6}placeholder: (\d+\.\d+\.\d+)$/gm,
 ];

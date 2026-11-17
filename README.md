@@ -55,8 +55,9 @@ echo 'JUKECORD_DISCORD_TOKEN=YOUR_BOT_TOKEN' >> .env
 ```
 
 On a cluster, the Helm chart takes the token from a Secret of your own ([Kubernetes](docs/KUBERNETES.md#install)).
-[Installing](docs/INSTALL.md) covers a Raspberry Pi, friends on other machines and running
-[from source](docs/INSTALL.md#from-source).
+Without Docker, each release has jukecord for Linux, macOS and Windows on x64 and arm64: one folder with its own
+Node.js, FFmpeg and yt-dlp ([without Docker](docs/INSTALL.md#without-docker)). [Installing](docs/INSTALL.md) covers a
+Raspberry Pi, friends on other machines and running [from source](docs/INSTALL.md#from-source).
 
 ### The Discord bot
 
@@ -125,13 +126,14 @@ hashes, and nothing is sent as telemetry ([what leaves your computer](docs/FAQ.m
 
 ## What it runs on
 
-|                    | Needs                                                                                                                                   |
-| :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
-| **Docker Compose** | Linux, macOS or Windows (WSL) on amd64 or arm64, with Compose 2.24 or newer; 430 MB for the image, 2 GiB for the cache                  |
-| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system, through Docker Compose with a [released image](docs/INSTALL.md#raspberry-pi-and-other-arm64-machines) |
-| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume                                                               |
-| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                                    |
-| **Listening**      | A current browser on a computer or a phone                                                                                              |
+|                    | Needs                                                                                                                                                          |
+| :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Docker Compose** | Linux, macOS or Windows (WSL) on amd64 or arm64, with Compose 2.24 or newer; 430 MB for the image, 2 GiB for the cache                                         |
+| **Raspberry Pi**   | A Pi 4 or 5 with a 64-bit system: a [released image](docs/INSTALL.md#raspberry-pi-and-other-arm64-machines) through Docker Compose, or the linux-arm64 program |
+| **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume                                                                                      |
+| **Without Docker** | Linux with glibc 2.28 or newer, macOS 13.5 or newer or Windows 10 or newer, on x64 or arm64: the [release's folder](docs/INSTALL.md#without-docker) for it     |
+| **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                                                           |
+| **Listening**      | A current browser on a computer or a phone                                                                                                                     |
 
 ## Guides
 

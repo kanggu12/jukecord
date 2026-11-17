@@ -784,16 +784,25 @@ describe('workflows and scripts', () => {
   });
 
   it('has its shell scripts executable', () => {
-    for (const file of ['jukecord', 'deploy/kind/check.sh', 'tests/ui/run.sh', '.github/badges.sh']) {
+    for (const file of [
+      'jukecord',
+      'deploy/kind/check.sh',
+      'tests/ui/run.sh',
+      '.github/badges.sh',
+      'deploy/bundle/ffmpeg.sh',
+      'deploy/bundle/build-ffmpeg.sh',
+    ]) {
       assert.ok(fs.statSync(file).mode & 0o100, `${file} is not executable`);
     }
   });
 
   // The pins of what ships (the image and the packages) and of the actions; the tools CI runs with (helm, kind,
   // kubeconform) are pinned by version and checksum in the workflows and moved by hand (CONTRIBUTING.md).
-  it('watches the pins of what ships for a newer release: yt-dlp and FFmpeg weekly, the rest through Dependabot', () => {
+  it('watches the pins of what ships for a newer release: yt-dlp, FFmpeg, OpenSSL and Node.js weekly, the rest through Dependabot', () => {
     assert.match(read('.github/workflows/ytdlp-release.yml'), /ARG YTDLP_VERSION=/);
     assert.match(read('.github/workflows/ffmpeg-release.yml'), /ARG FFMPEG_VERSION=/);
+    assert.match(read('.github/workflows/ffmpeg-release.yml'), /\^OPENSSL_VERSION=/);
+    assert.match(read('.github/workflows/node-release.yml'), /jq -r \.node\.version deploy\/bundle\/pins\.json/);
     const dependabot = read('.github/dependabot.yml');
     for (const [ecosystem, directory] of [
       ['github-actions', '/'],

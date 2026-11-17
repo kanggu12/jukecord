@@ -1,8 +1,9 @@
-# Once a week: whether a newer FFmpeg release of the same line (7.1) is out than the one the image builds. FFmpeg reads
-# media from any site, so its fixes matter, and nothing else would say so: the image builds FFmpeg from a pinned
-# release instead of taking Debian's package. The check fails (red on the Actions page, and a notice to the repository's
-# owner) until FFMPEG_VERSION and FFMPEG_SHA256 are bumped (CONTRIBUTING.md, "FFmpeg"). A newer line (8.0 after 7.1)
-# only adds a notice to the run: moving to it is a choice to make, not a fix to take.
+# Once a week: whether a newer FFmpeg release of the same line (7.1) is out than the one the image and the release's
+# programs build, and a newer OpenSSL of its line than the one the Linux programs' FFmpeg holds. FFmpeg reads media
+# from any site, so its fixes matter, and nothing else would say so: both build FFmpeg from a pinned release instead
+# of taking a package. The check fails (red on the Actions page, and a notice to the repository's owner) until
+# FFMPEG_VERSION and FFMPEG_SHA256, or deploy/bundle/ffmpeg.sh's OpenSSL, are bumped (CONTRIBUTING.md, "FFmpeg"). A
+# newer FFmpeg line (8.0 after 7.1) only adds a notice to the run: moving to it is a choice to make, not a fix to take.
 name: ffmpeg-release
 
 on:
@@ -38,5 +39,22 @@ jobs:
           fi
           if [ "$newest" != "$pinned" ]; then
             echo "::error::FFmpeg $newest is out; the image builds $pinned (bump it: CONTRIBUTING.md, FFmpeg)"
+            exit 1
+          fi
+      # The Linux programs' FFmpeg holds OpenSSL for https, built from its release (deploy/bundle/ffmpeg.sh); the image
+      # takes Debian's, which Dependabot's base updates bring.
+      - name: The newest OpenSSL of the line the Linux programs' FFmpeg holds, against the pinned one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(sed -n 's/^OPENSSL_VERSION=//p' deploy/bundle/ffmpeg.sh)
+          line=$(printf '%s' "$pinned" | cut -d. -f1-2)
+          # OpenSSL's releases are tagged openssl-3.5.9; the line's newest sorts last.
+          newest=$(gh api "repos/openssl/openssl/releases?per_page=100" --jq '.[].tag_name' |
+            sed -n "s/^openssl-\(${line//./\\.}\.[0-9]*\)$/\1/p" | sort -V | tail -n 1)
+          echo "pinned: $pinned; newest of $line: ${newest:-none found}"
+          test -n "$newest"
+          if [ "$newest" != "$pinned" ]; then
+            echo "::error::OpenSSL $newest is out; the Linux programs' FFmpeg holds $pinned (deploy/bundle/ffmpeg.sh: OPENSSL_VERSION and OPENSSL_SHA256)"
             exit 1
           fi

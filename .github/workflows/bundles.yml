@@ -1,0 +1,168 @@
+# The release's programs (scripts/bundle.ts): jukecord for Linux, macOS and Windows on x64 and arm64, each one folder
+# with its own Node.js, FFmpeg and yt-dlp. FFmpeg is built for each target (deploy/bundle/build-ffmpeg.sh: in Docker
+# for Linux and Windows, on a Mac of that processor for macOS) and kept in the cache until its release or its recipe
+# changes. The programs are put together on Linux, then each is unpacked and run on its own system and processor
+# (scripts/bundle-smoke.ts: started with its launcher, a track played through yt-dlp and FFmpeg, stopped). A version
+# tag attaches them to the GitHub release (release.yml calls this).
+name: bundles
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "panel/**"
+      - "scripts/**"
+      - "deploy/bundle/**"
+      - "deploy/docker/Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - "docs/THIRD_PARTY_NOTICES.md"
+      - ".github/workflows/bundles.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "panel/**"
+      - "scripts/**"
+      - "deploy/bundle/**"
+      - "deploy/docker/Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - "docs/THIRD_PARTY_NOTICES.md"
+      - ".github/workflows/bundles.yml"
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bundles-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ffmpeg:
+    name: FFmpeg for ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          # On an arm64 runner, so Docker builds it natively, not through emulation.
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          # llvm-mingw builds both Windows ones on x86-64 Linux.
+          - target: windows-x64
+            runner: ubuntu-24.04
+          - target: windows-arm64
+            runner: ubuntu-24.04
+          - target: macos-arm64
+            runner: macos-15
+          - target: macos-x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: What it is built from
+        id: key
+        shell: bash
+        run: |
+          # FFmpeg's release, from the image's Dockerfile, and the recipe: a change to either builds it again.
+          release=$(grep -E '^ARG FFMPEG_(VERSION|SHA256)=' deploy/docker/Dockerfile | cut -d= -f2 | tr '\n' '-')
+          echo "key=ffmpeg-${{ matrix.target }}-${release}${{ hashFiles('deploy/bundle/ffmpeg.sh', 'deploy/bundle/Dockerfile', 'deploy/bundle/build-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: ffmpeg/${{ matrix.target }}
+          key: ${{ steps.key.outputs.key }}
+      - name: The tools a Mac builds it with (pkg-config finds Opus, nasm assembles FFmpeg's x86 code)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        run: brew install nasm pkgconf
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: deploy/bundle/build-ffmpeg.sh ${{ matrix.target }} ffmpeg/${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: ffmpeg/
+          if-no-files-found: error
+          retention-days: 7
+
+  bundle:
+    name: the programs, put together
+    needs: ffmpeg
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      # The development packages too: the panel is built with esbuild.
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ffmpeg-*
+          path: ffmpeg
+          merge-multiple: true
+      - name: The six programs
+        run: node scripts/bundle.ts --ffmpeg ffmpeg --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jukecord-programs
+          path: |
+            dist/jukecord-*.tar.gz
+            dist/jukecord-*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  run:
+    name: the ${{ matrix.target }} program, run
+    needs: bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: macos-arm64
+            runner: macos-15
+          - target: macos-x64
+            runner: macos-15-intel
+          - target: windows-x64
+            runner: windows-2025
+          - target: windows-arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The Node.js that runs the check; the program runs with its own.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v8
+        with:
+          name: jukecord-programs
+          path: dist
+      - name: Unpacked, started, a track played, stopped
+        if: runner.os != 'Linux'
+        shell: bash
+        run: node scripts/bundle-smoke.ts dist/jukecord-*-${{ matrix.target }}.*
+      # On Linux, in a bare Debian 10: the oldest glibc the programs claim (2.28), and none of what a runner has
+      # installed (Node.js, libatomic, FFmpeg). The program's own Node.js runs the check.
+      - name: Unpacked, started, a track played, stopped, on a bare Debian 10
+        if: runner.os == 'Linux'
+        run: |
+          archive=$(ls dist/jukecord-*-${{ matrix.target }}.tar.gz)
+          docker run --rm -v "$PWD:/w:ro" -w /w \
+            debian:buster-slim@sha256:bb3dc79fddbca7e8903248ab916bb775c96ec61014b3d02b4f06043b604726dc \
+            sh -c 'set -e; mkdir /tmp/program; tar -xzf "$1" -C /tmp/program
+              cd /tmp/program/*/ && here=$PWD && cd /w
+              ldd --version | head -n 1
+              LD_LIBRARY_PATH=$here/lib/node/lib "$here/lib/node/bin/node" scripts/bundle-smoke.ts "$1"' sh "$archive"
