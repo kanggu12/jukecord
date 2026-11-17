@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { ConfigError, type ConfigFiles, loadConfig } from '../../src/config.ts';
 
-// Files that exist only in this map, so the tests never touch the disk.
+// Files that exist only in this map, so the tests never touch the disk. Each name is taken as the system writes it
+// whole, which is how jukecord asks for it (/srv/cookies.txt is C:\srv\cookies.txt on Windows).
 function files(content: Record<string, string>): ConfigFiles {
-  return { read: (file) => content[file] ?? '', readable: (file) => file in content };
+  const named = new Map(Object.entries(content).map(([file, text]) => [path.resolve(file), text]));
+  return { read: (file) => named.get(file) ?? '', readable: (file) => named.has(file) };
 }
 
 describe('loadConfig: limits, cookies and secrets from files', () => {
@@ -33,7 +36,7 @@ describe('loadConfig: limits, cookies and secrets from files', () => {
     assert.equal(config.queueMax, 250);
     assert.equal(config.liveMax, 3000);
     assert.equal(config.voice.idleMs, 0);
-    assert.equal(config.media.cookies, '/srv/cookies.txt');
+    assert.equal(config.media.cookies, path.resolve('/srv/cookies.txt'));
   });
 
   it('reads secrets from the files *_FILE names, the way Docker and Kubernetes mount them', () => {

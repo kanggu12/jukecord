@@ -4,9 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { takeWatchdogMark } from '../../src/watchdog.ts';
 
-const WATCHDOG = path.resolve(import.meta.dirname, '../../src/watchdog.ts');
+// As a file: address, which an import takes on every system (a Windows path, C:\..., is not one).
+const WATCHDOG = pathToFileURL(path.resolve(import.meta.dirname, '../../src/watchdog.ts')).href;
 
 // A Node process that starts the watchdog with a short limit and then does `then` (code run on its main thread).
 function child(then: string): Promise<{ signal: NodeJS.Signals | null; code: number | null; stderr: string }> {
@@ -26,13 +28,19 @@ describe('the watchdog', () => {
     // Busy for ten seconds without ever returning to the event loop.
     const started = Date.now();
     const result = await child('const end = Date.now() + 10_000; while (Date.now() < end) {}');
-    assert.equal(result.signal, 'SIGKILL');
+    // Ended outright: by SIGKILL on Linux and macOS; on Windows, where a process that ends itself so is said to have
+    // exited with 1 and no signal.
+    if (process.platform === 'win32') assert.deepEqual([result.code, result.signal], [1, null]);
+    else assert.equal(result.signal, 'SIGKILL');
     assert.match(result.stderr, /has not answered for \d+ s/);
     // Well before the loop would have ended by itself.
     assert.ok(Date.now() - started < 6000, `took ${Date.now() - started} ms`);
   });
 
-  it('does not take a frozen process for a hung main thread once it is thawed', async () => {
+  // Windows has no signal that stops a process and lets it go on (SIGSTOP and SIGCONT).
+  it('does not take a frozen process for a hung main thread once it is thawed', {
+    skip: process.platform === 'win32',
+  }, async () => {
     // The whole process stopped for two seconds (docker pause, a laptop asleep), then let go: both threads were
     // still, so nothing can be said about the main one. It must run on and end by itself.
     // The main thread is busy in short bursts (as a server under load is), so that when the process is let go the

@@ -333,7 +333,8 @@ describe('PlayerStateRepository and SettingsRepository', () => {
 });
 
 describe('Store.open and file modes', () => {
-  it("makes a database copied in with a looser mode this user's alone", () => {
+  // Windows keeps no such bits: the user's own profile folder, where the data is, keeps other users out there.
+  it("makes a database copied in with a looser mode this user's alone", { skip: process.platform === 'win32' }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-mode-'));
     try {
       const file = path.join(dir, 'jukecord.db');

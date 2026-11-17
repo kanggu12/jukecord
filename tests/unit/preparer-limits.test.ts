@@ -84,7 +84,9 @@ describe('Media under a crowd', () => {
       const signal = new AbortController();
       previous = signal;
       loads.push(media.prepare(track, signal.signal).catch(() => 'cancelled'));
-      await new Promise((resolve) => setTimeout(resolve, 2));
+      // The next press on the next turn of the event loop: faster than a download starts on every system (a 2 ms
+      // timer waits about 15 ms on Windows, which let each one start before the next press cancelled it).
+      await new Promise((resolve) => setImmediate(resolve));
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
     // Never more than four at once, though thirty were asked for; most never started at all.

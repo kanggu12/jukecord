@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { ConfigError, DEFAULT_PORT, describeConfig, loadConfig } from '../../src/config.ts';
 
@@ -9,7 +10,8 @@ const TOKEN = ['MTA4ODc2NTQzMjEwOTg3NjU0Mw', 'GaBcDe', 'abcdefghijklmnopqrstuvwx
 describe('loadConfig', () => {
   it('starts with safe defaults and no Discord: browser-only, listening on this machine only', () => {
     const config = loadConfig({}, '/srv/jukecord');
-    assert.equal(config.dataDir, '/srv/jukecord/data');
+    // As the system writes the path (C:\srv\jukecord\data on Windows, for this same setting).
+    assert.equal(config.dataDir, path.resolve('/srv/jukecord/data'));
     assert.equal(config.host, '127.0.0.1');
     assert.equal(config.port, DEFAULT_PORT);
     assert.equal(config.discord.token, null);
@@ -38,7 +40,7 @@ describe('loadConfig', () => {
       },
       '/ignored',
     );
-    assert.equal(config.dataDir, '/data');
+    assert.equal(config.dataDir, path.resolve('/data'));
     assert.equal(config.port, 9000);
     // The trailing slash goes, so paths can be appended.
     assert.equal(config.publicUrl, 'https://music.example.com');

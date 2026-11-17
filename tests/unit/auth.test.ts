@@ -64,7 +64,9 @@ describe('ensureHostToken', () => {
     try {
       const first = ensureHostToken(dir);
       assert.match(first, /^jkc_[A-Za-z0-9_-]{43}$/);
-      assert.equal(fs.statSync(path.join(dir, 'host-token')).mode & 0o777, 0o600);
+      // Windows keeps no such bits (a file's mode there says only whether it is read-only); there the data folder in
+      // the user's own profile is what keeps other users out.
+      if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'host-token')).mode & 0o777, 0o600);
       assert.equal(ensureHostToken(dir), first);
       // A damaged file is replaced rather than trusted.
       fs.writeFileSync(path.join(dir, 'host-token'), 'garbage');
