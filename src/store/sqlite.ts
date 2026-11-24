@@ -18,7 +18,19 @@ import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { Lock } from '../util/lock.ts';
-import { type RunResult, type SqlExecutor, type SqlRow, type SqlValue, StoreError } from './sql.ts';
+import {
+  type DatabaseServer,
+  type ExecutorMetrics,
+  type ExecutorOptions,
+  executorMetrics,
+  type RunResult,
+  type SqlExecutor,
+  type SqlRow,
+  type SqlValue,
+  StoreError,
+  statementKind,
+  type TransactionOptions,
+} from './sql.ts';
 
 // One open transaction or savepoint: how deep it is (1 for the outermost), whether it is still open (code it started
 // can outlive it, and must not count as inside it then), and the lock its own savepoints take turns with.
@@ -45,8 +57,14 @@ export class SqliteExecutor implements SqlExecutor {
   readonly dialect = 'sqlite' as const;
   /** The file path, or ":memory:" for the throwaway databases tests use. */
   readonly file: string;
+  /** SQLite and the version Node carries. */
+  readonly server: DatabaseServer;
   // The driver's connection; named for tests, which make its COMMIT fail to see the rollback.
   private readonly db: DatabaseSync;
+  // Where each statement's time and failure are counted, and whether they are (only when the executor was given
+  // metrics: telling a statement's kind and timing it cost a little on every one).
+  private readonly metrics: ExecutorMetrics;
+  private readonly measuring: boolean;
   // The connection itself: held by a transaction from BEGIN to COMMIT, and waited for by everyone else meanwhile.
   private readonly lock = new Lock();
   // The transaction the code running now is inside, if any.
@@ -55,13 +73,18 @@ export class SqliteExecutor implements SqlExecutor {
   // rows written in a reorder took six times as long, prepared one by one), and the repositories' texts repeat.
   private readonly statements = new Map<string, StatementSync>();
 
-  private constructor(db: DatabaseSync, file: string) {
+  private constructor(db: DatabaseSync, file: string, options: ExecutorOptions) {
     this.db = db;
     this.file = file;
+    this.metrics = executorMetrics(options.metrics);
+    this.measuring = options.metrics !== undefined;
+    // The library's own version, asked once: it is the one inside this Node, the same for every database it opens.
+    const version = db.prepare('SELECT sqlite_version() AS version').get()?.version;
+    this.server = { product: 'SQLite', version: typeof version === 'string' ? version : 'unknown' };
   }
 
   /** Opens (creating if needed) a database file, with the settings jukecord runs it with. */
-  static open(file: string): SqliteExecutor {
+  static open(file: string, options: ExecutorOptions = {}): SqliteExecutor {
     // The data directory may be new; SQLite does not create parent folders.
     if (file !== ':memory:') {
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -89,7 +112,7 @@ export class SqliteExecutor implements SqlExecutor {
       db.close();
       throw error;
     }
-    return new SqliteExecutor(db, file);
+    return new SqliteExecutor(db, file, options);
   }
 
   get isOpen(): boolean {
@@ -98,28 +121,46 @@ export class SqliteExecutor implements SqlExecutor {
 
   all(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
     // The driver's rows are plain objects of its own value types, every one of which is an SqlValue.
-    return this.use(() => this.prepared(sql).all(...params) as SqlRow[]);
+    return this.use(() => this.timed(sql, () => this.prepared(sql).all(...params) as SqlRow[]));
   }
 
   get(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow | undefined> {
-    return this.use(() => this.prepared(sql).get(...params) as SqlRow | undefined);
+    return this.use(() => this.timed(sql, () => this.prepared(sql).get(...params) as SqlRow | undefined));
   }
 
   run(sql: string, params: readonly SqlValue[] = []): Promise<RunResult> {
-    return this.use(() => {
-      const result = this.prepared(sql).run(...params);
-      // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
-      return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
-    });
+    return this.use(() =>
+      this.timed(sql, () => {
+        const result = this.prepared(sql).run(...params);
+        // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
+        return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
+      }),
+    );
   }
 
   exec(sql: string): Promise<void> {
-    return this.use(() => {
-      this.db.exec(sql);
-    });
+    return this.use(() =>
+      this.timed(sql, () => {
+        this.db.exec(sql);
+      }),
+    );
   }
 
-  async transaction<T>(fn: () => Promise<T> | T): Promise<T> {
+  // Runs one statement's work, its time and any failure counted under its kind when there are metrics to count in.
+  private timed<T>(sql: string, work: () => T): T {
+    if (!this.measuring) return work();
+    const done = this.metrics.statement(statementKind(sql));
+    try {
+      const result = work();
+      done();
+      return result;
+    } catch (error) {
+      done(true);
+      throw error;
+    }
+  }
+
+  async transaction<T>(fn: () => Promise<T> | T, options: TransactionOptions = {}): Promise<T> {
     // Inside a transaction still open: a savepoint of it.
     const parent = this.current.getStore();
     if (parent?.open) return this.savepoint(parent, fn);
@@ -128,8 +169,10 @@ export class SqliteExecutor implements SqlExecutor {
     const transaction: Transaction = { depth: 1, open: true, savepoints: new Lock() };
     try {
       // The outermost level takes SQLite's write lock at once (IMMEDIATE), so two writers queue up instead of
-      // deadlocking (the backup worker's connection, or another program on the file).
-      this.db.exec('BEGIN IMMEDIATE');
+      // deadlocking (the backup worker's connection, or another program on the file). A snapshot only reads: it
+      // takes no lock until its first read, and then sees the database as it was then, while another connection (a
+      // jukecord running on the file, when this is `jukecord db copy`) goes on writing beside it (WAL).
+      this.db.exec(options.snapshot ? 'BEGIN DEFERRED' : 'BEGIN IMMEDIATE');
       let result: T;
       try {
         result = await this.current.run(transaction, fn);

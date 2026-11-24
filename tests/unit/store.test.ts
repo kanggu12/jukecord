@@ -2,48 +2,38 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
-import { MIGRATIONS } from '../../src/store/schema.ts';
+import { MIGRATIONS, VERSION_TABLE } from '../../src/store/schema.ts';
 import { Store, StoreError } from '../../src/store/store.ts';
+import { eachDatabase } from '../support/databases.ts';
 import { addTracks, memoryStore } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
 const OTHER = '100000000000000002';
 
-describe('Store', () => {
+eachDatabase('Store', (db) => {
   it('creates the schema at the latest version and keeps it on reopening', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-db-'));
-    try {
-      const file = path.join(dir, 'sub', 'jukecord.db');
-      const store = await Store.open(file);
-      assert.equal(await store.schemaVersion(), MIGRATIONS.at(-1)?.version);
-      await addTracks(store, 1);
-      await store.close();
-      // Reopening runs no migration again and keeps the data.
-      const again = await Store.open(file);
-      assert.equal((await again.tracks.get(1))?.title, 'Track 1');
-      await again.close();
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    const store = await db.open();
+    assert.equal(await store.schemaVersion(), MIGRATIONS.at(-1)?.version);
+    await addTracks(store, 1);
+    await store.close();
+    // Reopening runs no migration again and keeps the data.
+    const again = await db.open();
+    assert.equal(await again.schemaVersion(), MIGRATIONS.at(-1)?.version);
+    assert.equal((await again.tracks.get(1))?.title, 'Track 1');
   });
 
   it('refuses a database written by a newer jukecord', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-db-'));
-    try {
-      const file = path.join(dir, 'jukecord.db');
-      const db = new DatabaseSync(file);
-      db.exec('PRAGMA user_version = 999');
-      db.close();
-      await assert.rejects(() => Store.open(file), /newer than this jukecord knows/);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    const store = await db.open();
+    // The version a newer jukecord would have left: SQLite's user_version, a server's version table.
+    if (db.kind === 'sqlite') await store.sql.exec('PRAGMA user_version = 999');
+    else await store.sql.run(`UPDATE ${VERSION_TABLE} SET version = 999`);
+    await store.close();
+    await assert.rejects(() => db.open(), /newer than this jukecord knows/);
   });
 
   it('rolls back a failed transaction, and only the inner level of a nested one', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [track] = await addTracks(store, 1);
     assert.ok(track);
     await assert.rejects(() =>
@@ -65,7 +55,9 @@ describe('Store', () => {
     // The outer insert stays; the inner one is gone.
     assert.equal(await store.queue.count(GUILD), 1);
   });
+});
 
+describe('Store on SQLite', () => {
   it('writes an online backup that opens with the same data', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-db-'));
     try {
@@ -84,9 +76,9 @@ describe('Store', () => {
   });
 });
 
-describe('TrackRepository', () => {
+eachDatabase('TrackRepository', (db) => {
   it('keeps one row per source and keeps known fields that a later lookup lacks', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const first = await store.tracks.upsert({
       source: 'https://example.com/a',
       url: 'https://example.com/a',
@@ -112,9 +104,9 @@ describe('TrackRepository', () => {
   });
 });
 
-describe('QueueRepository', () => {
+eachDatabase('QueueRepository', (db) => {
   it('inserts at the end, next, or a position, keeping positions dense', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [a, b, c, d] = await addTracks(store, 4);
     assert.ok(a && b && c && d);
     await store.queue.insert(GUILD, [a.id, b.id], Number.MAX_SAFE_INTEGER, 'u1');
@@ -134,7 +126,7 @@ describe('QueueRepository', () => {
   });
 
   it('removes, moves, reorders, shifts and clears', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const tracks = await addTracks(store, 4);
     const items = await store.queue.insert(
       GUILD,
@@ -171,7 +163,7 @@ describe('QueueRepository', () => {
   });
 
   it('keeps positions 0..n-1 after a removal and a shift from the middle of a long queue, and says what it holds', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const tracks = await addTracks(store, 6);
     const items = await store.queue.insert(
       GUILD,
@@ -204,7 +196,7 @@ describe('QueueRepository', () => {
   });
 
   it('removes many items in one go, closing every gap once, and counts only those that were there', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const tracks = await addTracks(store, 5);
     const items = await store.queue.insert(
       GUILD,
@@ -231,9 +223,9 @@ describe('QueueRepository', () => {
   });
 });
 
-describe('HistoryRepository', () => {
+eachDatabase('HistoryRepository', (db) => {
   it('pages by the order entries were written in, even when the clock went back between two plays', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [a, b, c] = await addTracks(store, 3);
     assert.ok(a && b && c);
     // The second entry says it started earlier than the first (the clock was set back): by ID it is still newer, so
@@ -250,7 +242,7 @@ describe('HistoryRepository', () => {
   });
 
   it('lists newest first and pages back', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [a, b, c] = await addTracks(store, 3);
     assert.ok(a && b && c);
     await store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: 1000, playedMs: 5000 });
@@ -276,9 +268,9 @@ describe('HistoryRepository', () => {
   });
 });
 
-describe('PlaylistRepository', () => {
+eachDatabase('PlaylistRepository', (db) => {
   it('saves, replaces, finds, renames and deletes', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [a, b, c] = await addTracks(store, 3);
     assert.ok(a && b && c);
     const saved = await store.playlists.save(GUILD, '  Evening  ', [a.id, b.id], 'u1');
@@ -301,9 +293,9 @@ describe('PlaylistRepository', () => {
   });
 });
 
-describe('PlayerStateRepository and SettingsRepository', () => {
+eachDatabase('PlayerStateRepository and SettingsRepository', (db) => {
   it('saves and loads the current track of each server', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [a] = await addTracks(store, 1);
     assert.ok(a);
     await store.playerState.save({
@@ -329,7 +321,7 @@ describe('PlayerStateRepository and SettingsRepository', () => {
   });
 
   it('defaults to no DJ role and remembers one when set', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     assert.deepEqual(await store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
     await store.settings.setDjRole(GUILD, '200000000000000001');
     assert.deepEqual(await store.settings.get(GUILD), { djRoleId: '200000000000000001', alertsChannelId: null });

@@ -4,12 +4,16 @@
  * The repositories (src/store/store.ts) hold their SQL text and hand it here with its values; an executor runs it on
  * one kind of database and gives back plain rows. Every call returns a promise, because the drivers of network
  * databases (PostgreSQL, MySQL) have no other way to answer; the SQLite executor (src/store/sqlite.ts) answers at once
- * but keeps the same shape, so the store above it does not change with the database under it.
+ * but keeps the same shape, so the store above it does not change with the database under it. The executors of the
+ * network databases are src/store/postgres.ts and src/store/mysql.ts (MySQL and MariaDB); the few statements that
+ * differ between databases are written by src/store/dialect.ts.
  *
  * Transactions follow the caller, not an argument: `transaction(async () => ...)` opens one, and every statement a
  * repository method runs inside that function, however deep, runs in it (an executor finds it through
  * AsyncLocalStorage). A transaction opened inside another becomes a savepoint of it, which rolls back alone.
  */
+import type { Logger } from '../log.ts';
+import type { Metrics } from '../metrics/registry.ts';
 
 /** Raised for requests the data does not allow: an unknown queue item, a playlist name already taken. */
 export class StoreError extends Error {
@@ -33,8 +37,35 @@ export interface RunResult {
 /** Which SQL the database speaks: the few statements that differ between databases are chosen by it. */
 export type Dialect = 'sqlite' | 'postgres' | 'mysql';
 
+/** The database program behind an executor, as the status, the doctor and `jukecord db status` name it. */
+export interface DatabaseServer {
+  /** Which program it is; MariaDB speaks the mysql dialect, with a few words of its own. */
+  readonly product: 'SQLite' | 'PostgreSQL' | 'MySQL' | 'MariaDB';
+  /** Its version as it says it, "3.50.4", "18.7" or "11.8.9" (MariaDB's own suffix left out). */
+  readonly version: string;
+}
+
+/** How a transaction runs. */
+export interface TransactionOptions {
+  /**
+   * Only reads, as one consistent view of the database that waits for no writer and holds none up: a copy of the
+   * whole database, the statistics' several questions of one moment. Writing in it fails on the network databases.
+   */
+  readonly snapshot?: boolean;
+}
+
+/** What every executor may be given when it is opened. */
+export interface ExecutorOptions {
+  /** Where statement durations, failures and the pool's use are reported (nothing kept when absent). */
+  readonly metrics?: Metrics;
+  /** Where a connection lost while idle, or a transaction tried again, is said (nothing said when absent). */
+  readonly log?: Pick<Logger, 'info' | 'warn' | 'error'>;
+}
+
 export interface SqlExecutor {
   readonly dialect: Dialect;
+  /** The database program and its version (known once the executor is open). */
+  readonly server: DatabaseServer;
   /** Whether statements can still run (false once closed): the readiness check asks this. */
   readonly isOpen: boolean;
   /** Every row a query returns, in its order. */
@@ -48,10 +79,113 @@ export interface SqlExecutor {
   /**
    * Runs `fn` in a transaction: everything it writes is kept, or nothing is if it throws (the error is passed on).
    * Inside another transaction it is a savepoint of it, which rolls back alone. Statements from outside the
-   * transaction (another request, another server's lane) wait for its end; so `fn` must await only database work,
-   * never the network or a timer, or everyone else waits that long too.
+   * transaction (another request, another server's lane) wait for its end on SQLite and see what was there before it
+   * on the network databases, whose transactions are serializable: one that would have seen another's change in the
+   * middle is run again from the start (so `fn` must do nothing but database work and keep nothing it read before a
+   * failure). `fn` must await only database work, never the network or a timer, or everyone waits that long too.
    */
-  transaction<T>(fn: () => Promise<T> | T): Promise<T>;
+  transaction<T>(fn: () => Promise<T> | T, options?: TransactionOptions): Promise<T>;
   /** Closes the connection once no transaction holds it; statements after that fail. */
   close(): Promise<void>;
+}
+
+// The extended result codes node:sqlite puts on a constraint's failure: a UNIQUE constraint, and a PRIMARY KEY.
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+const SQLITE_CONSTRAINT_PRIMARYKEY = 1555;
+
+/**
+ * Whether an error is a database refusing a row whose key is taken (a UNIQUE or PRIMARY KEY constraint), whichever
+ * driver raised it: what a repository turns into a refusal people can read (a playlist name already taken).
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const fields = error as Error & { code?: unknown; errcode?: unknown; errno?: unknown };
+  // SQLite (node:sqlite): the constraint's own extended result code.
+  if (fields.errcode === SQLITE_CONSTRAINT_UNIQUE || fields.errcode === SQLITE_CONSTRAINT_PRIMARYKEY) return true;
+  // PostgreSQL: unique_violation, the SQLSTATE of both.
+  if (fields.code === '23505') return true;
+  // MySQL and MariaDB: ER_DUP_ENTRY.
+  return fields.errno === 1062;
+}
+
+/** The kinds of statement a duration or a failure is counted under: a word from a short list, never the text. */
+export type StatementKind = 'select' | 'insert' | 'update' | 'delete' | 'transaction' | 'other';
+
+/** The kind of a statement, by its first word. */
+export function statementKind(sql: string): StatementKind {
+  // The first word after any spaces and comments a statement may start with.
+  const word = /^(?:\s|--[^\n]*\n)*([a-z]+)/i.exec(sql)?.[1]?.toLowerCase();
+  if (word === 'select' || word === 'with') return 'select';
+  if (word === 'insert') return 'insert';
+  if (word === 'update') return 'update';
+  if (word === 'delete') return 'delete';
+  return 'other';
+}
+
+/** What an executor counts in the metrics: each statement's duration and failure, and what its pool is doing. */
+export interface ExecutorMetrics {
+  /** Starts timing one statement of a kind; the function it gives ends the timing, a failure counted when given. */
+  statement(kind: StatementKind): (failed?: boolean) => void;
+  /** A transaction run again after the database refused it in the middle (a serialization failure, a deadlock). */
+  retried(): void;
+}
+
+/** What a pool of connections is doing at one moment. */
+export interface PoolUse {
+  /** Connections running a statement or holding a transaction. */
+  readonly busy: number;
+  /** Connections open and free. */
+  readonly idle: number;
+  /** Statements and transactions waiting for a connection. */
+  readonly waiting: number;
+}
+
+/** Reports a pool's use each time the metrics are read (nothing when there are no metrics). */
+export function poolMetrics(metrics: Metrics | undefined, read: () => PoolUse): void {
+  if (!metrics) return;
+  const connections = metrics.gauge(
+    'jukecord_db_pool_connections',
+    'Connections of the database pool, by state (busy: in use; idle: open and free).',
+    ['state'],
+  );
+  const waiting = metrics.gauge(
+    'jukecord_db_pool_waiting',
+    'Statements and transactions waiting for a connection of the database pool.',
+  );
+  metrics.collect(() => {
+    const use = read();
+    connections.set(use.busy, { state: 'busy' });
+    connections.set(use.idle, { state: 'idle' });
+    waiting.set(use.waiting);
+  });
+}
+
+/** The metrics every executor reports, declared once (each executor may add its pool's gauges with `collect`). */
+export function executorMetrics(metrics: Metrics | undefined): ExecutorMetrics {
+  // No registry: nothing counted, and no timer started for each statement.
+  if (!metrics) return { statement: () => () => {}, retried: () => {} };
+  const duration = metrics.histogram(
+    'jukecord_db_query_duration_seconds',
+    'How long database statements took, by kind (select, insert, update, delete, transaction, other).',
+    ['operation'],
+  );
+  const errors = metrics.counter(
+    'jukecord_db_query_errors_total',
+    'Database statements that failed, by kind (a constraint refused, the server unreachable, a timeout).',
+    ['operation'],
+  );
+  const retries = metrics.counter(
+    'jukecord_db_transaction_retries_total',
+    'Transactions run again because the database refused them halfway (a serialization failure or a deadlock).',
+  );
+  return {
+    statement: (kind) => {
+      const done = duration.time({ operation: kind });
+      return (failed = false) => {
+        done();
+        if (failed) errors.inc({ operation: kind });
+      };
+    },
+    retried: () => retries.inc(),
+  };
 }
