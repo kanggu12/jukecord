@@ -5,6 +5,7 @@
  * server's form route with its limiter per address and per name.
  */
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
 import type { ClientOptions } from 'ldapts';
@@ -347,5 +348,68 @@ describe('logging in with a directory account through the server', () => {
       fake.down = false;
     }
     assert.equal(await server.auth.limiter.blocked(['address:10.5.0.1']), false);
+  });
+});
+
+describe('a directory that takes StartTLS and then never finishes the handshake', () => {
+  // Answers the StartTLS request (an extended request, 0x77) with success, then leaves the TLS handshake unanswered;
+  // notes when each connection is closed.
+  const closed: number[] = [];
+  const sockets: net.Socket[] = [];
+  let opened = 0;
+  const stall = net.createServer((socket) => {
+    opened += 1;
+    sockets.push(socket);
+    let answered = false;
+    socket.on('close', () => closed.push(Date.now()));
+    socket.on('error', () => {});
+    socket.on('data', (chunk: Buffer) => {
+      if (answered || chunk[0] !== 0x30 || chunk.indexOf(0x77) < 0) return;
+      answered = true;
+      const id = chunk.subarray(4, 4 + (chunk[3] ?? 1));
+      const inner = Buffer.concat([
+        Buffer.from([0x02, id.length]),
+        id,
+        Buffer.from([0x78, 0x07, 0x0a, 0x01, 0x00, 0x04, 0x00, 0x04, 0x00]),
+      ]);
+      socket.write(Buffer.concat([Buffer.from([0x30, inner.length]), inner]));
+    });
+  });
+  let settings: LdapSettings;
+
+  before(async () => {
+    await new Promise<void>((resolve) => stall.listen(0, '127.0.0.1', resolve));
+    const { port } = stall.address() as net.AddressInfo;
+    settings = { ...SETTINGS, url: `ldap://127.0.0.1:${port}`, startTls: true, timeoutMs: 300 };
+  });
+  after(async () => {
+    // Whatever a try left open (none, once it gives up): the server closes only when its connections are gone.
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => stall.close(() => resolve()));
+  });
+  // What a promise came to, or that it was still under way after three seconds.
+  const within = <T>(promise: Promise<T>) =>
+    Promise.race([
+      promise,
+      new Promise<'still waiting'>((resolve) => setTimeout(() => resolve('still waiting'), 3000)),
+    ]);
+
+  it('gives up on it within the timeout, and lets go of the connection', async () => {
+    const started = Date.now();
+    const code = await within(refusal(new LdapLogin({ settings, log }).login('alice', 'alice-password')));
+    const took = Date.now() - started;
+    assert.equal(code, 'unavailable');
+    assert.ok(took < 1500, `it took ${took} ms`);
+    // The socket is closed, not left with the handshake under way.
+    for (let wait = 0; closed.length < opened && wait < 50; wait += 1) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(closed.length, opened);
+    // The settings' test says so in as long.
+    const before = Date.now();
+    const tested = await within(new LdapLogin({ settings, log }).test());
+    assert.ok(Date.now() - before < 1500);
+    if (tested === 'still waiting') throw new Error('the test is still waiting');
+    assert.equal(tested.checks[0]?.name, 'connection');
+    assert.equal(tested.checks[0]?.status, 'fail');
+    assert.match(tested.checks[0]?.detail ?? '', /StartTLS/);
   });
 });

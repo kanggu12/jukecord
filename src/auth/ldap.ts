@@ -184,12 +184,29 @@ export class LdapLogin {
     };
     const client = this.options.connect ? this.options.connect(options) : new Client(options);
     if (settings.startTls) {
+      // ldapts' StartTLS has no clock of its own (the timeout covers one message and the connect, not the handshake
+      // after them): a directory, or anything between, that answers the request and then stalls the handshake would
+      // hold the login, and its socket, for good. It gets the timeout the rest gets.
+      let timer: NodeJS.Timeout | undefined;
+      const upgrade = client.startTLS(tlsOptions);
       try {
-        await client.startTLS(tlsOptions);
+        await Promise.race([
+          upgrade,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`StartTLS did not finish within ${settings.timeoutMs} ms`)),
+              settings.timeoutMs,
+            );
+          }),
+        ]);
       } catch (error) {
-        // A connection that could not be encrypted is let go of, unused: nothing was sent over it in the clear.
+        // A connection that could not be encrypted is let go of, unused: nothing was sent over it in the clear. Letting
+        // go of it also ends a handshake still under way, whose failure then says nothing more.
+        upgrade.catch(() => {});
         await client.unbind().catch(() => {});
         throw error;
+      } finally {
+        clearTimeout(timer);
       }
     }
     return client;
