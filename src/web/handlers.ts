@@ -6,8 +6,7 @@
  * what makes the API do exactly what the panel, the slash commands and the CLI do.
  */
 import type { Static, TSchema } from 'typebox';
-import type { Access } from '../app/access.ts';
-import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
+import { type ActionContext, ActionError, type SettingsView } from '../app/actions.ts';
 import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
 import type { DoctorReport } from '../app/doctor.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
@@ -15,17 +14,20 @@ import { searchWords } from '../media/search.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
+import type { AccessPort, ActionsPort, BotAccount, HostJobs } from './core.ts';
 import { readLogs } from './logs.ts';
 import type { Presenter } from './present.ts';
 
 /** What handlers reach for. */
 export interface HandlerDeps {
-  readonly actions: Actions;
-  readonly access: Access;
+  /** The actions: jukecord's own in one process, the core's over the bus in an edge (see core.ts). */
+  readonly actions: ActionsPort;
+  readonly access: AccessPort;
   readonly auth: Auth;
   readonly store: Store;
   readonly presenter: Presenter;
-  readonly directory: () => Directory | null;
+  /** The bot's own account (Discord's directory in one process; the core's heartbeat in an edge). */
+  readonly directory: () => BotAccount | null;
   /** The address people open the panel at, for login links. */
   readonly publicUrl: string;
   readonly logDir: string;
@@ -36,6 +38,8 @@ export interface HandlerDeps {
   readonly discordMode: boolean;
   /** How many backups stay in the folder (JUKECORD_BACKUP_KEEP; seven by default). */
   readonly backupKeep?: number;
+  /** The backup and the logs, done by the core for an edge; absent, they are this process's own (one process). */
+  readonly host?: HostJobs;
 }
 
 // The parts of a request, typed from the operation's schemas.
@@ -75,7 +79,7 @@ const OK = { ok: true as const };
 
 /** Every operation's handler; a missing one fails the type check. */
 export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]> } = {
-  'now-playing': ({ context, deps }) => deps.presenter.player(deps.actions.nowPlaying(context)),
+  'now-playing': async ({ context, deps }) => deps.presenter.player(await deps.actions.nowPlaying(context)),
   'play-now': async ({ context, body, deps }) => {
     const result = await deps.actions.playNow(context, body.input);
     return { ...result, items: await deps.presenter.items(result.items) };
@@ -132,7 +136,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return OK;
   },
 
-  'voice-channels': ({ context, deps }) => deps.actions.voiceChannels(context),
+  'voice-channels': async ({ context, deps }) => deps.actions.voiceChannels(context),
   join: async ({ context, body, deps }) => {
     await deps.actions.join(context, body.channelId ?? null);
     return deps.actions.voiceChannels(context);
@@ -144,8 +148,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
 
   settings: async ({ context, deps }) => settingsAnswer(await deps.actions.settings(context)),
   'dj-role': async ({ context, body, deps }) => settingsAnswer(await deps.actions.djRole(context, body.roleId)),
-  status: ({ deps }) => {
-    const status = deps.actions.status();
+  status: async ({ deps }) => {
+    const status = await deps.actions.status();
     return {
       version: status.version,
       discord: status.discord,
@@ -203,17 +207,17 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return OK;
   },
 
-  logs: ({ query, deps }) =>
-    readLogs(
-      deps.logDir,
-      {
-        limit: query.limit ?? 200,
-        ...(query.level ? { level: query.level } : {}),
-        ...(query.component ? { component: query.component } : {}),
-        ...(query.before ? { before: query.before } : {}),
-      },
-      deps.logFiles,
-    ).map((record) => ({ ...record })),
+  logs: async ({ query, deps }) => {
+    const asked = {
+      limit: query.limit ?? 200,
+      ...(query.level ? { level: query.level } : {}),
+      ...(query.component ? { component: query.component } : {}),
+      ...(query.before ? { before: query.before } : {}),
+    };
+    // The core's log in a split jukecord (where the music is played); this process's own otherwise.
+    const records = deps.host ? await deps.host.logs(asked) : readLogs(deps.logDir, asked, deps.logFiles);
+    return records.map((record) => ({ ...record }));
+  },
   'login-link': ({ query, deps }) => {
     const scope = query.scope ?? 'admin';
     const link = deps.auth.createLink(scope);
@@ -221,8 +225,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   },
   backup: async ({ deps }) => {
     // Named by the time, so backups sort and none replaces another; the newest JUKECORD_BACKUP_KEEP stay. Written
-    // beside the main thread, which goes on answering meanwhile.
-    const made = await makeBackup(deps.store, deps.backupDir, deps.backupKeep ?? KEEP_BACKUPS);
+    // beside the main thread, which goes on answering meanwhile; by the core, into its backups folder, for an edge.
+    const made = deps.host
+      ? await deps.host.backup()
+      : await makeBackup(deps.store, deps.backupDir, deps.backupKeep ?? KEEP_BACKUPS);
     return { file: made.file, bytes: made.bytes };
   },
   doctor: async ({ deps }) => {

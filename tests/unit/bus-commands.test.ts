@@ -19,9 +19,18 @@ import {
 } from '../../src/bus/commands.ts';
 import type { MemoryTransport } from '../../src/bus/memory.ts';
 import { busNames } from '../../src/bus/transport.ts';
+import { sayError } from '../../src/core/say.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import { StoreError } from '../../src/store/sql.ts';
 import { eventually, memoryBus, settle, testBuses, testLog } from '../support/bus.ts';
+
+describe("an edge's refusals", () => {
+  it('are said in Korean too, as the panel shows them', () => {
+    for (const message of [CORE_AWAY, CORE_LATE]) {
+      assert.notEqual(sayError(message, 'ko'), sayError(message, 'en'), `no Korean for "${message}"`);
+    }
+  });
+});
 
 describe('the wire codec', () => {
   it('keeps an undefined argument between two given ones, which JSON would turn into null', () => {

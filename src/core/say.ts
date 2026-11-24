@@ -72,6 +72,12 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['too many skips at once; try again in a moment', '건너뛰기가 너무 잦음: 잠시 뒤 다시 시도하세요'],
   ['too many requests at once; try again in a moment', '요청이 너무 많음: 잠시 뒤 다시 시도하세요'],
   ['jukecord is busy; try again in a moment', 'jukecord가 지금 바쁨: 잠시 뒤 다시 시도하세요'],
+  // A split jukecord whose core cannot be reached (it starts, restarts, or the bus is down), or was too slow (503).
+  [
+    'jukecord is starting or restarting; try again in a moment',
+    'jukecord가 시작하거나 다시 시작하는 중: 잠시 뒤 다시 시도하세요',
+  ],
+  ['jukecord did not answer in time; try again in a moment', 'jukecord가 제때 답하지 않음: 잠시 뒤 다시 시도하세요'],
   // Why a live connection ended, which the panel shows.
   ['jukecord is restarting', 'jukecord가 다시 시작하는 중'],
   ['logged out', '로그아웃됨'],
