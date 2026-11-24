@@ -321,6 +321,14 @@ export class RemoteFiles implements Files {
           answer.destroy();
           return;
         }
+        // The core refuses this edge's secret: the two were given different ones. The browser cannot help that; it is
+        // told jukecord is away, and the log says what to fix.
+        if (answer.statusCode === 401) {
+          answer.resume();
+          this.failed(new Error('the core refuses this edge: JUKECORD_INTERNAL_SECRET is not the same on both'));
+          done(later(reply, 'unavailable', CORE_AWAY, 2000));
+          return;
+        }
         for (const name of ANSWERED) {
           const value = answer.headers[name];
           if (value !== undefined) reply.header(name, value);

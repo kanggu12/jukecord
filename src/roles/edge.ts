@@ -133,6 +133,8 @@ export interface EdgeOptions {
     readonly backupKeep: number;
     /** The rates and their clock, as one process's server takes them (tests lower them). */
     readonly rates?: Parameters<typeof createWebServer>[0]['rates'];
+    /** Whether this edge has fallen behind (tests say never; by default its event loop says). */
+    readonly behind?: () => boolean;
   };
   readonly log: Logger;
   /** How long the core may say nothing before it is taken for lost (default from bus/beat.ts). */
@@ -226,6 +228,7 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
     log: log.child('web'),
     ...(settings.live ? { live: settings.live } : {}),
     ...(settings.rates ? { rates: settings.rates } : {}),
+    ...(settings.behind ? { behind: settings.behind } : {}),
     sharedCache: options.sharedCache,
     registry: options.registry,
     ready: () => options.store.isOpen(),

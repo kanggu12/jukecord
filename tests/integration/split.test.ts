@@ -162,6 +162,11 @@ for (const { name, make } of testBuses()) {
         assert.equal(part.headers.get('content-range'), `bytes 5-14/${'OggS-0123456789-the-rest-of-the-file'.length}`);
         assert.equal(await part.text(), '0123456789');
       }
+      // The MP3 copy: none is made in these tests, which the core says as one process does.
+      const mp3 = await fetch(`${one.url}/api/v1/guilds/${GUILD}/tracks/${track.id}/audio?format=mp3`, {
+        headers: host,
+      });
+      assert.equal(mp3.status, 409);
       // A track not in this server's queue is refused as in one process, by the core.
       const other = await pieces.store.tracks.upsert(exampleTrack('elsewhere'));
       const refused = await fetch(`${one.url}/api/v1/guilds/${GUILD}/tracks/${other.id}/audio`, { headers: host });
@@ -169,6 +174,14 @@ for (const { name, make } of testBuses()) {
       // Without the secret, the core's internal port answers nothing.
       const direct = await fetch(`${core.internalUrl}/internal/v1/audio?guild=${GUILD}&track=${track.id}`);
       assert.equal(direct.status, 401);
+      // An edge given another secret than its core's: the browser hears jukecord is away, and the log says why.
+      const astray = await pieces.edge(core, { secret: 'not-the-secret-0123456789abcdef0123456789' });
+      const refused2 = await fetch(`${astray.url}/api/v1/guilds/${GUILD}/tracks/${track.id}/audio`, { headers: host });
+      assert.equal(refused2.status, 503);
+      assert.ok(
+        astray.logs.records.some((record) => String(record.fields.reason).includes('JUKECORD_INTERNAL_SECRET')),
+      );
+      await astray.stop();
     });
 
     it('adds up who listens on each edge at the core, and shows everyone on every edge', async () => {

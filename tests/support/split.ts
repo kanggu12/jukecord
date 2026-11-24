@@ -90,8 +90,8 @@ export interface Split {
   readonly options: SplitOptions;
   /** Starts a core (a second one waits for the first's lease, as a real one does). */
   core(): Promise<TestCore>;
-  /** Starts an edge, listening, that streams from `core`'s internal port. */
-  edge(core: TestCore): Promise<TestEdge>;
+  /** Starts an edge, listening, that streams from `core`'s internal port (with another secret, to test a mistake). */
+  edge(core: TestCore, options?: { secret?: string }): Promise<TestEdge>;
   /** Stops everything still running and removes what the test made. */
   close(): Promise<void>;
 }
@@ -250,7 +250,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
     };
   };
 
-  const edge = async (to: TestCore): Promise<TestEdge> => {
+  const edge = async (to: TestCore, given: { secret?: string } = {}): Promise<TestEdge> => {
     const logs = new MemorySink();
     const log = createLogger({ level: 'debug', sinks: [logs] });
     const name = serviceId('edge');
@@ -267,7 +267,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       sharedCache: shared,
       registry: new MetricsRegistry(),
       coreUrl: to.internalUrl,
-      secret: SECRET,
+      secret: given.secret ?? SECRET,
       fetchTimeoutMs: 60_000,
       web: {
         host: '127.0.0.1',
@@ -280,6 +280,8 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
         backupDir: path.join(dataDir, 'backups'),
         backupKeep: 7,
         ...(options.rates ? { rates: options.rates } : {}),
+        // Never behind: a busy test machine must not make changes fail at random (as tests/support/web.ts does).
+        behind: () => false,
       },
       log,
       ...(options.coreLostAfterMs !== undefined ? { coreLostAfterMs: options.coreLostAfterMs } : {}),
