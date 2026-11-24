@@ -442,7 +442,12 @@ export async function run(
     print(json ? JSON.stringify(answer, null, 2) : command.show(answer, { args: rest, flags: words.flags }));
     // The self-check and the login settings' tests fail the command when a check failed, so scripts and monitors can
     // tell.
-    if (operation === 'doctor' || operation === 'auth-test-oidc' || operation === 'auth-test-ldap') {
+    if (
+      operation === 'doctor' ||
+      operation === 'auth-test-oidc' ||
+      operation === 'auth-test-ldap' ||
+      operation === 'auth-test-discord'
+    ) {
       const checks = (answer as { checks?: { status: string }[] }).checks ?? [];
       if (checks.some((check) => check.status === 'fail')) return 1;
     }

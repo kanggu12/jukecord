@@ -323,6 +323,20 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     '이 jukecord(스키마 $2)보다 오래된 스키마 $1: 먼저 그 위에서 jukecord를 한 번 시작하세요',
   ],
   ['it does not answer', '응답하지 않음'],
+  // Testing the Discord login's application (src/settings/discord.ts).
+  ['no client ID (JUKECORD_DISCORD_CLIENT_ID)', '클라이언트 ID가 없음(JUKECORD_DISCORD_CLIENT_ID)'],
+  ['no client secret (JUKECORD_DISCORD_CLIENT_SECRET)', '클라이언트 시크릿이 없음(JUKECORD_DISCORD_CLIENT_SECRET)'],
+  [/^Discord could not be reached \((.+)\)$/, 'Discord에 닿지 못함($1)'],
+  [/^Discord knows application (\d+) and its secret$/, 'Discord가 애플리케이션 ID와 시크릿을 알아봄($1)'],
+  [/^Discord refused the client ID or its secret \((.+)\)$/, 'Discord가 클라이언트 ID나 시크릿을 받지 않음($1)'],
+  [/^the application's OAuth2 redirects must list (.+)$/, '애플리케이션의 OAuth2 리디렉션 목록에 있어야 하는 주소: $1'],
+  [
+    /^Discord refused the request \(invalid_request\): the application may not list (.+)$/,
+    'Discord가 요청을 받지 않음(invalid_request). 애플리케이션 목록에 없을 수 있는 주소: $1',
+  ],
+  [/^Discord answered (\d+) \((.+)\)$/, 'Discord 응답: $1($2)'],
+  [/^Discord answered (\d+)$/, 'Discord 응답: $1'],
+  [/^(JUKECORD_\w+) is no setting of the Discord login$/, '$1: Discord 로그인 설정이 아님'],
   // Testing an address for the shared cache or the bus (src/settings/servers.ts).
   [/^that is not an address \(example: (.+)\)$/, '주소가 아님(예: $1)'],
   [

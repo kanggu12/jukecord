@@ -224,6 +224,8 @@ export interface TestServerOptions {
     readonly env?: NodeJS.ProcessEnv;
     readonly supervisor?: Supervisor;
     readonly restart?: HostSettingsOptions['restart'];
+    /** Discord's API for the Discord login's test: a fake one (tests never reach Discord). */
+    readonly discord?: HostSettingsOptions['discord'];
   };
 }
 
@@ -413,6 +415,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       log: log.child('settings'),
       apply: (names) => void applied.push([...names]),
       ...(options.hostSettings.restart ? { restart: options.hostSettings.restart } : {}),
+      // Never Discord itself: without a fake of the test's, a test of the Discord login meets a closed port.
+      discord: options.hostSettings.discord ?? { api: 'http://127.0.0.1:9/api/v10' },
       move: new DatabaseMove({ dataDir, current: started.database.address, pool: 2 }),
     });
   }

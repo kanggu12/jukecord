@@ -13,6 +13,7 @@ import {
   AddResultSchema,
   AuthMethodsSchema,
   DatabaseTestSchema,
+  DiscordTestSchema,
   DoctorSchema,
   GuildId,
   GuildSchema,
@@ -71,6 +72,7 @@ export const ACCOUNT_OPERATIONS = [
   'auth-methods',
   'auth-test-oidc',
   'auth-test-ldap',
+  'auth-test-discord',
   'host-settings',
   'host-setting',
   'host-settings-change',
@@ -582,6 +584,16 @@ export const API = {
       strict,
     ),
     response: LdapTestSchema,
+  }),
+  'auth-test-discord': op({
+    method: 'POST',
+    path: '/auth/test-discord',
+    summary:
+      'Test logging in with Discord without logging anyone in: the application’s client ID and secret at Discord, and the address it must list; with settings not saved yet, or the ones in use',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object({ settings: Type.Optional(LoginSettingsSchema) }, strict),
+    response: DiscordTestSchema,
   }),
 
   // The host's settings (src/settings): every one, with its source and state; changing, putting back, a database's

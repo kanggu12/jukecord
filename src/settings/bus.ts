@@ -12,6 +12,7 @@ import type { CommandClient } from '../bus/commands.ts';
 import type { BusNames, BusTransport } from '../bus/transport.ts';
 import type { Supervisor } from '../config.ts';
 import type { Logger } from '../log.ts';
+import type { DiscordLoginTest } from './discord.ts';
 import type { DatabaseTest, MoveFailure, MoveState } from './move.ts';
 import type { ServerTest, ServerUse } from './servers.ts';
 import type { ChangedSetting, HostSettings, HostSettingsPort, HostSettingsView } from './service.ts';
@@ -24,6 +25,7 @@ export const SETTINGS_COMMANDS = [
   'settings.restart',
   'settings.test-database',
   'settings.test-server',
+  'settings.test-discord-login',
   'settings.move-start',
   'settings.move-state',
   'settings.move-cancel',
@@ -122,6 +124,8 @@ export function remoteSettings(client: CommandClient): HostSettingsPort {
     testDatabase: (url: string) => client.call<DatabaseTest>('settings.test-database', [url]),
     // Tried from the core, as one process tries it: the server the services would share is the core's to reach too.
     testServer: (url: string, use: ServerUse) => client.call<ServerTest>('settings.test-server', [url, use]),
+    testDiscordLogin: (values?: Readonly<Record<string, string>>) =>
+      client.call<DiscordLoginTest>('settings.test-discord-login', [values ?? {}]),
     startMove: (url: string, replace: boolean) => client.call<MoveState>('settings.move-start', [url, replace]),
     moveState: () =>
       client.call<{ state: MoveState | null; lastFailure: MoveFailure | null }>('settings.move-state', []),
@@ -147,6 +151,13 @@ export function settingsCommands(settings: HostSettings): Map<string, (args: rea
     ['settings.restart', () => settings.restartNow()],
     ['settings.test-database', ([url]) => settings.testDatabase(String(url ?? ''))],
     ['settings.test-server', ([url, use]) => settings.testServer(String(url ?? ''), use === 'bus' ? 'bus' : 'cache')],
+    [
+      'settings.test-discord-login',
+      ([values]) =>
+        settings.testDiscordLogin(
+          typeof values === 'object' && values !== null ? (values as Record<string, string>) : {},
+        ),
+    ],
     ['settings.move-start', ([url, replace]) => settings.startMove(String(url ?? ''), replace === true)],
     ['settings.move-state', () => settings.moveState()],
     ['settings.move-cancel', () => settings.cancelMove()],

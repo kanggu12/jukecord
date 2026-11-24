@@ -488,6 +488,14 @@ export const LdapTestSchema = Type.Object(
   { title: 'LdapTest' },
 );
 
+export const DiscordTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'False when any check failed' }),
+    checks: Type.Array(CheckSchema),
+  },
+  { title: 'DiscordTest' },
+);
+
 export const ErrorSchema = Type.Object(
   {
     error: Type.Object({

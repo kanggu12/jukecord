@@ -26,6 +26,7 @@ import {
   storedIn,
   type Words,
 } from './definitions.ts';
+import { type DiscordLoginTest, testDiscordLogin } from './discord.ts';
 import type { SettingsFile } from './file.ts';
 import {
   environmentVariable,
@@ -184,6 +185,8 @@ export interface HostSettingsOptions {
   readonly announce?: (names: readonly string[]) => Promise<void>;
   readonly log: Pick<Logger, 'info' | 'warn' | 'error'>;
   readonly role?: 'all' | 'core' | 'edge';
+  /** Discord's API for the Discord login's test (tests only: they never reach Discord). */
+  readonly discord?: { readonly api?: string; readonly fetch?: typeof fetch };
 }
 
 // The service's methods the web layer calls.
@@ -194,6 +197,7 @@ type PortMethod =
   | 'restartNow'
   | 'testDatabase'
   | 'testServer'
+  | 'testDiscordLogin'
   | 'startMove'
   | 'moveState'
   | 'cancelMove'
@@ -494,6 +498,46 @@ export class HostSettings {
     return this.mover().test(url);
   }
 
+  /**
+   * Tests the Discord login's application with the settings as they are, or with the page's values not saved yet:
+   * its client ID and secret at Discord's token endpoint, and the address Discord sends people back to
+   * (src/settings/discord.ts). Only Discord's own address is asked, so a saved secret goes nowhere a request names.
+   */
+  async testDiscordLogin(values: Readonly<Record<string, string>> = {}): Promise<DiscordLoginTest> {
+    // The login's own settings, and the ones its return address is made of; nothing else is the form's to try here.
+    for (const name of Object.keys(values))
+      if (!DISCORD_LOGIN.includes(name)) throw new ActionError('invalid', `${name} is no setting of the Discord login`);
+    let layers: SavedLayers;
+    try {
+      layers = await this.layers();
+    } catch (error) {
+      throw outage(error);
+    }
+    // The settings as they would read with the form's values, by the start's rules (the environment still wins).
+    const changes = Object.entries(values).map(([name, value]) => ({
+      name,
+      value: value.trim() === '' ? null : value.trim(),
+    }));
+    const inFile = changes.filter((change) => storedIn(findDefinition(change.name) as SettingDefinition) === 'file');
+    const read = this.read(
+      withChanges(
+        layers,
+        inFile,
+        changes.filter((change) => !inFile.includes(change)),
+      ),
+    );
+    // Settings that do not read (a malformed ID, say): their own problems, as a save would say them.
+    if (!read.config) throw new SettingsRefused(problemsOf(read.problems));
+    const config = read.config;
+    const publicUrl = config.publicUrl ?? `http://localhost:${config.publishedPort}`;
+    return testDiscordLogin({
+      clientId: config.discord.clientId,
+      clientSecret: config.discord.clientSecret,
+      redirectUri: `${publicUrl}/auth/callback`,
+      ...(this.options.discord ?? {}),
+    });
+  }
+
   /** Tries an address for the shared cache or the bus without saving or changing anything (src/settings/servers.ts). */
   testServer(url: string, use: ServerUse): Promise<ServerTest> {
     return testServer(url, use);
@@ -669,6 +713,14 @@ export function secretsMoved(
   }
   return problems;
 }
+
+// The settings the Discord login's test takes from the page's form: its own, and what its return address is made of.
+const DISCORD_LOGIN = [
+  'JUKECORD_DISCORD_CLIENT_ID',
+  'JUKECORD_DISCORD_CLIENT_SECRET',
+  'JUKECORD_PUBLIC_URL',
+  'JUKECORD_PUBLISHED_PORT',
+];
 
 // The layers with a change in them.
 function withChanges(

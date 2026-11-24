@@ -309,6 +309,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'settings-test-database': async ({ caller, body, deps }) => ({
     ...(await hostSettings(deps, caller).testDatabase(body.url)),
   }),
+  'auth-test-discord': async ({ caller, body, deps }) => {
+    const found = await hostSettings(deps, caller).testDiscordLogin(body.settings ?? {});
+    return { ok: found.ok, checks: found.checks.map((check) => ({ ...check })) };
+  },
   'settings-test-cache': async ({ caller, body, deps }) => ({
     ...(await hostSettings(deps, caller).testServer(body.url, 'cache')),
   }),

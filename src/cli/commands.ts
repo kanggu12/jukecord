@@ -1016,6 +1016,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     },
     show: (answer) => showChecks(answer),
   },
+  'auth-test-discord': {
+    name: 'auth test-discord',
+    usage: '',
+    summary: 'Test logging in with Discord (the application’s ID and secret), logging no one in',
+    request: () => ({ body: {} }),
+    show: (answer) => showChecks(answer),
+  },
   wrapped: {
     name: 'wrapped',
     usage: '[--year 2026] [--month 3] [--last]',
