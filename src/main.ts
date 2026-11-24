@@ -85,7 +85,8 @@ async function main(): Promise<number> {
   const log = createLogger({
     level: config.log.level,
     sinks: [
-      new ConsoleSink(),
+      // Readable lines, or with JUKECORD_LOG_FORMAT=json the log file's JSON lines, for a log shipper.
+      new ConsoleSink(config.log.format),
       new FileSink({ dir: path.join(config.dataDir, 'logs'), maxBytes: config.log.maxBytes, files: config.log.files }),
     ],
   });
