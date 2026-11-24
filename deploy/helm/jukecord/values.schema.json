@@ -310,6 +310,7 @@
       }
     },
     "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
+    "checksumSalt": { "type": "string" },
     "podLabels": {
       "type": "object",
       "description": "Labels in Kubernetes' form: a name of up to 63 letters, digits, - _ and . (with an optional prefix/), a value the same or empty",

@@ -1,0 +1,16 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
+{{- if not .Values.checksumSalt }}
+# The salt of the checksum annotations the pods restart by (jukecord.checksumSalt, _helpers.tpl): made at the first
+# install and kept on every upgrade, so the annotations change only when a secret of the values does. In a Secret, so
+# that someone who may read pods but not Secrets cannot test guesses of a password against the annotations.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "jukecord.checksumSaltName" . }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+type: Opaque
+data:
+  salt: {{ include "jukecord.checksumSalt" . | b64enc | quote }}
+{{- end }}

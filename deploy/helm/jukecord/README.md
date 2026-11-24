@@ -79,6 +79,7 @@ The last line prints a one-time login link for the host. Without a bot token juk
 | `resources`                                                                                  |              250m, 512Mi; limit 1536Mi              | requests and limits                                       |
 | `service.type`, `.port`                                                                      |                 `ClusterIP`, `8795`                 | the Service                                               |
 | `podLabels`, `podAnnotations`, `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets` |                                                     | the usual pod settings                                    |
+| `checksumSalt`                                                                               |                    made and kept                    | salts the hash of secrets the pods restart by (Argo CD)   |
 | `mode`                                                                                       |                      `single`                       | `single`: one pod; `split`: one core and edges            |
 | `bus.url`, `bus.existingSecret`                                                              |                                                     | the Redis or Valkey server of the services (split)        |
 | `split.existingSecret`                                                                       |                    made and kept                    | the internal secret the core and edges share              |

@@ -274,6 +274,12 @@ networkPolicy:
     - 169.254.0.0/16
 
 podAnnotations: {}
+# The pods restart when a secret of the values changes, by an annotation that holds a hash of them, salted so that
+# someone who may read pods but not Secrets cannot test guesses of a password against it. Left empty, the chart makes
+# the salt at the first install and keeps it in the Secret <name>-checksum-salt. A tool that renders the chart
+# without the cluster (Argo CD, helm template) cannot read that Secret and would make a new salt, and restart the
+# pods, every time: give such a tool a long random text of your own here.
+checksumSalt: ""
 # Labels for the pod, besides the chart's own (which win on the same key).
 podLabels: {}
 nodeSelector: {}

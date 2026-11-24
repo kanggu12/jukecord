@@ -273,10 +273,43 @@ an event that names the key.
         path: url
 {{- end -}}
 
+{{/* The Secret the checksums' salt is kept in, when the values give none (checksumSalt). */}}
+{{- define "jukecord.checksumSaltName" -}}
+{{- printf "%s-checksum-salt" (include "jukecord.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+The salt of the checksum annotations the pods restart by. A hash of a secret is never written into a pod bare: someone
+who may read pods but not Secrets could test guesses of a weak password against it offline. It is hashed after this
+salt, which no pod shows: checksumSalt when the values give one, else the one kept in jukecord.checksumSaltName since
+the first install (looked up in the cluster), else a new one, which checksum-salt.yaml keeps (helm template, which
+sees no cluster, makes a new one each time). Chosen once per render and kept in .Values for the render's every
+template, so the Secret and the pods agree.
+*/}}
+{{- define "jukecord.checksumSalt" -}}
+{{- if not (hasKey .Values "_checksumSalt") -}}
+{{- $salt := .Values.checksumSalt | default "" -}}
+{{- if not $salt -}}
+{{- $kept := lookup "v1" "Secret" .Release.Namespace (include "jukecord.checksumSaltName" .) | default dict -}}
+{{- $salt = dig "data" "salt" "" $kept | b64dec -}}
+{{- end -}}
+{{- if not $salt -}}
+{{- $salt = randAlphaNum 40 -}}
+{{- end -}}
+{{- $_ := set .Values "_checksumSalt" $salt -}}
+{{- end -}}
+{{- index .Values "_checksumSalt" -}}
+{{- end -}}
+
+{{/* A checksum annotation's value, (list $ <text>): the first 16 hex digits of the SHA-256 of the salt and the text. */}}
+{{- define "jukecord.saltedSum" -}}
+{{- printf "%s\n%s" (include "jukecord.checksumSalt" (index . 0)) (index . 1) | sha256sum | trunc 16 -}}
+{{- end -}}
+
 {{/* The pod's annotations for a changed database (the pod opens it only when it starts) and for a Prometheus that
 finds its targets by annotation (metrics.podAnnotations; one set in podAnnotations wins). */}}
 {{- define "jukecord.databaseChecksum" -}}
-checksum/database: {{ printf "%s/%s" .Values.database.url .Values.database.existingSecret | sha256sum | trunc 16 }}
+checksum/database: {{ include "jukecord.saltedSum" (list . (printf "%s/%s" .Values.database.url .Values.database.existingSecret)) }}
 {{- end -}}
 
 {{- define "jukecord.scrapeAnnotations" -}}

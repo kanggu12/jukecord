@@ -32,12 +32,17 @@ const CRD_SCHEMAS =
 const SERVICE_MONITOR_API = 'monitoring.coreos.com/v1/ServiceMonitor';
 const TOKEN = 'a-metrics-token-of-the-chart-0123456789';
 
-// The chart rendered with these values, or what helm said when it refused them.
+// The chart rendered with these values, or what helm said when it refused them. With a salt of its own for the
+// checksums, so that two renders compare (and no Secret is made for one: checksumSalt).
 function render(...values: string[]): string {
-  return execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', ...values], {
-    encoding: 'utf8',
-    stdio: 'pipe',
-  });
+  return execFileSync(
+    'helm',
+    ['template', 't', 'deploy/helm/jukecord', '--set', 'checksumSalt=the-tests-salt', ...values],
+    {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    },
+  );
 }
 function refusal(...values: string[]): string {
   try {

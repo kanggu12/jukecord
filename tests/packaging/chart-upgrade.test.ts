@@ -41,8 +41,11 @@ describe('upgrading the chart', () => {
     try {
       fs.cpSync(CHART, old, { recursive: true });
       fs.copyFileSync('tests/packaging/chart-values-0.3.4.yaml', path.join(old, 'values.yaml'));
+      // One salt for both (without a cluster the chart makes a new one for the checksums each time: checksumSalt).
       const render = (chart: string, values: readonly string[]) =>
-        execFileSync('helm', ['template', 't', chart, ...values], { encoding: 'utf8' });
+        execFileSync('helm', ['template', 't', chart, '--set', 'checksumSalt=the-tests-salt', ...values], {
+          encoding: 'utf8',
+        });
       for (const values of [
         // Nothing set: the defaults of both.
         [],
