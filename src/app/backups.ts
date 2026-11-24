@@ -144,17 +144,38 @@ export class BackupSchedule {
   private running: Promise<void> | null = null;
   // The last scheduled backup that failed, until one works again (for `jukecord doctor`).
   private failure: { at: number; reason: string } | null = null;
+  // The time of day and how many stay: the options' at first, the settings' after a change (JUKECORD_BACKUP_AT and
+  // JUKECORD_BACKUP_KEEP apply at once).
+  private at: TimeOfDay;
+  private keep: number;
 
   constructor(options: BackupScheduleOptions) {
     this.options = options;
+    this.at = options.at;
+    this.keep = options.keep;
   }
 
   /** Starts looking (a backup made since today's time, by hand or by a run before a restart, counts as today's). */
   start(): void {
+    this.stop();
     const now = new Date(this.options.clock.now());
     const newest = listBackups(this.options.dir)[0];
-    if (newest && newest.at >= timeOn(now, this.options.at)) this.done = dayOf(now);
+    // Today's is made when a backup is there since today's time; a time moved later today is not made again for it.
+    this.done = newest && newest.at >= timeOn(now, this.at) ? dayOf(now) : this.done === dayOf(now) ? this.done : null;
     this.look();
+  }
+
+  /**
+   * Another time of day and count from now on, looked at again at once: a time already past today makes today's backup
+   * now unless one was made since that time; the count applies from the next backup's pruning.
+   */
+  retime(at: TimeOfDay, keep: number): void {
+    const moved = at.hour !== this.at.hour || at.minute !== this.at.minute;
+    this.at = at;
+    this.keep = keep;
+    // A new time is a new day's question: today counts as done only by a backup made since that time.
+    if (moved) this.done = null;
+    if (this.timer !== null) this.start();
   }
 
   stop(): void {
@@ -177,7 +198,7 @@ export class BackupSchedule {
     const now = new Date(this.options.clock.now());
     const today = dayOf(now);
     // One at a time: a backup still being written puts off the next look's (only a clock set far ahead could ask).
-    if (this.running === null && this.done !== today && now.getTime() >= timeOn(now, this.options.at)) {
+    if (this.running === null && this.done !== today && now.getTime() >= timeOn(now, this.at)) {
       this.done = today;
       const running = this.run(now).finally(() => {
         if (this.running === running) this.running = null;
@@ -189,7 +210,8 @@ export class BackupSchedule {
 
   // Writes the day's backup (beside the main thread); a failure is said, never thrown.
   private async run(now: Date): Promise<void> {
-    const { store, dir, keep, log } = this.options;
+    const { store, dir, log } = this.options;
+    const keep = this.keep;
     try {
       const made = await makeBackup(store, dir, keep, now);
       log.info('made the scheduled backup', { file: made.file, bytes: made.bytes, kept: keep });

@@ -52,9 +52,18 @@ export class Prefetcher {
   private readonly options: PrefetcherOptions;
   private readonly plans = new Map<string, GuildPlan>();
   private stopped = false;
+  // How many tracks after the current one are fetched ahead: the option's at first, the settings' after a change
+  // (JUKECORD_PREFETCH applies at once, from each server's next plan).
+  private count: number;
 
   constructor(options: PrefetcherOptions) {
     this.options = options;
+    this.count = options.count;
+  }
+
+  /** How many tracks after the current one are fetched ahead, from each server's next plan on. */
+  setCount(count: number): void {
+    this.count = count;
   }
 
   /** Starts listening for changes. */
@@ -111,7 +120,7 @@ export class Prefetcher {
     // existing(): asking must not make a player for a server that never had one.
     const current = this.options.players.existing(guildId)?.snapshot().track ?? null;
     if (!current) return [];
-    const next = (await this.options.queue.list(guildId)).slice(0, this.options.count).map((item) => item.track);
+    const next = (await this.options.queue.list(guildId)).slice(0, this.count).map((item) => item.track);
     return [current, ...next];
   }
 

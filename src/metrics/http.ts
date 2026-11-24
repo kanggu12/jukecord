@@ -34,10 +34,16 @@ function digest(text: string): Buffer {
 
 /** The rule for `/metrics`, with the token it accepts (or none). */
 export class MetricsGate {
-  // The token's digest, made once; null when no token is set (the address rule alone).
-  private readonly token: Buffer | null;
+  // The token's digest, made once for each token; null when no token is set (the address rule alone). Changed while
+  // jukecord runs when the settings say so (JUKECORD_METRICS_TOKEN applies at once).
+  private token: Buffer | null;
 
   constructor(token: string | null) {
+    this.token = token === null ? null : digest(token);
+  }
+
+  /** The token a scraper shows from now on (null: none, the address rule alone). */
+  setToken(token: string | null): void {
     this.token = token === null ? null : digest(token);
   }
 

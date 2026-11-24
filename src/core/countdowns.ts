@@ -8,7 +8,8 @@ import type { Clock, TimerHandle } from './clock.ts';
 
 export class Countdowns {
   private readonly clock: Clock;
-  private readonly ms: number;
+  // Changed while jukecord runs when the setting it stands for does (the time alone, the time unheard).
+  private ms: number;
   private readonly expired: (key: string) => void;
   private readonly timers = new Map<string, TimerHandle>();
 
@@ -16,6 +17,24 @@ export class Countdowns {
     this.clock = clock;
     this.ms = ms;
     this.expired = expired;
+  }
+
+  /** How long the countdowns armed from now on run (the ones running keep their deadline). */
+  setMs(ms: number): void {
+    this.ms = ms;
+  }
+
+  /** Starts every running countdown again from now, at the time they run now (after setMs). */
+  rearm(): void {
+    for (const key of [...this.timers.keys()]) {
+      this.disarm(key);
+      this.arm(key);
+    }
+  }
+
+  /** Cancels every countdown. */
+  disarmAll(): void {
+    for (const key of [...this.timers.keys()]) this.disarm(key);
   }
 
   /** Starts the countdown for `key` unless one is running already. */

@@ -49,6 +49,29 @@ async function setup(start: string, keep = 2) {
   return { clock, store, sink, alerts, schedule };
 }
 
+describe('the daily backup, changed while jukecord runs (JUKECORD_BACKUP_AT and _KEEP apply at once)', () => {
+  it('makes the day’s backup at a time moved after the start, and keeps the count given', async () => {
+    const { clock, store, schedule } = await setup('2026-11-11T03:00:00', 5);
+    schedule.start();
+    // Moved to 03:30, before the 04:30 it started with: made at 03:30.
+    schedule.retime({ hour: 3, minute: 30 }, 1);
+    await clock.advance(31 * 60_000);
+    await schedule.idle();
+    assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
+    // A day later, one kept of the two made (the count given with the new time).
+    await clock.advance(86_400_000);
+    await schedule.idle();
+    assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
+    // Turned off: stopped, nothing more made; on again later the same day, today's is made already.
+    schedule.stop();
+    await clock.advance(86_400_000);
+    await schedule.idle();
+    assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
+    schedule.stop();
+    await store.close();
+  });
+});
+
 describe('the daily backup', () => {
   it('is made at its time once a day, and keeps the newest', async () => {
     const { clock, store, sink, schedule } = await setup('2026-11-11T03:00:00');

@@ -105,6 +105,27 @@ describe('Rest', () => {
     rest.stop();
   });
 
+  it('rests after a time changed while it runs, and not at all once it is turned off (JUKECORD_REST_AFTER)', async () => {
+    const { clock, player, rest } = await setup();
+    await clock.advance(60_000);
+    // A minute into the two: the wait starts again at thirty seconds from now.
+    rest.setAfter(30_000);
+    await clock.advance(29_000);
+    assert.equal(player.snapshot().status, 'playing');
+    await clock.advance(2000);
+    assert.equal(player.snapshot().status, 'paused');
+    // Off: a player nobody hears plays on.
+    await player.resume();
+    rest.setAfter(0);
+    await clock.advance(600_000);
+    assert.equal(player.snapshot().status, 'playing');
+    // On again: watched again, from now.
+    rest.setAfter(10_000);
+    await clock.advance(11_000);
+    assert.equal(player.snapshot().status, 'paused');
+    rest.stop();
+  });
+
   it('never rests when told not to', async () => {
     const { clock, player, rest } = await setup(0);
     await clock.advance(600_000);

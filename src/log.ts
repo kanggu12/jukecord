@@ -80,12 +80,23 @@ function clean(fields: LogFields): Record<string, unknown> {
   return out;
 }
 
+/** The logger main.ts makes, whose level can change while it runs (the settings page's log level applies at once). */
+export interface RootLogger extends Logger {
+  /** The least a record must be to be written, for this logger and every child of it from now on. */
+  setLevel(level: LogLevel): void;
+}
+
 /** Builds a logger that passes records at `level` and above to every sink. */
-export function createLogger(options: { level: LogLevel; sinks: readonly LogSink[]; component?: string }): Logger {
-  const component = options.component ?? 'jukecord';
+export function createLogger(options: { level: LogLevel; sinks: readonly LogSink[]; component?: string }): RootLogger {
+  // The level is held once for the logger and all its children, so a change of it reaches every part of jukecord.
+  return loggerWith({ level: options.level }, options.sinks, options.component ?? 'jukecord');
+}
+
+// A logger of one part (component) over the shared level and sinks.
+function loggerWith(shared: { level: LogLevel }, sinks: readonly LogSink[], component: string): RootLogger {
   // One function writes for every level, so the redaction and the level check cannot differ between them.
   const write = (level: LogLevel, msg: string, fields: LogFields = {}): void => {
-    if (RANK[level] < RANK[options.level]) return;
+    if (RANK[level] < RANK[shared.level]) return;
     const record: LogRecord = {
       time: new Date().toISOString(),
       level,
@@ -93,7 +104,7 @@ export function createLogger(options: { level: LogLevel; sinks: readonly LogSink
       msg: redact(msg),
       fields: clean(fields),
     };
-    for (const sink of options.sinks) sink.write(record);
+    for (const sink of sinks) sink.write(record);
   };
   return {
     debug: (msg, fields) => write('debug', msg, fields),
@@ -101,7 +112,10 @@ export function createLogger(options: { level: LogLevel; sinks: readonly LogSink
     warn: (msg, fields) => write('warn', msg, fields),
     error: (msg, fields) => write('error', msg, fields),
     // A child shares the sinks and the level; only the component name changes.
-    child: (name) => createLogger({ ...options, component: name }),
+    child: (name) => loggerWith(shared, sinks, name),
+    setLevel: (level) => {
+      shared.level = level;
+    },
   };
 }
 
@@ -153,9 +167,15 @@ export function jsonLine(record: LogRecord): string {
  * Warnings and errors go to stderr so a shell redirect of stdout still shows them.
  */
 export class ConsoleSink implements LogSink {
-  private readonly format: LogFormat;
+  // Changed while jukecord runs when the settings say so (JUKECORD_LOG_FORMAT applies at once).
+  private format: LogFormat;
 
   constructor(format: LogFormat = 'text') {
+    this.format = format;
+  }
+
+  /** Writes the lines from now on as text or as JSON. */
+  setFormat(format: LogFormat): void {
     this.format = format;
   }
 
@@ -184,8 +204,9 @@ export class ConsoleSink implements LogSink {
  */
 export class FileSink implements LogSink {
   readonly file: string;
-  private readonly maxBytes: number;
-  private readonly files: number;
+  // Both changed while jukecord runs when the settings say so (JUKECORD_LOG_MAX and _FILES apply at once).
+  private maxBytes: number;
+  private files: number;
   // The current file's size, tracked here so rotation does not need a stat call per line.
   private size: number;
   // Set after the first write failure so a broken disk produces one message, not one per log line.
@@ -215,6 +236,19 @@ export class FileSink implements LogSink {
       if (!this.failed) process.stderr.write(`jukecord: cannot write the log file ${this.file}: ${String(error)}\n`);
       this.failed = true;
     }
+  }
+
+  /**
+   * The size a file is rotated at and how many are kept, from now on: the next line past the size rotates, and files
+   * past the count go at the next rotation (fewer kept takes the oldest away then, more keeps them as they come).
+   */
+  setLimits(limits: { readonly maxBytes: number; readonly files: number }): void {
+    this.maxBytes = limits.maxBytes;
+    // Fewer files kept: the ones past the new count go now, oldest first, as a rotation would have dropped them.
+    for (let index = limits.files; index < Math.max(this.files, limits.files) + 1; index += 1) {
+      if (index >= 1) fs.rmSync(`${this.file}.${index}`, { force: true });
+    }
+    this.files = limits.files;
   }
 
   // Shifts jukecord.log.N to .N+1 from the oldest down, dropping the one past the limit, then starts a new file.

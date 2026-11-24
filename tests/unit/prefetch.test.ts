@@ -90,6 +90,19 @@ describe('Prefetcher', () => {
     );
   });
 
+  it('wants as many ahead as a count changed while it runs says, from the next plan on (JUKECORD_PREFETCH)', async () => {
+    const { queue, players, prefetcher, tracks } = await setup(2);
+    for (const track of tracks) await queue.add(GUILD, [track.id], 'end', null);
+    await players.get(GUILD).play();
+    const titles = async () => (await prefetcher.wanted(GUILD)).map((track) => track.title);
+    // The current track and the next two, then the next one only, then none ahead.
+    assert.deepEqual(await titles(), ['Track 1', 'Track 2', 'Track 3']);
+    prefetcher.setCount(1);
+    assert.deepEqual(await titles(), ['Track 1', 'Track 2']);
+    prefetcher.setCount(0);
+    assert.deepEqual(await titles(), ['Track 1']);
+  });
+
   it("tells the server's player of each track it fetched from its site, and not of one found in the cache", async () => {
     const { clock, queue, players, media, tracks } = await setup(2);
     for (const track of tracks) await queue.add(GUILD, [track.id], 'end', null);

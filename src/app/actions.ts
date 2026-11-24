@@ -407,9 +407,29 @@ export class Actions {
   // The turns of lookups that come in lists, shared by every import (and the links of other services).
   private readonly batch: BatchLookups;
 
+  // The host's limits and where lyrics come from: the options' at first, changed by the settings while jukecord runs
+  // (JUKECORD_QUEUE_MAX, JUKECORD_TRACK_MAX and JUKECORD_LYRICS apply at once).
+  private queueMax: number;
+  private trackMaxMs: number;
+  private lyricsSource: LyricsSource | null;
+
   constructor(options: ActionsOptions) {
     this.options = options;
     this.batch = options.batch ?? new BatchLookups();
+    this.queueMax = options.queueMax ?? 1000;
+    this.trackMaxMs = options.trackMaxMs ?? 3 * 3_600_000;
+    this.lyricsSource = options.lyrics ?? null;
+  }
+
+  /** The longest queue and the longest track from now on: a change refused before may be taken now, and the other way. */
+  setLimits(limits: { readonly queueMax: number; readonly trackMaxMs: number }): void {
+    this.queueMax = limits.queueMax;
+    this.trackMaxMs = limits.trackMaxMs;
+  }
+
+  /** Where lyrics come from from now on; null turns them off (nothing more is asked of LRCLIB). */
+  setLyrics(source: LyricsSource | null): void {
+    this.lyricsSource = source;
   }
 
   /** Called by the web server once it is up, so a revoked listening link ends its guests' live connections. */
@@ -473,8 +493,8 @@ export class Actions {
   // for an add that did nothing. Where the server's people take turns, tracks added at the end go in turn. Called in
   // the server's turn: the room it counts is still there when the tracks go in.
   private async enqueue(context: ActionContext, tracks: readonly Track[], at: InsertAt): Promise<AddResult> {
-    const trackMax = this.options.trackMaxMs ?? 3 * 3_600_000;
-    const queueMax = this.options.queueMax ?? 1000;
+    const trackMax = this.trackMaxMs;
+    const queueMax = this.queueMax;
     // Unknown lengths pass: most such tracks are ordinary songs from sites that do not say.
     const short = tracks.filter((track) => track.durationMs === null || track.durationMs <= trackMax);
     const room = Math.max(0, queueMax - (await this.options.queue.size(context.guildId)));
@@ -596,17 +616,13 @@ export class Actions {
     // A part that failed for another reason than the queue's limits fails the add, as it did.
     await Promise.all(parts);
     if (items.length === 0) {
-      if (skippedFull > 0)
-        throw new ActionError('conflict', `the queue is full (${this.options.queueMax ?? 1000} tracks)`);
+      if (skippedFull > 0) throw new ActionError('conflict', `the queue is full (${this.queueMax} tracks)`);
       if (skippedLimit > 0) {
         const limit = (await this.options.store.settings.community(context.guildId)).personLimit;
         throw new ActionError('conflict', `each person may have ${limit} tracks in the queue here`);
       }
       if (skippedTooLong > 0)
-        throw new ActionError(
-          'invalid',
-          `longer than the ${Math.round((this.options.trackMaxMs ?? 3 * 3_600_000) / 60_000)} minute limit`,
-        );
+        throw new ActionError('invalid', `longer than the ${Math.round(this.trackMaxMs / 60_000)} minute limit`);
       throw new ActionError('not-found', 'none of its tracks was found on YouTube');
     }
     return { items, skippedTooLong, skippedFull, skippedLimit, skippedNotFound: notFound };
@@ -1047,7 +1063,7 @@ export class Actions {
       version: VERSION,
       discord: this.options.discordReady?.() ?? false,
       uptimeMs: Date.now() - (this.options.startedAt ?? Date.now()),
-      lyrics: Boolean(this.options.lyrics),
+      lyrics: this.lyricsSource !== null,
     };
   }
 
@@ -1078,7 +1094,7 @@ export class Actions {
    * the track playing: nobody can make jukecord look up anything else.
    */
   async lyrics(context: ActionContext): Promise<LyricsAnswer> {
-    const source = this.options.lyrics;
+    const source = this.lyricsSource;
     if (!source) throw new ActionError('unavailable', 'lyrics are turned off here');
     const track = this.options.players.get(context.guildId).snapshot().track;
     if (!track) throw new ActionError('conflict', 'nothing is playing');

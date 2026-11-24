@@ -101,11 +101,18 @@ database_command() {
   compose run --rm --no-deps "${tty[@]}" -e "TZ=$(timezone)" "$service" jukecord "$@"
 }
 
-# Whether .env names the database (JUKECORD_DATABASE_URL, or its _FILE): a server, or a SQLite file of its own. A restore
-# then copies the backup into it (jukecord db copy); without either the database is the volume's jukecord.db file, and
-# the file is swapped.
+# Whether jukecord's database is named somewhere: in .env (JUKECORD_DATABASE_URL, or its _FILE), or saved from the
+# panel's Settings in the volume's settings.json (a database moved to from there). Either is a server, or a SQLite file
+# of its own: a restore then copies the backup into it (jukecord db copy); without either the database is the volume's
+# jukecord.db file, and the file is swapped.
 configured_database() {
-  [ -n "$(setting JUKECORD_DATABASE_URL)" ] || [ -n "$(setting JUKECORD_DATABASE_URL_FILE)" ]
+  [ -n "$(setting JUKECORD_DATABASE_URL)" ] || [ -n "$(setting JUKECORD_DATABASE_URL_FILE)" ] && return 0
+  # Read in a container of the image, as jukecord's user (the volume is not this machine's to read).
+  # shellcheck disable=SC2016
+  compose run --rm --no-deps -T --entrypoint node "$service" -e 'const fs = require("node:fs");
+let saved = null;
+try { saved = JSON.parse(fs.readFileSync("/data/settings.json", "utf8")).settings?.JUKECORD_DATABASE_URL?.value; } catch {}
+process.exit(saved ? 0 : 1);' >/dev/null 2>&1
 }
 
 # Runs the jukecord command inside with these words, and an import's file with them: its words that are not options
@@ -189,7 +196,7 @@ built_here() {
 # The address the panel is reached at from this machine: the public one when set, else where Compose really published
 # the port (which also follows JUKECORD_PORT and JUKECORD_BIND from the shell, not only from .env).
 panel_url() {
-  local url published host port
+  local url published host port given
   url=$(setting JUKECORD_PUBLIC_URL)
   if [ -n "$url" ]; then
     printf '%s' "$url"
@@ -200,7 +207,9 @@ panel_url() {
   port=${published##*:}
   # Published on every address (0.0.0.0 or ::) or on this machine only: localhost, the name the documents use.
   case "$host" in '' | 0.0.0.0 | '[::]' | '::' | 127.0.0.1) host=localhost ;; esac
-  printf 'http://%s:%s' "$host" "${port:-${JUKECORD_PORT:-$(setting JUKECORD_PORT)}}"
+  # The port .env gives, or Compose's default when it gives none (an empty line, as .env.example has it).
+  given=$(setting JUKECORD_PORT)
+  printf 'http://%s:%s' "$host" "${port:-${JUKECORD_PORT:-${given:-8795}}}"
 }
 
 # Opens an address in a browser when this is someone's desktop; prints it either way.

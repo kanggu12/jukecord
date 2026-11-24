@@ -15,7 +15,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ConfigError, loadConfig } from '../config.ts';
+import { ConfigError } from '../config.ts';
+import { readSettingsFile, SettingsFileError } from '../settings/file.ts';
+import { ONE_PROCESS } from '../settings/layers.ts';
+import { dataFolderOf, firstSettings } from '../settings/start.ts';
 import {
   AddressError,
   type DatabaseAddress,
@@ -72,8 +75,19 @@ export async function runDatabaseCommand(
       print(DB_HELP);
       return verb === undefined ? 2 : 0;
     }
-    // The settings, for the database jukecord uses and the data folder a SQLite path is taken from.
-    const config = loadConfig(env, process.cwd());
+    // The settings, for the database jukecord uses and the data folder a SQLite path is taken from: the environment's
+    // and settings.json's (a database moved to from the panel's Settings is named there), as jukecord reads them
+    // before it opens its database.
+    let saved: ReturnType<typeof readSettingsFile>;
+    try {
+      saved = readSettingsFile(dataFolderOf(env, process.cwd()));
+    } catch (error) {
+      if (error instanceof SettingsFileError) throw new ConfigError([error.message]);
+      throw error;
+    }
+    const first = firstSettings(env, process.cwd(), saved, ONE_PROCESS);
+    if (!first.config) throw new ConfigError(first.problems);
+    const config = first.config;
     const address = (text: string): DatabaseAddress => {
       if (text === 'configured') return config.database.address;
       try {

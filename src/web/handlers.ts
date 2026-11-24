@@ -14,6 +14,7 @@ import type { LoginChecks } from '../auth/check.ts';
 import type { AuthSettings } from '../auth/settings.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import { searchWords } from '../media/search.ts';
+import type { HostSettingsPort } from '../settings/service.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
@@ -42,6 +43,8 @@ export interface HandlerDeps {
   readonly loginSettings?: AuthSettings;
   /** Tests of those settings, as they are or with values not saved yet (null: no test can run here). */
   readonly loginChecks?: LoginChecks | null;
+  /** The host's settings (src/settings): seen, changed, put back, and the restart; absent where they are not kept. */
+  readonly settings?: HostSettingsPort;
 }
 
 // The parts of a request, typed from the operation's schemas.

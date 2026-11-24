@@ -72,7 +72,10 @@ const EVICTED_COVER = { kind: 'cover' } as const;
 
 export class MediaCache {
   readonly dir: string;
-  private readonly maxBytes: number;
+  // The most it may hold: the option's at first, the settings' after a change (JUKECORD_CACHE_MAX applies at once).
+  private maxBytes: number;
+  // The limit's gauge, set again when the limit changes.
+  private readonly limitGauge: { set(value: number): void };
   private readonly log: Logger;
   private readonly now: () => number;
   private readonly entries = new Map<string, CacheEntry>();
@@ -105,6 +108,7 @@ export class MediaCache {
       'The most the media cache may hold (JUKECORD_CACHE_MAX).',
     );
     limit.set(this.maxBytes);
+    this.limitGauge = limit;
     metrics.collect(() => {
       bytes.set(this.size());
       tracks.set(this.count());
@@ -343,6 +347,13 @@ export class MediaCache {
     const count = (this.pins.get(key) ?? 0) - 1;
     if (count > 0) this.pins.set(key, count);
     else this.pins.delete(key);
+  }
+
+  /** The most the cache may hold from now on: a smaller limit takes the least recently used files out at once. */
+  setMaxBytes(bytes: number): void {
+    this.maxBytes = bytes;
+    this.limitGauge.set(bytes);
+    this.evict();
   }
 
   /**

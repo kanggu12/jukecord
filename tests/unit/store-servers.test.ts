@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { openStore } from '../../src/store/open.ts';
 import { TABLES, VERSION_TABLE } from '../../src/store/schema.ts';
+import { LATEST_SCHEMA } from '../../src/store/store.ts';
 import { eachDatabase } from '../support/databases.ts';
 import { LONG_SOURCE } from '../support/fill.ts';
 import { addTracks } from '../support/store.ts';
@@ -150,7 +151,7 @@ eachDatabase('what differs between the databases', (db) => {
     // waits for it and finds it made.
     const [a, b] = await Promise.all([openStore(address, { pool: 2 }), openStore(address, { pool: 2 })]);
     try {
-      assert.deepEqual([await a.schemaVersion(), await b.schemaVersion()], [8, 8]);
+      assert.deepEqual([await a.schemaVersion(), await b.schemaVersion()], [LATEST_SCHEMA, LATEST_SCHEMA]);
       assert.equal(Number((await a.sql.get(`SELECT COUNT(*) AS n FROM ${VERSION_TABLE}`))?.n), 1);
     } finally {
       await a.close();

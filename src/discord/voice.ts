@@ -244,8 +244,9 @@ export class VoiceManager implements VoiceControl {
   private readonly joined = new Map<string, Joined>();
   // Joins in progress, per server (see join).
   private readonly joining = new Map<string, Promise<{ channelId: string; name: string }>>();
-  // How long the bot stays alone in a channel, and the countdowns running per server.
-  private readonly idleMs: number;
+  // How long the bot stays alone in a channel (changed while it runs by JUKECORD_VOICE_IDLE), and the countdowns
+  // running per server.
+  private idleMs: number;
   private readonly idle: Countdowns;
   // Where joining and leaving are announced (the panel shows the channel); absent in tests that do not care.
   private readonly bus: Bus | null;
@@ -288,6 +289,17 @@ export class VoiceManager implements VoiceControl {
       // A failure of leaving is the countdown's, as it was when this ran in its timer.
       this.drop(guildId).catch(throwFromTimer);
     });
+  }
+
+  /**
+   * How long the bot stays alone in a channel from now on: a countdown running starts again with the new time; 0 stops
+   * every countdown (the bot stays), and the next voice change starts them again once it is not 0.
+   */
+  setIdleMs(ms: number): void {
+    this.idleMs = ms;
+    this.idle.setMs(ms);
+    if (ms === 0) this.idle.disarmAll();
+    else this.idle.rearm();
   }
 
   /**

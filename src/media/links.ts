@@ -203,10 +203,27 @@ export class Links {
   private readonly matches = new Map<string, { at: number; track: NewTrack }>();
   // The Spotify app's token, and when it stops working.
   private spotifyToken: { token: string; until: number } | null = null;
+  // The services read and the host's Spotify app: the options' at first, the settings' after a change
+  // (JUKECORD_LINK_SERVICES and the Spotify app apply at once).
+  private services: ReadonlySet<LinkService>;
+  private spotifyApp: { readonly clientId: string; readonly clientSecret: string } | null;
 
   constructor(options: LinksOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
+    this.services = options.services;
+    this.spotifyApp = options.spotify ?? null;
+  }
+
+  /** The services whose links are read from now on (a link of another is refused as not read here). */
+  setServices(services: ReadonlySet<LinkService>): void {
+    this.services = services;
+  }
+
+  /** The host's Spotify app from now on (null: none); a token of the one before is not used again. */
+  setSpotify(app: { readonly clientId: string; readonly clientSecret: string } | null): void {
+    this.spotifyApp = app;
+    this.spotifyToken = null;
   }
 
   /** Whether an input is a link of one of the services (turned off or not: one turned off is refused when added). */
@@ -224,7 +241,7 @@ export class Links {
   ): Promise<LinkResult> {
     let target = linkTarget(text);
     if (!target) throw new LinkError('invalid', 'that is not a link jukecord reads');
-    if (!this.options.services.has(target.service))
+    if (!this.services.has(target.service))
       throw new LinkError('unavailable', `jukecord does not read ${NAMES[target.service]} links here`);
     if (target.kind === 'short') target = await this.unshorten(target, ask.signal);
     const listed = (await this.list(target, ask.signal)).slice(0, BATCH_MOST);
@@ -318,7 +335,7 @@ export class Links {
 
   // Spotify: its Web API with the host's app; without one, a track from its page.
   private async spotify(target: Target, signal?: AbortSignal): Promise<LinkTrack[]> {
-    if (!this.options.spotify) {
+    if (!this.spotifyApp) {
       if (target.kind === 'track') return [await this.spotifyPage(target, signal)];
       throw new LinkError(
         'unavailable',
@@ -373,7 +390,7 @@ export class Links {
   private async spotifyAuth(signal?: AbortSignal): Promise<string> {
     const kept = this.spotifyToken;
     if (kept && this.now() < kept.until) return kept.token;
-    const app = this.options.spotify;
+    const app = this.spotifyApp;
     if (!app) throw new LinkError('unavailable', 'Spotify is not set up here');
     const answer = await this.get('https://accounts.spotify.com/api/token', signal, {
       method: 'POST',

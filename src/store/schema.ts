@@ -274,6 +274,40 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE player_state ADD COLUMN autoplay TEXT NOT NULL DEFAULT 'off';
     `,
   },
+  {
+    version: 9,
+    // The host's settings saved from the panel, the API or the CLI, kept with the data so every service of a split
+    // jukecord reads the same (src/settings): a row per setting by its environment name. A value of NULL is a setting
+    // put back to its default; the row stays, with its revision, so a change made from a page that read an older
+    // revision is told apart from one made on the latest. Secrets and the settings needed before the database opens
+    // live in settings.json in the data folder instead, never here.
+    sql: `
+      CREATE TABLE host_settings (
+        name       TEXT    PRIMARY KEY,
+        value      TEXT,
+        revision   INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+    postgres: `
+      CREATE TABLE host_settings (
+        name       TEXT COLLATE "C" PRIMARY KEY,
+        value      TEXT COLLATE "C",
+        revision   BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      );
+    `,
+    // MySQL commits a CREATE TABLE by itself: IF NOT EXISTS lets a migration stopped after it run again.
+    mysql: `
+      CREATE TABLE IF NOT EXISTS host_settings (
+        name       VARCHAR(255) NOT NULL,
+        value      TEXT,
+        revision   BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (name)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+    `,
+  },
 ];
 
 /** The version the servers' baseline makes at once: schema 8, the last released before PostgreSQL and MySQL. */
@@ -796,4 +830,6 @@ export const TABLES: readonly Table[] = [
     key: ['id_hash'],
   },
   { name: 'likes', columns: ['owner', 'track_id', 'created_at'], key: ['owner', 'track_id'] },
+  // The host's saved settings: copied with the data, so a move to another database keeps them.
+  { name: 'host_settings', columns: ['name', 'value', 'revision', 'updated_at'], key: ['name'] },
 ];

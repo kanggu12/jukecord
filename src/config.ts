@@ -481,9 +481,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
   problems.push(...auth.problems);
 
   // Unknown JUKECORD_ variables are not fatal, but they are almost always a misspelt setting that silently does nothing.
-  for (const name of Object.keys(env).sort()) {
-    if (name.startsWith('JUKECORD_') && !KNOWN.has(name)) warnings.push(`${name} is not a jukecord setting`);
-  }
+  warnings.push(...unknownVariables(env));
 
   // Stop here with every problem at once (see the module comment).
   if (problems.length > 0) throw new ConfigError(problems);
@@ -511,6 +509,14 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     auth: auth.settings,
     supervisor,
   };
+}
+
+/** The warnings of JUKECORD_ variables that are no setting (almost always a misspelt one), in order of their names. */
+export function unknownVariables(env: NodeJS.ProcessEnv): string[] {
+  return Object.keys(env)
+    .sort()
+    .filter((name) => name.startsWith('JUKECORD_') && !KNOWN.has(name))
+    .map((name) => `${name} is not a jukecord setting`);
 }
 
 /**

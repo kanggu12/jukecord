@@ -243,7 +243,8 @@ function outgoing(size: number, text: () => Buffer, packed: () => Buffer): (clie
 export class EventHub {
   private readonly options: EventHubOptions;
   private readonly now: () => number;
-  private readonly limits: LiveLimits;
+  // The caps: the options' at first; the total changes while jukecord runs when the settings say so (JUKECORD_LIVE_MAX).
+  private limits: LiveLimits;
   private readonly queueEveryMs: number;
   private readonly listenersEveryMs: number;
   private readonly clients = new Set<Client>();
@@ -266,6 +267,14 @@ export class EventHub {
   private readonly outbox = new GuildLanes();
   // The messages and bytes sent, and the connections, for the metrics.
   private readonly sent: LiveMetrics;
+
+  /**
+   * The most live connections at once from now on. Those already open stay (a smaller cap is not a reason to close
+   * anyone's panel); new ones wait for a place under it.
+   */
+  setTotal(total: number): void {
+    this.limits = { ...this.limits, total };
+  }
 
   constructor(options: EventHubOptions) {
     this.options = options;

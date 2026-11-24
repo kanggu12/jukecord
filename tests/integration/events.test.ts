@@ -417,6 +417,37 @@ describe('live connections are capped', () => {
   });
 });
 
+describe('the cap of live connections, changed while jukecord runs (JUKECORD_LIVE_MAX applies at once)', () => {
+  it('keeps the connections open under a lower cap and lets new ones in under a higher one', async () => {
+    const server = await testServer({ listen: true, live: { total: 3, perLogin: 10, perAddress: 10 } });
+    const sockets: Socket[] = [];
+    try {
+      const base = `${server.url.replace('http://', 'ws://')}/api/v1/events`;
+      const open = () => {
+        const socket = new Socket(base, { authorization: `Bearer ${HOST_TOKEN}` });
+        sockets.push(socket);
+        return socket;
+      };
+      await open().next('hello');
+      await open().next('hello');
+      // Lowered under what is open: both stay, a third is refused.
+      server.web.hub.setTotal(2);
+      assert.equal(server.web.hub.counts().connections, 2);
+      assert.deepEqual(await open().closed, {
+        code: 1013,
+        reason: 'jukecord has as many live connections as it allows',
+      });
+      // Raised: the next one fits.
+      server.web.hub.setTotal(5);
+      await open().next('hello');
+      assert.equal(server.web.hub.counts().connections, 3);
+    } finally {
+      for (const socket of sockets) socket.close();
+      await server.close();
+    }
+  });
+});
+
 describe('votes to skip, live', () => {
   it('counts a browser listening as a person who may vote, and tells every panel how the vote stands', async () => {
     const server = await testServer({

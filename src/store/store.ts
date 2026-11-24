@@ -178,6 +178,8 @@ export class Store {
   readonly listenLinks: ListenLinkRepository;
   readonly guests: GuestSessionRepository;
   readonly likes: LikeRepository;
+  /** The host's settings saved from the panel, the API or the CLI (the ones not kept in settings.json). */
+  readonly hostSettings: HostSettingRepository;
 
   private constructor(sql: SqlExecutor, now: () => number) {
     this.sql = sql;
@@ -198,6 +200,7 @@ export class Store {
     this.listenLinks = new ListenLinkRepository(this, now);
     this.guests = new GuestSessionRepository(this, now);
     this.likes = new LikeRepository(this, now);
+    this.hostSettings = new HostSettingRepository(this, now);
   }
 
   /**
@@ -2426,4 +2429,95 @@ export class LikeRepository {
     );
     return rows.map((row) => ({ track: trackFrom(row), likedAt: int(row, 'created_at') }));
   }
+}
+
+/** A host setting saved in the database (src/settings): its text, or null when put back to its default. */
+export interface SavedSetting {
+  /** The setting's environment name. */
+  readonly name: string;
+  readonly value: string | null;
+  /** How many times it was written: a change made against an older revision is a conflict (see HostSettingRepository). */
+  readonly revision: number;
+  readonly updatedAt: number;
+}
+
+/** A change to one host setting: its new text, or null to put it back to its default. */
+export interface SettingWrite {
+  readonly name: string;
+  readonly value: string | null;
+}
+
+/** Settings changed by someone else since the page that asks read them: nothing was written. */
+export class RevisionConflict extends Error {
+  override name = 'RevisionConflict';
+  /** The settings whose revision moved on. */
+  readonly names: readonly string[];
+
+  constructor(names: readonly string[]) {
+    super(`changed by someone else meanwhile: ${names.join(', ')}`);
+    this.names = names;
+  }
+}
+
+/**
+ * The host's settings saved with the data: shared by every service of a split jukecord, since each reads the same
+ * database. Only settings that are neither secret nor needed before the database opens are kept here (those are
+ * settings.json's, in the data folder).
+ */
+export class HostSettingRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** Every saved setting, by name (a few dozen rows at most). */
+  async all(): Promise<SavedSetting[]> {
+    const rows = await this.store.sql.all('SELECT name, value, revision, updated_at FROM host_settings ORDER BY name');
+    return rows.map(savedFrom);
+  }
+
+  /**
+   * Writes changes in one transaction, each row's revision one more than before (a setting never saved is at 0). With
+   * `expected`, a setting named in it whose revision is not the one given is a conflict, and nothing is written: a page
+   * that read the settings before someone else changed one cannot write over that change unseen.
+   */
+  write(changes: readonly SettingWrite[], expected?: Readonly<Record<string, number>>): Promise<SavedSetting[]> {
+    return this.store.transaction(async () => {
+      // The rows as they are now, read in the transaction, which holds them until it ends.
+      const current = new Map((await this.all()).map((row) => [row.name, row]));
+      const stale = changes
+        .map((change) => change.name)
+        .filter((name) => expected?.[name] !== undefined && (current.get(name)?.revision ?? 0) !== expected[name]);
+      if (stale.length > 0) throw new RevisionConflict(stale);
+      const now = this.now();
+      const written: SavedSetting[] = [];
+      for (const change of changes) {
+        const revision = (current.get(change.name)?.revision ?? 0) + 1;
+        await this.store.sql.run(
+          this.store.dialect.upsert({
+            table: 'host_settings',
+            columns: ['name', 'value', 'revision', 'updated_at'],
+            key: ['name'],
+            update: ['value', 'revision', 'updated_at'],
+          }),
+          [change.name, change.value, revision, now],
+        );
+        written.push({ name: change.name, value: change.value, revision, updatedAt: now });
+      }
+      return written;
+    });
+  }
+}
+
+// A row of host_settings as the repository gives it.
+function savedFrom(row: Row): SavedSetting {
+  return {
+    name: text(row, 'name'),
+    value: textOrNull(row, 'value'),
+    revision: int(row, 'revision'),
+    updatedAt: int(row, 'updated_at'),
+  };
 }

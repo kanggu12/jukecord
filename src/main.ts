@@ -22,7 +22,7 @@ import { LoginChecks } from './auth/check.ts';
 import { LdapLogin } from './auth/ldap.ts';
 import { OidcLogin } from './auth/oidc.ts';
 import { MemoryCache } from './cache/memory.ts';
-import { ConfigError, loadConfig } from './config.ts';
+import { type Config, ConfigError, unknownVariables } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
 import { GuildLanes, throwFromTimer } from './core/lanes.ts';
@@ -51,6 +51,12 @@ import { MetricsRegistry } from './metrics/registry.ts';
 import { diskMetrics, EventLoop, runtimeMetrics } from './metrics/runtime.ts';
 import { describeService, discordMetrics, playerMetrics } from './metrics/service.ts';
 import { sharedCacheReport } from './metrics/services.ts';
+import { applyLive } from './settings/apply.ts';
+import { readSettingsFile, SettingsFile, SettingsFileError } from './settings/file.ts';
+import { ONE_PROCESS } from './settings/layers.ts';
+import { RESTART_EXIT_CODE, supervisorOf } from './settings/restart.ts';
+import { HostSettings } from './settings/service.ts';
+import { allSettings, dataFolderOf, firstSettings } from './settings/start.ts';
 import { describeAddress } from './store/address.ts';
 import { ConnectionError } from './store/network.ts';
 import { openStore } from './store/open.ts';
@@ -72,35 +78,52 @@ let crashCheckpoint: () => Promise<void> = async () => {};
 // Set by the first unexpected error: the exit it makes is under way.
 let crashing = false;
 
+// Settings problems are printed as a list and the process exits with 2 (a usage error), before anything starts.
+function refuseSettings(problems: readonly string[]): number {
+  process.stderr.write(`${new ConfigError(problems).message}\n`);
+  return 2;
+}
+
 async function main(): Promise<number> {
   // Everything jukecord writes (the database, logins, logs, the cache) is for its own user only.
   process.umask(0o077);
-  let config: ReturnType<typeof loadConfig>;
+  const env = process.env;
+  const cwd = process.cwd();
+  // One process: every setting may be saved (src/settings/layers.ts); a split's services read some from their
+  // environment only.
+  const rules = ONE_PROCESS;
+  // The settings saved in the data folder (settings.json): where the database is, where jukecord listens, the secrets.
+  // A file that cannot be read keeps jukecord from starting, as a setting that cannot is.
+  let fileSettings: ReturnType<typeof readSettingsFile>;
   try {
-    config = loadConfig(process.env, process.cwd());
+    fileSettings = readSettingsFile(dataFolderOf(env, cwd));
   } catch (error) {
-    // Settings problems are printed as a list and the process exits with 2 (a usage error), before anything starts.
-    if (error instanceof ConfigError) {
-      process.stderr.write(`${error.message}\n`);
-      return 2;
-    }
+    if (error instanceof SettingsFileError) return refuseSettings([error.message]);
     throw error;
   }
+  // First what is needed before the database opens (src/settings/start.ts); the rest once it is open.
+  const first = firstSettings(env, cwd, fileSettings, rules);
+  if (!first.config) return refuseSettings(first.problems);
+  const boot: Config = first.config;
 
-  const log = createLogger({
-    level: config.log.level,
-    sinks: [
-      // Readable lines, or with JUKECORD_LOG_FORMAT=json the log file's JSON lines, for a log shipper.
-      new ConsoleSink(config.log.format),
-      new FileSink({ dir: path.join(config.dataDir, 'logs'), maxBytes: config.log.maxBytes, files: config.log.files }),
-    ],
+  // The two sinks are kept: their format and rotation change when the settings say so.
+  const consoleSink = new ConsoleSink(boot.log.format);
+  const fileSink = new FileSink({
+    dir: path.join(boot.dataDir, 'logs'),
+    maxBytes: boot.log.maxBytes,
+    files: boot.log.files,
   });
-  for (const warning of config.warnings) log.warn(warning);
+  const log = createLogger({
+    level: boot.log.level,
+    // Readable lines, or with JUKECORD_LOG_FORMAT=json the log file's JSON lines, for a log shipper.
+    sinks: [consoleSink, fileSink],
+  });
+  for (const warning of unknownVariables(env)) log.warn(warning);
   log.info(`starting jukecord ${VERSION}`, {
-    data: config.dataDir,
+    data: boot.dataDir,
     // Where the database is, never with its user or password.
-    database: describeAddress(config.database.address),
-    discord: config.discord.token ? 'yes' : 'browser-only',
+    database: describeAddress(boot.database.address),
+    discord: boot.discord.token ? 'yes' : 'browser-only',
   });
 
   // Every number jukecord reports, for /metrics. A number that cannot be read is said in the log once per reason (a
@@ -118,7 +141,7 @@ async function main(): Promise<number> {
   // jukecord is behind.
   const loop = new EventLoop();
   runtimeMetrics(registry, loop);
-  diskMetrics(registry, config.dataDir);
+  diskMetrics(registry, boot.dataDir);
 
   // A crash anywhere is logged with its stack before the process goes down; a stray rejected promise is logged and the
   // music goes on (each part already handles its own failures; this catches what slipped through).
@@ -143,19 +166,41 @@ async function main(): Promise<number> {
   // jukecord ends: there is nothing it can do without its database. Each statement is reported for the metrics.
   let store: Store;
   try {
-    store = await openStore(config.database.address, {
-      pool: config.database.pool,
+    store = await openStore(boot.database.address, {
+      pool: boot.database.pool,
       log: log.child('database'),
       report: databaseReport(registry),
     });
   } catch (error) {
     if (!(error instanceof ConnectionError)) throw error;
     log.error('jukecord cannot reach its database', { reason: error.message });
+    // Settings the environment and settings.json give that would be refused anyway are said too, as before the
+    // database was waited for: the host mends both in one go.
+    const without = allSettings(env, cwd, { file: fileSettings, database: new Map() }, rules);
+    if (!without.config) return refuseSettings(without.problems);
     return 1;
   }
-  if (config.database.address.kind !== 'sqlite') {
+  if (boot.database.address.kind !== 'sqlite') {
     log.info('the database is open', { server: `${store.sql.server.product} ${store.sql.server.version}` });
   }
+  // Every setting now, with the values saved in the database too. A saved value the rules refuse now is left out and
+  // said (the page shows it); a problem of the environment's own keeps jukecord from starting, as before.
+  const saved = new Map((await store.hostSettings.all()).map((row) => [row.name, row]));
+  const all = allSettings(env, cwd, { file: fileSettings, database: saved }, rules);
+  if (!all.config) {
+    await store.close();
+    return refuseSettings(all.problems);
+  }
+  const config: Config = all.config;
+  for (const [name, refused] of new Map([...first.refused, ...all.refused]))
+    log.warn('a saved setting is refused; its default or the environment’s value is in use', {
+      setting: name,
+      reason: refused.why,
+    });
+  // The log as the saved settings have it, now that they are read (the lines so far used the environment's).
+  log.setLevel(config.log.level);
+  consoleSink.setFormat(config.log.format);
+  fileSink.setLimits(config.log);
   // The shared cache (src/cache): in this process's memory, all one process needs; its reads are counted.
   const sharedCache = new MemoryCache({ report: sharedCacheReport(registry) });
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
@@ -291,18 +336,18 @@ async function main(): Promise<number> {
   // The tracks' covers, fetched once into the cache by the same address rule as yt-dlp's (src/media/covers.ts).
   const covers = new Covers({ cache, log: log.child('covers'), allowPrivate: config.media.allowPrivate });
   // Lyrics from LRCLIB, unless turned off: its requests go through the same address guard as yt-dlp's, and say what
-  // asks (LRCLIB wants a client's name, version and home).
-  const lyrics = config.lyrics
-    ? new Lyrics({
-        lyrics: store.lyrics,
-        music: store.music,
-        lookup: new LrclibClient({
-          get: outbound({ proxy: egress?.url ?? null }),
-          userAgent: `jukecord/${VERSION} (https://github.com/kanggu12/jukecord)`,
-        }),
-        log: log.child('lyrics'),
-      })
-    : null;
+  // asks (LRCLIB wants a client's name, version and home). Made either way (it asks nothing until a track's lyrics are
+  // asked for), so turning them on in the settings has them at once.
+  const lyricsSource = new Lyrics({
+    lyrics: store.lyrics,
+    music: store.music,
+    lookup: new LrclibClient({
+      get: outbound({ proxy: egress?.url ?? null }),
+      userAgent: `jukecord/${VERSION} (https://github.com/kanggu12/jukecord)`,
+    }),
+    log: log.child('lyrics'),
+  });
+  const lyrics = config.lyrics ? lyricsSource : null;
   // Who listens in each server, for the votes to skip: the people in the bot's voice channel and the people listening
   // in browsers, filled in once the bot and the web server below are made.
   const audience = {
@@ -438,6 +483,54 @@ async function main(): Promise<number> {
     // Every login counted by its way in and how it went (jukecord_logins_total).
     metrics: registry,
   });
+  // The host's settings while jukecord runs (src/settings): seen and changed from the panel, the API and the CLI. A
+  // change that applies at once is handed to its part here (each part is made by now, or is read when the change
+  // comes: the web server, the bot, the rest and the backups); the rest waits for a restart, which the page offers.
+  const hostSettings = new HostSettings({
+    env,
+    cwd,
+    store,
+    file: new SettingsFile(config.dataDir),
+    rules,
+    started: config,
+    supervisor: supervisorOf(config.supervisor, env),
+    refused: new Map([...first.refused, ...all.refused]),
+    log: log.child('settings'),
+    // Restarting is stopping as on SIGTERM, with the code that has jukecord's supervisor start it again.
+    restart: () => stop('restart', RESTART_EXIT_CODE),
+    apply: (names, next) =>
+      applyLive(names, next, {
+        log: {
+          setLevel: (level) => log.setLevel(level),
+          setFormat: (format) => consoleSink.setFormat(format),
+          setLimits: (limits) => fileSink.setLimits(limits),
+        },
+        limits: actions,
+        autoplay,
+        // Turned on: the source made above; off: none, and nothing more is asked of LRCLIB.
+        lyrics: { setLyrics: (on) => actions.setLyrics(on ? lyricsSource : null) },
+        rest: { setAfter: (ms) => rest.setAfter(ms) },
+        cache,
+        prefetch: prefetcher,
+        links,
+        backups: {
+          setSchedule: (at, keep) => {
+            // Off: the schedule stops (kept for its last failure); on: started again at the new time, or made.
+            if (at === null) schedule?.stop();
+            else if (schedule) {
+              schedule.retime(at, keep);
+              schedule.start();
+            } else {
+              schedule = makeSchedule(at, keep);
+              schedule.start();
+            }
+          },
+        },
+        metrics: { setToken: (token) => web.setMetricsToken(token) },
+        live: () => web.hub,
+        voice: () => bot?.voice ?? null,
+      }),
+  });
   const web: WebServer = await createWebServer({
     host: config.host,
     port: config.port,
@@ -469,14 +562,22 @@ async function main(): Promise<number> {
       directory,
       publicUrl,
       logDir: path.join(config.dataDir, 'logs'),
-      logFiles: config.log.files,
+      // How many log files there are, as the settings say now (JUKECORD_LOG_FILES applies at once).
+      get logFiles() {
+        return hostSettings.config.log.files;
+      },
       backupDir: path.join(config.dataDir, 'backups'),
-      backupKeep: config.backups.keep,
+      // How many backups stay, as the settings say now (JUKECORD_BACKUP_KEEP applies at once).
+      get backupKeep() {
+        return hostSettings.config.backups.keep;
+      },
+      settings: hostSettings,
       loginSettings: config.auth,
-      // The login settings' tests read the environment jukecord started with, under the values a test brings.
+      // The login settings' tests read the settings as they are now, under the values a test brings.
       loginChecks: new LoginChecks({
-        env: process.env,
-        cwd: process.cwd(),
+        // As the settings read now: the environment, with the values saved from the panel under it.
+        env: () => hostSettings.environment(),
+        cwd,
         redirectUri: `${publicUrl}/auth/sso/callback`,
         afterLogout: `${publicUrl}/login`,
         log: log.child('auth-test'),
@@ -511,18 +612,19 @@ async function main(): Promise<number> {
   });
   rest.start();
 
-  // A backup every day at the host's time of day (JUKECORD_BACKUP_AT), when one is set.
-  const schedule = config.backups.at
-    ? new BackupSchedule({
-        store,
-        dir: path.join(config.dataDir, 'backups'),
-        keep: config.backups.keep,
-        at: config.backups.at,
-        clock: systemClock,
-        log: log.child('backups'),
-        alerts,
-      })
-    : null;
+  // A backup every day at the host's time of day (JUKECORD_BACKUP_AT), when one is set. Kept (stopped) when the
+  // settings turn it off, so its last failure is still said and a backup under way is still waited for at the stop.
+  const makeSchedule = (at: NonNullable<Config['backups']['at']>, keep: number) =>
+    new BackupSchedule({
+      store,
+      dir: path.join(config.dataDir, 'backups'),
+      keep,
+      at,
+      clock: systemClock,
+      log: log.child('backups'),
+      alerts,
+    });
+  let schedule: BackupSchedule | null = config.backups.at ? makeSchedule(config.backups.at, config.backups.keep) : null;
   schedule?.start();
 
   // A revoked listening link ends its guests' live connections at once, whichever way it was revoked.
@@ -536,10 +638,11 @@ async function main(): Promise<number> {
   // Stopping: save where every server is, leave voice, close the database, in that order. Set up before the panel
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;
-  const stop = (signal: string): void => {
+  // `code` is what the process exits with once stopped: 0, or a restart's (for what runs jukecord to start it again).
+  const stop = (signal: string, code = 0): void => {
     if (stopping) return;
     stopping = true;
-    log.info('stopping', { signal });
+    log.info(code === RESTART_EXIT_CODE ? 'restarting' : 'stopping', { signal });
     // Ten seconds to stop cleanly; a stuck network call must not keep a container from restarting.
     setTimeout(() => {
       log.error('stopping took longer than 10 s; exiting anyway');
@@ -567,7 +670,7 @@ async function main(): Promise<number> {
           .then(() => sharedCache.close())
           .finally(() => {
             // Closed once no transaction holds it, then out.
-            void store.close().finally(() => process.exit(0));
+            void store.close().finally(() => process.exit(code));
           }),
       throwFromTimer,
     );

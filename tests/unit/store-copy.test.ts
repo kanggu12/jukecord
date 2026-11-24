@@ -14,7 +14,7 @@ import { copyStore } from '../../src/store/copy.ts';
 import { openStore } from '../../src/store/open.ts';
 import { VERSION_TABLE } from '../../src/store/schema.ts';
 import type { SqlExecutor } from '../../src/store/sql.ts';
-import { Store } from '../../src/store/store.ts';
+import { LATEST_SCHEMA, Store } from '../../src/store/store.ts';
 import { eachDatabase, TEST_DATABASES } from '../support/databases.ts';
 import { everyRow, fill, LONG_SOURCE } from '../support/fill.ts';
 import { addTracks } from '../support/store.ts';
@@ -187,7 +187,7 @@ eachDatabase('a copy into a database', (db) => {
     };
     await assert.rejects(
       async () => Store.open(await at(7), { migrate: false }),
-      /older than this jukecord's \(8\); start this jukecord on it/,
+      new RegExp(`older than this jukecord's \\(${LATEST_SCHEMA}\\); start this jukecord on it`),
     );
     await assert.rejects(async () => Store.open(await at(999), { migrate: false }), /newer than this jukecord knows/);
   });

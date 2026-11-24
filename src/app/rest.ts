@@ -38,15 +38,38 @@ export class Rest {
   private readonly waits: Countdowns;
   // The bus listeners, kept to remove them on stop.
   private readonly off: (() => void)[] = [];
+  // How long a server may go unheard: the option's at first, the settings' after a change (JUKECORD_REST_AFTER).
+  private afterMs: number;
+  // Whether jukecord asked it to watch (start, until stop): a change of the time watches again only then.
+  private started = false;
 
   constructor(options: RestOptions) {
     this.options = options;
+    this.afterMs = options.afterMs;
     this.waits = new Countdowns(options.clock, options.afterMs, (guildId) => this.expired(guildId));
   }
 
   /** Starts watching every server (nothing at all when resting is off). */
   start(): void {
-    if (this.options.afterMs === 0) return;
+    this.started = true;
+    this.watch();
+  }
+
+  /**
+   * How long a playing server may go unheard from now on (0: never rests). Every wait starts again with the new time;
+   * turned off, none is left running.
+   */
+  setAfter(ms: number): void {
+    this.afterMs = ms;
+    this.waits.setMs(ms);
+    if (!this.started) return;
+    this.unwatch();
+    this.watch();
+  }
+
+  // Watches what can change whether a server is heard, once, while resting is on.
+  private watch(): void {
+    if (this.afterMs === 0 || this.off.length > 0) return;
     const { bus } = this.options;
     // What can change whether a server is heard, or whether it plays: its player, its voice channel, its browsers.
     const onPlayer = ({ guildId }: { guildId: string }) => this.check(guildId);
@@ -66,8 +89,14 @@ export class Rest {
 
   /** Stops watching (shutting down): no countdown is left behind. */
   stop(): void {
+    this.started = false;
+    this.unwatch();
+  }
+
+  // Stops listening and drops every countdown.
+  private unwatch(): void {
     for (const off of this.off.splice(0)) off();
-    for (const player of this.options.players.all()) this.waits.disarm(player.guildId);
+    this.waits.disarmAll();
   }
 
   // Whether a server's player is playing (or getting the next track ready) while nobody hears it.
@@ -94,7 +123,7 @@ export class Rest {
         if (await this.options.players.existing(guildId)?.rest())
           this.options.log.info('paused: nobody was listening', {
             guild: guildId,
-            afterSeconds: Math.round(this.options.afterMs / 1000),
+            afterSeconds: Math.round(this.afterMs / 1000),
           });
       })
       .catch(throwFromTimer);

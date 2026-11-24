@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 import { withSettingsTable } from '../../scripts/settings-doc.ts';
 import { AUTH_VARIABLES } from '../../src/auth/settings.ts';
 import { type Config, ConfigError, loadConfig } from '../../src/config.ts';
+import { sayError } from '../../src/core/say.ts';
 import {
   DEPLOYMENT_VARIABLES,
   definition,
@@ -193,6 +194,65 @@ describe('the settings table', () => {
     // Every variable is in it, the _FILE twins too; the deployment's are in INSTALL.md.
     for (const name of KNOWN_VARIABLES.filter((variable) => !DEPLOYMENT_VARIABLES.includes(variable))) {
       assert.ok(guide.includes(`\`${name}\``), `${name} is not in the guide`);
+    }
+  });
+
+  it('has Korean for every problem the settings page can show', () => {
+    // Values of every shape for every setting, alone and among the settings its checks read it with, and the pairs
+    // the checks hold together: each problem they give is said in Korean too (a refused save shows them).
+    const shapes = [
+      'x',
+      '0',
+      '-1',
+      '99999999',
+      '1e4',
+      '1.5x',
+      'two words',
+      'https://',
+      'ftp://x',
+      '25:00',
+      'maybe',
+      'a'.repeat(41),
+    ];
+    const problems = new Set<string>();
+    const collect = (env: Record<string, string>) => {
+      const result = read(env);
+      if (Array.isArray(result)) for (const problem of result) problems.add(problem as string);
+    };
+    for (const setting of SETTINGS) {
+      for (const value of shapes) {
+        collect({ [setting.name]: value });
+        collect({ ...around(setting), [setting.name]: value });
+      }
+      if (setting.file) {
+        collect({ [setting.name]: 'x', [`${setting.name}_FILE`]: '/run/secret' });
+        collect({ [`${setting.name}_FILE`]: '/run/secret' });
+      }
+    }
+    for (const env of [
+      { JUKECORD_DISCORD_CLIENT_SECRET: 's' },
+      { JUKECORD_SPOTIFY_CLIENT_SECRET: 's' },
+      { JUKECORD_OIDC_ISSUER: 'https://sso.example.com' },
+      { JUKECORD_LDAP_URL: 'ldaps://dir.example.org', JUKECORD_LDAP_STARTTLS: 'yes' },
+      { ...DIRECTORY_ON, JUKECORD_LDAP_BIND_DN: 'cn=x,dc=x' },
+      { ...DIRECTORY_ON, JUKECORD_LDAP_GROUP_FILTER: '(member={dn})', JUKECORD_LDAP_NESTED_GROUPS: 'yes' },
+      { ...DIRECTORY_ON, JUKECORD_LDAP_GROUP_BASE_DN: 'ou=g,dc=x' },
+      { ...DIRECTORY_ON, JUKECORD_LDAP_USER_FILTER: '(cn=x)' },
+      { ...DIRECTORY_ON, JUKECORD_LDAP_GROUP_FILTER: '(cn=x)' },
+      { JUKECORD_DATABASE_URL: 'postgres://h/db' },
+      { JUKECORD_DATABASE_URL: 'postgres://u@h/' },
+      { JUKECORD_DATABASE_URL: 'postgres://u@h/db?nope=1' },
+      { JUKECORD_DATABASE_URL: 'postgres://u@h/db?sslmode=prefer' },
+      { JUKECORD_DATABASE_URL: 'postgres://u@h/db?ssl=maybe' },
+      { JUKECORD_DATABASE_URL: 'postgres://u@h/db?connect_timeout=0' },
+      { JUKECORD_DATABASE_URL: 'postgres://u@h/db?schema=a-b' },
+      { JUKECORD_DATABASE_URL: 'redis://h' },
+      { JUKECORD_DATABASE_URL: 'sqlite://host/x.db' },
+    ])
+      collect(env);
+    assert.ok(problems.size > 60, `only ${problems.size} problems were made; are the shapes still right?`);
+    for (const problem of problems) {
+      assert.notEqual(sayError(problem, 'ko'), sayError(problem, 'en'), `no Korean for "${problem}"`);
     }
   });
 

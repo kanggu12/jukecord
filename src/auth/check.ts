@@ -13,8 +13,11 @@ import { type Check, OidcLogin } from './oidc.ts';
 import { AUTH_VARIABLES, type AuthSettings, type MemberLevel, readAuthSettings } from './settings.ts';
 
 export interface LoginChecksOptions {
-  /** The environment jukecord started with: what is in use, under the values a test brings. */
-  readonly env: NodeJS.ProcessEnv;
+  /**
+   * The environment jukecord started with, or how to read it as it is now (with the saved settings under it, see
+   * src/settings/layers.ts): what is in use, under the values a test brings.
+   */
+  readonly env: NodeJS.ProcessEnv | (() => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>);
   readonly cwd: string;
   readonly files?: ConfigFiles;
   /** Where the provider sends people back to, and after logging out (as the login itself is set up). */
@@ -48,8 +51,11 @@ export class LoginChecks {
    * The login settings with some values in place of the ones in use, by their environment names. A value given for a
    * setting that has a `_FILE` twin replaces the file too; a name that is no login setting is a problem.
    */
-  settingsWith(values: Readonly<Record<string, string>> = {}): { settings: AuthSettings; problems: string[] } {
-    const env: NodeJS.ProcessEnv = { ...this.options.env };
+  settingsWith(
+    values: Readonly<Record<string, string>> = {},
+    base: NodeJS.ProcessEnv = typeof this.options.env === 'function' ? {} : this.options.env,
+  ): { settings: AuthSettings; problems: string[] } {
+    const env: NodeJS.ProcessEnv = { ...base };
     const unknown: string[] = [];
     for (const [name, value] of Object.entries(values)) {
       // Files are the host's to name in the environment: a test brings values, never a path to read.
@@ -64,9 +70,15 @@ export class LoginChecks {
     return { settings: read.settings, problems: [...unknown, ...read.problems] };
   }
 
+  // The environment the settings are read from now: as jukecord started, or as the settings say now.
+  private async environment(): Promise<NodeJS.ProcessEnv> {
+    const env = this.options.env;
+    return typeof env === 'function' ? await env() : env;
+  }
+
   /** Tests logging in through the identity provider: its document, its keys, the client and its secret. */
   async oidc(values: Readonly<Record<string, string>> = {}): Promise<TestAnswer> {
-    const { settings, problems } = this.settingsWith(values);
+    const { settings, problems } = this.settingsWith(values, await this.environment());
     if (problems.length > 0) return { ok: false, checks: problemsAsChecks(problems) };
     if (!settings.oidc) {
       return {
@@ -95,7 +107,7 @@ export class LoginChecks {
     username?: string,
     values: Readonly<Record<string, string>> = {},
   ): Promise<TestAnswer & { groups: string[] | null; level: MemberLevel | null }> {
-    const { settings, problems } = this.settingsWith(values);
+    const { settings, problems } = this.settingsWith(values, await this.environment());
     if (problems.length > 0) return { ok: false, checks: problemsAsChecks(problems), groups: null, level: null };
     const ldap = settings.ldap;
     if (!ldap) {

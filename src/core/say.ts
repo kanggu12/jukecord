@@ -270,6 +270,156 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // The picture of a search's result (the search cover route, src/web/server.ts), beside a track's cover above.
   ['no search found that address lately', '최근 검색 결과에 없는 주소'],
   ['that search result has no picture', '이미지가 없는 검색 결과'],
+  // The host's settings (src/settings): a change refused, the database away, a restart.
+  ['the database does not answer', '데이터베이스가 응답하지 않음'],
+  ['the database does not answer; nothing was saved', '데이터베이스가 응답하지 않음: 아무것도 저장하지 않음'],
+  ['say which settings to change', '바꿀 설정을 정하세요'],
+  [/^(JUKECORD_\w+) is not a jukecord setting$/, '$1: jukecord 설정이 아님'],
+  [/^(JUKECORD_\w+) is set where jukecord starts, not here$/, '$1: jukecord를 시작하는 곳에서 정함'],
+  [/^(JUKECORD_\w+) is set by the environment \((JUKECORD_\w+)\)$/, '$1: 환경 변수($2)로 정해짐'],
+  [
+    /^(JUKECORD_\w+) comes from each service's environment in a split jukecord$/,
+    '$1: 나눠 띄운 jukecord에서는 서비스마다 환경 변수로 정함',
+  ],
+  ['settings.json could not be written; nothing was saved', 'settings.json에 쓰지 못함: 아무것도 저장하지 않음'],
+  [/^changed by someone else meanwhile: (.+); read them again$/, '그사이 다른 사람이 바꿈($1): 다시 읽어 오세요'],
+  ['jukecord cannot restart itself here', '여기서는 jukecord가 스스로 다시 시작할 수 없음'],
+  [
+    'nothing would start jukecord again here (it runs without a supervisor, as in a terminal): stop it and start it yourself',
+    '여기서는 jukecord를 다시 띄워 줄 것이 없음(터미널처럼 감독 프로그램 없이 실행 중): 직접 멈추고 다시 시작하세요',
+  ],
+  // The settings' rules (src/config.ts, src/auth/settings.ts, src/store/address.ts, src/util/units.ts), as a refused
+  // change shows them: each names its variable, and a value it quotes goes at the end in Korean.
+  [/^(JUKECORD_\w+): "(.*)" is not a whole number$/, '$1: 정수가 아님("$2")'],
+  [/^(JUKECORD_\w+): (.+) is outside ([^\s-]+)-([^\s-]+)$/, '$1: $3~$4 범위 밖($2)'],
+  [
+    /^(JUKECORD_\w+): (.+) is outside ([^\s-]+)-([^\s-]+) \(or 0 to never leave\)$/,
+    '$1: $3~$4 범위 밖($2). 0이면 나가지 않음',
+  ],
+  [
+    /^(JUKECORD_\w+): (.+) is outside ([^\s-]+)-([^\s-]+) \(or 0 to never pause\)$/,
+    '$1: $3~$4 범위 밖($2). 0이면 멈추지 않음',
+  ],
+  [/^(JUKECORD_\w+): "(.*)" is not a URL \(example: (.+)\)$/, '$1: 주소가 아님("$2", 예: $3)'],
+  [/^(JUKECORD_\w+): "(.*)" must start with http\(s\):\/\/$/, '$1: http:// 또는 https://로 시작해야 함("$2")'],
+  [
+    /^(JUKECORD_\w+): "(.*)" is not true, false, a hop count or addresses$/,
+    '$1: true, false, 프록시 수, 주소 가운데 하나가 아님("$2")',
+  ],
+  [/^(JUKECORD_\w+): an application ID is 17 to 20 digits$/, '$1: 애플리케이션 ID는 17~20자리 숫자'],
+  [
+    /^(JUKECORD_\w+): (.+) is too small for the media cache \(at least (.+)\)$/,
+    '$1: 미디어 캐시로는 너무 작음($2, 최소 $3)',
+  ],
+  [/^(JUKECORD_\w+): (.+) is too small for a log file \(at least (.+)\)$/, '$1: 로그 파일로는 너무 작음($2, 최소 $3)'],
+  [/^(JUKECORD_\w+): (.+) cannot be read$/, '$1: 읽을 수 없는 파일($2)'],
+  [/^(JUKECORD_\w+): (.+) is empty$/, '$1: 빈 파일($2)'],
+  [/^(JUKECORD_\w+): "(.*)" is not true or false$/, '$1: true나 false가 아님("$2")'],
+  [/^(JUKECORD_\w+): "(.*)" is not off or a time of day like 04:30$/, '$1: off나 04:30 같은 시각이 아님("$2")'],
+  [/^(JUKECORD_\w+): "(.*)" is not on or off$/, '$1: on이나 off가 아님("$2")'],
+  [/^(JUKECORD_\w+): "(.*)" is not yes or no$/, '$1: yes나 no가 아님("$2")'],
+  [/^(JUKECORD_\w+): "(.*)" is not text or json$/, '$1: text나 json이 아님("$2")'],
+  [/^(JUKECORD_\w+): "(.*)" is not one of (.+)$/, '$1: 다음 가운데 하나가 아님("$2"): $3'],
+  [/^(JUKECORD_\w+): a Spotify client ID is letters and digits$/, '$1: Spotify 클라이언트 ID는 영문자와 숫자'],
+  [/^(JUKECORD_\w+): "(.*)" is not a size \(examples: (.+)\)$/, '$1: 크기가 아님("$2", 예: $3)'],
+  [/^(JUKECORD_\w+): "(.*)" has an unknown size unit \(use (.+)\)$/, '$1: 모르는 크기 단위("$2", 쓸 수 있는 단위: $3)'],
+  [/^(JUKECORD_\w+): "(.*)" is not a duration \(examples: (.+)\)$/, '$1: 시간이 아님("$2", 예: $3)'],
+  [
+    /^(JUKECORD_\w+): "(.*)" has an unknown duration unit \(use (.+)\)$/,
+    '$1: 모르는 시간 단위("$2", 쓸 수 있는 단위: $3)',
+  ],
+  [/^(JUKECORD_\w+): at most (\d+) characters$/, '$1: 최대 $2자'],
+  [
+    /^(JUKECORD_\w+): "(.*)" is not a claim name or a dotted path like realm_access\.roles$/,
+    '$1: 클레임 이름이나 realm_access.roles 같은 경로가 아님("$2")',
+  ],
+  [/^set (JUKECORD_\w+) or (JUKECORD_\w+), not both$/, '$1, $2 가운데 하나만 정하세요'],
+  [/^set both (JUKECORD_\w+) and (JUKECORD_\w+), or neither$/, '$1, $2 둘 다 정하거나 둘 다 비우세요'],
+  [/^(JUKECORD_\w+) is set but (JUKECORD_\w+) is not$/, '$2 없이 $1만 있음'],
+  [
+    /^set who may log in: (JUKECORD_\w+), (JUKECORD_\w+) or (JUKECORD_\w+) \(a \* lets in everyone the (?:provider|directory) knows\)$/,
+    '로그인할 수 있는 그룹을 정하세요: $1, $2, $3(*는 모든 사람)',
+  ],
+  [
+    /^JUKECORD_METRICS_TOKEN: at least 16 characters and no spaces \(openssl rand -hex 32 makes one\)$/,
+    'JUKECORD_METRICS_TOKEN: 공백 없이 16자 이상(openssl rand -hex 32로 만들 수 있음)',
+  ],
+  [
+    /^JUKECORD_OIDC_ISSUER: "(.*)" is not an issuer's address \(example: (.+)\)$/,
+    'JUKECORD_OIDC_ISSUER: 발급자 주소가 아님("$1", 예: $2)',
+  ],
+  [
+    /^JUKECORD_LDAP_URL: "(.*)" is not ldap:\/\/host or ldaps:\/\/host \(with a port if not the usual\)$/,
+    'JUKECORD_LDAP_URL: ldap://호스트나 ldaps://호스트가 아님("$1")',
+  ],
+  [
+    'JUKECORD_LDAP_STARTTLS is for ldap://; ldaps:// is encrypted already',
+    'JUKECORD_LDAP_STARTTLS는 ldap://에만 씀. ldaps://는 이미 암호화됨',
+  ],
+  [
+    /^JUKECORD_LDAP_CA_FILE: (.+) has no certificate in PEM form$/,
+    'JUKECORD_LDAP_CA_FILE: PEM 형식의 인증서가 없는 파일($1)',
+  ],
+  [
+    /^JUKECORD_LDAP_BIND_DN: "(.*)" is not a DN \(example: (.+)\) or, for Active Directory, (.+)$/,
+    'JUKECORD_LDAP_BIND_DN: DN이 아님("$1", 예: $2, Active Directory는 $3)',
+  ],
+  [/^JUKECORD_LDAP_BASE_DN: "(.*)" is not a DN \(example: (.+)\)$/, 'JUKECORD_LDAP_BASE_DN: DN이 아님("$1", 예: $2)'],
+  [
+    /^(JUKECORD_\w+): put \{username\} where the name typed goes, as in (.+)$/,
+    '$1: 입력한 이름이 들어갈 자리에 {username}을 넣으세요(예: $2)',
+  ],
+  [/^(JUKECORD_\w+): "(.*)" is not one filter in parentheses$/, '$1: 괄호로 묶인 필터 하나가 아님("$2")'],
+  [
+    /^(JUKECORD_\w+): put \{dn\} \(or \{username\}\) where the person goes, as in (.+)$/,
+    '$1: 사람이 들어갈 자리에 {dn}이나 {username}을 넣으세요(예: $2)',
+  ],
+  [
+    /^JUKECORD_LDAP_GROUP_BASE_DN is where groups are searched: set (JUKECORD_\w+) or (JUKECORD_\w+) too$/,
+    'JUKECORD_LDAP_GROUP_BASE_DN은 그룹을 찾는 위치: $1, $2 가운데 하나도 정하세요',
+  ],
+  // The database's address (src/store/address.ts): what is wrong with it, never the address itself (a password).
+  [
+    'JUKECORD_DATABASE_URL is not an address like postgres://user:password@host/database, mysql://... or sqlite:',
+    'JUKECORD_DATABASE_URL: postgres://사용자:암호@호스트/데이터베이스, mysql://…, sqlite: 꼴의 주소가 아님',
+  ],
+  [
+    /^JUKECORD_DATABASE_URL starts with (\S+), not sqlite:, postgres:\/\/, postgresql:\/\/, mysql:\/\/ or mariadb:\/\/$/,
+    'JUKECORD_DATABASE_URL: sqlite:, postgres://, postgresql://, mysql://, mariadb:// 가운데 하나로 시작해야 함($1)',
+  ],
+  [
+    /^JUKECORD_DATABASE_URL does not take the parameter "(.+)" for (\w+)$/,
+    'JUKECORD_DATABASE_URL: $2에는 쓸 수 없는 매개변수("$1")',
+  ],
+  [/^JUKECORD_DATABASE_URL gives (\w+) twice$/, 'JUKECORD_DATABASE_URL: 매개변수가 두 번 있음($1)'],
+  [
+    /^JUKECORD_DATABASE_URL has a (.+) that is not percent-encoded properly$/,
+    'JUKECORD_DATABASE_URL: 퍼센트 인코딩이 잘못된 부분이 있음',
+  ],
+  [/^JUKECORD_DATABASE_URL has no user name/, 'JUKECORD_DATABASE_URL: 사용자 이름이 없음'],
+  [/^JUKECORD_DATABASE_URL names no database/, 'JUKECORD_DATABASE_URL: 데이터베이스 이름이 없음'],
+  ['JUKECORD_DATABASE_URL names no host', 'JUKECORD_DATABASE_URL: 호스트가 없음'],
+  [
+    /^JUKECORD_DATABASE_URL has a schema "(.+)" that is not a plain name/,
+    'JUKECORD_DATABASE_URL: 스키마 이름은 영문자, 숫자, _만("$1")',
+  ],
+  [
+    'JUKECORD_DATABASE_URL gives sslmode and ssl; give one of them',
+    'JUKECORD_DATABASE_URL: sslmode, ssl 가운데 하나만 쓰세요',
+  ],
+  [/^JUKECORD_DATABASE_URL has ssl=(.*); it is true or false$/, 'JUKECORD_DATABASE_URL: ssl은 true나 false($1)'],
+  [
+    /^JUKECORD_DATABASE_URL has sslmode=(.*); it is disable, require, verify-ca or verify-full/,
+    'JUKECORD_DATABASE_URL: sslmode는 disable, require, verify-ca, verify-full 가운데 하나($1)',
+  ],
+  [
+    /^JUKECORD_DATABASE_URL has connect_timeout=(.*); it is a whole number of seconds from 1 to 300$/,
+    'JUKECORD_DATABASE_URL: connect_timeout은 1~300초 사이의 정수($1)',
+  ],
+  [
+    'JUKECORD_DATABASE_URL sqlite: takes a path, not a host',
+    'JUKECORD_DATABASE_URL: sqlite:에는 호스트 없이 경로만 씀',
+  ],
 ];
 
 // The few messages people read in other English words than the API's: [the API's message, the words for people].

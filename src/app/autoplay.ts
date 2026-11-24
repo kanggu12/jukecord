@@ -86,8 +86,17 @@ export class Autoplay {
   private readonly mixes = new Map<string, { at: number; tracks: NewTrack[] }>();
   private started = false;
 
+  // The longest track a pick may be: the option's at first, the settings' after a change (JUKECORD_TRACK_MAX).
+  private trackMaxMs: number;
+
   constructor(options: AutoplayOptions) {
     this.options = options;
+    this.trackMaxMs = options.trackMaxMs;
+  }
+
+  /** The longest track a pick may be, from the next pick on. */
+  setTrackMax(ms: number): void {
+    this.trackMaxMs = ms;
   }
 
   /** Starts listening to the players and the queues. */
@@ -240,8 +249,7 @@ export class Autoplay {
   /** A track drawn from the server's plays, weighted by how often it played and how many liked it; null for none. */
   async fromHistory(guildId: string, avoid: ReadonlySet<number>): Promise<Track | null> {
     const candidates = (await this.options.store.history.playCounts(guildId)).filter(
-      (entry) =>
-        !avoid.has(entry.trackId) && (entry.durationMs === null || entry.durationMs <= this.options.trackMaxMs),
+      (entry) => !avoid.has(entry.trackId) && (entry.durationMs === null || entry.durationMs <= this.trackMaxMs),
     );
     if (candidates.length === 0) return null;
     const weights = candidates.map((entry) => entry.plays + LIKE_WEIGHT * entry.likes);
@@ -289,7 +297,7 @@ export class Autoplay {
     for (const entry of mix.tracks) {
       if (signal.aborted) return null;
       if (entry.source === current.source) continue;
-      if (entry.durationMs !== null && entry.durationMs > this.options.trackMaxMs) continue;
+      if (entry.durationMs !== null && entry.durationMs > this.trackMaxMs) continue;
       const known = await this.options.store.tracks.bySource(entry.source);
       if (known && avoid.has(known.id)) continue;
       // The same check as any address added: a mix lists YouTube's own pages, but nothing is taken on trust.

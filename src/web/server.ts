@@ -124,6 +124,8 @@ export interface TurnedAway {
 export interface WebServer {
   readonly app: FastifyInstance;
   readonly hub: EventHub;
+  /** The token a scraper of /metrics shows from now on (the settings' JUKECORD_METRICS_TOKEN applies at once). */
+  setMetricsToken(token: string | null): void;
   /** Starts listening; returns the address. */
   listen(): Promise<string>;
   close(): Promise<void>;
@@ -1199,6 +1201,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   return {
     app,
     hub,
+    setMetricsToken: (token) => gate.setToken(token),
     listen: () => app.listen({ host: options.host, port: options.port }),
     close: async () => {
       hub.close();
