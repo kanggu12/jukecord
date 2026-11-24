@@ -83,8 +83,9 @@ The panel is published on 127.0.0.1, this machine only. For friends to log in an
 - With `JUKECORD_TRUST_PROXY=1` jukecord believes the `X-Forwarded-For` and `X-Forwarded-Proto` of one proxy.
 - The proxy passes WebSocket upgrades for `/api/v1/events`, with a long read timeout: the panel keeps that connection
   open.
-- `/metrics` needs no login, so jukecord answers it only for this machine and its network: a request with
-  `X-Forwarded-For`, or from a public address, gets a 404. The examples below refuse it at the proxy too.
+- `/metrics` needs no login, so jukecord answers it only for this machine and its network: a request with a header a
+  proxy adds (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`, `X-Forwarded-Host`, `X-Forwarded-Proto`), or from a
+  public address, gets a 404. The examples below refuse it at the proxy too.
 
 Caddy, which gets the certificate itself:
 
