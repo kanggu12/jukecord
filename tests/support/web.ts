@@ -15,8 +15,9 @@ import {
   type VoiceControl,
 } from '../../src/app/actions.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
 import { OidcLogin } from '../../src/auth/oidc.ts';
-import type { OidcSettings } from '../../src/auth/settings.ts';
+import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
@@ -191,6 +192,8 @@ export interface TestServerOptions {
   readonly searched?: Record<string, NewTrack[]>;
   /** Logging in through an identity provider: its settings, and the fetch its made-up provider answers. */
   readonly oidc?: { readonly settings: OidcSettings; readonly fetch: typeof fetch };
+  /** Logging in with a directory account: its settings, and a directory that stands in for one. */
+  readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -297,6 +300,13 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
         fetch: options.oidc.fetch,
       })
     : null;
+  const ldap = options.ldap
+    ? new LdapLogin({
+        settings: options.ldap.settings,
+        log,
+        ...(options.ldap.connect ? { connect: options.ldap.connect } : {}),
+      })
+    : null;
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
@@ -305,6 +315,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     // The login links and failed logins in memory, as one jukecord keeps them (each test server its own).
     cache: loginCache,
     oidc,
+    ldap,
     log,
     // Real time for logins: the session repository uses the store's clock, which the tests keep fixed.
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -357,7 +368,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       logFiles: 5,
       backupDir: path.join(dataDir, 'backups'),
       discordMode: !options.browserOnly,
-      loginSettings: { oidc: options.oidc?.settings ?? null, ldap: null },
+      loginSettings: { oidc: options.oidc?.settings ?? null, ldap: options.ldap?.settings ?? null },
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });

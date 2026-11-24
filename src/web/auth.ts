@@ -19,6 +19,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hostLike, type MemberPrincipal, type Principal, type Provider } from '../app/access.ts';
+import type { LdapLogin } from '../auth/ldap.ts';
 import type { OidcLogin } from '../auth/oidc.ts';
 import type { MemberLevel } from '../auth/settings.ts';
 import type { Cache } from '../cache/cache.ts';
@@ -219,6 +220,8 @@ export interface AuthOptions {
   readonly store: Store;
   /** Logging in through the host's identity provider (OIDC), or null when it is not set up. */
   readonly oidc?: OidcLogin | null;
+  /** Logging in with an account of the host's directory (LDAP, Active Directory), or null when it is not set up. */
+  readonly ldap?: LdapLogin | null;
   /** The host token's secret (see ensureHostToken). */
   readonly hostToken: string;
   /** Whether cookies get the Secure flag (the public address is https). */
@@ -271,6 +274,11 @@ export class Auth {
   /** Logging in through the host's identity provider (OIDC), when it is set up. */
   get oidc(): OidcLogin | null {
     return this.options.oidc ?? null;
+  }
+
+  /** Logging in with an account of the host's directory (LDAP, Active Directory), when it is set up. */
+  get ldap(): LdapLogin | null {
+    return this.options.ldap ?? null;
   }
 
   /**

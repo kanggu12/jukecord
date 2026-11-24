@@ -14,7 +14,8 @@ import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { hostLike, personOf } from '../app/access.ts';
 import { ActionError, likesOwner } from '../app/actions.ts';
-import { levelOf, sameOidcGroup } from '../auth/levels.ts';
+import { LdapError } from '../auth/ldap.ts';
+import { levelOf, sameLdapGroup, sameOidcGroup } from '../auth/levels.ts';
 import { OidcError, SSO_COOKIE } from '../auth/oidc.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
@@ -35,6 +36,7 @@ import {
   type Caller,
   CSRF_HEADER,
   cookie,
+  nameFailures,
   parseCookies,
   SESSION_COOKIE,
   safeNext,
@@ -993,6 +995,70 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       return reply.redirect(`/login?error=sso-${code}`);
     }
   });
+
+  // Logging in with an account of the host's directory (LDAP, Active Directory): the login page's form sends the name
+  // and the password here, from the panel's own pages only (another site cannot log a browser in as someone). Held
+  // back per address and per name before the directory is asked, so neither a guess at one account from many places
+  // nor many accounts from one place goes fast.
+  app.post<{ Body: { username?: unknown; password?: unknown; next?: unknown } }>(
+    '/auth/directory',
+    async (request, reply) => {
+      if (!sameOrigin(request, options.publicUrl)) {
+        return failure(reply, 'forbidden', 'connections come from the panel only');
+      }
+      const ldap = auth.ldap;
+      const settings = deps.loginSettings?.ldap;
+      if (!ldap || !settings)
+        return failure(reply, 'not-found', 'logging in with a directory account is not set up here');
+      const body = request.body ?? {};
+      const username = typeof body.username === 'string' ? body.username : '';
+      const password = typeof body.password === 'string' ? body.password : '';
+      const refused = (status: number, code: string, message: string) =>
+        reply.code(status).send({ error: { code, message } });
+      const keys = [addressFailures(request.ip), nameFailures('ldap', username)];
+      if (await auth.limiter.blocked(keys)) {
+        auth.counted('ldap', 'blocked');
+        return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+      }
+      try {
+        const identity = await ldap.login(username, password);
+        const level = levelOf(identity.groups, settings.groups, sameLdapGroup);
+        const principal = await auth.admit('ldap', identity, level, false);
+        if (!principal) {
+          auth.counted('ldap', 'denied');
+          log.info('refused a directory login: in none of the groups jukecord lets in', {
+            user: identity.name,
+            groups: identity.groups.length,
+          });
+          return refused(403, 'no-group', 'your account is in none of the groups jukecord lets in');
+        }
+        auth.counted('ldap', 'ok');
+        log.info('logged in with a directory account', { user: identity.name, level: level ?? undefined });
+        const next = safeNext(typeof body.next === 'string' ? body.next : '/');
+        return reply.header('set-cookie', await auth.startSession(principal)).send({ ok: true, next });
+      } catch (failure) {
+        const code = failure instanceof LdapError ? failure.code : 'unavailable';
+        // The name or password the person typed is never in the log, nor in what the panel is told: only why.
+        log.info('a directory login did not go through', { reason: code, detail: reasonOf(failure) });
+        if (code === 'invalid') return refused(400, 'invalid', 'type your name and your password');
+        if (code === 'unavailable') {
+          auth.counted('ldap', 'unavailable');
+          return refused(503, 'directory-down', 'the directory did not answer; try again in a moment');
+        }
+        if (code === 'ambiguous') {
+          auth.counted('ldap', 'denied');
+          return refused(409, 'ambiguous', 'the directory has more than one account by that name');
+        }
+        // A refused name or password counts against the address and the name; the try after the twentieth is refused.
+        const blocked = await auth.limiter.fail(keys);
+        auth.counted('ldap', blocked ? 'blocked' : 'failed');
+        if (blocked) return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+        if (code === 'expired') return refused(403, 'password-expired', 'your password has expired; change it first');
+        if (code === 'disabled') return refused(403, 'account-disabled', 'your account is turned off or locked');
+        return refused(401, 'wrong-password', 'wrong name or password');
+      }
+    },
+  );
 
   // A one-time login link from `jukecord open`: the browser becomes the host, or the host's friend with the view or
   // control the link was made for.

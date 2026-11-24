@@ -17,6 +17,7 @@ import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { LdapLogin } from './auth/ldap.ts';
 import { OidcLogin } from './auth/oidc.ts';
 import { MemoryCache } from './cache/memory.ts';
 import { ConfigError, loadConfig } from './config.ts';
@@ -338,6 +339,8 @@ async function main(): Promise<number> {
         log: log.child('sso'),
       })
     : null;
+  // Logging in with an account of the host's directory (LDAP, Active Directory), when it is set up.
+  const ldap = config.auth.ldap ? new LdapLogin({ settings: config.auth.ldap, log: log.child('directory') }) : null;
   const auth = new Auth({
     store,
     hostToken: ensureHostToken(config.dataDir),
@@ -346,6 +349,7 @@ async function main(): Promise<number> {
     // The login links not used yet and the failed logins: this process's memory, all one process needs.
     cache: loginCache,
     oidc,
+    ldap,
     log: log.child('auth'),
   });
   const web: WebServer = await createWebServer({
