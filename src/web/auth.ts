@@ -19,6 +19,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hostLike, type MemberPrincipal, type Principal, type Provider } from '../app/access.ts';
+import type { OidcLogin } from '../auth/oidc.ts';
+import type { MemberLevel } from '../auth/settings.ts';
 import type { Cache } from '../cache/cache.ts';
 import { discordUserId } from '../core/types.ts';
 import type { Logger } from '../log.ts';
@@ -215,6 +217,8 @@ export type LoginMethod = 'discord' | 'link' | 'listen' | 'oidc' | 'ldap';
 
 export interface AuthOptions {
   readonly store: Store;
+  /** Logging in through the host's identity provider (OIDC), or null when it is not set up. */
+  readonly oidc?: OidcLogin | null;
   /** The host token's secret (see ensureHostToken). */
   readonly hostToken: string;
   /** Whether cookies get the Secure flag (the public address is https). */
@@ -262,6 +266,36 @@ export class Auth {
   /** Whether logging in with Discord is set up. */
   get discordLogin(): boolean {
     return this.options.oauth !== null;
+  }
+
+  /** Logging in through the host's identity provider (OIDC), when it is set up. */
+  get oidc(): OidcLogin | null {
+    return this.options.oidc ?? null;
+  }
+
+  /**
+   * The login a member's provider vouched for, at the level their groups reach: as themselves (by their key, under the
+   * name the provider gave), or, when the provider names their Discord user and a bot is there to ask, as that Discord
+   * user with the level on top. Null when their groups reach no level: they are refused.
+   */
+  async admit(
+    provider: Provider,
+    person: { readonly subject: string; readonly name: string; readonly discordId?: string | null },
+    level: MemberLevel | null,
+    discord: boolean,
+  ): Promise<MemberPrincipal | null> {
+    if (level === null) return null;
+    const users = this.options.store.users;
+    if (person.discordId && discord) {
+      // Named here only when jukecord has not met them yet: Discord's own name and picture win once the bot has.
+      if (!(await users.get(person.discordId)))
+        await users.upsert({ id: person.discordId, name: person.name, avatar: null });
+      return { kind: 'user', userId: person.discordId, level };
+    }
+    const memberId = memberKey(provider, person.subject);
+    // Their name as the provider gave it at this login, and the time of the login: all that is kept of them.
+    await users.upsert({ id: memberId, name: person.name, avatar: null });
+    return { kind: 'member', memberId, provider, level };
   }
 
   /** Whether cookies are marked Secure. */

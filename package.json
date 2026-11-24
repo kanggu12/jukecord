@@ -32,6 +32,7 @@
     "@fastify/websocket": "11.3.7",
     "discord.js": "14.28.1",
     "fastify": "5.12.8",
+    "openid-client": "6.9.1",
     "typebox": "1.4.7"
   }
 }

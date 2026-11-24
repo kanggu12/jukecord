@@ -15,6 +15,8 @@ import {
   type VoiceControl,
 } from '../../src/app/actions.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import { OidcLogin } from '../../src/auth/oidc.ts';
+import type { OidcSettings } from '../../src/auth/settings.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
@@ -187,6 +189,8 @@ export interface TestServerOptions {
   readonly lyrics?: LyricsSource;
   /** What a search finds for some words (anything else finds nothing). */
   readonly searched?: Record<string, NewTrack[]>;
+  /** Logging in through an identity provider: its settings, and the fetch its made-up provider answers. */
+  readonly oidc?: { readonly settings: OidcSettings; readonly fetch: typeof fetch };
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -282,6 +286,17 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
   const loginCache = new MemoryCache();
+  // Through the made-up provider, coming back to the address the test server says it has.
+  const oidc = options.oidc
+    ? new OidcLogin({
+        settings: options.oidc.settings,
+        redirectUri: 'http://localhost:8795/auth/sso/callback',
+        afterLogout: 'http://localhost:8795/login',
+        cache: loginCache,
+        log,
+        fetch: options.oidc.fetch,
+      })
+    : null;
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
@@ -289,6 +304,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     oauth: options.oauth ?? null,
     // The login links and failed logins in memory, as one jukecord keeps them (each test server its own).
     cache: loginCache,
+    oidc,
     log,
     // Real time for logins: the session repository uses the store's clock, which the tests keep fixed.
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -341,6 +357,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       logFiles: 5,
       backupDir: path.join(dataDir, 'backups'),
       discordMode: !options.browserOnly,
+      loginSettings: { oidc: options.oidc?.settings ?? null, ldap: null },
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });

@@ -14,6 +14,8 @@ import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { hostLike, personOf } from '../app/access.ts';
 import { ActionError, likesOwner } from '../app/actions.ts';
+import { levelOf, sameOidcGroup } from '../auth/levels.ts';
+import { OidcError, SSO_COOKIE } from '../auth/oidc.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
@@ -27,7 +29,16 @@ import type { CoverFile, Covers, Pictured } from '../media/covers.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
-import { addressFailures, addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
+import {
+  addressFailures,
+  addressKey,
+  type Caller,
+  CSRF_HEADER,
+  cookie,
+  parseCookies,
+  SESSION_COOKIE,
+  safeNext,
+} from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
@@ -207,6 +218,11 @@ function unfit(error: Unfit, request: FastifyRequest): string {
   // A pattern (an ID): what the field's description says it is.
   if (field?.description) return `${name} is ${field.description.charAt(0).toLowerCase()}${field.description.slice(1)}`;
   return `${name} ${first.message ?? 'is not right'}`;
+}
+
+// What went wrong, in the words of its error, for the log.
+function reasonOf(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
 }
 
 // The answer for an error, in the one shape every API error has.
@@ -909,6 +925,75 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       }
     },
   );
+  // Logging in through the host's identity provider (OIDC): off to the provider, and back. Where the person wanted to
+  // go travels with the login on the cache, checked to be a path on this site.
+  app.get<{ Querystring: { next?: string } }>('/auth/sso', async (request, reply) => {
+    const oidc = auth.oidc;
+    if (!oidc) return reply.redirect('/login?error=no-sso');
+    try {
+      const started = await oidc.start(safeNext(typeof request.query.next === 'string' ? request.query.next : '/'));
+      const tie = cookie(started.cookie.name, started.cookie.value, {
+        maxAgeSeconds: started.cookie.maxAgeMs / 1000,
+        secure: auth.secure,
+      });
+      return reply.header('set-cookie', tie).redirect(started.location);
+    } catch (failure) {
+      // The provider's document could not be read: its trouble, said on the login page; the next try asks again.
+      auth.counted('oidc', 'unavailable');
+      log.warn('could not start a login through SSO', { reason: reasonOf(failure) });
+      return reply.redirect('/login?error=sso-down');
+    }
+  });
+  app.get('/auth/sso/callback', async (request, reply) => {
+    // The cookie that tied the login to this browser has done its job, whatever happens next.
+    reply.header('set-cookie', cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }));
+    const oidc = auth.oidc;
+    const settings = deps.loginSettings?.oidc;
+    if (!oidc || !settings) return reply.redirect('/login?error=no-sso');
+    // Refused before the provider is asked: a blocked address must not be able to make jukecord trade codes on and on.
+    if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+      auth.counted('oidc', 'blocked');
+      return reply.redirect('/login?error=too-many');
+    }
+    // The provider's answer, as it put it after the "?".
+    const query = new URLSearchParams(request.raw.url?.split('?')[1] ?? '');
+    try {
+      const { identity, next } = await oidc.finish(query, parseCookies(request.headers.cookie).get(SSO_COOKIE));
+      const level = levelOf(identity.groups, settings.groups, sameOidcGroup);
+      // Their Discord user, when the provider names one and a bot is there to ask about it (deps.directory).
+      const principal = await auth.admit('oidc', identity, level, deps.directory() !== null);
+      if (!principal) {
+        auth.counted('oidc', 'denied');
+        log.info('refused a login through SSO: in none of the groups jukecord lets in', {
+          user: identity.name,
+          groups: identity.groups.length,
+        });
+        return reply.redirect('/login?error=no-group');
+      }
+      // Asked afresh at a Discord user's login: someone refused a minute ago may have joined a server since.
+      if (principal.kind === 'user') deps.access.forget(principal.userId);
+      reply.header('set-cookie', [
+        cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }),
+        await auth.startSession(principal),
+      ]);
+      auth.counted('oidc', 'ok');
+      log.info('logged in through SSO', {
+        user: identity.name,
+        level: level ?? undefined,
+        ...(principal.kind === 'user' ? { discord: true } : {}),
+      });
+      return reply.redirect(next);
+    } catch (failure) {
+      const code = failure instanceof OidcError ? failure.code : 'failed';
+      // The provider not answering is not the person's failure, nor is turning back there; a state that is no login
+      // of this browser and a code the provider refused are counted, as any failed login is.
+      if (code === 'expired' || code === 'failed') await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('oidc', code === 'unavailable' ? 'unavailable' : code === 'cancelled' ? 'denied' : 'failed');
+      log.info('a login through SSO did not go through', { reason: reasonOf(failure) });
+      return reply.redirect(`/login?error=sso-${code}`);
+    }
+  });
+
   // A one-time login link from `jukecord open`: the browser becomes the host, or the host's friend with the view or
   // control the link was made for.
   app.get<{ Params: { code: string } }>('/auth/link/:code', async (request, reply) => {
@@ -960,10 +1045,17 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (caller?.principal.kind === 'user') deps.access.forget(caller.principal.userId);
     // This browser's live connection ends with its login.
     if (caller?.sessionHash) hub.end((other) => other.sessionHash === caller.sessionHash);
-    return reply
-      .header('set-cookie', await auth.endSession(caller))
-      .code(204)
-      .send();
+    const ended = await auth.endSession(caller);
+    // A login through the host's identity provider logs out there too, when it offers that: the panel goes where the
+    // answer says, and the provider sends it back to the login page. Every other logout answers nothing, as before.
+    const principal = caller?.principal;
+    const throughSso =
+      principal !== undefined &&
+      ((principal.kind === 'member' && principal.provider === 'oidc') ||
+        (principal.kind === 'user' && principal.level !== undefined));
+    const next = throughSso ? await auth.oidc?.logoutUrl() : null;
+    if (next) return reply.header('set-cookie', ended).send({ next });
+    return reply.header('set-cookie', ended).code(204).send();
   });
 
   // Health: alive (the process answers), ready (it can serve), and the figures for Prometheus.

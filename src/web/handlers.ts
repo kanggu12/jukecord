@@ -10,6 +10,7 @@ import type { Access } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
 import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import type { AuthSettings } from '../auth/settings.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import { searchWords } from '../media/search.ts';
 import type { Store } from '../store/store.ts';
@@ -36,6 +37,8 @@ export interface HandlerDeps {
   readonly discordMode: boolean;
   /** How many backups stay in the folder (JUKECORD_BACKUP_KEEP; seven by default). */
   readonly backupKeep?: number;
+  /** The settings of logging in through the host's identity provider and directory (who gets which level). */
+  readonly loginSettings?: AuthSettings;
 }
 
 // The parts of a request, typed from the operation's schemas.

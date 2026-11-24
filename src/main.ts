@@ -17,6 +17,7 @@ import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { OidcLogin } from './auth/oidc.ts';
 import { MemoryCache } from './cache/memory.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
@@ -325,6 +326,18 @@ async function main(): Promise<number> {
   const { clientId, clientSecret } = config.discord;
   // Short-lived login state (src/cache/cache.ts): in memory, with its size and age limits.
   const loginCache = new MemoryCache();
+  // Logging in through the host's identity provider (OIDC), when it is set up: the provider sends people back to the
+  // public address, and after logging out there to the login page.
+  const oidcSettings = config.auth.oidc;
+  const oidc = oidcSettings
+    ? new OidcLogin({
+        settings: oidcSettings,
+        redirectUri: `${publicUrl}/auth/sso/callback`,
+        afterLogout: `${publicUrl}/login`,
+        cache: loginCache,
+        log: log.child('sso'),
+      })
+    : null;
   const auth = new Auth({
     store,
     hostToken: ensureHostToken(config.dataDir),
@@ -332,6 +345,7 @@ async function main(): Promise<number> {
     oauth: clientId && clientSecret ? { clientId, clientSecret, redirectUri: `${publicUrl}/auth/callback` } : null,
     // The login links not used yet and the failed logins: this process's memory, all one process needs.
     cache: loginCache,
+    oidc,
     log: log.child('auth'),
   });
   const web: WebServer = await createWebServer({
@@ -365,6 +379,7 @@ async function main(): Promise<number> {
       logFiles: config.log.files,
       backupDir: path.join(config.dataDir, 'backups'),
       backupKeep: config.backups.keep,
+      loginSettings: config.auth,
       discordMode: bot !== null,
       doctor: () =>
         runDoctor({
