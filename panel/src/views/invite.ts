@@ -9,7 +9,7 @@ import { api, type ListenLink } from '../api.ts';
 import { fill, h, icon, subLine } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import { type QrCode, qrCode } from '../qr.ts';
-import { mayControl, state, t } from '../state.ts';
+import { hostLike, mayControl, state, t } from '../state.ts';
 import { clockTime, momentText } from '../time.ts';
 import { confirmDialog, problem, showDialog } from '../ui/layers.ts';
 import { act, ago } from './player.ts';
@@ -17,9 +17,10 @@ import { act, ago } from './player.ts';
 // How many browsers a listening link takes (the server's GUESTS_PER_LINK; its answers carry it too).
 const GUESTS = 25;
 
-/** Whether this login may invite: listening links for whoever may change the music, login links for the host. */
+/** Whether this login may invite: listening links for whoever may change the music, login links for the host (and
+ * whoever may do what the host may). */
 export function mayInvite(): boolean {
-  return Boolean(state.guild) && (mayControl() || state.me?.kind === 'host');
+  return Boolean(state.guild) && (mayControl() || hostLike());
 }
 
 // A link made on the server for its own address: when that is this machine (no public address set) but the panel was
@@ -170,7 +171,7 @@ export function inviteDialog(): void {
   const words = t();
   const guild = state.guild;
   if (!guild) return;
-  const host = state.me?.kind === 'host';
+  const host = hostLike();
   const body = h('div', { class: 'invite' });
   showDialog(words.invite, body);
 

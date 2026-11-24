@@ -154,6 +154,20 @@ export function t(): Words {
   return words(state.lang);
 }
 
+/**
+ * Whether this login may do what the host may: the host, and a login whose groups at the host's identity provider or
+ * directory gave it the admin level (the log, login links for friends).
+ */
+export function hostLike(): boolean {
+  const me = state.me;
+  return me?.kind === 'host' || me?.member?.level === 'admin';
+}
+
+/** Whether this login is a person with an account (their face shows their initials), not a role. */
+export function isPerson(): boolean {
+  return state.me?.kind === 'user' || state.me?.kind === 'member';
+}
+
 /** Whether the person may change the music in the server shown. */
 export function mayControl(): boolean {
   return Boolean(state.guild?.mayControl) && state.me?.scope !== 'read';

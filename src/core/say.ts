@@ -116,7 +116,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['your account is turned off or locked', '계정이 꺼져 있거나 잠겨 있음'],
   ['the directory has more than one account by that name', '디렉터리에 그 이름의 계정이 둘 이상 있음'],
   ['the directory did not answer; try again in a moment', '디렉터리가 응답하지 않음: 잠시 뒤 다시 시도하세요'],
-  ['your account is in none of the groups jukecord lets in', 'jukecord가 들여보내는 그룹에 속해 있지 않음'],
+  ['your account is in none of the groups jukecord lets in', 'jukecord에 들어올 수 있는 그룹에 속해 있지 않음'],
   [/^repeat is one of (.+)$/, '반복은 $1 중 하나'],
   [/^no such address: (.+)$/, '없는 주소: $1'],
   [/^playlist (\d+) does not exist$/, '없는 플레이리스트(번호 $1)'],

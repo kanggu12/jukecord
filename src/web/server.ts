@@ -943,7 +943,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       // The provider's document could not be read: its trouble, said on the login page; the next try asks again.
       auth.counted('oidc', 'unavailable');
       log.warn('could not start a login through SSO', { reason: reasonOf(failure) });
-      return reply.redirect('/login?error=sso-down');
+      return reply.redirect('/login?error=sso-unavailable');
     }
   });
   app.get('/auth/sso/callback', async (request, reply) => {
