@@ -370,7 +370,8 @@ describe('the alert rules', () => {
   });
 
   it('pass promtool, and its tests in alerts.test.yaml', {
-    skip: !have('promtool', '--version') && 'promtool is not installed',
+    // Skipped on a machine without promtool; never in CI, which installs it (ci.yml), so the rules cannot go unchecked.
+    skip: !process.env.CI && !have('promtool', '--version') && 'promtool is not installed',
   }, () => {
     execFileSync('promtool', ['check', 'rules', 'alerts.yaml'], { cwd: 'deploy/monitoring', stdio: 'pipe' });
     execFileSync('promtool', ['test', 'rules', 'alerts.test.yaml'], { cwd: 'deploy/monitoring', stdio: 'pipe' });
@@ -390,6 +391,25 @@ describe('the Compose example', () => {
     assert.match(compose, /name: \$\{JUKECORD_NETWORK:-jukecord_default\}\n {4}external: true/);
     // The project of the main compose.yaml is called jukecord, so its network is jukecord_default.
     assert.match(read('compose.yaml'), /^name: jukecord$/m);
+  });
+
+  it('is the Prometheus whose promtool CI checks the rules with, and Dependabot proposes the next one', () => {
+    // The image's version, and the release ci.yml takes promtool from: a newer image Dependabot proposes fails here
+    // until ci.yml follows it (with that release's checksum), so the rules are checked by the Prometheus that runs them.
+    const image = /image: prom\/prometheus:v(\d+\.\d+\.\d+)@/.exec(compose)?.[1];
+    assert.ok(image, 'no pinned Prometheus image');
+    const ci = read('.github/workflows/ci.yml');
+    const releases = [
+      ...ci.matchAll(/prometheus\/releases\/download\/v(\d+\.\d+\.\d+)\/prometheus-(\d+\.\d+\.\d+)\./g),
+    ];
+    assert.equal(releases.length, 1, 'ci.yml takes promtool from one Prometheus release');
+    assert.deepEqual([releases[0]?.[1], releases[0]?.[2]], [image, image]);
+    // Taken out of the archive by its folder's name, which carries the version too.
+    assert.match(ci, new RegExp(`prometheus-${image.replaceAll('.', '\\.')}\\.linux-amd64/promtool`));
+    assert.match(
+      read('.github/dependabot.yml'),
+      /- package-ecosystem: docker-compose\n {4}directory: \/deploy\/monitoring\n/,
+    );
   });
 
   it('mounts files that exist, which name each other rightly', () => {

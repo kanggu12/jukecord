@@ -168,6 +168,15 @@ jobs:
             https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
           echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kubeconform.tar.gz" | sha256sum -c -
           sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+      # The Prometheus of deploy/monitoring/compose.yaml (tests/packaging/monitoring.test.ts holds the two together):
+      # its promtool checks the alert rules and runs their tests, which fail here rather than being skipped.
+      - name: promtool, checked against its release's checksum
+        run: |
+          curl -fsSL --retry 4 --retry-delay 5 --max-time 120 -o /tmp/prometheus.tar.gz \
+            https://github.com/prometheus/prometheus/releases/download/v3.16.0/prometheus-3.16.0.linux-amd64.tar.gz
+          echo "68727009472a2c02e1ff7f062fd5b3e637285bffc8fc2d340c76fb449d6e0f34  /tmp/prometheus.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/prometheus.tar.gz -C /usr/local/bin --strip-components=1 \
+            prometheus-3.16.0.linux-amd64/promtool
       - name: One version everywhere
         run: node scripts/check-version.ts
       - name: The chart, the workflows, the scripts, the changelog and the API document
@@ -177,7 +186,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.9.0 --severity=warning /mnt/jukecord \
             /mnt/deploy/kind/check.sh /mnt/tests/ui/run.sh /mnt/deploy/bundle/ffmpeg.sh /mnt/deploy/bundle/build-ffmpeg.sh \
-            /mnt/deploy/bundle/jukecord
+            /mnt/deploy/bundle/jukecord /mnt/tests/auth/run.sh /mnt/tests/auth/run-ad.sh
 
   image:
     name: image (${{ matrix.platform }})

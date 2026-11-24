@@ -1,6 +1,7 @@
 # Dependabot proposes newer versions once a week, in as few pull requests as it can: one for the actions the workflows
-# use, one for the Node base image's digest, one for the images FFmpeg is built in for the release's programs, and one
-# for the npm packages (a new major version of a package, which can break things, comes in a pull request of its own).
+# use, one for the Node base image's digest, one for the images FFmpeg is built in for the release's programs, one for
+# the monitoring example's Prometheus and Grafana, and one for the npm packages (a new major version of a package, which
+# can break things, comes in a pull request of its own).
 # Each pull request runs ci.yml, which builds and starts the image, and bundles.yml where the programs are touched.
 # yt-dlp, FFmpeg, OpenSSL and the programs' Node.js are release files, not packages Dependabot knows:
 # ytdlp-release.yml, ffmpeg-release.yml and node-release.yml watch those.
@@ -35,6 +36,16 @@ updates:
       interval: weekly
     groups:
       build-images:
+        patterns: ["*"]
+
+  # The images of deploy/monitoring/compose.yaml, Prometheus and Grafana, by version and digest. A newer Prometheus
+  # also needs ci.yml's promtool moved to the same release (tests/packaging/monitoring.test.ts says so).
+  - package-ecosystem: docker-compose
+    directory: /deploy/monitoring
+    schedule:
+      interval: weekly
+    groups:
+      monitoring-images:
         patterns: ["*"]
 
   # package.json and package-lock.json: the packages jukecord runs and the tools it is built and checked with.
