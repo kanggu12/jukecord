@@ -80,6 +80,75 @@ database:
 # Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
 publicUrl: ""
 
+# Logging in through your own identity provider (OIDC: Keycloak, Authentik, Entra ID, Okta, Google ...) and with
+# directory accounts (LDAP: OpenLDAP, FreeIPA, Active Directory), as jukecord's JUKECORD_OIDC_* and JUKECORD_LDAP_*
+# settings take them (docs/README.md, settings): each is off until its address is set. The pods that serve browsers
+# log people in (the one pod, or the edges in split mode), and `jukecord auth test-oidc|test-ldap` runs there. The
+# two secrets reach jukecord as files, from the chart's Secret (made from the values here, which `helm get values`
+# then shows) or from an existingSecret of yours under the key named below. Who may log in, and as what: admin may do
+# what the host may, control changes the music in every server, read looks and listens; a list ("*" for everyone).
+auth:
+  oidc:
+    # The issuer's address exactly as the provider names itself (https://sso.example.com/realms/home). Register
+    # jukecord as a client with the redirect <publicUrl>/auth/sso/callback (and <publicUrl>/login after logging out).
+    issuer: ""
+    clientId: ""
+    # The client's secret; empty for a public client, which PKCE alone proves.
+    clientSecret: ""
+    # A Secret of yours with the client's secret under the key oidcClientSecret (refused together with clientSecret).
+    existingSecret: ""
+    # The scopes asked for (empty: openid profile), as a list.
+    scopes: []
+    # The claim the groups or roles are in: a name, or a dotted path such as realm_access.roles (empty: groups).
+    groupsClaim: ""
+    adminGroups: []
+    controlGroups: []
+    readGroups: []
+    # The words on the login key (empty: "Log in with SSO"), and a claim with a Discord user ID, to log in as that user.
+    label: ""
+    discordClaim: ""
+  ldap:
+    # ldaps://host (encrypted), or ldap://host with startTls to upgrade; a port if not the usual.
+    url: ""
+    startTls: false
+    # The service account that finds people (a DN, or for Active Directory jukecord@corp.example.com), and its
+    # password; both empty for an anonymous search.
+    bindDn: ""
+    bindPassword: ""
+    # A Secret of yours with the bind password under the key ldapBindPassword (refused together with bindPassword).
+    existingSecret: ""
+    # Where people are looked for, and the filter that finds one (empty: (uid={username}); Active Directory's is
+    # (sAMAccountName={username})).
+    baseDn: ""
+    userFilter: ""
+    # Groups from memberOf by default; or from a search with this filter ((member={dn}), say) under groupBaseDn (empty:
+    # baseDn), or with nestedGroups from Active Directory's nested groups. The lists name groups by DN or by name.
+    groupFilter: ""
+    groupBaseDn: ""
+    nestedGroups: false
+    adminGroups: []
+    controlGroups: []
+    readGroups: []
+    # How long each request may take (empty: 10s), and the words on the directory form's key (empty: the panel's own).
+    timeout: ""
+    label: ""
+  # A private CA that signed the provider's or the directory's certificate: a Secret or a ConfigMap of yours (one of
+  # them), and the key that holds the certificates in PEM. Mounted read-only; the directory's connection checks against
+  # it (JUKECORD_LDAP_CA_FILE), and so do the requests to the provider (NODE_EXTRA_CA_CERTS, besides the system's).
+  ca:
+    secret: ""
+    configMap: ""
+    key: ca.crt
+  # Where the provider and the directory are, as NetworkPolicy egress rules (to, ports), for the pods that log people
+  # in: one on the internet needs none, one in the cluster's private ranges does (Keycloak in the cluster, a directory
+  # on your network). For a directory at 10.20.0.5:
+  #   - to:
+  #       - ipBlock:
+  #           cidr: 10.20.0.5/32
+  #     ports:
+  #       - port: 636
+  egressTo: []
+
 metrics:
   # jukecord answers /metrics to a scraper on the cluster's network asking directly, with nothing to set. A token lets
   # one in from anywhere else: from outside the cluster, through a proxy, or through a service mesh's sidecar (which adds
@@ -188,9 +257,8 @@ networkPolicy:
   # Where the database (and in split mode the bus) is, as NetworkPolicy egress rules (to, ports): the cluster's
   # private ranges are out of reach otherwise. Empty with a database set: any pod of the release's namespace on 5432
   # (PostgreSQL) and 3306 (MySQL, MariaDB), and in split mode 6379 (Redis, Valkey) too. Rules given here replace that
-  # one, for every pod of the release; an identity provider or a directory in a private range (JUKECORD_OIDC_ISSUER,
-  # JUKECORD_LDAP_URL: the pods that serve browsers log people in, the edges in split mode) needs its rule here too.
-  # For a database elsewhere in a private range:
+  # one, for every pod of the release (an identity provider's or a directory's rules go in auth.egressTo). For a
+  # database elsewhere in a private range:
   #   - to:
   #       - ipBlock:
   #           cidr: 10.20.0.0/24

@@ -29,6 +29,7 @@ spec:
         # As the core's: its secrets, its database, and where a Prometheus that finds its targets by annotation scrapes.
         checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
         {{- include "jukecord.databaseChecksum" . | nindent 8 }}
+        {{- include "jukecord.authChecksum" . | nindent 8 }}
         {{- with include "jukecord.scrapeAnnotations" . }}
         {{- . | nindent 8 }}
         {{- end }}
@@ -72,6 +73,10 @@ spec:
               value: "1"
             {{- end }}
             {{- include "jukecord.splitEnv" . | nindent 12 }}
+            {{- /* Logging in through the identity provider and the directory (auth) happens in the edges. */}}
+            {{- with include "jukecord.authEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
           startupProbe:
             httpGet:
               path: /healthz
@@ -116,6 +121,9 @@ spec:
             - name: database
               mountPath: {{ include "jukecord.databaseDir" . }}
               readOnly: true
+            {{- with include "jukecord.authMounts" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- if or (include "jukecord.readsClientSecret" .) (include "jukecord.readsMetricsToken" .) }}
             - name: discord
               mountPath: {{ include "jukecord.secretDir" . }}
@@ -130,6 +138,9 @@ spec:
             sizeLimit: 64Mi
         {{- include "jukecord.splitSecrets" . | nindent 8 }}
         {{- include "jukecord.databaseVolume" . | nindent 8 }}
+        {{- with include "jukecord.authVolumes" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- if or (include "jukecord.readsClientSecret" .) (include "jukecord.readsMetricsToken" .) }}
         # The OAuth secret as a file, for logging in with Discord (an edge does the login), and the metrics token.
         - name: discord

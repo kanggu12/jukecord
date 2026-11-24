@@ -81,6 +81,20 @@ for (const { name, make } of testBuses()) {
         coreLostAfterMs: 1500,
         // A burst of two changes and hardly any more, so a third from the same login is refused wherever it comes in.
         rates: { changes: { perSecond: 0.01, burst: 2 } },
+        // Logging in through an identity provider, set up on the edges (where logins happen).
+        logins: {
+          oidc: {
+            issuer: 'https://sso.example.com/realms/home',
+            clientId: 'jukecord',
+            clientSecret: null,
+            scopes: ['openid', 'profile'],
+            groupsClaim: 'groups',
+            groups: { admin: ['admins'], control: [], read: [] },
+            label: null,
+            discordClaim: null,
+          },
+          ldap: null,
+        },
       });
       core = await pieces.core();
       one = await pieces.edge(core);
@@ -295,6 +309,12 @@ for (const { name, make } of testBuses()) {
       assert.equal((logs.body as unknown as { msg: string }[])[0]?.msg, 'from the core');
       const doctor = await ask(one, 'GET', '/doctor');
       assert.match(JSON.stringify(doctor.body), /asked with discordLogin=false/);
+      // The core's settings, with the edge's own logins in place of the core's (logins happen at the edges).
+      const settings = (doctor.body as { settings: Record<string, string> }).settings;
+      assert.equal(settings['sso (oidc)'], 'https://sso.example.com/realms/home');
+      assert.equal(settings['sso client'], 'jukecord');
+      assert.equal(settings['directory (ldap)'], 'off');
+      assert.equal(settings.role, 'core');
       const backup = await ask(one, 'POST', '/backups');
       assert.equal(backup.status, 200);
     });

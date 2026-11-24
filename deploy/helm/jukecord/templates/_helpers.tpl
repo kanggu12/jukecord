@@ -319,6 +319,7 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- fail "bus.url and bus.existingSecret are both set; set one of them." -}}
 {{- end -}}
 {{- end -}}
+{{- $authSets := include "jukecord.authVariables" . | fromYaml -}}
 {{- $names := list -}}
 {{- range $name, $_ := (.Values.env | default dict) -}}{{- $names = append $names (list "env" $name) -}}{{- end -}}
 {{- range (.Values.extraEnv | default list) -}}{{- $names = append $names (list "extraEnv" .name) -}}{{- end -}}
@@ -333,6 +334,12 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- end -}}
 {{- if eq $name "JUKECORD_DATABASE_URL" -}}
 {{- fail (printf "%s: JUKECORD_DATABASE_URL is not set here. The database's address goes in database.url, or under the key url of a Secret named by database.existingSecret; the chart gives it to jukecord as a file (it holds a password)." $where) -}}
+{{- end -}}
+{{- if hasKey $authSets $name -}}
+{{- fail (printf "%s: %s is not set here. The logins' settings go in the chart's auth values (this one in %s); the chart gives them to the pods that log people in, and the secrets as files." $where $name (index $authSets $name)) -}}
+{{- end -}}
+{{- if and (eq $name "NODE_EXTRA_CA_CERTS") (include "jukecord.setsExtraCa" $) -}}
+{{- fail (printf "%s: NODE_EXTRA_CA_CERTS is set by the chart (from auth.ca, the identity provider's CA); leave it out, or put every certificate you need in that one bundle." $where) -}}
 {{- end -}}
 {{- if hasKey $chartSets $name -}}
 {{- fail (printf "%s: %s is set by the chart (from %s); leave it out." $where $name (index $chartSets $name)) -}}
@@ -352,6 +359,7 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}
 {{- fail "discord.existingSecret is set together with discord.token or discord.clientSecret, which would be ignored. Put the token and the OAuth secret in the Secret named by existingSecret and leave those two empty, or leave existingSecret empty to have the chart make the Secret from them." -}}
 {{- end -}}
+{{- include "jukecord.validateAuth" . -}}
 {{- if and .Values.metrics.existingSecret .Values.metrics.token -}}
 {{- fail "metrics.existingSecret is set together with metrics.token, which would be ignored. Put the token in the Secret named by existingSecret (key metricsToken) and leave metrics.token empty, or leave existingSecret empty to have the chart make the Secret from it." -}}
 {{- end -}}

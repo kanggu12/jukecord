@@ -83,6 +83,88 @@
       }
     },
     "publicUrl": { "type": "string", "pattern": "^(|https?://[^\\s/]+(/.*)?)$" },
+    "auth": {
+      "type": "object",
+      "description": "Logging in through an identity provider (OIDC) and with directory accounts (LDAP), on the pods that serve browsers",
+      "additionalProperties": false,
+      "properties": {
+        "oidc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "pattern": "^(|https?://[^\\s?#]+)$",
+              "description": "The issuer's address; empty: off"
+            },
+            "clientId": { "type": "string" },
+            "clientSecret": { "type": "string" },
+            "existingSecret": {
+              "type": "string",
+              "description": "A Secret holding the client's secret under the key oidcClientSecret"
+            },
+            "scopes": { "type": "array", "items": { "type": "string", "pattern": "^\\S+$" } },
+            "groupsClaim": { "type": "string", "pattern": "^(|[^\\s.]+(\\.[^\\s.]+)*)$" },
+            "adminGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "controlGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "readGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "label": { "type": "string", "maxLength": 40 },
+            "discordClaim": { "type": "string", "pattern": "^(|[^\\s.]+(\\.[^\\s.]+)*)$" }
+          }
+        },
+        "ldap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^(|ldaps?://[^\\s/]+/?)$",
+              "description": "ldap://host or ldaps://host; empty: off"
+            },
+            "startTls": { "type": "boolean" },
+            "bindDn": { "type": "string" },
+            "bindPassword": { "type": "string" },
+            "existingSecret": {
+              "type": "string",
+              "description": "A Secret holding the bind password under the key ldapBindPassword"
+            },
+            "baseDn": { "type": "string" },
+            "userFilter": { "type": "string" },
+            "groupFilter": { "type": "string" },
+            "groupBaseDn": { "type": "string" },
+            "nestedGroups": { "type": "boolean" },
+            "adminGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "controlGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "readGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "timeout": { "type": "string", "pattern": "^(|\\s*\\d+(\\.\\d+)?\\s*[A-Za-z]*\\s*)$" },
+            "label": { "type": "string", "maxLength": 40 }
+          }
+        },
+        "ca": {
+          "type": "object",
+          "description": "A private CA's certificates (PEM) for the provider and the directory: a Secret or a ConfigMap, and its key",
+          "additionalProperties": false,
+          "properties": {
+            "secret": { "type": "string" },
+            "configMap": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "egressTo": {
+          "type": "array",
+          "description": "NetworkPolicy egress rules (to, ports) to the provider and the directory, for the pods that log people in",
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "to": { "type": "array", "items": { "type": "object" } },
+              "ports": { "type": "array", "items": { "type": "object" } }
+            }
+          }
+        }
+      }
+    },
     "metrics": {
       "type": "object",
       "additionalProperties": false,

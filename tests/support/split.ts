@@ -12,6 +12,7 @@ import { Access } from '../../src/app/access.ts';
 import { Actions } from '../../src/app/actions.ts';
 import { cachePart, databasePart, Health } from '../../src/app/health.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import type { AuthSettings } from '../../src/auth/settings.ts';
 import { CoreBeat } from '../../src/bus/beat.ts';
 import { serviceId } from '../../src/bus/commands.ts';
 import type { BusTransport } from '../../src/bus/transport.ts';
@@ -86,6 +87,8 @@ export interface SplitOptions {
   readonly coreLostAfterMs?: number;
   /** Lower rates for the edges (one rate for every edge: they count together in the shared cache). */
   readonly rates?: { readonly changes?: { perSecond: number; burst: number } };
+  /** The edges' login settings (OIDC, LDAP), which their self-check shows in place of the core's. */
+  readonly logins?: AuthSettings;
 }
 
 /** The pieces a split test shares: one database, one bus, one shared cache, the media cache's folder. */
@@ -225,10 +228,11 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       logs: () => [
         { time: '2026-11-11T00:00:00.000Z', level: 'info', component: 'core', msg: 'from the core', fields: {} },
       ],
+      // A core's own settings, its login settings off (a split's core has none).
       doctor: async (discordLogin) => ({
         ok: true,
         checks: [{ name: 'core', status: 'ok', detail: `asked with discordLogin=${discordLogin}` }],
-        settings: {},
+        settings: { 'data directory': dataDir, 'sso (oidc)': 'off', 'directory (ldap)': 'off', role: 'core' },
       }),
       turnedAway: () => {},
       health: new Health({
@@ -303,6 +307,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
         backupDir: path.join(dataDir, 'backups'),
         backupKeep: 7,
         ...(options.rates ? { rates: options.rates } : {}),
+        ...(options.logins ? { loginSettings: options.logins } : {}),
         // Never behind: a busy test machine must not make changes fail at random (as tests/support/web.ts does).
         behind: () => false,
       },

@@ -38,7 +38,12 @@ spec:
           protocol: TCP
     {{- /* The database, which is often in the cluster's private range (out of reach by the rule below): the rule
     split mode has too (jukecord.serviceEgress). */}}
-    {{- include "jukecord.serviceEgress" . | nindent 4 }}
+    {{- with include "jukecord.serviceEgress" . | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    {{- with include "jukecord.authEgress" . | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
     # The internet, any port: Discord voice uses UDP on ports it chooses.
     - to:
         - ipBlock:
@@ -116,6 +121,9 @@ spec:
       {{- end }}
   egress:
     {{- include "jukecord.splitEgress" . | nindent 4 }}
+    {{- with include "jukecord.authEgress" . | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
     # The core's internal port, in the cluster (its private range is out of reach otherwise).
     - to:
         - podSelector:

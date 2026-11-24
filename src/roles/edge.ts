@@ -22,7 +22,7 @@ import type { Principal } from '../app/access.ts';
 import type { DoctorReport } from '../app/doctor.ts';
 import { cachePart, databasePart, Health } from '../app/health.ts';
 import type { LoginChecks } from '../auth/check.ts';
-import type { AuthSettings } from '../auth/settings.ts';
+import { type AuthSettings, describeAuth } from '../auth/settings.ts';
 import { type CoreChange, CoreWatch } from '../bus/beat.ts';
 import { COMMAND_LIMIT_MS, CommandClient } from '../bus/commands.ts';
 import { Presence, PresenceReporter } from '../bus/presence.ts';
@@ -303,7 +303,14 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
       get discordMode() {
         return facts()?.discordMode ?? false;
       },
-      doctor: () => client.call<DoctorReport>('core.doctor', [options.auth.discordLogin]),
+      // The core's self-check, with this edge's login settings in place of the core's: logins happen here (a split's
+      // core has none of its own to show).
+      doctor: async () => {
+        const report = await client.call<DoctorReport>('core.doctor', [options.auth.discordLogin]);
+        if (!settings.loginSettings) return report;
+        const theirs = Object.entries(report.settings).filter(([key]) => !/^(sso|directory) /.test(key));
+        return { ...report, settings: { ...Object.fromEntries(theirs), ...describeAuth(settings.loginSettings) } };
+      },
       host,
       ...(settings.loginSettings ? { loginSettings: settings.loginSettings } : {}),
       ...(settings.loginChecks !== undefined ? { loginChecks: settings.loginChecks } : {}),

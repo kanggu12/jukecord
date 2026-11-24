@@ -23,8 +23,9 @@ spec:
       annotations:
         # A changed token or secret in the values restarts the pod, which reads them only when it starts.
         checksum/secret: {{ printf "%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
-        # And a changed database, which it opens only when it starts.
+        # And a changed database, which it opens only when it starts, and changed logins (auth).
         checksum/database: {{ printf "%s/%s" .Values.database.url .Values.database.existingSecret | sha256sum | trunc 16 }}
+        {{- include "jukecord.authChecksum" . | nindent 8 }}
         {{- /* Where a Prometheus that finds its targets by annotation scrapes; one set in podAnnotations wins. */}}
         {{- if .Values.metrics.podAnnotations }}
         {{- range $key, $value := dict "prometheus.io/scrape" "true" "prometheus.io/port" "8795" "prometheus.io/path" "/metrics" }}
@@ -98,6 +99,10 @@ spec:
             - name: JUKECORD_DATABASE_URL_FILE
               value: {{ include "jukecord.databaseDir" . }}/url
             {{- end }}
+            {{- /* Logging in through the identity provider and the directory (auth), when either is on. */}}
+            {{- with include "jukecord.authEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- if and .Values.ingress.enabled (not (include "jukecord.userSets" (list . "JUKECORD_TRUST_PROXY"))) }}
             # Behind the Ingress controller: one proxy whose X-Forwarded-For is believed (for the login limiter).
             - name: JUKECORD_TRUST_PROXY
@@ -162,6 +167,9 @@ spec:
               mountPath: {{ include "jukecord.databaseDir" . }}
               readOnly: true
             {{- end }}
+            {{- with include "jukecord.authMounts" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -213,6 +221,9 @@ spec:
         {{- if include "jukecord.readsDatabase" . }}
         # The database's address as a file (jukecord.databaseVolume, the same in split mode).
         {{- include "jukecord.databaseVolume" . | nindent 8 }}
+        {{- end }}
+        {{- with include "jukecord.authVolumes" . | trim }}
+        {{- . | nindent 8 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
