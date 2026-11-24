@@ -12,7 +12,9 @@ jukecord itself is MIT-licensed ([LICENSE](../LICENSE)). It uses the following, 
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp), its official Linux build, which bundles Python and the libraries it uses; each one's licence text, and where its source is, are in `/opt/yt-dlp/_internal/THIRD_PARTY_LICENSES.txt` in the image | Unlicense; the bundled parts under their own licences, GNU Readline under GPL-3.0-or-later and mutagen under GPL-2.0-or-later among them | https://github.com/yt-dlp/yt-dlp                |
 | Debian 13 base packages (tini, ca-certificates, libopus0, libmp3lame0 and their dependencies)                                                                                                                                                | their own licences, listed in `/usr/share/doc/*/copyright` in the image                                                                  | https://sources.debian.org                      |
 
-jukecord runs FFmpeg and yt-dlp as separate programs; it does not link to them.
+jukecord runs FFmpeg and yt-dlp as separate programs; it does not link to them. A database server, Redis or Valkey,
+Prometheus and Grafana, which the Compose files in `deploy/split` and `deploy/monitoring` run beside jukecord, are images
+of their own, under their own licences, and are not part of jukecord's image.
 
 ## In the release's programs
 
@@ -32,14 +34,19 @@ Each program carries this file as its `THIRD_PARTY_NOTICES.md`. It runs FFmpeg a
 
 ## npm packages the server runs
 
-| Package                                                             | Licence                                                                  |
-| :------------------------------------------------------------------ | :----------------------------------------------------------------------- |
-| discord.js, @discordjs/voice and their @discordjs packages          | Apache-2.0                                                               |
-| @snazzah/davey (Discord's end-to-end voice encryption)              | MIT                                                                      |
-| fastify, @fastify/websocket, @fastify/static and their dependencies | MIT                                                                      |
-| typebox                                                             | MIT                                                                      |
-| ws                                                                  | MIT                                                                      |
-| the remaining dependencies                                          | MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD and BlueOak-1.0.0 |
+| Package                                                                                         | Licence                                                    |
+| :---------------------------------------------------------------------------------------------- | :--------------------------------------------------------- |
+| discord.js, @discordjs/voice and their @discordjs packages                                      | Apache-2.0                                                 |
+| @snazzah/davey (Discord's end-to-end voice encryption)                                          | MIT                                                        |
+| fastify, @fastify/websocket and @fastify/static                                                 | MIT                                                        |
+| typebox                                                                                         | MIT                                                        |
+| ws                                                                                              | MIT                                                        |
+| pg, with pg-pool and pg-protocol (PostgreSQL; loaded only for a `postgres://` database address) | MIT                                                        |
+| mysql2 (MySQL and MariaDB; loaded only for a `mysql://` or `mariadb://` address)                | MIT                                                        |
+| @redis/client (the bus and the shared cache on Redis or Valkey; loaded only for their address)  | MIT                                                        |
+| openid-client, with oauth4webapi and jose (logging in through an identity provider)             | MIT                                                        |
+| ldapts (logging in with a directory account)                                                    | MIT                                                        |
+| the remaining dependencies                                                                      | MIT, ISC, Apache-2.0, BSD-3-Clause, 0BSD and BlueOak-1.0.0 |
 
 `npm ls --omit=dev --all` lists every package with its version; each one's licence is in its folder under
 `node_modules`.

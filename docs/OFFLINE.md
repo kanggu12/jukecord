@@ -10,7 +10,9 @@ and the data in.
 | the queue, history, playlists and statistics           | thumbnails and avatars (they come from the sites)              |
 | the host's login links                                 | checking for a newer yt-dlp (`doctor` says it could not check) |
 
-Without a bot token jukecord runs browser-only and needs no Discord at all, which is also how its tests run.
+Without a bot token jukecord runs browser-only and needs no Discord at all, which is also how its tests run. A database
+server, Redis or Valkey, and an identity provider or directory for logins all work on your own network, without the
+internet.
 
 ## A program from the release
 
@@ -62,7 +64,26 @@ helm install jukecord ./jukecord-0.3.4.tgz -n jukecord --create-namespace \
   --set image.repository=registry.example.internal/jukecord
 ```
 
+## A split, a database and monitoring
+
+The drivers for PostgreSQL, MySQL/MariaDB and Redis/Valkey are inside jukecord's image and programs already. What the
+Compose files run beside jukecord (PostgreSQL or MySQL, Valkey and Caddy for the split; Prometheus and Grafana for
+monitoring) are images of their own, each pinned by version and digest in its file. Listed, pulled and saved where there
+is access (the split's needs its `deploy/split/.env` made first), and loaded inside as jukecord's image is:
+
+```bash
+# on a machine with access, in the checkout
+images=$( (docker compose -f deploy/split/compose.yaml config --images
+  docker compose -f deploy/split/compose.yaml -f deploy/split/compose.mysql.yaml config --images
+  docker compose -f deploy/monitoring/compose.yaml config --images) | grep -v '^jukecord' | sort -u)
+for image in $images; do docker pull "$image"; done
+docker save $images | gzip > jukecord-services.tar.gz
+# on the other machine
+gunzip -c jukecord-services.tar.gz | docker load
+```
+
 ## Moving the data
 
 The data is one folder: `/data` in the container, the `jukecord_jukecord-data` volume with Compose. `./jukecord backup`
-makes a copy of the database to carry; the cache can stay behind, since tracks are fetched again when played.
+makes a copy of the database to carry, a SQLite file whatever the database is; the cache can stay behind, since tracks
+are fetched again when played.

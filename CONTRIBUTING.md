@@ -1,7 +1,7 @@
 # Contributing
 
-For people who change jukecord's code: the setup, the layout, the style, the tests, the pinned FFmpeg and yt-dlp, the
-release's programs, and releases. For a larger change, open an issue first to agree on its shape.
+For people who change jukecord's code: the setup, the layout, the style, the tests, the chart, the pinned FFmpeg and
+yt-dlp, the release's programs, and releases. For a larger change, open an issue first to agree on its shape.
 
 ## Set up
 
@@ -19,21 +19,31 @@ npm start          # browser-only, with its data in ./data
 
 ## How the code is laid out
 
-| Path                     | What it is                                                                               |
-| :----------------------- | :--------------------------------------------------------------------------------------- |
-| `src/app/`               | The actions, one function per thing a person can do, and who may do it                   |
-| `src/core/`              | Each server's queue and player, the clock, the words the bot and the panel share         |
-| `src/media/`             | yt-dlp and ffmpeg, the cache, covers, lyrics, links of other services, the address guard |
-| `src/web/`               | The HTTP API, the logins and the live updates                                            |
-| `src/discord/`           | The bot: slash commands, cards and the voice channel                                     |
-| `src/cli/`, `src/store/` | The `jukecord` command; SQLite and its migrations                                        |
-| `panel/`                 | The web panel: TypeScript and one stylesheet                                             |
-| `deploy/`, `tests/`      | The image, the Helm chart and its kind check; the tests and the panel's walk             |
+| Path                     | What it is                                                                                     |
+| :----------------------- | :--------------------------------------------------------------------------------------------- |
+| `src/app/`               | The actions, one function per thing a person can do, who may do it, and readiness by parts     |
+| `src/core/`              | Each server's queue and player, its lane, the clock, the words the bot and the panel share     |
+| `src/media/`             | yt-dlp and ffmpeg, the cache, covers, lyrics, links of other services, the address guard       |
+| `src/web/`               | The HTTP API, the logins and the live updates                                                  |
+| `src/discord/`           | The bot: slash commands, cards and the voice channel                                           |
+| `src/store/`             | The store: SQLite's, PostgreSQL's and MySQL's executors, the dialects, the migrations, copying |
+| `src/auth/`              | Logging in through an identity provider (OIDC) or a directory (LDAP), and their settings       |
+| `src/bus/`, `src/cache/` | The bus between a core and its edges, and the shared cache, in memory or on Redis or Valkey    |
+| `src/roles/`             | The core's and an edge's own parts                                                             |
+| `src/metrics/`           | The metrics registry, each part's figures, and who may read `/metrics`                         |
+| `src/cli/`               | The `jukecord` command, and `jukecord db`                                                      |
+| `panel/`                 | The web panel: TypeScript and one stylesheet                                                   |
+| `deploy/`, `tests/`      | The image, the Helm chart, the split's and monitoring's Compose files; the tests and the walk  |
 
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) has the parts and how they talk; [DECISIONS.md](docs/DECISIONS.md) says why.
 The rule that shapes most changes: a feature is an action in `src/app/actions.ts`, offered by all four ways in (the
 panel, a slash command, the API table in `src/web/api.ts`, a CLI command). The compiler and the parity tests point at
 the place you forgot.
+
+The store's SQL is written once for the three databases, with what differs in `src/store/dialect.ts`. A new
+migration goes at the end of `src/store/schema.ts` with SQLite's statements and PostgreSQL's and MySQL's beside them
+(a test fails one without both), and a released migration is never edited. A state that more than one process must see
+belongs in the database or the shared cache, and a call an edge makes of the core in `src/web/core.ts`.
 
 ## Style
 
@@ -47,7 +57,18 @@ the place you forgot.
 
 [TESTING.md](docs/TESTING.md) lists the suites. A change to the panel runs `tests/ui/run.sh` before it is merged (it
 needs `docker build -f deploy/docker/Dockerfile -t jukecord:dev .` once); a change to the chart runs
-`deploy/kind/check.sh`.
+`deploy/kind/check.sh`, and `deploy/kind/check-split.sh` when split mode is touched. A change to the store runs on the
+six database servers (`JUKECORD_TEST_DATABASES`), one to the bus, the cache or the roles on Valkey
+(`JUKECORD_TEST_BUS_URL`) and through `tests/split/run.sh`, one to the logins through `tests/auth/run.sh`; CI runs them
+all.
+
+## The chart
+
+`deploy/helm/jukecord/values.yaml` has a copy, `files/defaults.yaml`, which the templates read to fill in what an older
+release's values lack: `helm upgrade --reuse-values` hands a template the release's own values, without the groups a
+newer chart added. After any change to `values.yaml`, copy it there again; `tests/packaging/chart-upgrade.test.ts`
+fails until the two match, and upgrades a 0.3 release's values the way Helm renders them. Each value is in
+`values.schema.json` too, and in the chart's README.
 
 ## FFmpeg
 
@@ -99,11 +120,15 @@ node scripts/bundle-smoke.ts out/jukecord-<version>-linux-x64.tar.gz
 ## Dependabot
 
 Once a week Dependabot proposes newer versions of the workflows' actions, of the Node base image's digest (the `FROM`
-lines of the Dockerfile), of the images the programs' FFmpeg is built in (`deploy/bundle/Dockerfile`) and of the npm
-packages, each kind in one pull request.
+lines of the Dockerfile), of the images the programs' FFmpeg is built in (`deploy/bundle/Dockerfile`), of the images
+beside jukecord in `deploy/split` (PostgreSQL, MySQL, Valkey, Caddy) and `deploy/monitoring` (Prometheus, Grafana), and
+of the npm packages, each kind in one pull request.
 
 - A new major version of an npm package comes on its own. The next major version of Node is not proposed: moving to
-  the next LTS is a decision.
+  the next LTS is a decision. Nor is a new major version of the images beside jukecord: a database's needs its data
+  moved, and the others can change what they read.
+- The six database servers of CI's `databases` job are pinned by version and digest in `ci.yml`, where Dependabot does
+  not look: move them by hand, the oldest and the newest supported of each.
 - The outside actions (Docker's, `softprops/action-gh-release` and `azure/setup-helm`) run where a job's token may
   write, so they are pinned by commit, with the release beside it in a comment; Dependabot moves both together.
 - The tools the workflows run (helm, kind and kubeconform) are pinned by version, kubeconform and kind with their
