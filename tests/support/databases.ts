@@ -18,7 +18,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, describe } from 'node:test';
 import type { Metrics } from '../../src/metrics/registry.ts';
-import { type DatabaseAddress, parseDatabaseAddress, type ServerAddress } from '../../src/store/address.ts';
+import {
+  type DatabaseAddress,
+  parseDatabaseAddress,
+  type ServerAddress,
+  type SqliteAddress,
+} from '../../src/store/address.ts';
 import { MysqlExecutor } from '../../src/store/mysql.ts';
 import { PostgresExecutor } from '../../src/store/postgres.ts';
 import { MIGRATIONS, TABLES, VERSION_TABLE } from '../../src/store/schema.ts';
@@ -46,6 +51,8 @@ export interface TestDatabase {
   executor(options?: OpenOptions): Promise<SqlExecutor>;
   /** This test's database's address (for what reaches it by address: a copy, the jukecord command). */
   address(): Promise<DatabaseAddress>;
+  /** The same as an address written out, as JUKECORD_DATABASE_URL takes it (with the test server's password). */
+  url(): Promise<string>;
   /** An address of another database of this kind, empty and without tables, the test's alone. */
   another(): Promise<DatabaseAddress>;
 }
@@ -104,7 +111,7 @@ function sqlite(): TestDatabase {
     return dir;
   };
   let others = 0;
-  const own = (): DatabaseAddress => ({ kind: 'sqlite', file: path.join(folder(), 'jukecord.db') });
+  const own = (): SqliteAddress => ({ kind: 'sqlite', file: path.join(folder(), 'jukecord.db') });
   return {
     name: 'sqlite',
     kind: 'sqlite',
@@ -115,6 +122,7 @@ function sqlite(): TestDatabase {
       return sql;
     },
     address: async () => own(),
+    url: async () => `sqlite:${own().file}`,
     another: async () => {
       others += 1;
       return { kind: 'sqlite', file: path.join(folder(), `another-${others}.db`) };
@@ -125,6 +133,8 @@ function sqlite(): TestDatabase {
 // The databases of one server for this process: made when first needed, emptied between tests, dropped at the end.
 class ServerDatabases {
   readonly admin: ServerAddress;
+  // The administering database's address as it was written (the test databases' are made from it).
+  private readonly url: string;
   // The connection that makes, empties and drops them (to the database the address names).
   private root: SqlExecutor | null = null;
   // Databases ready for a test (at the latest schema and empty), and every one made, for dropping.
@@ -132,9 +142,18 @@ class ServerDatabases {
   private readonly made = new Set<string>();
   private count = 0;
 
-  constructor(admin: ServerAddress) {
+  constructor(admin: ServerAddress, url: string) {
     this.admin = admin;
+    this.url = url;
     finishing.push(() => this.finish());
+  }
+
+  /** A database's address by its name, written out (a schema parameter on PostgreSQL, the path on MySQL). */
+  urlOf(name: string): string {
+    const url = new URL(this.url);
+    if (this.admin.kind === 'postgres') url.searchParams.set('schema', name);
+    else url.pathname = `/${name}`;
+    return url.href;
   }
 
   // The administering connection, opened once.
@@ -230,7 +249,7 @@ function serverDatabases(url: string): ServerDatabases {
   if (!known) {
     const address = parseDatabaseAddress(url, os.tmpdir());
     if (address.kind === 'sqlite') throw new Error('JUKECORD_TEST_DATABASES names servers; SQLite is always tested');
-    known = new ServerDatabases(address);
+    known = new ServerDatabases(address, url);
     servers.set(url, known);
   }
   return known;
@@ -263,6 +282,7 @@ function server(url: string): TestDatabase {
       return sql;
     },
     address: async () => databases.addressOf(await own()),
+    url: async () => databases.urlOf(await own()),
     another: async () => {
       const name = await databases.blank();
       // Dropped with the test: what it holds is the test's own.

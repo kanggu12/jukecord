@@ -2,9 +2,11 @@
  * Backups of the database: one on request (the backup operation, ./jukecord backup), and one a day at a time of the
  * host's choosing (JUKECORD_BACKUP_AT, off by default), the newest JUKECORD_BACKUP_KEEP kept (seven by default).
  *
- * A backup is a consistent copy made while jukecord runs (VACUUM INTO, see Store.backup), in the backups folder of
- * the data directory, named by the time it was made so the names sort as the backups do. The media cache is not in it
- * (tracks are fetched again when they are played).
+ * A backup is a consistent copy made while jukecord runs, in the backups folder of the data directory, named by the
+ * time it was made so the names sort as the backups do: a SQLite file whatever the database is (SQLite's own file
+ * copied by VACUUM INTO; a PostgreSQL or MySQL database's rows copied into a new SQLite file by src/store/copy.ts), so
+ * any backup goes back into any kind of database (`jukecord db copy`). The media cache is not in it (tracks are
+ * fetched again when they are played).
  */
 import fs from 'node:fs';
 import path from 'node:path';

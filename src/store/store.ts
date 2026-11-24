@@ -111,6 +111,11 @@ function trackFrom(row: Row): Track {
 /** Options for opening the store; tests pass a fixed clock so timestamps can be compared. */
 export interface StoreOptions {
   readonly now?: () => number;
+  /**
+   * Whether the schema is brought up to date (the default). A copy's source is opened without: it must be at this
+   * jukecord's schema already, or the copy is refused (a copy reads a database, it does not change it).
+   */
+  readonly migrate?: boolean;
 }
 
 /** The kinds of database jukecord runs on, as the status and the doctor name them. */
@@ -199,7 +204,8 @@ export class Store {
     const sql = typeof target === 'string' ? SqliteExecutor.open(target) : target;
     const store = new Store(sql, options.now ?? Date.now);
     try {
-      await store.migrate();
+      if (options.migrate === false) await store.atLatest();
+      else await store.migrate();
     } catch (error) {
       // A failed migration leaves the database untouched (it runs in a transaction); close it so the file is not held.
       await sql.close();
@@ -215,9 +221,7 @@ export class Store {
 
   /** Which kind of database this is (MariaDB told from MySQL by what the server says it is). */
   get backend(): Backend {
-    if (this.sql.dialect === 'sqlite') return 'sqlite';
-    if (this.sql.dialect === 'postgres') return 'postgres';
-    return this.sql.server.product === 'MariaDB' ? 'mariadb' : 'mysql';
+    return backendOf(this.sql);
   }
 
   /** Whether statements can still run (false once closed): what the readiness check asks. */
@@ -226,16 +230,8 @@ export class Store {
   }
 
   /** The schema version the database is at: SQLite's user_version, or a server's jukecord_schema (0: none yet). */
-  async schemaVersion(): Promise<number> {
-    if (this.sql.dialect === 'sqlite') {
-      const row = await this.sql.get('PRAGMA user_version');
-      if (!row) throw new StoreError('the database says no schema version');
-      return int(row, 'user_version');
-    }
-    // A database jukecord never ran on has no version table: version 0.
-    if (!(await this.hasTable(VERSION_TABLE))) return 0;
-    const row = await one(this.sql.get(`SELECT MAX(version) AS version FROM ${VERSION_TABLE}`));
-    return intOrNull(row, 'version') ?? 0;
+  schemaVersion(): Promise<number> {
+    return schemaVersionOf(this.sql);
   }
 
   /** What SQLite's quick check says of the database: "ok", or the first damage it found (null: no answer). */
@@ -250,52 +246,31 @@ export class Store {
    * How the database answers now: whether it does, its schema version and the time of one statement there and back.
    * Never throws: a database that does not answer is an answer.
    */
-  async health(): Promise<DatabaseHealth> {
-    const server = `${this.sql.server.product} ${this.sql.server.version}`;
-    const started = performance.now();
-    try {
-      await this.sql.get('SELECT 1 AS ok');
-      const roundTripMs = Math.round((performance.now() - started) * 100) / 100;
-      return { ok: true, backend: this.backend, server, schema: await this.schemaVersion(), roundTripMs, error: null };
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return { ok: false, backend: this.backend, server, schema: null, roundTripMs: null, error: reason };
-    }
+  health(): Promise<DatabaseHealth> {
+    return healthOf(this.sql);
   }
 
-  /** How much room the database takes, in bytes, where it says (a SQLite file's size is read from the disk instead). */
-  async size(): Promise<number | null> {
-    const file = this.file;
-    if (file !== null) {
-      if (file === ':memory:') return null;
-      // The file and what its write-ahead log holds that the file does not yet.
-      let bytes = fs.statSync(file).size;
-      try {
-        bytes += fs.statSync(`${file}-wal`).size;
-      } catch {
-        // No log file at the moment.
-      }
-      return bytes;
-    }
-    const row =
-      this.sql.dialect === 'postgres'
-        ? await this.sql.get('SELECT pg_database_size(current_database()) AS bytes')
-        : await this.sql.get(
-            `SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.tables
-               WHERE table_schema = DATABASE()`,
-          );
-    return row ? intOrNull(row, 'bytes') : null;
+  /** How much room the database takes, in bytes, where it says (a SQLite file's size is read from the disk). */
+  size(): Promise<number | null> {
+    return sizeOf(this.sql);
   }
 
-  // Whether the database has a table of this name (in the schema jukecord uses: PostgreSQL's current one, MySQL's
-  // database).
-  private async hasTable(name: string): Promise<boolean> {
-    const where = this.sql.dialect === 'postgres' ? 'current_schema()' : 'DATABASE()';
-    const row = await this.sql.get(
-      `SELECT 1 AS found FROM information_schema.tables WHERE table_schema = ${where} AND table_name = ?`,
-      [name],
-    );
-    return row !== undefined;
+  // Whether the database has a table of this name (see hasTable).
+  private hasTable(name: string): Promise<boolean> {
+    return hasTable(this.sql, name);
+  }
+
+  // Refuses a database that is not at this jukecord's schema, older or newer, saying what to do about it.
+  private async atLatest(): Promise<void> {
+    const current = await this.schemaVersion();
+    const latest = MIGRATIONS.at(-1)?.version ?? 0;
+    refuseNewer(current, latest);
+    if (current === 0) throw new StoreError('the database holds no jukecord data (no schema at all)');
+    if (current < latest) {
+      throw new StoreError(
+        `the database is at schema ${current}, older than this jukecord's (${latest}); start this jukecord on it once to bring it up to date`,
+      );
+    }
   }
 
   // Applies every migration newer than the database, each in its own transaction with its version.
@@ -411,41 +386,147 @@ export class Store {
     return result.lastId;
   }
 
-  /** Writes a consistent copy of the database to `target` (an online backup; the bot keeps running). */
+  /**
+   * Writes a consistent copy of the database to `target` (an online backup; the bot keeps running). SQLite's is its
+   * file copied (VACUUM INTO); a server database's is a SQLite file of the same kind made by the copy (see backupAside).
+   */
   async backup(target: string): Promise<void> {
-    const sqlite = this.sqlite('backed up');
+    if (!(this.sql instanceof SqliteExecutor)) return this.backupAside(target);
     // VACUUM INTO refuses to overwrite, so a backup never replaces an older one by accident.
     if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    await sqlite.vacuumInto(target);
+    await this.sql.vacuumInto(target);
   }
 
   /**
-   * backup(), written by a worker thread with a connection of its own (SqliteExecutor.vacuumIntoAside): a copy of a
-   * large database takes seconds, and the main thread goes on answering meanwhile. An in-memory database (the tests')
-   * has no file for another connection to open, and is copied here.
+   * backup(), written beside the main thread's work: SQLite's by a worker thread with a connection of its own
+   * (SqliteExecutor.vacuumIntoAside), since a copy of a large database takes seconds; a server database's by the copy
+   * (src/store/copy.ts), which reads one moment's view of it over the network a page at a time and writes a new SQLite
+   * file (what SQLite's own backups are, so any backup goes back into any database). An in-memory database (the
+   * tests') has no file for another connection to open, and is copied here.
    */
   async backupAside(target: string): Promise<void> {
-    const sqlite = this.sqlite('backed up');
-    if (sqlite.file === ':memory:') return this.backup(target);
+    if (this.sql instanceof SqliteExecutor && this.sql.file === ':memory:') return this.backup(target);
     if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     // Written under another name, and named a backup once whole: jukecord stopped in the middle (the worker ends with
     // it) leaves a ".partial" file, which no list takes for a backup (app/backups.ts clears it away later).
     const partial = `${target}.partial`;
-    await sqlite.vacuumIntoAside(partial);
+    if (this.sql instanceof SqliteExecutor) {
+      await this.sql.vacuumIntoAside(partial);
+    } else {
+      await this.copyInto(partial);
+    }
     fs.renameSync(partial, target);
+  }
+
+  // A server database copied into a new SQLite file (removed again when the copy fails), left as one file with no
+  // write-ahead log beside it, as VACUUM INTO leaves SQLite's backups.
+  private async copyInto(file: string): Promise<void> {
+    const { copyStore } = await import('./copy.ts');
+    const copy = await Store.open(file);
+    try {
+      await copyStore(this, copy);
+      await copy.sql.exec('PRAGMA journal_mode = DELETE');
+    } catch (error) {
+      await copy.close();
+      for (const part of ['', '-wal', '-shm', '-journal']) fs.rmSync(`${file}${part}`, { force: true });
+      throw error;
+    }
+    await copy.close();
   }
 
   /** Closes the database, once no transaction holds it; closing twice does nothing. */
   close(): Promise<void> {
     return this.sql.close();
   }
+}
 
-  // The SQLite executor under the store, for what only SQLite does here (a backup is a copy of its file).
-  private sqlite(what: string): SqliteExecutor {
-    if (this.sql instanceof SqliteExecutor) return this.sql;
-    throw new StoreError(`a ${this.sql.dialect} database is not ${what} by jukecord yet`);
+/** The schema version this jukecord writes (its last migration's). */
+export const LATEST_SCHEMA = MIGRATIONS.at(-1)?.version ?? 0;
+
+/** Which kind of database an executor reaches (MariaDB told from MySQL by what the server says it is). */
+export function backendOf(sql: SqlExecutor): Backend {
+  if (sql.dialect === 'sqlite') return 'sqlite';
+  if (sql.dialect === 'postgres') return 'postgres';
+  return sql.server.product === 'MariaDB' ? 'mariadb' : 'mysql';
+}
+
+/**
+ * Whether the database an executor reaches has a table of this name: in the schema jukecord uses (PostgreSQL's
+ * current one, MySQL's database, SQLite's file).
+ */
+export async function hasTable(sql: SqlExecutor, name: string): Promise<boolean> {
+  if (sql.dialect === 'sqlite') {
+    return (
+      (await sql.get("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?", [name])) !== undefined
+    );
+  }
+  const where = sql.dialect === 'postgres' ? 'current_schema()' : 'DATABASE()';
+  const row = await sql.get(
+    `SELECT 1 AS found FROM information_schema.tables WHERE table_schema = ${where} AND table_name = ?`,
+    [name],
+  );
+  return row !== undefined;
+}
+
+/** The schema version of the database an executor reaches, whatever it is (0: no jukecord schema yet). */
+export async function schemaVersionOf(sql: SqlExecutor): Promise<number> {
+  if (sql.dialect === 'sqlite') {
+    const row = await sql.get('PRAGMA user_version');
+    if (!row) throw new StoreError('the database says no schema version');
+    return int(row, 'user_version');
+  }
+  // A database jukecord never ran on has no version table: version 0.
+  if (!(await hasTable(sql, VERSION_TABLE))) return 0;
+  const row = await one(sql.get(`SELECT MAX(version) AS version FROM ${VERSION_TABLE}`));
+  return intOrNull(row, 'version') ?? 0;
+}
+
+/**
+ * How much room the database an executor reaches takes, in bytes: a SQLite file's size on the disk (with what its
+ * write-ahead log holds), PostgreSQL's tables of the schema jukecord uses with their indexes, MySQL's tables of its
+ * database as the server estimates them (MySQL updates the figure now and then, not at every change). Null for an
+ * in-memory database.
+ */
+export async function sizeOf(sql: SqlExecutor): Promise<number | null> {
+  if (sql instanceof SqliteExecutor) {
+    if (sql.file === ':memory:') return null;
+    let bytes = fs.statSync(sql.file).size;
+    try {
+      bytes += fs.statSync(`${sql.file}-wal`).size;
+    } catch {
+      // No log file at the moment.
+    }
+    return bytes;
+  }
+  const row =
+    sql.dialect === 'postgres'
+      ? await sql.get(
+          `SELECT COALESCE(SUM(pg_total_relation_size(c.oid)), 0) AS bytes FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.relkind = 'r'`,
+        )
+      : await sql.get(
+          `SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.tables
+             WHERE table_schema = DATABASE()`,
+        );
+  return row ? intOrNull(row, 'bytes') : null;
+}
+
+/**
+ * How the database an executor reaches answers now: whether it does, its schema version and the time of one
+ * statement there and back. Never throws: a database that does not answer is an answer.
+ */
+export async function healthOf(sql: SqlExecutor): Promise<DatabaseHealth> {
+  const server = `${sql.server.product} ${sql.server.version}`;
+  const started = performance.now();
+  try {
+    await sql.get('SELECT 1 AS ok');
+    const roundTripMs = Math.round((performance.now() - started) * 100) / 100;
+    return { ok: true, backend: backendOf(sql), server, schema: await schemaVersionOf(sql), roundTripMs, error: null };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, backend: backendOf(sql), server, schema: null, roundTripMs: null, error: reason };
   }
 }
 
