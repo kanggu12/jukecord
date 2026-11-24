@@ -831,8 +831,12 @@ async function main(): Promise<number> {
       throwFromTimer,
     );
   };
-  process.once('SIGTERM', () => stop('SIGTERM'));
-  process.once('SIGINT', () => stop('SIGINT'));
+  // Every time, not once: the same stop can come twice (a service manager signals every process of the service, and
+  // a terminal's Ctrl+C reaches the program's launcher, which hands it on, as well as jukecord), and a second signal
+  // with no listener left would end jukecord before it saved where every server was. stop() takes the first only, and
+  // its own time limit ends a stop that hangs.
+  process.on('SIGTERM', () => stop('SIGTERM'));
+  process.on('SIGINT', () => stop('SIGINT'));
   // This core can no longer be sure it holds the lease (another took it, or the bus was out of reach for as long as
   // the lease lasts): it stops, and its restart policy starts it again, to wait for the lease.
   lostLease = () => stop('this core no longer holds its lease', 1);
@@ -1055,8 +1059,9 @@ async function runEdge(start: {
     log.info('restarting with the core, in a moment', { inSeconds: Math.round(spreadMs / 1000) });
     setTimeout(() => stop('restart', RESTART_EXIT_CODE), spreadMs).unref();
   });
-  process.once('SIGTERM', () => stop('SIGTERM'));
-  process.once('SIGINT', () => stop('SIGINT'));
+  // Every time, not once, as one process (a second signal of the same stop must not cut the edge's short).
+  process.on('SIGTERM', () => stop('SIGTERM'));
+  process.on('SIGINT', () => stop('SIGINT'));
   await edge.web.listen();
   log.info('the panel and the API are up (an edge)', {
     listen: `${config.host}:${config.port}`,

@@ -74,11 +74,15 @@ case ${1:-} in
     shift
     # jukecord runs beside this script, which hands it the signals it gets (Ctrl+C, a service manager's SIGTERM) and
     # starts it again when it ends with 75, its restart; any other end is this script's end too, with its code.
+    # A signal that reached jukecord already (a terminal's Ctrl+C reaches both, a service manager may signal both)
+    # comes to it twice; it takes the first. `|| :` keeps a child already gone from ending this script (set -e).
     child=''
-    trap '[ -z "$child" ] || kill -TERM "$child" 2>/dev/null' TERM
-    trap '[ -z "$child" ] || kill -INT "$child" 2>/dev/null' INT
+    trap '[ -z "$child" ] || kill -TERM "$child" 2>/dev/null || :' TERM
+    trap '[ -z "$child" ] || kill -INT "$child" 2>/dev/null || :' INT
     while :; do
-      nodejs "$app/src/main.js" "$@" &
+      # In the background through run(), whose exec makes the background process Node itself: $! is jukecord, the
+      # one the signals are for (a shell between them would die of the signal and leave jukecord running).
+      run "$app/src/main.js" "$@" &
       child=$!
       code=0
       wait "$child" || code=$?

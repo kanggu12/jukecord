@@ -212,6 +212,35 @@ for (let waited = 0; !playing && waited < 90_000; waited += 1000) {
 }
 await check(`the tone plays (as "${playing}")`, playing !== '', (await jukecord(['np'])).text);
 
+// The host's settings: one that settings.json keeps (the database's pool, which the start reads before the database),
+// changed through the command, waits for a restart; `jukecord restart` ends jukecord with its restart's code, the
+// launcher starts it again, and the new one reads the setting from settings.json.
+const set = await jukecord(['settings', 'set', 'database-pool', '3']);
+await check('jukecord settings set', set.status === 0, set.text);
+const file = path.join(work, 'data', 'settings.json');
+const kept = fs.existsSync(file)
+  ? (JSON.parse(fs.readFileSync(file, 'utf8')) as { settings?: Record<string, { value?: string }> })
+  : {};
+await check('the setting is kept in settings.json', kept.settings?.JUKECORD_DATABASE_POOL?.value === '3', set.text);
+const restart = await jukecord(['restart']);
+await check('jukecord restart', restart.status === 0 && restart.text.includes('launcher'), restart.text);
+// Started again: the setting read at the new start, nothing waiting for a restart, the launcher still running.
+let again = false;
+for (let waited = 0; !again && exited === undefined && waited < 90_000; waited += 1000) {
+  const got = await jukecord(['--json', 'settings', 'get', 'database-pool']);
+  if (got.status === 0) {
+    const setting = JSON.parse(got.text) as { value?: string; source?: string; pending?: boolean };
+    again = setting.value === '3' && setting.source === 'saved' && setting.pending === false;
+  }
+  if (!again) await new Promise((r) => setTimeout(r, 1000));
+}
+const starts = log.join('').split('starting jukecord').length - 1;
+await check(
+  'the launcher starts jukecord again, which reads settings.json',
+  again && exited === undefined && starts === 2,
+  `started ${starts} times`,
+);
+
 const code = await stop();
 media.close();
 // On Linux and macOS jukecord stops cleanly on SIGTERM; on Windows taskkill ends it outright.
