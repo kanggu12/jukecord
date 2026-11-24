@@ -17,6 +17,7 @@ import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { MemoryCache } from './cache/memory.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -40,10 +41,13 @@ import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
 import { Search } from './media/search.ts';
 import { YtDlp } from './media/ytdlp.ts';
+import { databaseReport } from './metrics/database.ts';
 import { ToolWatch } from './metrics/media.ts';
 import { MetricsRegistry } from './metrics/registry.ts';
 import { diskMetrics, EventLoop, runtimeMetrics } from './metrics/runtime.ts';
 import { describeService, discordMetrics, playerMetrics } from './metrics/service.ts';
+import { sharedCacheReport } from './metrics/services.ts';
+import { SqliteExecutor } from './store/sqlite.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
@@ -125,7 +129,12 @@ async function main(): Promise<number> {
     crashCheckpoint().then(exit, exit);
   });
 
-  const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
+  // The database, each statement reported for the metrics.
+  const store = await Store.open(
+    SqliteExecutor.open(path.join(config.dataDir, 'jukecord.db'), { report: databaseReport(registry) }),
+  );
+  // The shared cache (src/cache): in this process's memory, all one process needs; its reads are counted.
+  const sharedCache = new MemoryCache({ report: sharedCacheReport(registry) });
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
   const lanes = new GuildLanes();
   // Trouble said in the log and in each server's alerts channel (app/alerts.ts); the bot posts them once it exists.
@@ -348,7 +357,7 @@ async function main(): Promise<number> {
     role: 'all',
     database: store.sql.dialect,
     bus: 'in-process',
-    cache: 'memory',
+    cache: sharedCache.kind,
   });
   // The bot posts the alerts (it waits for Discord after a start); browser-only, the log alone says them.
   alertSink = bot;
@@ -490,6 +499,7 @@ async function main(): Promise<number> {
           .then(() => egress?.close())
           // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
           .then(() => schedule?.idle())
+          .then(() => sharedCache.close())
           .finally(() => {
             // Closed once no transaction holds it, then out.
             void store.close().finally(() => process.exit(0));

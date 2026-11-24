@@ -13,12 +13,15 @@ import { MediaCache } from '../../src/media/cache.ts';
 import type { Ffmpeg } from '../../src/media/ffmpeg.ts';
 import { Media } from '../../src/media/preparer.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
+import { databaseReport } from '../../src/metrics/database.ts';
 import { ToolWatch } from '../../src/metrics/media.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import { diskMetrics, EventLoop, runtimeMetrics } from '../../src/metrics/runtime.ts';
 import { describeService, discordMetrics, playerMetrics } from '../../src/metrics/service.ts';
+import { busReport, sharedCacheReport } from '../../src/metrics/services.ts';
 import { httpMetrics, liveMetrics } from '../../src/metrics/web.ts';
 import type { TrackRepository } from '../../src/store/store.ts';
+import { OPERATIONS } from '../../src/web/api.ts';
 
 /** The registry with every family, and what to stop and remove afterwards. */
 export interface EveryFamily {
@@ -61,6 +64,10 @@ export function everyFamily(): EveryFamily {
   new ToolWatch(registry);
   httpMetrics(registry);
   liveMetrics(registry);
+  // What the database executors, the bus adapters and the shared cache's adapters report into, with a connection read.
+  databaseReport(registry).connections(() => ({ busy: 0, idle: 1, waiting: 0 }));
+  busReport(registry, OPERATIONS).command('skip', 0.01, 'ok');
+  sharedCacheReport(registry).entries(() => 0);
   return {
     registry,
     close: () => {
