@@ -29,6 +29,8 @@ const DISCOVERY_MS = 24 * 60 * 60_000;
 const REQUEST_S = 10;
 // The longest name kept for a person: what fits a row of the panel, where longer ones end in an ellipsis anyway.
 const NAME_MAX = 64;
+// The longest place to go after a login that is kept with it (the panel's own addresses are far shorter).
+const NEXT_MAX = 2048;
 
 /** Who the provider says logged in, and what of theirs decides their level. */
 export interface OidcIdentity {
@@ -197,7 +199,8 @@ export class OidcLogin {
     const nonce = client.randomNonce();
     const verifier = client.randomPKCECodeVerifier();
     const browser = randomBytes(32).toString('base64url');
-    const pending: Pending = { browser: hashOf(browser), verifier, nonce, next };
+    // Where to go after, kept with the login: an address this long is no page of the panel's, and is not kept.
+    const pending: Pending = { browser: hashOf(browser), verifier, nonce, next: next.length > NEXT_MAX ? '/' : next };
     await this.options.cache.set(`auth:oidc:${hashOf(state)}`, JSON.stringify(pending), LOGIN_MS);
     const location = client.buildAuthorizationUrl(configuration, {
       redirect_uri: this.options.redirectUri,

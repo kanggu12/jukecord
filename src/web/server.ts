@@ -932,6 +932,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   app.get<{ Querystring: { next?: string } }>('/auth/sso', async (request, reply) => {
     const oidc = auth.oidc;
     if (!oidc) return reply.redirect('/login?error=no-sso');
+    // Held to a rate per address: each start keeps a login's state on the cache for ten minutes.
+    if (!(await auth.mayStartSso(request.ip))) {
+      auth.counted('oidc', 'blocked');
+      return reply.redirect('/login?error=sso-too-fast');
+    }
     try {
       const started = await oidc.start(safeNext(typeof request.query.next === 'string' ? request.query.next : '/'));
       const tie = cookie(started.cookie.name, started.cookie.value, {

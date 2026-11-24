@@ -204,6 +204,8 @@ describe('LoginLimiter', () => {
     // The name as the directory compares it: one count whatever the case and the spaces around it.
     assert.equal(nameFailures('ldap', ' ALICE '), alice);
     assert.notEqual(nameFailures('oidc', 'alice'), alice);
+    // However long the name sent, its key is no longer than the longest name taken.
+    assert.equal(nameFailures('ldap', 'x'.repeat(60_000)).length, 'name:ldap:'.length + 256);
     for (const address of ['10.0.0.1', '10.0.0.2', '10.0.0.3']) await limiter.fail([addressFailures(address), alice]);
     // Each address failed once; the name three times.
     assert.equal(await limiter.blocked([addressFailures('10.0.0.4')]), false);

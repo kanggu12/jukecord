@@ -346,4 +346,13 @@ describe('logging in through SSO with the server', () => {
     const cancelled = await sso({ error: 'access_denied' }, '10.1.0.10');
     assert.equal(cancelled.headers.location, '/login?error=sso-cancelled');
   });
+
+  it('holds one address to ten logins started at once, then one every six seconds', async () => {
+    const start = () => inject({ method: 'GET', url: '/auth/sso', remoteAddress: '10.1.0.20' });
+    for (let i = 0; i < 10; i += 1) assert.match(String((await start()).headers.location), /^https:\/\/sso\./);
+    assert.equal((await start()).headers.location, '/login?error=sso-too-fast');
+    // Others start as before.
+    const other = await inject({ method: 'GET', url: '/auth/sso', remoteAddress: '10.1.0.21' });
+    assert.match(String(other.headers.location), /^https:\/\/sso\./);
+  });
 });

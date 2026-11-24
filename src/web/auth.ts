@@ -59,6 +59,8 @@ const TOKEN_PREFIX = 'jkc_';
 const GUEST_PREFIX = 'g.';
 // A guest's session is noted as seen at most once a minute, like a member's.
 const SEEN_EVERY_MS = 60_000;
+// How fast one address may start logins at the identity provider (see Auth.mayStartSso).
+const SSO_STARTS = { perSecond: 1 / 6, burst: 10 };
 
 /** What a listening link's code did for a browser: a guest's session, nothing (a login there already), or why not. */
 export type ListenLinkUse =
@@ -168,9 +170,11 @@ export function addressFailures(address: string | undefined): string {
 /**
  * The key a name's failed logins at the directory form are counted under: the provider and the name as the directory
  * compares it (LDAP and Active Directory match user names regardless of case), so "Alice" and "alice" are one count.
+ * At most its first 256 characters, the longest name the form takes: a key never grows with what is sent (a request
+ * may carry 64 KiB), so names made up by the thousand cost the cache little each.
  */
 export function nameFailures(provider: string, name: string): string {
-  return `name:${provider}:${name.trim().normalize('NFC').toLowerCase()}`;
+  return `name:${provider}:${[...name.trim().normalize('NFC').toLowerCase()].slice(0, 256).join('')}`;
 }
 
 /**
@@ -264,6 +268,16 @@ export class Auth {
   /** Counts a login by its way and how it went. */
   counted(method: LoginMethod, outcome: LoginOutcome): void {
     this.logins.inc({ method, outcome });
+  }
+
+  /**
+   * Whether an address may start another login at the identity provider now: ten at once, then one every six seconds
+   * (no person needs more). Each start keeps its state on the cache for ten minutes, and a flood of them would push
+   * other entries out of a cache of bounded size (the failure counts among them); the buckets themselves are kept apart
+   * from the entries.
+   */
+  async mayStartSso(address: string | undefined): Promise<boolean> {
+    return (await this.options.cache.spend([`auth:sso-start:${addressKey(address)}`], SSO_STARTS)) === 0;
   }
 
   /** Whether logging in with Discord is set up. */
