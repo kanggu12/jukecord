@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { AUTH_VARIABLES, type AuthSettings, describeAuth, readAuthSettings } from './auth/settings.ts';
 import { LINK_SERVICES, type LinkService } from './media/links.ts';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
@@ -101,6 +102,8 @@ export interface Config {
     /** The host's own Spotify app, for Spotify albums and playlists; null without one. */
     readonly spotify: { readonly clientId: string; readonly clientSecret: string } | null;
   };
+  /** Logging in through the host's identity provider (OIDC) and directory (LDAP, Active Directory); each null when off. */
+  readonly auth: AuthSettings;
 }
 
 /** Settings that cannot be used; `problems` lists every one, each naming the variable. */
@@ -161,6 +164,8 @@ const KNOWN = new Set([
   'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
   'JUKECORD_METRICS_TOKEN',
   'JUKECORD_METRICS_TOKEN_FILE',
+  // Logging in through OIDC and LDAP (src/auth/settings.ts reads them).
+  ...AUTH_VARIABLES,
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
@@ -169,7 +174,8 @@ export interface ConfigFiles {
   readable(file: string): boolean;
 }
 
-const diskFiles: ConfigFiles = {
+/** The files on this machine, as loadConfig reads them by default (the login settings' test reads them so too). */
+export const diskFiles: ConfigFiles = {
   read: (file) => fs.readFileSync(file, 'utf8'),
   readable: (file) => {
     try {
@@ -436,6 +442,9 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     problems.push('JUKECORD_METRICS_TOKEN: at least 16 characters and no spaces (openssl rand -hex 32 makes one)');
   }
   const metrics = { token: metricsToken };
+  // Logging in through the host's identity provider and directory: off unless their addresses are set.
+  const auth = readAuthSettings(env, cwd, files);
+  problems.push(...auth.problems);
 
   // Unknown JUKECORD_ variables are not fatal, but they are almost always a misspelt setting that silently does nothing.
   for (const name of Object.keys(env).sort()) {
@@ -464,6 +473,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     warnings,
     metrics,
     links,
+    auth: auth.settings,
   };
 }
 
@@ -504,6 +514,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'spotify app': config.links.spotify?.clientId ?? 'not set',
     'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
     'metrics token': secret(config.metrics.token),
+    ...describeAuth(config.auth),
   };
 }
 

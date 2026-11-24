@@ -11,19 +11,23 @@ import { type TObject, type TSchema, Type } from 'typebox';
 import type { ActionName } from '../app/actions.ts';
 import {
   AddResultSchema,
+  AuthMethodsSchema,
   DoctorSchema,
   GuildId,
   GuildSchema,
   HistoryEntrySchema,
   ImportResultSchema,
+  LdapTestSchema,
   LikedSchema,
   ListenLinkCreatedSchema,
   ListenLinkSchema,
+  LoginSettingsSchema,
   LogRecordSchema,
   LyricsSchema,
   MeSchema,
   MovedSchema,
   Nullable,
+  OidcTestSchema,
   OkSchema,
   PlayerSchema,
   PlaylistFileSchema,
@@ -56,6 +60,9 @@ export const ACCOUNT_OPERATIONS = [
   'login-link',
   'backup',
   'doctor',
+  'auth-methods',
+  'auth-test-oidc',
+  'auth-test-ldap',
 ] as const;
 
 export type AccountOperation = (typeof ACCOUNT_OPERATIONS)[number];
@@ -508,6 +515,41 @@ export const API = {
     tag: 'host',
     access: 'host',
     response: DoctorSchema,
+  }),
+  // Logging in.
+  'auth-methods': op({
+    method: 'GET',
+    path: '/auth/methods',
+    summary: 'The ways of logging in that are set up here (what the login page shows)',
+    tag: 'account',
+    access: 'public',
+    response: AuthMethodsSchema,
+  }),
+  'auth-test-oidc': op({
+    method: 'POST',
+    path: '/auth/test-oidc',
+    summary:
+      'Test logging in through the identity provider (OIDC) without logging anyone in: its document, its keys, the client and its secret; with settings not saved yet, or the ones in use',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object({ settings: Type.Optional(LoginSettingsSchema) }, strict),
+    response: OidcTestSchema,
+  }),
+  'auth-test-ldap': op({
+    method: 'POST',
+    path: '/auth/test-ldap',
+    summary:
+      'Test logging in with a directory account (LDAP) without logging anyone in: the connection, the service account, the base DN, and with a name the person, their groups and their level (no password)',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object(
+      {
+        username: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: 'A name to look up' })),
+        settings: Type.Optional(LoginSettingsSchema),
+      },
+      strict,
+    ),
+    response: LdapTestSchema,
   }),
 
   // Wrapped.

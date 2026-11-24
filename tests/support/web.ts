@@ -16,6 +16,10 @@ import {
 } from '../../src/app/actions.ts';
 import { busPart, cachePart, databasePart, discordPart, Health, type HealthPart } from '../../src/app/health.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import type { LoginChecks } from '../../src/auth/check.ts';
+import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
+import { OidcLogin } from '../../src/auth/oidc.ts';
+import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
@@ -197,6 +201,12 @@ export interface TestServerOptions {
   readonly metricsToken?: string;
   /** More parts for /readyz to check, beside the database, the bus, the cache and Discord. */
   readonly parts?: readonly HealthPart[];
+  /** Logging in through an identity provider: its settings, and the fetch its made-up provider answers. */
+  readonly oidc?: { readonly settings: OidcSettings; readonly fetch: typeof fetch };
+  /** Logging in with a directory account: its settings, and a directory that stands in for one. */
+  readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
+  /** The login settings' tests (none by default). */
+  readonly loginChecks?: LoginChecks;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -291,11 +301,34 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
+  const loginCache = new MemoryCache();
+  // Through the made-up provider, coming back to the address the test server says it has.
+  const oidc = options.oidc
+    ? new OidcLogin({
+        settings: options.oidc.settings,
+        redirectUri: 'http://localhost:8795/auth/sso/callback',
+        afterLogout: 'http://localhost:8795/login',
+        cache: loginCache,
+        log,
+        fetch: options.oidc.fetch,
+      })
+    : null;
+  const ldap = options.ldap
+    ? new LdapLogin({
+        settings: options.ldap.settings,
+        log,
+        ...(options.ldap.connect ? { connect: options.ldap.connect } : {}),
+      })
+    : null;
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
     secureCookies: false,
     oauth: options.oauth ?? null,
+    // The login links and failed logins in memory, as one jukecord keeps them (each test server its own).
+    cache: loginCache,
+    oidc,
+    ldap,
     log,
     // Real time for logins: the session repository uses the store's clock, which the tests keep fixed.
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -378,6 +411,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       logFiles: 5,
       backupDir: path.join(dataDir, 'backups'),
       discordMode: !options.browserOnly,
+      loginSettings: { oidc: options.oidc?.settings ?? null, ldap: options.ldap?.settings ?? null },
+      loginChecks: options.loginChecks ?? null,
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });
@@ -413,6 +448,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     close: async () => {
       await web.close();
       await sharedCache.close();
+      await loginCache.close();
       await store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },

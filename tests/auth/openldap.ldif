@@ -1,0 +1,89 @@
+# The directory of the end-to-end logins: people, groups that give each of jukecord's levels, a group inside a
+# group (which only Active Directory's rule follows), a name made of filter syntax, and jukecord's service account.
+# Every name and password is made up. Loaded into osixia/openldap (base dc=example,dc=org), whose memberOf overlay
+# keeps memberOf for groupOfUniqueNames.
+
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: ou=services,dc=example,dc=org
+objectClass: organizationalUnit
+ou: services
+
+dn: cn=jukecord,ou=services,dc=example,dc=org
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: jukecord
+description: jukecord's service account: finds people and reads their groups
+userPassword: jukecord-e2e-service-password
+
+dn: uid=ada,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: ada
+cn: Ada Admin
+sn: Admin
+displayName: Ada
+userPassword: ada-e2e-password
+
+dn: uid=dan,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: dan
+cn: Dan Deejay
+sn: Deejay
+userPassword: dan-e2e-password
+
+dn: uid=lee,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: lee
+cn: Lee Listener
+sn: Listener
+displayName: Lee
+userPassword: lee-e2e-password
+
+dn: uid=nia,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: nia
+cn: Nia Nightshift
+sn: Nightshift
+userPassword: nia-e2e-password
+
+dn: uid=sam,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: sam
+cn: Sam Stranger
+sn: Stranger
+userPassword: sam-e2e-password
+
+dn: uid=sta*r,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: sta*r
+cn: Star Name
+sn: Name
+userPassword: star-e2e-password
+
+dn: cn=night-shift,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: night-shift
+uniqueMember: uid=nia,ou=people,dc=example,dc=org
+
+dn: cn=jukecord-admins,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: jukecord-admins
+uniqueMember: uid=ada,ou=people,dc=example,dc=org
+
+dn: cn=jukecord-djs,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: jukecord-djs
+uniqueMember: uid=dan,ou=people,dc=example,dc=org
+uniqueMember: uid=sta*r,ou=people,dc=example,dc=org
+
+dn: cn=jukecord-listeners,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: jukecord-listeners
+uniqueMember: uid=lee,ou=people,dc=example,dc=org
+uniqueMember: cn=night-shift,ou=groups,dc=example,dc=org

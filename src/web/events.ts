@@ -22,7 +22,7 @@
  * after it is newer, as when the state was made in one go.
  */
 import type { WebSocket } from 'ws';
-import type { Access, Principal } from '../app/access.ts';
+import { type Access, hostLike, type Principal, personOf } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
@@ -209,14 +209,14 @@ function guestVoice(voice: ReturnType<Actions['voiceChannels']>): ReturnType<Act
 }
 
 // The context for what one connection may see: its own person (voice channels are listed as they see them in
-// Discord), or the host, who sees them all.
+// Discord), or the host and whoever may do what the host may, who see them all.
 function viewer(client: Client, guildId: string): ActionContext {
   const principal = client.principal;
   return {
     guildId,
-    userId: principal.kind === 'user' ? principal.userId : null,
+    userId: personOf(principal),
     mayControl: false,
-    mayManage: principal.kind === 'host',
+    mayManage: hostLike(principal),
   };
 }
 
@@ -375,7 +375,9 @@ export class EventHub {
     const principal = caller.principal;
     // The person's name and picture are read first: from the caps' check to the connection counted nothing waits, so
     // two connections at once cannot both take the last place.
-    const person = principal.kind === 'user' ? await this.options.users.get(principal.userId) : null;
+    // A Discord user's and a member's name are the users table's (a member's key is theirs in the data).
+    const personId = personOf(principal);
+    const person = personId === null ? null : await this.options.users.get(personId);
     // Gone while the name was read: nothing to take, and no goodbye will come for it.
     if (socket.readyState !== socket.OPEN) return false;
     // The host is not held to the per-login and per-address caps: it is the machine's own, and its tabs and scripts
@@ -427,18 +429,17 @@ export class EventHub {
           ? { id: null, name: 'Guest', avatar: null, guest: true }
           : principal.kind === 'friend'
             ? { id: null, name: 'Friend', avatar: null, friend: true }
-            : { id: principal.userId, name: person?.name ?? principal.userId, avatar: person?.avatar ?? null };
+            : { id: personId, name: person?.name ?? personId ?? '', avatar: person?.avatar ?? null };
     const client: Client = {
       socket,
       caller,
       principal,
       who,
+      // A Discord user and a member by who they are, however many tabs; the host as one; each friend's and guest's
+      // browser on its own.
       person:
-        principal.kind === 'user'
-          ? principal.userId
-          : principal.kind === 'host'
-            ? 'host'
-            : `${principal.kind} ${caller.sessionHash ?? caller.tokenId ?? ''}`,
+        personId ??
+        (principal.kind === 'host' ? 'host' : `${principal.kind} ${caller.sessionHash ?? caller.tokenId ?? ''}`),
       gzip: options.gzip === true,
       login,
       address,

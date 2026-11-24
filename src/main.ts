@@ -18,6 +18,9 @@ import { runDoctor } from './app/doctor.ts';
 import { busPart, cachePart, databasePart, discordPart, Health, toolPart } from './app/health.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { LoginChecks } from './auth/check.ts';
+import { LdapLogin } from './auth/ldap.ts';
+import { OidcLogin } from './auth/oidc.ts';
 import { MemoryCache } from './cache/memory.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
@@ -390,11 +393,29 @@ async function main(): Promise<number> {
   const publicUrl = config.publicUrl ?? `http://localhost:${config.publishedPort}`;
   const access = new Access({ settings: store.settings, directory });
   const { clientId, clientSecret } = config.discord;
+  // Logging in through the host's identity provider (OIDC), when it is set up: the provider sends people back to the
+  // public address, and after logging out there to the login page.
+  const oidcSettings = config.auth.oidc;
+  const oidc = oidcSettings
+    ? new OidcLogin({
+        settings: oidcSettings,
+        redirectUri: `${publicUrl}/auth/sso/callback`,
+        afterLogout: `${publicUrl}/login`,
+        cache: sharedCache,
+        log: log.child('sso'),
+      })
+    : null;
+  // Logging in with an account of the host's directory (LDAP, Active Directory), when it is set up.
+  const ldap = config.auth.ldap ? new LdapLogin({ settings: config.auth.ldap, log: log.child('directory') }) : null;
   const auth = new Auth({
     store,
     hostToken: ensureHostToken(config.dataDir),
     secureCookies: publicUrl.startsWith('https://'),
     oauth: clientId && clientSecret ? { clientId, clientSecret, redirectUri: `${publicUrl}/auth/callback` } : null,
+    // The login links not used yet and the failed logins: this process's memory, all one process needs.
+    cache: sharedCache,
+    oidc,
+    ldap,
     log: log.child('auth'),
   });
   const web: WebServer = await createWebServer({
@@ -431,6 +452,15 @@ async function main(): Promise<number> {
       logFiles: config.log.files,
       backupDir: path.join(config.dataDir, 'backups'),
       backupKeep: config.backups.keep,
+      loginSettings: config.auth,
+      // The login settings' tests read the environment jukecord started with, under the values a test brings.
+      loginChecks: new LoginChecks({
+        env: process.env,
+        cwd: process.cwd(),
+        redirectUri: `${publicUrl}/auth/sso/callback`,
+        afterLogout: `${publicUrl}/login`,
+        log: log.child('auth-test'),
+      }),
       discordMode: bot !== null,
       doctor: () =>
         runDoctor({

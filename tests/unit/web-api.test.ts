@@ -280,7 +280,7 @@ describe('the HTTP API', () => {
     assert.equal((await from('10.0.0.7', {}, api('/status'))).statusCode, 200);
     assert.equal((await from('10.0.0.7')).statusCode, 401);
     // A login link the host just made works from there too; a used one says the address is blocked.
-    const link = server.auth.createLink();
+    const link = await server.auth.createLink();
     const used = await inject({ method: 'GET', url: `/auth/link/${link.code}`, remoteAddress: '10.0.0.7' });
     assert.equal(used.headers.location, '/');
     assert.match(String(used.headers['set-cookie']), new RegExp(`${SESSION_COOKIE}=`));

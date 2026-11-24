@@ -16,7 +16,15 @@ import type { Players } from '../core/players.ts';
 import type { InsertAt, QueueService } from '../core/queue.ts';
 import { plainReason, REASONS } from '../core/reasons.ts';
 import { isPreset, SOUND_PRESETS, type Sound, VOLUME_MAX } from '../core/sound.ts';
-import type { HistoryEntry, LikedTrack, NewTrack, Playlist, QueueItem, Track } from '../core/types.ts';
+import {
+  discordUserId,
+  type HistoryEntry,
+  type LikedTrack,
+  type NewTrack,
+  type Playlist,
+  type QueueItem,
+  type Track,
+} from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { type AddressCheck, AddressError } from '../media/address.ts';
 import { BATCH_MOST, BatchLookups } from '../media/batch.ts';
@@ -869,7 +877,9 @@ export class Actions {
     const voice = this.options.voice;
     if (!voice)
       throw new ActionError('unavailable', 'jukecord runs without a Discord bot here, so it cannot join voice');
-    return voice.join(context.guildId, channelId, context.userId);
+    // The person's own channel and whether they may go to the one named are Discord's to say: a member of the host's
+    // identity provider is no Discord user, and joins as a friend does.
+    return voice.join(context.guildId, channelId, discordUserId(context.userId));
   }
 
   async leave(context: ActionContext): Promise<void> {
@@ -889,8 +899,10 @@ export class Actions {
     const voice = this.options.voice;
     // Browser-only: there are no channels, which is an answer, not an error (the panel shows "no Discord").
     if (!voice) return { current: null, channels: [] };
-    // The host (no Discord user, may manage) sees every channel; a member, the ones they can see themselves.
-    const viewer = { userId: context.userId, all: context.userId === null && context.mayManage };
+    // The host (no Discord user, may manage) sees every channel, and so does an admin member (no Discord user either);
+    // a Discord user, the ones they can see themselves.
+    const discordUser = discordUserId(context.userId);
+    const viewer = { userId: discordUser, all: discordUser === null && context.mayManage };
     const channels = voice.channels(context.guildId, viewer);
     const current = voice.channel(context.guildId);
     // The bot's own channel is named only to those who can see it; the others learn that it is in voice, not where.

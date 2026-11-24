@@ -6,7 +6,7 @@
  * hover and focus target, every value is in the tooltip and in the table view, and text never takes the bar colour.
  */
 import { ranks } from '../../../src/core/facts.ts';
-import { api, type LogRecord, type Stats, type Status } from '../api.ts';
+import { ApiError, type AuthMethods, api, directoryLogin, type LogRecord, type Stats, type Status } from '../api.ts';
 import { niceTop } from '../axis.ts';
 import { avatarUrl, face, fill, h, icon } from '../dom.ts';
 import { logoMark } from '../logo.ts';
@@ -586,24 +586,80 @@ export function waitingPage(status: Status | null, text: string): HTMLElement {
   );
 }
 
-export function loginPage(status: Status | null, error: string | null): HTMLElement {
+/**
+ * The login page: the mark and the name over one plate of the ways in that are set up here, each a key that says
+ * what it does (through the host's identity provider, with Discord), then the directory account's form, then the
+ * host's own way (a link from its machine). A refusal is one sentence at the top of the plate, in the panel's words;
+ * the directory form's refusals come there without leaving the page.
+ */
+export function loginPage(status: Status | null, methods: AuthMethods | null, error: string | null): HTMLElement {
   const words = t();
   const next = new URLSearchParams(location.search).get('next') ?? '/';
-  // Only the panel's own words for the errors it knows: the address's text is anyone's to write, and the page must not
-  // say it in jukecord's name. Another code says only that the login did not go through.
-  const message = error ? (words.loginErrors[error] ?? words.loginFailed) : null;
   // Out of a listening link (it ended, was revoked, or is full): a guest, who has no login of their own to ask for.
   const guest = error?.startsWith('listen-') ?? false;
+  // What the page says went wrong, in one sentence: only the panel's own words for the codes it knows (the address's
+  // text is anyone's to write, and the page must not say it in jukecord's name); another code says only that the
+  // login did not go through. Hidden while there is nothing to say; the same line takes the form's refusals.
+  const notice = h('div', { class: 'notice tone-bad', role: 'alert', hidden: error === null });
+  const say = (code: string | null) => {
+    notice.hidden = code === null;
+    fill(notice, ...(code === null ? [] : [icon('circle-alert'), words.loginErrors[code] ?? words.loginFailed]));
+  };
+  say(error);
+  // The ways in, the identity provider's first: the first of them is the main key, the brand's blue.
+  const sso = methods?.sso ?? null;
+  const discord = methods?.discord ?? status?.login.discord ?? false;
+  const directory = methods?.directory ?? null;
+  const keys = [
+    sso
+      ? h(
+          'a',
+          { class: 'key login-key', href: `/auth/sso?next=${encodeURIComponent(next)}`, dataset: { way: 'sso' } },
+          icon('key-round'),
+          sso.label ?? words.loginSso,
+        )
+      : null,
+    discord
+      ? h(
+          'a',
+          { class: 'key login-key', href: `/auth/login?next=${encodeURIComponent(next)}`, dataset: { way: 'discord' } },
+          icon('log-in'),
+          words.loginDiscord,
+        )
+      : null,
+  ].filter((key): key is HTMLAnchorElement => key !== null);
+  const form = directory ? directoryForm(directory.label, next, say) : null;
+  const main = keys[0] ?? form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+  main?.classList.add('primary');
+  // The host's own way: a link from the machine jukecord runs on (`jukecord open`), by how it was installed; a guest
+  // whose listening link ended asks whoever shared it for a new one (the host's commands are not theirs).
+  const own = guest
+    ? h('p', { class: 'login-host' }, words.loginGuest)
+    : h(
+        'div',
+        { class: 'login-host' },
+        h('p', null, words.loginHost),
+        h(
+          'dl',
+          { class: 'login-commands' },
+          h('dt', null, words.loginCompose),
+          h('dd', null, h('code', null, './jukecord open')),
+          h('dt', null, words.loginElsewhere),
+          h('dd', null, h('code', null, 'jukecord link')),
+        ),
+      );
+  // The host's way under the others, apart from them by a line; alone, it is what the plate holds.
+  if (keys.length > 0 || form) own.classList.add('apart');
   return h(
     'main',
     { class: 'login' },
     h(
-      'section',
-      { class: 'card' },
+      'div',
+      { class: 'login-stage' },
       h(
         'div',
-        { class: 'brand' },
-        logoMark(40),
+        { class: 'brand login-brand' },
+        logoMark(48),
         h(
           'span',
           { class: 'wordmark' },
@@ -612,28 +668,84 @@ export function loginPage(status: Status | null, error: string | null): HTMLElem
         ),
       ),
       h('h1', { class: 'sr' }, words.loginTitle),
-      message ? h('div', { class: 'notice tone-bad', role: 'alert' }, icon('circle-alert'), message) : null,
-      status?.login.discord
-        ? h(
-            'a',
-            { class: 'key primary login-key', href: `/auth/login?next=${encodeURIComponent(next)}` },
-            icon('log-in'),
-            words.loginDiscord,
-          )
-        : null,
-      // A guest whose listening link ended: a new link from whoever shared it (the host's commands are not theirs).
-      guest ? h('p', null, words.loginGuest) : h('p', null, words.loginHost),
-      // Which command, by how jukecord was installed.
-      guest
-        ? null
-        : h(
-            'dl',
-            { class: 'login-commands' },
-            h('dt', null, words.loginCompose),
-            h('dd', null, h('code', null, './jukecord open')),
-            h('dt', null, words.loginElsewhere),
-            h('dd', null, h('code', null, 'jukecord link')),
-          ),
+      h(
+        'section',
+        { class: 'card login-plate', 'aria-label': words.loginTitle },
+        notice,
+        keys.length > 0 ? h('div', { class: 'login-ways' }, ...keys) : null,
+        // "or" between the keys and the form, when there are both.
+        keys.length > 0 && form ? h('div', { class: 'login-or', role: 'separator' }, words.loginOr) : null,
+        form,
+        own,
+      ),
     ),
   );
+}
+
+// The directory account's form: the name and the password, and the key that sends them. It stays on the page: a
+// refusal is said at the top of the plate (`say`, with the answer's code), the password is cleared and the cursor put
+// where to type again; a login that goes through goes where the person wanted to go.
+function directoryForm(label: string | null, next: string, say: (code: string | null) => void): HTMLFormElement {
+  const words = t();
+  const name = h('input', {
+    id: 'login-user',
+    name: 'username',
+    type: 'text',
+    autocomplete: 'username',
+    autocapitalize: 'none',
+    spellcheck: 'false',
+    required: true,
+    maxlength: '256',
+  });
+  const password = h('input', {
+    id: 'login-password',
+    name: 'password',
+    type: 'password',
+    autocomplete: 'current-password',
+    required: true,
+    maxlength: '1024',
+  });
+  const send = h(
+    'button',
+    { class: 'key login-key', type: 'submit', dataset: { way: 'directory' } },
+    icon('log-in'),
+    h('span', null, label ?? words.loginDirectory),
+  );
+  const form = h(
+    'form',
+    { class: 'login-form', method: 'post', action: '/auth/directory', novalidate: true },
+    h('label', { class: 'login-label', for: 'login-user' }, words.loginUser),
+    h('div', { class: 'field' }, icon('user'), name),
+    h('label', { class: 'login-label', for: 'login-password' }, words.loginPassword),
+    h('div', { class: 'field' }, icon('lock'), password),
+    send,
+  );
+  // A press while one is under way sends nothing more.
+  let sending = false;
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (sending) return;
+    // Both are needed: said here, before anything is sent (an empty password is never sent to a directory).
+    if (name.value.trim() === '' || password.value === '') {
+      say('invalid');
+      (name.value.trim() === '' ? name : password).focus();
+      return;
+    }
+    sending = true;
+    send.setAttribute('aria-busy', 'true');
+    // The key says it is working: its icon turns, its words stay (the key keeps its width and place).
+    send.firstElementChild?.replaceWith(icon('loader-circle', 'spin'));
+    try {
+      location.assign(await directoryLogin(name.value, password.value, next));
+    } catch (error) {
+      say(error instanceof ApiError && error.code in words.loginErrors ? error.code : 'directory-down');
+      // The password again, from the start; the name stays (a wrong name is typed over).
+      password.value = '';
+      password.focus();
+      send.firstElementChild?.replaceWith(icon('log-in'));
+      send.removeAttribute('aria-busy');
+      sending = false;
+    }
+  };
+  return form;
 }

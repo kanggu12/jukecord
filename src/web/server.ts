@@ -14,8 +14,12 @@ import zlib from 'node:zlib';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { hostLike, personOf } from '../app/access.ts';
 import { ActionError, likesOwner } from '../app/actions.ts';
 import type { Health } from '../app/health.ts';
+import { LdapError } from '../auth/ldap.ts';
+import { levelOf, sameLdapGroup, sameOidcGroup } from '../auth/levels.ts';
+import { OidcError, SSO_COOKIE } from '../auth/oidc.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
@@ -30,7 +34,17 @@ import { MetricsRegistry } from '../metrics/registry.ts';
 import { httpMetrics, methodLabel, routeLabel, statusClass } from '../metrics/web.ts';
 import { StoreError } from '../store/store.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
-import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
+import {
+  addressFailures,
+  addressKey,
+  type Caller,
+  CSRF_HEADER,
+  cookie,
+  nameFailures,
+  parseCookies,
+  SESSION_COOKIE,
+  safeNext,
+} from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
@@ -219,6 +233,11 @@ function unfit(error: Unfit, request: FastifyRequest): string {
   return `${name} ${first.message ?? 'is not right'}`;
 }
 
+// What went wrong, in the words of its error, for the log.
+function reasonOf(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
 // The answer for an error, in the one shape every API error has.
 function failure(reply: FastifyReply, code: string, message: string): FastifyReply {
   return reply.code(STATUS[code] ?? 500).send({ error: { code, message } });
@@ -254,6 +273,12 @@ function forbiddenFor(access: Permission, caller: Caller): string {
       ? "a friend cannot change the server's settings or tokens"
       : 'a friend who may only look and listen cannot change the music';
   }
+  // A member's level is their groups' word: said so, with who can change it.
+  if (caller.principal.kind === 'member') {
+    return access === 'admin'
+      ? "your groups let you change the music, not the server's settings or tokens"
+      : 'your groups let you look and listen, not change the music';
+  }
   return `this needs ${access === 'admin' ? 'an' : 'a'} ${access} token`;
 }
 
@@ -263,7 +288,8 @@ function permission(access: Permission, caller: Caller | null): 'ok' | 'unauthor
   if (access === 'read') return 'ok';
   if (access === 'control') return caller.scope === 'read' ? 'forbidden' : 'ok';
   if (access === 'admin') return caller.scope === 'admin' ? 'ok' : 'forbidden';
-  return caller.principal.kind === 'host' && caller.scope === 'admin' ? 'ok' : 'forbidden';
+  // What only the host may do: the host, and a login whose groups gave it the admin level (src/app/access.ts).
+  return hostLike(caller.principal) && caller.scope === 'admin' ? 'ok' : 'forbidden';
 }
 
 export async function createWebServer(options: WebServerOptions): Promise<WebServer> {
@@ -581,9 +607,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const session = request.headers.cookie?.includes(`${SESSION_COOKIE}=`) ?? false;
     // A request without any credential is not a failed login (a public page, or a "log in first").
     if (caller || (!request.headers.authorization && !session)) return { caller, blocked: false };
-    // Asked before this failure counts, as before: the attempt after the twentieth is the first one refused.
-    const blocked = auth.limiter.blocked(request.ip);
-    auth.limiter.fail(request.ip);
+    // Counted, and whether the address was blocked before this failure, as before: the attempt after the twentieth is
+    // the first one refused.
+    const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
     if (reply && session) reply.header('set-cookie', await auth.endSession(null));
     return { caller: null, blocked };
   };
@@ -646,8 +672,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // (a household, an office, Docker's bridge, a proxy not trusted): counted by it, fifteen panels opening at
         // once behind one were refused, and a refused /me shows the panel's start-failed page.
         if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
+          const person = caller ? personOf(caller.principal) : null;
           const keys = caller
-            ? [caller.principal.kind === 'user' ? `person ${caller.principal.userId}` : `login ${loginKey(caller)}`]
+            ? [person !== null ? `person ${person}` : `login ${loginKey(caller)}`]
             : [`address ${addressKey(request.ip)}`];
           // A search, which starts yt-dlp, is held to its own rate as well, by the same keys (both must have a token).
           const searching = name === 'search';
@@ -890,7 +917,10 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (error || !code || !state) return reply.redirect('/login?error=cancelled');
       // Refused before Discord is asked: whether this login works is only known from Discord's answer, and a blocked
       // address must not be able to make jukecord ask Discord over and over (Discord limits how often it may).
-      if (auth.limiter.blocked(request.ip)) return reply.redirect('/login?error=too-many');
+      if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+        auth.counted('discord', 'blocked');
+        return reply.redirect('/login?error=too-many');
+      }
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
         await deps.store.users.upsert(person);
@@ -898,34 +928,180 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         deps.access.forget(person.id);
         // Only people in a server the bot is in get in: the panel is for those servers.
         const guilds = await deps.access.guilds({ kind: 'user', userId: person.id });
-        if (guilds.length === 0) return reply.redirect('/login?error=not-a-member');
+        if (guilds.length === 0) {
+          auth.counted('discord', 'denied');
+          return reply.redirect('/login?error=not-a-member');
+        }
         reply.header('set-cookie', [
           auth.clearOAuthCookie(),
           await auth.startSession({ kind: 'user', userId: person.id }),
         ]);
+        auth.counted('discord', 'ok');
         log.info('logged in with Discord', { user: person.name });
         return reply.redirect(next);
       } catch (failure) {
         // Just started and not connected to Discord yet: not the person's failure, and not counted as one.
-        if (failure instanceof ActionError && failure.code === 'unavailable')
+        if (failure instanceof ActionError && failure.code === 'unavailable') {
+          auth.counted('discord', 'unavailable');
           return reply.redirect('/login?error=connecting');
-        auth.limiter.fail(request.ip);
+        }
+        await auth.limiter.fail([addressFailures(request.ip)]);
+        auth.counted('discord', 'failed');
         log.info('a Discord login failed', { reason: failure instanceof Error ? failure.message : String(failure) });
         return reply.redirect('/login?error=failed');
       }
     },
   );
+  // Logging in through the host's identity provider (OIDC): off to the provider, and back. Where the person wanted to
+  // go travels with the login on the cache, checked to be a path on this site.
+  app.get<{ Querystring: { next?: string } }>('/auth/sso', async (request, reply) => {
+    const oidc = auth.oidc;
+    if (!oidc) return reply.redirect('/login?error=no-sso');
+    // Held to a rate per address: each start keeps a login's state on the cache for ten minutes.
+    if (!(await auth.mayStartSso(request.ip))) {
+      auth.counted('oidc', 'blocked');
+      return reply.redirect('/login?error=sso-too-fast');
+    }
+    try {
+      const started = await oidc.start(safeNext(typeof request.query.next === 'string' ? request.query.next : '/'));
+      const tie = cookie(started.cookie.name, started.cookie.value, {
+        maxAgeSeconds: started.cookie.maxAgeMs / 1000,
+        secure: auth.secure,
+      });
+      return reply.header('set-cookie', tie).redirect(started.location);
+    } catch (failure) {
+      // The provider's document could not be read: its trouble, said on the login page; the next try asks again.
+      auth.counted('oidc', 'unavailable');
+      log.warn('could not start a login through SSO', { reason: reasonOf(failure) });
+      return reply.redirect('/login?error=sso-unavailable');
+    }
+  });
+  app.get('/auth/sso/callback', async (request, reply) => {
+    // The cookie that tied the login to this browser has done its job, whatever happens next.
+    reply.header('set-cookie', cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }));
+    const oidc = auth.oidc;
+    const settings = deps.loginSettings?.oidc;
+    if (!oidc || !settings) return reply.redirect('/login?error=no-sso');
+    // Refused before the provider is asked: a blocked address must not be able to make jukecord trade codes on and on.
+    if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+      auth.counted('oidc', 'blocked');
+      return reply.redirect('/login?error=too-many');
+    }
+    // The provider's answer, as it put it after the "?".
+    const query = new URLSearchParams(request.raw.url?.split('?')[1] ?? '');
+    try {
+      const { identity, next } = await oidc.finish(query, parseCookies(request.headers.cookie).get(SSO_COOKIE));
+      const level = levelOf(identity.groups, settings.groups, sameOidcGroup);
+      // Their Discord user, when the provider names one and a bot is there to ask about it (deps.directory).
+      const principal = await auth.admit('oidc', identity, level, deps.directory() !== null);
+      if (!principal) {
+        auth.counted('oidc', 'denied');
+        log.info('refused a login through SSO: in none of the groups jukecord lets in', {
+          user: identity.name,
+          groups: identity.groups.length,
+        });
+        return reply.redirect('/login?error=no-group');
+      }
+      // Asked afresh at a Discord user's login: someone refused a minute ago may have joined a server since.
+      if (principal.kind === 'user') deps.access.forget(principal.userId);
+      reply.header('set-cookie', [
+        cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }),
+        await auth.startSession(principal),
+      ]);
+      auth.counted('oidc', 'ok');
+      log.info('logged in through SSO', {
+        user: identity.name,
+        level: level ?? undefined,
+        ...(principal.kind === 'user' ? { discord: true } : {}),
+      });
+      return reply.redirect(next);
+    } catch (failure) {
+      const code = failure instanceof OidcError ? failure.code : 'failed';
+      // The provider not answering is not the person's failure, nor is turning back there; a state that is no login
+      // of this browser and a code the provider refused are counted, as any failed login is.
+      if (code === 'expired' || code === 'failed') await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('oidc', code === 'unavailable' ? 'unavailable' : code === 'cancelled' ? 'denied' : 'failed');
+      log.info('a login through SSO did not go through', { reason: reasonOf(failure) });
+      return reply.redirect(`/login?error=sso-${code}`);
+    }
+  });
+
+  // Logging in with an account of the host's directory (LDAP, Active Directory): the login page's form sends the name
+  // and the password here, from the panel's own pages only (another site cannot log a browser in as someone). Held
+  // back per address and per name before the directory is asked, so neither a guess at one account from many places
+  // nor many accounts from one place goes fast.
+  app.post<{ Body: { username?: unknown; password?: unknown; next?: unknown } }>(
+    '/auth/directory',
+    async (request, reply) => {
+      if (!sameOrigin(request, options.publicUrl)) {
+        return failure(reply, 'forbidden', 'connections come from the panel only');
+      }
+      const ldap = auth.ldap;
+      const settings = deps.loginSettings?.ldap;
+      if (!ldap || !settings)
+        return failure(reply, 'not-found', 'logging in with a directory account is not set up here');
+      const body = request.body ?? {};
+      const username = typeof body.username === 'string' ? body.username : '';
+      const password = typeof body.password === 'string' ? body.password : '';
+      const refused = (status: number, code: string, message: string) =>
+        reply.code(status).send({ error: { code, message } });
+      const keys = [addressFailures(request.ip), nameFailures('ldap', username)];
+      if (await auth.limiter.blocked(keys)) {
+        auth.counted('ldap', 'blocked');
+        return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+      }
+      try {
+        const identity = await ldap.login(username, password);
+        const level = levelOf(identity.groups, settings.groups, sameLdapGroup);
+        const principal = await auth.admit('ldap', identity, level, false);
+        if (!principal) {
+          auth.counted('ldap', 'denied');
+          log.info('refused a directory login: in none of the groups jukecord lets in', {
+            user: identity.name,
+            groups: identity.groups.length,
+          });
+          return refused(403, 'no-group', 'your account is in none of the groups jukecord lets in');
+        }
+        auth.counted('ldap', 'ok');
+        log.info('logged in with a directory account', { user: identity.name, level: level ?? undefined });
+        const next = safeNext(typeof body.next === 'string' ? body.next : '/');
+        return reply.header('set-cookie', await auth.startSession(principal)).send({ ok: true, next });
+      } catch (failure) {
+        const code = failure instanceof LdapError ? failure.code : 'unavailable';
+        // The name or password the person typed is never in the log, nor in what the panel is told: only why.
+        log.info('a directory login did not go through', { reason: code, detail: reasonOf(failure) });
+        if (code === 'invalid') return refused(400, 'invalid', 'type your name and your password');
+        if (code === 'unavailable') {
+          auth.counted('ldap', 'unavailable');
+          return refused(503, 'directory-down', 'the directory did not answer; try again in a moment');
+        }
+        if (code === 'ambiguous') {
+          auth.counted('ldap', 'denied');
+          return refused(409, 'ambiguous', 'the directory has more than one account by that name');
+        }
+        // A refused name or password counts against the address and the name; the try after the twentieth is refused.
+        const blocked = await auth.limiter.fail(keys);
+        auth.counted('ldap', blocked ? 'blocked' : 'failed');
+        if (blocked) return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+        if (code === 'expired') return refused(403, 'password-expired', 'your password has expired; change it first');
+        if (code === 'disabled') return refused(403, 'account-disabled', 'your account is turned off or locked');
+        return refused(401, 'wrong-password', 'wrong name or password');
+      }
+    },
+  );
+
   // A one-time login link from `jukecord open`: the browser becomes the host, or the host's friend with the view or
   // control the link was made for.
   app.get<{ Params: { code: string } }>('/auth/link/:code', async (request, reply) => {
     // A link that works logs in even from a blocked address (it was made by the host a moment ago); one that does not
     // counts as a failure, and from a blocked address says so.
-    const scope = auth.useLink(request.params.code);
+    const scope = await auth.useLink(request.params.code);
     if (scope === null) {
-      const blocked = auth.limiter.blocked(request.ip);
-      auth.limiter.fail(request.ip);
+      const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('link', blocked ? 'blocked' : 'failed');
       return reply.redirect(blocked ? '/login?error=too-many' : '/login?error=link');
     }
+    auth.counted('link', 'ok');
     log.info(scope === 'admin' ? 'logged in with a login link' : 'a friend logged in with a login link', { scope });
     return reply.header('set-cookie', await auth.startLinkSession(scope)).redirect('/');
   });
@@ -941,14 +1117,18 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const used = await auth.useListenLink(code, caller);
     if (used.kind === 'invalid') {
       // A code that does not work is a failed login like any other (a guess at the codes is held back).
-      const blocked = auth.limiter.blocked(request.ip);
-      auth.limiter.fail(request.ip);
+      const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('listen', blocked ? 'blocked' : 'failed');
       return blocked
         ? failure(reply, 'too-many', 'too many failed logins; wait ten minutes')
         : failure(reply, 'not-found', 'this listening link has ended or does not exist');
     }
-    if (used.kind === 'full') return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    if (used.kind === 'full') {
+      auth.counted('listen', 'denied');
+      return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    }
     if (used.kind === 'already') return reply.send({ ok: true });
+    auth.counted('listen', 'ok');
     log.info('a guest came in with a listening link', { link: used.linkId, guild: used.guildId });
     return reply.header('set-cookie', used.cookie).send({ ok: true });
   });
@@ -961,10 +1141,17 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (caller?.principal.kind === 'user') deps.access.forget(caller.principal.userId);
     // This browser's live connection ends with its login.
     if (caller?.sessionHash) hub.end((other) => other.sessionHash === caller.sessionHash);
-    return reply
-      .header('set-cookie', await auth.endSession(caller))
-      .code(204)
-      .send();
+    const ended = await auth.endSession(caller);
+    // A login through the host's identity provider logs out there too, when it offers that: the panel goes where the
+    // answer says, and the provider sends it back to the login page. Every other logout answers nothing, as before.
+    const principal = caller?.principal;
+    const throughSso =
+      principal !== undefined &&
+      ((principal.kind === 'member' && principal.provider === 'oidc') ||
+        (principal.kind === 'user' && principal.level !== undefined));
+    const next = throughSso ? await auth.oidc?.logoutUrl() : null;
+    if (next) return reply.header('set-cookie', ended).send({ next });
+    return reply.header('set-cookie', ended).code(204).send();
   });
 
   // Health: alive (the process answers, nothing checked: a liveness probe must not fail for a database that is down),

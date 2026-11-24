@@ -10,6 +10,8 @@ import type { Access } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions, type Directory, type SettingsView } from '../app/actions.ts';
 import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import type { LoginChecks } from '../auth/check.ts';
+import type { AuthSettings } from '../auth/settings.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import { searchWords } from '../media/search.ts';
 import type { Store } from '../store/store.ts';
@@ -36,6 +38,10 @@ export interface HandlerDeps {
   readonly discordMode: boolean;
   /** How many backups stay in the folder (JUKECORD_BACKUP_KEEP; seven by default). */
   readonly backupKeep?: number;
+  /** The settings of logging in through the host's identity provider and directory (who gets which level). */
+  readonly loginSettings?: AuthSettings;
+  /** Tests of those settings, as they are or with values not saved yet (null: no test can run here). */
+  readonly loginChecks?: LoginChecks | null;
 }
 
 // The parts of a request, typed from the operation's schemas.
@@ -159,11 +165,12 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   me: async ({ caller, deps }) => {
     const { principal, scope, csrf } = who(caller);
     const bot = deps.directory()?.self() ?? null;
+    const none = { guest: null, member: null };
     if (principal.kind === 'host')
-      return { kind: 'host' as const, id: null, name: 'Host', avatar: null, scope, csrf, bot, guest: null };
+      return { kind: 'host' as const, id: null, name: 'Host', avatar: null, scope, csrf, bot, ...none };
     // A friend and a guest have no name of their own (the panel says which they are in the person's language).
     if (principal.kind === 'friend')
-      return { kind: 'friend' as const, id: null, name: 'Friend', avatar: null, scope, csrf, bot, guest: null };
+      return { kind: 'friend' as const, id: null, name: 'Friend', avatar: null, scope, csrf, bot, ...none };
     if (principal.kind === 'guest') {
       return {
         kind: 'guest' as const,
@@ -174,6 +181,22 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
         csrf,
         bot,
         guest: { guildId: principal.guildId, expiresAt: principal.expiresAt },
+        member: null,
+      };
+    }
+    // A member is named by what their provider said at their last login (kept with their key in the users table).
+    if (principal.kind === 'member') {
+      const person = await deps.store.users.get(principal.memberId);
+      return {
+        kind: 'member' as const,
+        id: principal.memberId,
+        name: person?.name ?? principal.memberId,
+        avatar: null,
+        scope,
+        csrf,
+        bot,
+        guest: null,
+        member: { provider: principal.provider, level: principal.level },
       };
     }
     const person = await deps.store.users.get(principal.userId);
@@ -186,6 +209,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       csrf,
       bot,
       guest: null,
+      // A Discord user who logged in through OIDC: the level their groups gave them, too.
+      member: principal.level ? { provider: 'oidc' as const, level: principal.level } : null,
     };
   },
   guilds: async ({ caller, deps }) => (await deps.access.guilds(who(caller).principal)).map((guild) => ({ ...guild })),
@@ -214,9 +239,9 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       },
       deps.logFiles,
     ).map((record) => ({ ...record })),
-  'login-link': ({ query, deps }) => {
+  'login-link': async ({ query, deps }) => {
     const scope = query.scope ?? 'admin';
-    const link = deps.auth.createLink(scope);
+    const link = await deps.auth.createLink(scope);
     return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt, scope };
   },
   backup: async ({ deps }) => {
@@ -228,6 +253,29 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   doctor: async ({ deps }) => {
     const report = await deps.doctor();
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
+  },
+  // The login page's ways in: Discord, the identity provider and the directory, each when it is set up.
+  'auth-methods': ({ deps }) => ({
+    discord: deps.auth.discordLogin,
+    sso: deps.auth.oidc ? { label: deps.auth.oidc.label } : null,
+    directory: deps.auth.ldap ? { label: deps.auth.ldap.label } : null,
+  }),
+  'auth-test-oidc': async ({ body, deps }) => {
+    const checks = deps.loginChecks;
+    if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
+    const answer = await checks.oidc(body.settings ?? {});
+    return { ok: answer.ok, checks: answer.checks.map((check) => ({ ...check })) };
+  },
+  'auth-test-ldap': async ({ body, deps }) => {
+    const checks = deps.loginChecks;
+    if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
+    const answer = await checks.ldap(body.username, body.settings ?? {});
+    return {
+      ok: answer.ok,
+      checks: answer.checks.map((check) => ({ ...check })),
+      groups: answer.groups ? [...answer.groups] : null,
+      level: answer.level,
+    };
   },
 
   wrapped: async ({ context, query, deps }) =>
