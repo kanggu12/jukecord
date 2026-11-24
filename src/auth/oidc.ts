@@ -315,8 +315,12 @@ export class OidcLogin {
     }
   }
 
-  /** Checks the settings against the provider without logging anyone in: what was found, or the failure. */
-  async test(): Promise<Check[]> {
+  /**
+   * Checks the settings against the provider without logging anyone in: what was found, or the failure. With the
+   * secret in use withheld (a test that moved the issuer or the client), the client is not tried: nothing is sent to
+   * its token endpoint.
+   */
+  async test(options: { secretWithheld?: boolean } = {}): Promise<Check[]> {
     const checks: Check[] = [];
     let configuration: client.Configuration;
     try {
@@ -355,30 +359,39 @@ export class OidcLogin {
       checks.push({ name: 'signing keys', status: 'fail', detail: said(error) });
     }
     // The client: a code no one was given, traded at the token endpoint. A provider that knows the client says the
-    // code is not valid (invalid_grant); one that does not, that the client is not (invalid_client).
-    try {
-      await client.genericGrantRequest(configuration, 'authorization_code', {
-        code: `jukecord-test-${randomBytes(12).toString('base64url')}`,
-        redirect_uri: this.options.redirectUri,
-        code_verifier: client.randomPKCECodeVerifier(),
+    // code is not valid (invalid_grant); one that does not, that the client is not (invalid_client). Not tried without
+    // the secret in use, which goes only to the issuer and client it is for.
+    if (options.secretWithheld) {
+      checks.push({
+        name: 'client',
+        status: 'warn',
+        detail:
+          'not tried: give JUKECORD_OIDC_CLIENT_SECRET to test another issuer or client (the secret in use goes only where it goes now)',
       });
-      checks.push({ name: 'client', status: 'warn', detail: 'the provider took a made-up code' });
-    } catch (error) {
-      const code = error instanceof client.ResponseBodyError ? error.error : null;
-      if (code === 'invalid_grant')
-        checks.push({
-          name: 'client',
-          status: 'ok',
-          detail: `the provider knows ${this.options.settings.clientId} and its secret`,
+    } else
+      try {
+        await client.genericGrantRequest(configuration, 'authorization_code', {
+          code: `jukecord-test-${randomBytes(12).toString('base64url')}`,
+          redirect_uri: this.options.redirectUri,
+          code_verifier: client.randomPKCECodeVerifier(),
         });
-      else if (code === 'invalid_client' || code === 'unauthorized_client')
-        checks.push({
-          name: 'client',
-          status: 'fail',
-          detail: `the provider refused the client ID or its secret (${said(error)})`,
-        });
-      else checks.push({ name: 'client', status: unreachable(error) ? 'fail' : 'warn', detail: said(error) });
-    }
+        checks.push({ name: 'client', status: 'warn', detail: 'the provider took a made-up code' });
+      } catch (error) {
+        const code = error instanceof client.ResponseBodyError ? error.error : null;
+        if (code === 'invalid_grant')
+          checks.push({
+            name: 'client',
+            status: 'ok',
+            detail: `the provider knows ${this.options.settings.clientId} and its secret`,
+          });
+        else if (code === 'invalid_client' || code === 'unauthorized_client')
+          checks.push({
+            name: 'client',
+            status: 'fail',
+            detail: `the provider refused the client ID or its secret (${said(error)})`,
+          });
+        else checks.push({ name: 'client', status: unreachable(error) ? 'fail' : 'warn', detail: said(error) });
+      }
     checks.push({
       name: 'redirect',
       status: 'ok',

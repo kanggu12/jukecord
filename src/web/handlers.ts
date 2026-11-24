@@ -83,6 +83,16 @@ function who(caller: Caller | null): Caller {
 
 const OK = { ok: true as const };
 
+// The values a settings test brings in place of the saved ones: the host's alone. Whoever else may do what the host
+// may (an admin member) tests the settings as they are saved: values not saved yet can point a test, and what it
+// sends, anywhere.
+function unsaved(caller: Caller | null, values: Readonly<Record<string, string>> | undefined): Record<string, string> {
+  if (!values || Object.keys(values).length === 0) return {};
+  if (caller?.principal.kind !== 'host')
+    throw new ActionError('forbidden', 'only the host can test settings not saved yet');
+  return { ...values };
+}
+
 /** Every operation's handler; a missing one fails the type check. */
 export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]> } = {
   'now-playing': async ({ context, deps }) => deps.presenter.player(await deps.actions.nowPlaying(context)),
@@ -268,16 +278,16 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     sso: deps.auth.oidc ? { label: deps.auth.oidc.label } : null,
     directory: deps.auth.ldap ? { label: deps.auth.ldap.label } : null,
   }),
-  'auth-test-oidc': async ({ body, deps }) => {
+  'auth-test-oidc': async ({ caller, body, deps }) => {
     const checks = deps.loginChecks;
     if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
-    const answer = await checks.oidc(body.settings ?? {});
+    const answer = await checks.oidc(unsaved(caller, body.settings));
     return { ok: answer.ok, checks: answer.checks.map((check) => ({ ...check })) };
   },
-  'auth-test-ldap': async ({ body, deps }) => {
+  'auth-test-ldap': async ({ caller, body, deps }) => {
     const checks = deps.loginChecks;
     if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
-    const answer = await checks.ldap(body.username, body.settings ?? {});
+    const answer = await checks.ldap(body.username, unsaved(caller, body.settings));
     return {
       ok: answer.ok,
       checks: answer.checks.map((check) => ({ ...check })),
