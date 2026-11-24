@@ -15,6 +15,7 @@ import { type AlertSink, Alerts, leftLoopAlert, restartedAlert, turnedAwayAlert 
 import { Autoplay } from './app/autoplay.ts';
 import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
+import { busPart, cachePart, databasePart, discordPart, Health, toolPart } from './app/health.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
 import { MemoryCache } from './cache/memory.ts';
@@ -351,6 +352,20 @@ async function main(): Promise<number> {
     guilds: () => bot?.guilds().length ?? 0,
     voice: () => bot?.voice.states() ?? new Map(),
   });
+  // Whether jukecord can serve, part by part (/readyz and the metrics): the parts it cannot serve without, and the
+  // ones it reports without depending on them (Discord, when there is a bot, and the media programs).
+  const health = new Health({
+    parts: [
+      databasePart(store),
+      busPart('in-process'),
+      cachePart(sharedCache),
+      ...(bot ? [discordPart(() => bot.gateway())] : []),
+      toolPart('ffmpeg', tools, () => ffmpeg.about()),
+      toolPart('yt-dlp', tools, () => ytdlp.version()),
+    ],
+    discord: () => bot?.ready() ?? false,
+    metrics: registry,
+  });
   // What runs: the version, this process's role (one process does it all) and its backends.
   describeService(registry, {
     version: VERSION,
@@ -400,8 +415,7 @@ async function main(): Promise<number> {
     behind: () => loop.behind,
     metrics: registry,
     metricsToken: config.metrics.token,
-    ready: () => store.isOpen(),
-    discordReady: () => bot?.ready() ?? false,
+    health,
     // Connections turned away at a cap are jukecord's trouble, told to the alerts channels.
     turnedAway: (away) => void alerts.raise(turnedAwayAlert(away)),
     deps: {

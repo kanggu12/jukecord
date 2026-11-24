@@ -14,7 +14,9 @@ import {
   type RoleInfo,
   type VoiceControl,
 } from '../../src/app/actions.ts';
+import { busPart, cachePart, databasePart, discordPart, Health, type HealthPart } from '../../src/app/health.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
@@ -193,6 +195,8 @@ export interface TestServerOptions {
   readonly searched?: Record<string, NewTrack[]>;
   /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN). */
   readonly metricsToken?: string;
+  /** More parts for /readyz to check, beside the database, the bus, the cache and Discord. */
+  readonly parts?: readonly HealthPart[];
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -314,6 +318,19 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     voice: () => new Map(options.browserOnly ? [] : [['ready', voice.current.size]]),
   });
   const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log, metrics });
+  // Readiness as main.ts makes it, the media programs aside (a test server runs none); a test may add parts.
+  const sharedCache = new MemoryCache();
+  const health = new Health({
+    parts: [
+      databasePart(store),
+      busPart('in-process'),
+      cachePart(sharedCache),
+      ...(options.browserOnly ? [] : [discordPart(() => ({ state: 'ready' as const }))]),
+      ...(options.parts ?? []),
+    ],
+    discord: () => !options.browserOnly,
+    metrics,
+  });
   cache.init();
   // Covers come from a table instead of the internet; every picture asked for is noted.
   const pictureRequests: string[] = [];
@@ -346,8 +363,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     // Never behind unless a test says so: a busy test machine must not make changes fail at random.
     behind: options.behind ?? (() => false),
     ...(options.timeouts ? { timeouts: options.timeouts } : {}),
-    ready: () => true,
-    discordReady: () => !options.browserOnly,
+    health,
     metrics,
     ...(options.metricsToken ? { metricsToken: options.metricsToken } : {}),
     deps: {
@@ -396,6 +412,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     url,
     close: async () => {
       await web.close();
+      await sharedCache.close();
       await store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },

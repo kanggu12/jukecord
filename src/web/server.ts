@@ -15,6 +15,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { ActionError, likesOwner } from '../app/actions.ts';
+import type { Health } from '../app/health.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
@@ -57,8 +58,8 @@ export interface WebServerOptions {
   readonly log: Logger;
   /** How many live connections there may be (in all, per login, per address); tests and the settings change it. */
   readonly live?: Partial<LiveLimits>;
-  /** Whether jukecord can serve requests (for /readyz). */
-  readonly ready: () => boolean;
+  /** Whether jukecord can serve, part by part (for /readyz, src/app/health.ts). */
+  readonly health: Health;
   /** Where every number of jukecord is kept, for /metrics; a server made on its own (a test's) makes its own. */
   readonly metrics?: MetricsRegistry;
   /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN); none: the address rule. */
@@ -68,7 +69,6 @@ export interface WebServerOptions {
    * address's, or the live connections' (for app/alerts.ts).
    */
   readonly turnedAway?: (cap: TurnedAway) => void;
-  readonly discordReady: () => boolean;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
   readonly rates?: {
     readonly changes?: Rate;
@@ -967,11 +967,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       .send();
   });
 
-  // Health: alive (the process answers), ready (it can serve), and the figures for Prometheus.
+  // Health: alive (the process answers, nothing checked: a liveness probe must not fail for a database that is down),
+  // ready (it can serve: each part's state, kept for a second), and the figures for Prometheus.
   app.get('/healthz', async (_request, reply) => reply.type('text/plain').send('ok\n'));
   app.get('/readyz', async (_request, reply) => {
-    const ready = options.ready();
-    return reply.code(ready ? 200 : 503).send({ ready, discord: options.discordReady() });
+    const readiness = await options.health.read();
+    return reply
+      .code(readiness.ready ? 200 : 503)
+      .header('cache-control', 'no-store')
+      .send(readiness);
   });
   // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), or one that shows
   // the metrics token, not for the internet: a request that came through the reverse proxy (it carries

@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Health } from '../../src/app/health.ts';
 import type { Players } from '../../src/core/players.ts';
 import type { QueueService } from '../../src/core/queue.ts';
 import { createLogger } from '../../src/log.ts';
@@ -68,6 +69,8 @@ export function everyFamily(): EveryFamily {
   databaseReport(registry).connections(() => ({ busy: 0, idle: 1, waiting: 0 }));
   busReport(registry, OPERATIONS).command('skip', 0.01, 'ok');
   sharedCacheReport(registry).entries(() => 0);
+  // Readiness, by parts.
+  new Health({ parts: [], discord: () => true, metrics: registry });
   return {
     registry,
     close: () => {
