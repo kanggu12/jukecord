@@ -35,6 +35,19 @@
       "preset": "recommended"
     }
   },
+  "overrides": [
+    {
+      "includes": ["src/**", "tests/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noFloatingPromises": "error",
+            "noMisusedPromises": "error"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {
