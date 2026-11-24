@@ -2,8 +2,9 @@
  * One of the release's programs, run the way a person runs it, on the system it is for: the archive unpacked, the
  * Node.js, FFmpeg, yt-dlp and voice encryption in it working, and jukecord started with its own launcher, in a data
  * folder of this run's, playing a tone that this script serves on a local address, so the track goes through yt-dlp
- * and FFmpeg as one from a site would. Nothing is installed and nothing outside the run's folder is written. Exits 1
- * with what failed and the end of jukecord's output.
+ * and FFmpeg as one from a site would; then a setting saved in settings.json and jukecord restarted, which its
+ * launcher starts again. Nothing is installed and nothing outside the run's folder is written. Exits 1 with what
+ * failed and the end of jukecord's output.
  *
  *   node scripts/bundle-smoke.ts <jukecord-version-target archive>
  */

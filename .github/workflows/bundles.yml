@@ -2,7 +2,8 @@
 # with its own Node.js, FFmpeg and yt-dlp. FFmpeg is built for each target (deploy/bundle/build-ffmpeg.sh: in Docker
 # for Linux and Windows, on a Mac of that processor for macOS) and kept in the cache until its release or its recipe
 # changes. The programs are put together on Linux, then each is unpacked and run on its own system and processor
-# (scripts/bundle-smoke.ts: started with its launcher, a track played through yt-dlp and FFmpeg, stopped). A version
+# (scripts/bundle-smoke.ts: started with its launcher, a track played through yt-dlp and FFmpeg, a setting saved and
+# jukecord restarted by its launcher, stopped). A version
 # tag attaches them to the GitHub release (release.yml calls this).
 name: bundles
 
@@ -150,13 +151,13 @@ jobs:
         with:
           name: jukecord-programs
           path: dist
-      - name: Unpacked, started, a track played, stopped
+      - name: Unpacked, started, a track played, restarted, stopped
         if: runner.os != 'Linux'
         shell: bash
         run: node scripts/bundle-smoke.ts dist/jukecord-*-${{ matrix.target }}.*
       # On Linux, in a bare Debian 10: the oldest glibc the programs claim (2.28), and none of what a runner has
       # installed (Node.js, libatomic, FFmpeg). The program's own Node.js runs the check.
-      - name: Unpacked, started, a track played, stopped, on a bare Debian 10
+      - name: Unpacked, started, a track played, restarted, stopped, on a bare Debian 10
         if: runner.os == 'Linux'
         run: |
           archive=$(ls dist/jukecord-*-${{ matrix.target }}.tar.gz)
