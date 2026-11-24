@@ -163,10 +163,11 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
   const versions = new QueueVersions();
   // The web server, once made (the parts below are started first and hear it late).
   let web: WebServer | null = null;
-  // Every change of the core, or a bus back after it was down: waiting commands refused, versions forgotten, every
-  // panel told to reconnect and ask again.
-  const restart = (why: string) => {
-    client.failAll();
+  // Every change of the core, or a bus back after it was down: versions forgotten and every panel told to reconnect
+  // and ask again; and, but for a core found (it answers the commands waiting for it), the waiting commands refused,
+  // since the core they went to is gone or its answers were lost.
+  const restart = (why: string, refuse: boolean) => {
+    if (refuse) client.failAll();
     versions.clear();
     web?.hub.restartAll();
     log.info('the live connections were told to reconnect', { why });
@@ -177,7 +178,7 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
     version: VERSION,
     log: log.child('core'),
     ...(options.coreLostAfterMs !== undefined ? { lostAfterMs: options.coreLostAfterMs } : {}),
-    changed: (change: CoreChange) => restart(`the core was ${change}`),
+    changed: (change: CoreChange) => restart(`the core was ${change}`, change !== 'found'),
   });
   let wasDown = false;
   const offChange = transport.onChange((up) => {
@@ -187,7 +188,7 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
       client.failAll();
       return;
     }
-    if (wasDown) restart('the bus is back');
+    if (wasDown) restart('the bus is back', true);
     wasDown = false;
   });
   // The core's events, announced on this edge's bus; the endings it and the other edges send, ended here.

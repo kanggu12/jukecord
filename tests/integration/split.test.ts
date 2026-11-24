@@ -107,6 +107,20 @@ for (const { name, make } of testBuses()) {
       assert.deepEqual(document, JSON.parse(JSON.stringify(openApiDocument('/api/v1'))));
     });
 
+    it("writes each role's figures on its own /metrics: an edge its panels and calls, the core its players", async () => {
+      const edge = await (await fetch(`${one.url}/metrics`)).text();
+      assert.match(edge, /^jukecord_panel_connections \d+$/m);
+      assert.match(edge, /^jukecord_bus_commands_total\{command="actions\.status",outcome="ok"\} \d+$/m);
+      assert.doesNotMatch(edge, /^jukecord_players\{/m);
+      const coreMetrics = await (await fetch(`${core.healthUrl}/metrics`)).text();
+      assert.match(coreMetrics, /^jukecord_players\{status="idle"\} \d+$/m);
+      assert.match(coreMetrics, /^jukecord_edges 2$/m);
+      assert.match(coreMetrics, /^jukecord_bus_commands_served_total\{command="actions\.status",outcome="ok"\} \d+$/m);
+      // And their readiness by parts.
+      const coreReady = (await (await fetch(`${core.healthUrl}/readyz`)).json()) as { parts: Record<string, string> };
+      assert.deepEqual(coreReady.parts, { database: 'ok', bus: 'ok' });
+    });
+
     it('keeps the status of every refusal: 404, 409, 400 and 403 as in one process', async () => {
       assert.equal((await ask(one, 'DELETE', `/guilds/${GUILD}/queue/99999`)).status, 404);
       const pause = await ask(one, 'POST', `/guilds/${GUILD}/player/pause`);
