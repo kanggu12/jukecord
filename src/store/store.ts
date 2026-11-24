@@ -21,14 +21,13 @@ import {
   type Track,
 } from '../core/types.ts';
 import { MIGRATIONS } from './schema.ts';
+import { StoreError } from './sql.ts';
+
+// Raised for requests the data does not allow (defined beside the executor, which raises it too).
+export { StoreError };
 
 /** A row as the driver returns it. */
 type Row = Record<string, SQLOutputValue>;
-
-/** Raised for requests the data does not allow: an unknown queue item, a playlist name already taken. */
-export class StoreError extends Error {
-  override name = 'StoreError';
-}
 
 // Column readers. The driver returns INTEGER as number (or bigint past 2^53, which jukecord never reaches); these
 // turn a column into the type the domain objects use and fail loudly if the schema and the code disagree.
