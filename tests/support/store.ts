@@ -12,38 +12,50 @@ export function memoryStore(now: () => number = () => Date.UTC(2026, 10, 11)): P
 }
 
 /**
+ * Asked before each statement (with its text) and each transaction (with "BEGIN") of a slow database: what it answers
+ * is waited for first, so a test can hold one change at a chosen point while another is asked for.
+ */
+export type Hold = (what: string) => Promise<void> | undefined;
+
+/**
  * An in-memory database whose every statement waits a turn of the event loop first, as a network database's answer
  * does: what interleaves at an await does interleave here, so a test sees what the server's lanes keep apart.
  */
-export function slowMemoryStore(now: () => number = () => Date.UTC(2026, 10, 11)): Promise<Store> {
-  return Store.open(slowly(SqliteExecutor.open(':memory:')), { now });
+export function slowMemoryStore(now: () => number = () => Date.UTC(2026, 10, 11), hold?: Hold): Promise<Store> {
+  return Store.open(slowly(SqliteExecutor.open(':memory:'), hold), { now });
 }
 
-// An executor that answers like the one it wraps, a turn of the event loop later.
-function slowly(sql: SqlExecutor): SqlExecutor {
-  const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
+// An executor that answers like the one it wraps, a turn of the event loop later (and after `hold`, when it says so).
+function slowly(sql: SqlExecutor, hold?: Hold): SqlExecutor {
+  const turn = async (what: string) => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await hold?.(what);
+  };
   return {
     dialect: sql.dialect,
     get isOpen() {
       return sql.isOpen;
     },
     all: async (text: string, params?: readonly SqlValue[]): Promise<SqlRow[]> => {
-      await turn();
+      await turn(text);
       return sql.all(text, params);
     },
     get: async (text: string, params?: readonly SqlValue[]): Promise<SqlRow | undefined> => {
-      await turn();
+      await turn(text);
       return sql.get(text, params);
     },
     run: async (text: string, params?: readonly SqlValue[]): Promise<RunResult> => {
-      await turn();
+      await turn(text);
       return sql.run(text, params);
     },
     exec: async (text: string): Promise<void> => {
-      await turn();
+      await turn(text);
       return sql.exec(text);
     },
-    transaction: (fn) => sql.transaction(fn),
+    transaction: async (fn) => {
+      await turn('BEGIN');
+      return sql.transaction(fn);
+    },
     close: () => sql.close(),
   };
 }
