@@ -28,7 +28,7 @@ import {
 const api = (path: string) => `${API_PREFIX}${path}`;
 
 const CAROL = memberKey('ldap', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41');
-const DAVE = memberKey('oidc', '9b1f6c2e-0000-4000-8000-00000000000d');
+const DAVE = memberKey('oidc', '9b1f6c2e-0000-4000-8000-00000000000d', 'https://sso.example.test/realms/home');
 
 // What an ActionError's code is, or "none".
 const code = async (fn: () => Promise<unknown>) => {
@@ -45,12 +45,19 @@ describe('member keys', () => {
     assert.match(CAROL, /^ldap:[0-9a-f]{15}$/);
     assert.equal(CAROL.length, 20);
     assert.equal(memberKey('ldap', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41'), CAROL);
-    assert.notEqual(memberKey('oidc', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41'), CAROL);
+    assert.notEqual(memberKey('oidc', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41', 'https://sso.example.test'), CAROL);
     assert.equal(memberProvider(CAROL), 'ldap');
     assert.equal(memberProvider(DAVE), 'oidc');
     for (const other of [ALICE, 'host', 'autoplay', 'ldap:short', null]) assert.equal(memberProvider(other), null);
     assert.equal(discordUserId(CAROL), null);
     assert.equal(discordUserId(ALICE), ALICE);
+  });
+
+  it("are apart by the provider's issuer too: another provider's person of the same subject is someone else", () => {
+    const here = memberKey('oidc', 'f2a1-mina', 'https://sso.example.test/realms/home');
+    assert.match(here, /^oidc:[0-9a-f]{15}$/);
+    assert.notEqual(memberKey('oidc', 'f2a1-mina', 'https://login.other.example/'), here);
+    assert.equal(memberKey('oidc', 'f2a1-mina', 'https://sso.example.test/realms/home'), here);
   });
 });
 

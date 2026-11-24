@@ -346,7 +346,12 @@ export class Auth {
    */
   async admit(
     provider: Provider,
-    person: { readonly subject: string; readonly name: string; readonly discordId?: string | null },
+    person: {
+      readonly subject: string;
+      readonly name: string;
+      readonly issuer?: string | null;
+      readonly discordId?: string | null;
+    },
     level: MemberLevel | null,
     discord: boolean,
   ): Promise<MemberPrincipal | null> {
@@ -358,7 +363,7 @@ export class Auth {
         await users.upsert({ id: person.discordId, name: person.name, avatar: null });
       return { kind: 'user', userId: person.discordId, level };
     }
-    const memberId = memberKey(provider, person.subject);
+    const memberId = memberKey(provider, person.subject, person.issuer ?? null);
     // Their name as the provider gave it at this login, and the time of the login: all that is kept of them.
     await users.upsert({ id: memberId, name: person.name, avatar: null });
     return { kind: 'member', memberId, provider, level };
@@ -715,11 +720,14 @@ export class Auth {
 
 /**
  * A member's key in jukecord's data, from where they logged in and who the provider says they are: `oidc:` or `ldap:`
- * and 15 hex digits of SHA-256 over both. Twenty characters, never a Discord ID (digits only), "host" or "autoplay",
- * the same at every login, and the subject itself is not kept.
+ * and 15 hex digits of SHA-256 over the way, the provider's issuer (an identity provider's subjects are its own: the
+ * same `sub` at another provider is someone else) and the subject. Twenty characters, never a Discord ID (digits
+ * only), "host" or "autoplay", the same at every login, and the subject itself is not kept. A directory has no issuer:
+ * its entries' IDs (entryUUID, objectGUID) are its own already.
  */
-export function memberKey(provider: Provider, subject: string): string {
-  return `${provider}:${createHash('sha256').update(`${provider}\n${subject}`).digest('hex').slice(0, 15)}`;
+export function memberKey(provider: Provider, subject: string, issuer: string | null = null): string {
+  const what = issuer === null ? `${provider}\n${subject}` : `${provider}\n${issuer}\n${subject}`;
+  return `${provider}:${createHash('sha256').update(what).digest('hex').slice(0, 15)}`;
 }
 
 /** The provider of a member's key; null for anything that is not one. */

@@ -36,6 +36,8 @@ const NEXT_MAX = 2048;
 export interface OidcIdentity {
   /** The provider's own ID of the person (the `sub` claim). */
   readonly subject: string;
+  /** The provider that vouched for them (the `iss` claim, checked to be the one set up): its subjects are its own. */
+  readonly issuer: string;
   /** Their display name, from the first of name, preferred_username, nickname or given_name there is. */
   readonly name: string;
   /** The groups or roles at the configured claim. */
@@ -291,6 +293,7 @@ export class OidcLogin {
     const discord = settings.discordClaim ? claimAt(found, settings.discordClaim) : undefined;
     return {
       subject: claims.sub,
+      issuer: claims.iss,
       name: [...(name ?? claims.sub).trim()].slice(0, NAME_MAX).join(''),
       groups: claimValues(claimAt(found, settings.groupsClaim)),
       // A Discord ID as text only: a JSON number that long has lost its last digits already.

@@ -97,6 +97,21 @@ describe('claims and groups', () => {
     assert.equal(sameLdapGroup('Night\\, Late', 'cn=Night\\, Late,ou=groups,dc=x'), false);
     assert.equal(sameLdapGroup('Night, Late', 'cn=Night\\, Late,ou=groups,dc=x'), true);
   });
+
+  it("matches a group written as a DN by the whole DN: a same-named group an OU's admin makes elsewhere is not it", () => {
+    const written = 'CN=jukecord-admins,OU=Groups,DC=corp,DC=example';
+    assert.equal(sameLdapGroup(written, 'cn=jukecord-admins,ou=groups,dc=corp,dc=example'), true);
+    for (const elsewhere of [
+      'CN=jukecord-admins,OU=Sales,DC=corp,DC=example',
+      'CN=jukecord-admins,OU=Groups,OU=Sales,DC=corp,DC=example',
+      'CN=jukecord-admins,OU=Groups,DC=corp,DC=example,DC=evil',
+      'CN=jukecord-admins\\,OU\\=Groups\\,DC\\=corp\\,DC\\=example,OU=Sales,DC=corp,DC=example',
+    ])
+      assert.equal(sameLdapGroup(written, elsewhere), false, elsewhere);
+    // Written as a plain name, any group of that name matches, wherever it is: what the guides say to avoid where
+    // others may make groups.
+    assert.equal(sameLdapGroup('jukecord-admins', 'CN=jukecord-admins,OU=Sales,DC=corp,DC=example'), true);
+  });
 });
 
 describe('OidcLogin', () => {
@@ -120,7 +135,7 @@ describe('OidcLogin', () => {
     const back = provider.authorize(started.location, MINA);
     const done = await oidc.finish(back, started.cookie.value);
     assert.deepEqual(done, {
-      identity: { subject: 'f2a1-mina', name: 'Mina', groups: ['/djs', 'other'], discordId: null },
+      identity: { subject: 'f2a1-mina', issuer: ISSUER, name: 'Mina', groups: ['/djs', 'other'], discordId: null },
       next: '/stats',
     });
     // The secret went as HTTP Basic, and the verifier was the one behind the challenge.
@@ -186,7 +201,7 @@ describe('OidcLogin', () => {
       userinfo: { realm_access: { roles: ['dj'] }, discord_id: ALICE },
     };
     const { identity } = await through(oidc, provider, person);
-    assert.deepEqual(identity, { subject: 'u-7', name: 'joon', groups: ['dj'], discordId: ALICE });
+    assert.deepEqual(identity, { subject: 'u-7', issuer: ISSUER, name: 'joon', groups: ['dj'], discordId: ALICE });
     assert.ok(provider.requests.includes('GET /realms/home/protocol/openid-connect/userinfo'));
     // A Discord ID as a JSON number has lost its last digits: not taken.
     const numeric = { ...person, userinfo: { ...person.userinfo, discord_id: Number(ALICE) } };
@@ -296,7 +311,7 @@ describe('logging in through SSO with the server', () => {
     const cookie = String(session).split(';')[0] ?? '';
     const me = await inject({ method: 'GET', url: `${API_PREFIX}/me`, headers: { cookie } });
     assert.equal(me.json().kind, 'member');
-    assert.equal(me.json().id, memberKey('oidc', 'f2a1-mina'));
+    assert.equal(me.json().id, memberKey('oidc', 'f2a1-mina', ISSUER));
     assert.equal(me.json().name, 'Mina');
     assert.deepEqual(me.json().member, { provider: 'oidc', level: 'control' });
     const out = await inject({
