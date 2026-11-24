@@ -6,7 +6,7 @@
  */
 import { spawn } from 'node:child_process';
 import { PRESET_STAGES, type Sound } from '../core/sound.ts';
-import type { ToolJob, ToolMeter, ToolWatch } from '../metrics/media.ts';
+import type { ToolMeter, ToolTask, ToolWatch } from '../metrics/media.ts';
 import { childEnv, lastLines, ProcessError, type RunOptions, run, watch } from './process.ts';
 import { parseProgress, type YtDlp, ytdlpFailure } from './ytdlp.ts';
 
@@ -85,14 +85,14 @@ export class Ffmpeg {
     this.tools = tools;
   }
 
-  /** The meter of one run for `job`, started now (for a run that another part starts: a voice channel's stream). */
-  meter(job: ToolJob): ToolMeter | undefined {
-    return this.tools?.start('ffmpeg', job);
+  /** The meter of one run for `task`, started now (for a run that another part starts: a voice channel's stream). */
+  meter(task: ToolTask): ToolMeter | undefined {
+    return this.tools?.start('ffmpeg', task);
   }
 
   // The options of one run: its time limit, cancellation and meter.
-  private runOptions(job: ToolJob, timeoutMs: number, signal?: AbortSignal): RunOptions {
-    const meter = this.meter(job);
+  private runOptions(task: ToolTask, timeoutMs: number, signal?: AbortSignal): RunOptions {
+    const meter = this.meter(task);
     return { timeoutMs, ...(signal ? { signal } : {}), ...(meter ? { meter } : {}) };
   }
 

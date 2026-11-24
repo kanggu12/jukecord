@@ -17,6 +17,7 @@ import type { YtDlp } from '../../src/media/ytdlp.ts';
 import { failureKind, ToolWatch } from '../../src/metrics/media.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import { EventLoop, runtimeMetrics } from '../../src/metrics/runtime.ts';
+import { discordMetrics } from '../../src/metrics/service.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { parseExposition } from '../support/exposition.ts';
 import { everyFamily } from '../support/metrics.ts';
@@ -48,14 +49,43 @@ describe('every family jukecord declares', () => {
       if (/_(ms|milliseconds|kb|mb|minutes)(_|$)/.test(family.name)) assert.fail(`${family.name} is not in base units`);
       // Help is a sentence, for the people who read it in Grafana and Prometheus.
       assert.match(family.help, /^[A-Z].*[.)]$/, family.name);
-      // No label that names one thing among many: a server, a person, a track, an address.
+      // No label that names one thing among many: a server, a person, a track, an address; and none Prometheus or
+      // Kubernetes' discovery puts on every series of a target, which would rename ours exported_<name> on the way in.
       for (const label of family.labelNames) {
+        assert.ok(
+          !['job', 'instance', 'namespace', 'pod', 'service', 'container', 'endpoint', 'node'].includes(label),
+          `${family.name}{${label}} takes a target's label`,
+        );
         assert.doesNotMatch(
           label,
           /guild|server_id|user|person|track|url|address|ip|path|token|session/,
           `${family.name}{${label}}`,
         );
       }
+    }
+  });
+});
+
+describe('Discord, counted', () => {
+  it('says only that it is not connected when jukecord runs browser-only, leaving the gateway out', () => {
+    const registry = new MetricsRegistry();
+    discordMetrics(registry, {
+      connected: () => false,
+      gateway: () => null,
+      guilds: () => 0,
+      voice: () => new Map(),
+    });
+    const text = registry.render();
+    parseExposition(text);
+    assert.equal(seriesValue(text, 'jukecord_discord_connected'), 0);
+    // No gateway: no state, no latency of 0 s, no count of servers, no voice (an alert on them never fires).
+    for (const family of [
+      'jukecord_discord_gateway_state',
+      'jukecord_discord_gateway_latency_seconds',
+      'jukecord_discord_guilds',
+      'jukecord_voice_connections',
+    ]) {
+      assert.doesNotMatch(text, new RegExp(`^${family}[{ ]`, 'm'), family);
     }
   });
 });
@@ -91,15 +121,15 @@ describe('the media programs, counted', () => {
     const text = registry.render();
     parseExposition(text);
     for (const [labels, count] of [
-      ['tool="ffmpeg",job="about",outcome="ok"', 1],
-      ['tool="ffmpeg",job="mp3",outcome="failed"', 1],
-      ['tool="yt-dlp",job="lookup",outcome="timeout"', 1],
-      ['tool="yt-dlp",job="search",outcome="cancelled"', 1],
-      ['tool="yt-dlp",job="version",outcome="missing"', 1],
+      ['tool="ffmpeg",task="about",outcome="ok"', 1],
+      ['tool="ffmpeg",task="mp3",outcome="failed"', 1],
+      ['tool="yt-dlp",task="lookup",outcome="timeout"', 1],
+      ['tool="yt-dlp",task="search",outcome="cancelled"', 1],
+      ['tool="yt-dlp",task="version",outcome="missing"', 1],
     ] as const) {
       assert.equal(seriesValue(text, `jukecord_media_tool_runs_total{${labels}}`), count, labels);
     }
-    assert.equal(seriesValue(text, 'jukecord_media_tool_duration_seconds_count{tool="yt-dlp",job="lookup"}'), 1);
+    assert.equal(seriesValue(text, 'jukecord_media_tool_duration_seconds_count{tool="yt-dlp",task="lookup"}'), 1);
     // Nothing runs any more.
     assert.equal(seriesValue(text, 'jukecord_media_tools_running{tool="yt-dlp"}'), 0);
     assert.equal(seriesValue(text, 'jukecord_media_tools_running{tool="ffmpeg"}'), 0);

@@ -301,9 +301,11 @@ export class MetricsRegistry implements Metrics {
     }
     const family: Family = { name, help, kind, labelNames: [...labelNames], buckets, series: new Map() };
     this.families.set(name, family);
-    // A metric without labels has its one series from the start, at zero, as Prometheus's own clients write it: a
-    // rate() over it then starts with the first scrape, not with the first thing counted.
-    if (labelNames.length === 0) this.seriesOf(family, {});
+    // A counter or a histogram without labels has its one series from the start, at zero, as Prometheus's own
+    // clients write it: nothing counted yet is the truth, and a rate() over it starts with the first scrape. A gauge
+    // has none until it is set: before that its value is not known, and a made-up 0 would read as one (no free disk,
+    // no latency at all).
+    if (labelNames.length === 0 && kind !== 'gauge') this.seriesOf(family, {});
     return family;
   }
 

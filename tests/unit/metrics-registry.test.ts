@@ -148,6 +148,22 @@ describe('MetricsRegistry', () => {
     parseExposition(plain);
   });
 
+  it('writes a counter or a histogram without labels at zero from the start, and a gauge only once it is set', () => {
+    const registry = new MetricsRegistry();
+    registry.counter('jukecord_test_sent_total', 'Sent.');
+    registry.histogram('jukecord_test_seconds', 'How long.', [], [1]);
+    const latency = registry.gauge('jukecord_test_latency_seconds', 'Latency.');
+    const before = registry.render();
+    assert.match(before, /^jukecord_test_sent_total 0$/m);
+    assert.match(before, /^jukecord_test_seconds_count 0$/m);
+    // Declared, with its help and type, and no value: not known yet is not 0.
+    assert.match(before, /^# TYPE jukecord_test_latency_seconds gauge\n(?!jukecord_test_latency_seconds)/m);
+    assert.doesNotMatch(before, /^jukecord_test_latency_seconds /m);
+    parseExposition(before);
+    latency.set(0.04);
+    assert.match(registry.render(), /^jukecord_test_latency_seconds 0\.04$/m);
+  });
+
   it('lists what it declared, in order, for the tests that check a dashboard', () => {
     const registry = new MetricsRegistry();
     registry.gauge('jukecord_test_players', 'Players.', ['status']);

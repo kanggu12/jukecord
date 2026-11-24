@@ -10,7 +10,7 @@ import fs from 'node:fs';
 // YouTube's bot check is shared with the reasons people are shown (core/reasons.ts).
 import { BOT_CHECK } from '../core/reasons.ts';
 import type { NewTrack } from '../core/types.ts';
-import type { ToolJob, ToolMeter, ToolWatch } from '../metrics/media.ts';
+import type { ToolMeter, ToolTask, ToolWatch } from '../metrics/media.ts';
 import { childEnv, lastLines, ProcessError, type RunOptions, type RunResult, run, watch } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
 
@@ -172,14 +172,14 @@ export class YtDlp {
     this.options = options;
   }
 
-  /** The meter of one run for `job`, started now (for a run that another part watches: the download into ffmpeg). */
-  meter(job: ToolJob): ToolMeter | undefined {
-    return this.options.tools?.start('yt-dlp', job);
+  /** The meter of one run for `task`, started now (for a run that another part watches: the download into ffmpeg). */
+  meter(task: ToolTask): ToolMeter | undefined {
+    return this.options.tools?.start('yt-dlp', task);
   }
 
   // The options of one run: its time limit and cancellation, and its meter.
-  private runOptions(job: ToolJob, timeoutMs: number, signal?: AbortSignal): RunOptions {
-    const meter = this.meter(job);
+  private runOptions(task: ToolTask, timeoutMs: number, signal?: AbortSignal): RunOptions {
+    const meter = this.meter(task);
     return { timeoutMs, ...(signal ? { signal } : {}), ...(meter ? { meter } : {}) };
   }
 
@@ -351,12 +351,12 @@ export class YtDlp {
 
   // Runs one -J listing (a search, a mix) and reads its entries into tracks (none is an empty list).
   private async listing(
-    job: ToolJob,
+    task: ToolTask,
     args: readonly string[],
     count: number,
     signal?: AbortSignal,
   ): Promise<NewTrack[]> {
-    const result = await runExplained(this.options.binary, args, this.runOptions(job, this.options.timeoutMs, signal));
+    const result = await runExplained(this.options.binary, args, this.runOptions(task, this.options.timeoutMs, signal));
     let info: unknown;
     try {
       info = JSON.parse(result.stdout);

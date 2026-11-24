@@ -14,9 +14,10 @@ export type ToolName = 'yt-dlp' | 'ffmpeg';
 
 /**
  * What a run was for: yt-dlp's version, a lookup, a search, a mix, a download into FFmpeg or into a file; FFmpeg's
- * check of itself, an encode from yt-dlp or from a file, an MP3 copy, or a voice channel's stream.
+ * check of itself, an encode from yt-dlp or from a file, an MP3 copy, or a voice channel's stream. Its label is `task`:
+ * `job` is the name Prometheus gives every scrape target's series, and would be renamed exported_job on the way in.
  */
-export type ToolJob =
+export type ToolTask =
   | 'version'
   | 'lookup'
   | 'search'
@@ -53,13 +54,13 @@ export class ToolWatch {
   constructor(metrics: Metrics = NO_METRICS) {
     this.runs = metrics.counter(
       'jukecord_media_tool_runs_total',
-      'Runs of yt-dlp and FFmpeg, by what each was for and how it ended (ok, failed, timeout, cancelled, missing).',
-      ['tool', 'job', 'outcome'],
+      'Runs of yt-dlp and FFmpeg, by what each was for (task) and how it ended (ok, failed, timeout, cancelled, missing).',
+      ['tool', 'task', 'outcome'],
     );
     this.durations = metrics.histogram(
       'jukecord_media_tool_duration_seconds',
       "How long yt-dlp's and FFmpeg's runs took, by what each was for (voice channels' streams, which last as long as the track, left out).",
-      ['tool', 'job'],
+      ['tool', 'task'],
       TOOL_BUCKETS,
     );
     this.running = metrics.gauge('jukecord_media_tools_running', 'Processes of yt-dlp and FFmpeg running now.', [
@@ -69,8 +70,8 @@ export class ToolWatch {
     for (const tool of ['yt-dlp', 'ffmpeg'] as const) this.running.inc({ tool }, 0);
   }
 
-  /** A run of `tool` for `job` starts now; the meter it gives says how it ended. */
-  start(tool: ToolName, job: ToolJob): ToolMeter {
+  /** A run of `tool` for `task` starts now; the meter it gives says how it ended. */
+  start(tool: ToolName, task: ToolTask): ToolMeter {
     const started = performance.now();
     const labels = { tool };
     this.running.inc(labels);
@@ -79,9 +80,9 @@ export class ToolWatch {
       if (done) return;
       done = true;
       this.running.dec(labels);
-      this.runs.inc({ tool, job, outcome });
-      // A stream's length is the track's, not the work's: only the jobs that end when their work does are timed.
-      if (job !== 'voice') this.durations.observe((performance.now() - started) / 1000, { tool, job });
+      this.runs.inc({ tool, task, outcome });
+      // A stream's length is the track's, not the work's: only the tasks that end when their work does are timed.
+      if (task !== 'voice') this.durations.observe((performance.now() - started) / 1000, { tool, task });
       // A program that could not be started is missing; one that started is there, whatever it then said.
       this.states.set(tool, outcome === 'missing' ? 'down' : 'ok');
     };
