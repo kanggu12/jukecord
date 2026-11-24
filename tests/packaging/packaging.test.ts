@@ -793,6 +793,8 @@ describe('workflows and scripts', () => {
       'deploy/bundle/ffmpeg.sh',
       'deploy/bundle/build-ffmpeg.sh',
       'tests/auth/run.sh',
+      'tests/auth/run-ad.sh',
+      'tests/auth/samba/start.sh',
     ]) {
       assert.ok(fs.statSync(file).mode & 0o100, `${file} is not executable`);
     }

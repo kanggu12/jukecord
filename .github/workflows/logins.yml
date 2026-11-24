@@ -1,6 +1,7 @@
 # Logging in for real, on every push to main and every pull request: a Keycloak and an OpenLDAP started by
-# tests/auth/run.sh (images pinned by digest), jukecords against them, and the end-to-end logins of tests/auth. The
-# same script runs on a developer's machine. GitHub's service containers are not used: they take no command, and
+# tests/auth/run.sh (images pinned by digest), and a Samba domain controller built and started by tests/auth/run-ad.sh
+# (its Debian pinned by digest), jukecords against them, and the end-to-end logins of tests/auth. The same scripts run
+# on a developer's machine. GitHub's service containers are not used: they take no command, and
 # Keycloak needs `start-dev --import-realm`; the directory needs its certificate and its people loaded once it is up.
 name: logins
 
@@ -34,3 +35,21 @@ jobs:
         run: docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.9.0 --severity=warning /mnt/tests/auth/run.sh
       - name: Log in through Keycloak and with OpenLDAP accounts
         run: tests/auth/run.sh
+
+  active-directory:
+    name: Active Directory (a Samba domain controller)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: The scripts, checked as the other shell scripts are (warnings and up)
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.9.0 --severity=warning /mnt/tests/auth/run-ad.sh \
+            /mnt/tests/auth/samba/start.sh
+      - name: Log in with Active Directory accounts
+        run: tests/auth/run-ad.sh

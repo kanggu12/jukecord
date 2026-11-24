@@ -320,9 +320,12 @@ export function readAuthSettings(
     // A service account needs both; neither is an anonymous search.
     if ((bindDn === null) !== (bindPassword === null))
       problems.push('set both JUKECORD_LDAP_BIND_DN and JUKECORD_LDAP_BIND_PASSWORD, or neither');
-    if (bindDn !== null && !bindDn.includes('='))
+    // A DN, or the two names Active Directory also binds by: the user principal name (jukecord@corp.example.com) and
+    // the down-level one (CORP\jukecord).
+    const adName = bindDn !== null && (/^[^@\s=,]+@[^@\s=,]+$/.test(bindDn) || /^[^\\\s=,]+\\[^\\\s=,]+$/.test(bindDn));
+    if (bindDn !== null && !bindDn.includes('=') && !adName)
       problems.push(
-        `JUKECORD_LDAP_BIND_DN: "${bindDn}" is not a DN (example: cn=jukecord,ou=services,dc=example,dc=org)`,
+        `JUKECORD_LDAP_BIND_DN: "${bindDn}" is not a DN (example: cn=jukecord,ou=services,dc=example,dc=org) or, for Active Directory, jukecord@corp.example.com`,
       );
     const baseDn = get('JUKECORD_LDAP_BASE_DN');
     if (baseDn === null) problems.push('JUKECORD_LDAP_URL is set but JUKECORD_LDAP_BASE_DN is not');

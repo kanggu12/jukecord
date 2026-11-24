@@ -185,6 +185,19 @@ describe('LdapLogin', () => {
     );
   });
 
+  it('says to encrypt when the directory takes no password in the clear, and StartTLS gets through', async () => {
+    const server = directory();
+    server.encryptedOnly = true;
+    await assert.rejects(
+      login(server).login('alice', 'alice-password'),
+      (error: unknown) =>
+        error instanceof LdapError &&
+        error.code === 'unavailable' &&
+        /encrypted connection only: use ldaps:\/\/ or JUKECORD_LDAP_STARTTLS=yes/.test(error.message),
+    );
+    assert.equal((await login(server, { startTls: true }).login('alice', 'alice-password')).name, 'Alice');
+  });
+
   it('refuses a filter that finds two people', async () => {
     const server = directory();
     assert.equal(

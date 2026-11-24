@@ -3,7 +3,7 @@
  * groups, a service account, filters read with ldapts' own parser, Active Directory's nested-group rule, and the
  * refusals a directory gives. Every operation is written down in order, so a test sees what was sent and what was not.
  */
-import { FilterParser, InvalidCredentialsError } from 'ldapts';
+import { FilterParser, InvalidCredentialsError, StrongAuthRequiredError } from 'ldapts';
 import type { DirectoryClient } from '../../src/auth/ldap.ts';
 import { IN_CHAIN } from '../../src/auth/ldap.ts';
 
@@ -35,6 +35,8 @@ export class FakeDirectoryServer {
    * or a certificate that is not trusted (it connects at the first request).
    */
   unreachable = false;
+  /** When set, a bind sent in the clear is refused, as Active Directory with LDAP signing required refuses it. */
+  encryptedOnly = false;
 
   /** The connect function LdapLogin takes. */
   readonly connect = (): DirectoryClient => {
@@ -48,14 +50,18 @@ export class FakeDirectoryServer {
     const reach = () => {
       if (this.unreachable) throw new Error('connect ECONNREFUSED 127.0.0.1:636');
     };
+    // Whether this connection was upgraded with StartTLS.
+    let tls = false;
     return {
       startTLS: async () => {
         reach();
         this.log.push('starttls');
+        tls = true;
       },
       bind: async (dn, password) => {
         reach();
         this.log.push(`bind ${dn}`);
+        if (this.encryptedOnly && !tls) throw new StrongAuthRequiredError('BindSimple: Transport encryption required.');
         if (dn === this.service.dn) {
           if (password !== this.service.password) throw new InvalidCredentialsError('invalid credentials');
           return;

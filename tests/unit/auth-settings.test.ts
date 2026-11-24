@@ -186,6 +186,12 @@ describe('login settings', () => {
     assert.equal(settings.ldap?.timeoutMs, 5000);
   });
 
+  it("takes Active Directory's other names for the service account: user@domain and DOMAIN\\user", () => {
+    for (const name of ['jukecord@corp.example.com', 'CORP\\jukecord'])
+      assert.deepEqual(problems({ ...OPENLDAP, JUKECORD_LDAP_BIND_DN: name }), [], name);
+    assert.match(problems({ ...OPENLDAP, JUKECORD_LDAP_BIND_DN: 'jukecord at corp' })[0] ?? '', /is not a DN/);
+  });
+
   it('names every LDAP mistake at once', () => {
     assert.deepEqual(
       problems({
@@ -200,7 +206,7 @@ describe('login settings', () => {
       [
         'JUKECORD_LDAP_STARTTLS is for ldap://; ldaps:// is encrypted already',
         'set both JUKECORD_LDAP_BIND_DN and JUKECORD_LDAP_BIND_PASSWORD, or neither',
-        'JUKECORD_LDAP_BIND_DN: "jukecord" is not a DN (example: cn=jukecord,ou=services,dc=example,dc=org)',
+        'JUKECORD_LDAP_BIND_DN: "jukecord" is not a DN (example: cn=jukecord,ou=services,dc=example,dc=org) or, for Active Directory, jukecord@corp.example.com',
         'JUKECORD_LDAP_URL is set but JUKECORD_LDAP_BASE_DN is not',
         'JUKECORD_LDAP_USER_FILTER: put {username} where the name typed goes, as in (uid={username})',
         'JUKECORD_LDAP_NESTED_GROUPS: "maybe" is not yes or no',

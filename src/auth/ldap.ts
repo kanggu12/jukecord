@@ -9,7 +9,16 @@
  * password as an anonymous bind (RFC 4513, 5.1.2) and says yes to it.
  */
 import type tls from 'node:tls';
-import { Client, type ClientOptions, InvalidCredentialsError, NoSuchObjectError, SizeLimitExceededError } from 'ldapts';
+import {
+  Client,
+  type ClientOptions,
+  ConfidentialityRequiredError,
+  InvalidCredentialsError,
+  NoSuchObjectError,
+  ResultCodeError,
+  SizeLimitExceededError,
+  StrongAuthRequiredError,
+} from 'ldapts';
 import type { Logger } from '../log.ts';
 import { normalDn } from './levels.ts';
 import type { Check } from './oidc.ts';
@@ -129,6 +138,16 @@ function said(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// What a directory that takes binds over an encrypted connection only (Active Directory with LDAP signing required,
+// Samba by default) is told by the settings to do.
+const ENCRYPT =
+  'the directory takes names and passwords over an encrypted connection only: use ldaps:// or JUKECORD_LDAP_STARTTLS=yes';
+
+// Whether the directory refused for want of encryption (strongerAuthRequired, confidentialityRequired).
+function wantsEncryption(error: unknown): boolean {
+  return error instanceof StrongAuthRequiredError || error instanceof ConfidentialityRequiredError;
+}
+
 // The attributes read of a person: their names, their groups and the IDs that last.
 const PERSON_ATTRIBUTES = ['displayName', 'cn', 'memberOf', 'entryUUID', 'objectGUID', 'nsUniqueId', 'ipaUniqueID'];
 
@@ -184,11 +203,14 @@ export class LdapLogin {
     try {
       await client.bind(bindDn, bindPassword);
     } catch (error) {
+      // Its answer (a refusal of the account, or of a bind sent in the clear), or no answer at all.
       throw new LdapError(
         'unavailable',
-        error instanceof InvalidCredentialsError
-          ? `the directory refused jukecord's service account: ${said(error)}`
-          : `the directory could not be reached: ${said(error)}`,
+        wantsEncryption(error)
+          ? ENCRYPT
+          : error instanceof ResultCodeError
+            ? `the directory refused jukecord's service account: ${said(error)}`
+            : `the directory could not be reached: ${said(error)}`,
       );
     }
   }
@@ -269,6 +291,8 @@ export class LdapLogin {
           const why = bindRefusal(error.message);
           throw new LdapError(why, why === 'wrong' ? 'not their password' : `the directory says the account is ${why}`);
         }
+        // A bind in the clear refused is the settings' trouble, not the person's (an anonymous search came first).
+        if (wantsEncryption(error)) throw new LdapError('unavailable', ENCRYPT);
         throw new LdapError('unavailable', `the directory did not answer the bind: ${said(error)}`);
       }
       const display = [...texts(entry.displayName), ...texts(entry.cn)].find((text) => text.trim() !== '') ?? name;
