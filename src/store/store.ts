@@ -43,6 +43,15 @@ import { SqliteExecutor } from './sqlite.ts';
 // Raised for requests the data does not allow (defined beside the executor, which raises it too).
 export { StoreError };
 
+// READ COMMITTED on the servers (TransactionOptions.latest), for the transactions below whose writers take turns
+// already (a server's queue, history and player state, which its lane changes one at a time) or that no check of their
+// own hangs on (a row written and read back, two reads of one list): the serializable level refused them for other
+// servers' sake, rows they never shared. A check and the write that hangs on it, with no lane putting the writers in
+// order, takes a turn on its key instead (a login's likes, a listening link's last guest place: src/app/actions.ts
+// and src/web/auth.ts); serializable, the default, is for a transaction that says neither. SQLite's transactions take
+// turns whatever they ask.
+const READ_COMMITTED: TransactionOptions = { latest: true };
+
 /** A row as the executor returns it. */
 type Row = SqlRow;
 
@@ -603,7 +612,7 @@ export class TrackRepository {
       const stored = await this.get(id);
       if (!stored) throw new StoreError('the track just written cannot be read back');
       return stored;
-    });
+    }, READ_COMMITTED);
   }
 
   /** The track with this ID, or null. */
@@ -629,6 +638,9 @@ export class TrackRepository {
 // Columns of a queue item joined with its track.
 const QUEUE_SELECT = `SELECT q.id, q.guild_id, q.position, q.added_by, q.added_at, ${TRACK_COLUMNS}
   FROM queue_items q JOIN tracks t ON t.id = q.track_id`;
+
+// The index of each server's queue in order (guild_id, position), as every schema names it.
+const QUEUE_INDEX = 'queue_items_by_guild';
 
 function queueItemFrom(row: Row): QueueItem {
   return {
@@ -684,12 +696,17 @@ export class QueueRepository {
       // An index past the end means the end; a negative one is a caller's mistake.
       if (index < 0) throw new StoreError(`position ${index} is before the start of the queue`);
       const at = Math.min(index, length);
-      // Make room: everything from `at` onwards moves down by the number of new tracks.
-      await this.store.sql.run('UPDATE queue_items SET position = position + ? WHERE guild_id = ? AND position >= ?', [
-        trackIds.length,
-        guildId,
-        at,
-      ]);
+      // Make room: everything from `at` onwards moves down by the number of new tracks (read through the server's own
+      // index, so no other server's row is touched: see SqlDialect.throughIndex). Nothing to move for tracks added at
+      // the end, the usual case: no statement then (on InnoDB even an UPDATE that changes nothing locks the index
+      // entry after the server's last one, another server's).
+      if (at < length) {
+        await this.store.sql.run(
+          `UPDATE ${this.store.dialect.throughIndex('queue_items', QUEUE_INDEX)} SET position = position + ?
+             WHERE guild_id = ? AND position >= ?`,
+          [trackIds.length, guildId, at],
+        );
+      }
       const now = this.now();
       // In batches of rows, in their order, so the IDs follow the places.
       const rows = trackIds.map((trackId, offset): SqlValue[] => [guildId, at + offset, trackId, addedBy, now]);
@@ -711,7 +728,7 @@ export class QueueRepository {
       ).map((row) => queueItemFrom(row));
       if (items.length !== trackIds.length) throw new StoreError('a queue item just written cannot be read back');
       return items;
-    });
+    }, READ_COMMITTED);
   }
 
   /** Whether a track is in a server's queue, read without reading the queue itself. */
@@ -743,7 +760,7 @@ export class QueueRepository {
       }
       await this.closeGap(guildId, int(row, 'position'));
       return true;
-    });
+    }, READ_COMMITTED);
   }
 
   /**
@@ -769,7 +786,7 @@ export class QueueRepository {
       // The gaps they left are closed once, for all of them.
       if (removed > 0) await this.compact(guildId);
       return removed;
-    });
+    }, READ_COMMITTED);
   }
 
   /** Moves one item to `index` (counted in the queue as it is before the move). */
@@ -784,7 +801,7 @@ export class QueueRepository {
       ids.splice(from, 1);
       ids.splice(index, 0, itemId);
       await this.writeOrder(guildId, ids, at);
-    });
+    }, READ_COMMITTED);
   }
 
   /** Puts the queue in exactly this order; `itemIds` must hold every item once (used by shuffle and drag-and-drop). */
@@ -798,7 +815,7 @@ export class QueueRepository {
         wanted.size === itemIds.length && wanted.size === current.size && [...wanted].every((id) => current.has(id));
       if (!same) throw new StoreError('the new order does not hold exactly the items in the queue');
       await this.writeOrder(guildId, itemIds, at);
-    });
+    }, READ_COMMITTED);
   }
 
   /** Removes every item of a server's queue and returns how many there were. */
@@ -819,7 +836,7 @@ export class QueueRepository {
       await this.store.sql.run('DELETE FROM queue_items WHERE id = ?', [first.id]);
       await this.closeGap(guildId, first.position);
       return first;
-    });
+    }, READ_COMMITTED);
   }
 
   // The item IDs in queue order, and the place each has now.
@@ -843,10 +860,13 @@ export class QueueRepository {
   // Closes the gap one removed item left at `position`: everything after it moves up one place, in one statement.
   // Positions stay 0..n-1 (every change keeps them so), and the order of the rest does not change.
   private async closeGap(guildId: string, position: number): Promise<void> {
-    await this.store.sql.run('UPDATE queue_items SET position = position - 1 WHERE guild_id = ? AND position > ?', [
-      guildId,
-      position,
-    ]);
+    // Through the server's own index, as in insert(): MariaDB read the whole table here and deadlocked with the
+    // other servers' gaps closed at the same moment.
+    await this.store.sql.run(
+      `UPDATE ${this.store.dialect.throughIndex('queue_items', QUEUE_INDEX)} SET position = position - 1
+         WHERE guild_id = ? AND position > ?`,
+      [guildId, position],
+    );
   }
 
   // Writes position = index for each ID; rows already in place (`at` says where each is) are left alone. The rows that
@@ -935,7 +955,7 @@ export class HistoryRepository {
       const stored = await this.get(id);
       if (!stored) throw new StoreError('the history entry just written cannot be read back');
       return stored;
-    });
+    }, READ_COMMITTED);
   }
 
   /** Deletes a server's oldest entries beyond `keep` and returns how many went. */
@@ -1369,7 +1389,7 @@ export class PlaylistRepository {
       const saved = await this.get(id);
       if (!saved) throw new StoreError('the playlist just written cannot be read back');
       return saved;
-    });
+    }, READ_COMMITTED);
   }
 
   /** One playlist by ID, or null. */
@@ -1391,7 +1411,7 @@ export class PlaylistRepository {
         name.trim(),
       ]);
       return row ? this.get(int(row, 'id')) : null;
-    });
+    }, READ_COMMITTED);
   }
 
   /** A server's playlists, most recently saved first. */
@@ -1445,7 +1465,7 @@ export class PlaylistRepository {
       const renamed = await this.get(playlistId);
       if (!renamed) throw new StoreError(`playlist ${playlistId} does not exist`);
       return renamed;
-    });
+    }, READ_COMMITTED);
   }
 
   /** Deletes a playlist and its items; false when there was none. */
@@ -1902,7 +1922,7 @@ export class TokenRepository {
       const made = await this.get(id);
       if (!made) throw new StoreError('the token just written cannot be read back');
       return made;
-    });
+    }, READ_COMMITTED);
   }
 
   /** The token with this hash, or null. */
@@ -2106,7 +2126,7 @@ export class LyricsRepository {
       const saved = await this.get(lyrics.trackId);
       if (!saved) throw new StoreError('the lyrics just written cannot be read back');
       return saved;
-    });
+    }, READ_COMMITTED);
   }
 }
 
@@ -2211,7 +2231,7 @@ export class ListenLinkRepository {
       const made = await this.get(id);
       if (!made) throw new StoreError('the listening link just written cannot be read back');
       return made;
-    });
+    }, READ_COMMITTED);
   }
 
   /** The link with this ID while it has not expired, or null. */

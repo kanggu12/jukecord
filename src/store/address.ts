@@ -8,10 +8,12 @@
  *
  * TLS is asked for in the address with libpq's words, for both kinds of server: sslmode=disable (the default, as the
  * drivers' own), require (encrypted, the certificate not checked), verify-ca (signed by a known authority) or
- * verify-full (and made out to the host's name); sslrootcert names the authority's certificate (the system's are used
- * without it), sslcert and sslkey a certificate of jukecord's own. MySQL's names are taken too (ssl-mode=REQUIRED,
- * VERIFY_CA, VERIFY_IDENTITY; ssl-ca, ssl-cert, ssl-key). connect_timeout is in seconds (10 by default), schema picks
- * a PostgreSQL schema (public by default), host a PostgreSQL socket's folder and socket a MySQL socket.
+ * verify-full (and made out to the host's name); sslrootcert names the authority's certificate (without it, the
+ * server's certificate is checked against Node's default authorities, plus any JUKECORD_CA_FILE adds; a private
+ * authority is trusted with sslrootcert), sslcert and sslkey a certificate of jukecord's own. MySQL's names are taken
+ * too (ssl-mode=REQUIRED, VERIFY_CA, VERIFY_IDENTITY; ssl-ca, ssl-cert, ssl-key). connect_timeout is in seconds (10 by
+ * default), schema picks a PostgreSQL schema (public by default), host a PostgreSQL socket's folder and socket a MySQL
+ * socket.
  *
  * Nothing here reads a file or the network: the certificates are read when the executor opens, so the settings can be
  * checked (and tested) on their own.
@@ -241,6 +243,22 @@ export function describeAddress(address: DatabaseAddress): string {
   const schema = address.schema === null ? '' : `, schema ${address.schema}`;
   const tls = address.tls === 'disable' ? 'without TLS' : `TLS ${address.tls}`;
   return `${address.product} (${where}, database ${address.database}${schema}, ${tls})`;
+}
+
+/**
+ * An address as it was written (one that may not even be read as one), with its password left out, for a message
+ * that repeats what was typed: everything from the colon after the user name to the last @ goes. The last one, not
+ * the first: a password may hold / ? # or @ itself when it is not percent-encoded (a base64 one has / in it), and the
+ * host never holds an @. A text without both is left as it is (no password in it).
+ */
+export function withoutPassword(text: string): string {
+  const scheme = text.indexOf('://');
+  if (scheme === -1) return text;
+  const start = scheme + 3;
+  const at = text.lastIndexOf('@');
+  const colon = text.indexOf(':', start);
+  if (at < start || colon === -1 || colon > at) return text;
+  return `${text.slice(0, colon + 1)}…${text.slice(at)}`;
 }
 
 /** Whether two addresses are the same database (a copy onto itself would empty it first). */

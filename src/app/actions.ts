@@ -1233,10 +1233,12 @@ export class Actions {
    * Likes a track for this login. A like is personal, so the DJ role is not needed; the track must be one this server
    * shows (playing, queued, played here or in one of its playlists): a track number from elsewhere would show another
    * server's music in the list. The checks and the like are one transaction: a login's likes are its own across
-   * every server, so no server's turn covers them, and two likes at once cannot both pass the limit.
+   * every server, so no server's lane covers them; the login's own turn on the database does (see
+   * TransactionOptions.turn), so two likes at once cannot both pass the limit, and other logins' likes do not wait.
    */
   like(context: ActionContext, trackId: number): Promise<LikedTrack> {
     const store = this.options.store;
+    const inTurn = { turn: `likes:${likesOwner(context)}` };
     return store.transaction(async () => {
       const track = await store.tracks.get(trackId);
       // Each question one lookup by an index, as for the covers (web/server.ts): the player, the queue, the history,
@@ -1255,7 +1257,7 @@ export class Actions {
       await store.likes.add(owner, trackId);
       const liked = (await store.likes.list(owner)).find((entry) => entry.track.id === trackId);
       return liked ?? { track, likedAt: Date.now() };
-    });
+    }, inTurn);
   }
 
   /** Takes a like back. */

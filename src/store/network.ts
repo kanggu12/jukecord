@@ -48,7 +48,9 @@ export function tlsOptions(
   const ca = certificate(address.tlsFiles.ca, 'root certificate (sslrootcert)');
   const cert = certificate(address.tlsFiles.cert, 'certificate (sslcert)');
   const key = certificate(address.tlsFiles.key, 'key (sslkey)');
-  // Only the files that were given: Node's own authorities are used when no root certificate is named.
+  // Only the files that were given, and no `ca` at all without a root certificate: Node's default authorities check
+  // the server then, with what JUKECORD_CA_FILE adds to them (tls.setDefaultCACertificates at the start). A `ca` of
+  // an empty list would replace them, so none is ever passed in its place.
   const files: ConnectionOptions = {
     ...(ca === undefined ? {} : { ca }),
     ...(cert === undefined ? {} : { cert }),
@@ -132,10 +134,27 @@ export function connectionFailure(error: unknown, address: ServerAddress): Conne
       cause: error,
     });
   }
-  if (/Connection terminated unexpectedly|Connection lost|server closed the connection/i.test(message)) {
+  // A connection that went away while in use, in the drivers' words: pg's (its end, and a statement asked of a
+  // connection that failed before), mysql2's (its end, and a statement asked of one closed since).
+  if (
+    /Connection terminated|Connection lost|server closed the connection|not queryable|connection is in closed state/i.test(
+      message,
+    )
+  ) {
     return new ConnectionError(`${where(address)} cut the connection (${message})`, true, { cause: error });
   }
-  // PostgreSQL's SQLSTATE codes of a refused login or connection.
+  // A statement whose answer did not come in time (pg's query_timeout, see src/store/postgres.ts): the connection is
+  // given up, since an answer that comes later would be taken for the next statement's.
+  if (/Query read timeout/i.test(message)) {
+    return new ConnectionError(
+      `${where(address)} did not answer a statement in time (the connection is given up)`,
+      true,
+      {
+        cause: error,
+      },
+    );
+  }
+  // PostgreSQL's SQLSTATE codes of a refused login or connection, and of a connection the server ended.
   const postgres: Readonly<Record<string, readonly [boolean, string]>> = {
     '28P01': [false, `the user name or password was refused by ${where(address)}`],
     '28000': [false, `${where(address)} does not let this user in from here (pg_hba.conf): ${message}`],
@@ -143,6 +162,15 @@ export function connectionFailure(error: unknown, address: ServerAddress): Conne
     '57P03': [true, `the database at ${where(address)} is starting up`],
     '53300': [true, `${where(address)} has no room for another connection (max_connections)`],
     '42501': [false, `the user may not use the database "${address.database}": ${message}`],
+    // Ended by the server: an administrator (pg_terminate_backend), a shutdown or restart, a crash of another
+    // connection, a connection or a transaction left idle too long, or the connection's own failure (class 08).
+    '57P01': [true, `the database at ${where(address)} ended the connection (${message})`],
+    '57P02': [true, `the database at ${where(address)} ended the connection (${message})`],
+    '57P05': [true, `the database at ${where(address)} ended the connection (${message})`],
+    '25P03': [true, `the database at ${where(address)} ended the connection (${message})`],
+    '08000': [true, `the connection to ${where(address)} failed (${message})`],
+    '08003': [true, `the connection to ${where(address)} failed (${message})`],
+    '08006': [true, `the connection to ${where(address)} failed (${message})`],
   };
   const known = postgres[code];
   if (known) return new ConnectionError(known[1], known[0], { cause: error });
@@ -155,6 +183,9 @@ export function connectionFailure(error: unknown, address: ServerAddress): Conne
     1053: [true, `the database at ${where(address)} is shutting down`],
     1129: [false, `${where(address)} blocks this host after too many failed connections (FLUSH HOSTS)`],
     1130: [false, `${where(address)} does not let this host in`],
+    // Ended by the server: an administrator (KILL, MariaDB's own number for it), or idle too long (MySQL 8.0.24+).
+    1927: [true, `the database at ${where(address)} ended the connection (${message})`],
+    4031: [true, `the database at ${where(address)} ended the connection (${message})`],
   };
   const numbered = typeof fields.errno === 'number' ? mysql[fields.errno] : undefined;
   if (numbered) return new ConnectionError(numbered[1], numbered[0], { cause: error });

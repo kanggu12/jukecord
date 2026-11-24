@@ -18,6 +18,7 @@ import {
   PooledExecutor,
   type PoolOptions,
   STATEMENT_TIMEOUT_MS,
+  type Turn,
 } from './pooled.ts';
 import type { DatabaseServer, SqlRow, SqlValue } from './sql.ts';
 
@@ -27,6 +28,15 @@ const IDLE_IN_TRANSACTION_MS = 60_000;
 
 // How many placeholder conversions are kept: every text the repositories use, and a bound on texts made at random.
 const TEXTS_KEPT = 1000;
+
+// TCP keep-alive from this long of quiet on a connection (the system's default is two hours): a connection a NAT or a
+// firewall dropped on the way is found dead within seconds of it (Node then sends ten probes a second apart), instead
+// of holding its statement, and the server's lane waiting on that statement, for hours.
+const KEEPALIVE_MS = 10_000;
+
+// How much longer than a statement may run (the server ends it then) jukecord waits for the answer: the server's own
+// end comes first, and this is for an answer that never comes (a connection lost without a word, a server hung).
+const ANSWER_MARGIN_MS = 10_000;
 
 // The SQLSTATE codes of a transaction refused for another's sake: a serialization failure, and a deadlock.
 const REFUSED = new Set(['40001', '40P01']);
@@ -86,12 +96,22 @@ export function numberPlaceholders(sql: string): string {
 export class PostgresExecutor extends PooledExecutor<PoolClient> {
   readonly dialect = 'postgres' as const;
   private readonly pool: Pool;
+  // The connections that failed (cut, ended by the server) with the error each failed with: a transaction holding one
+  // learns of it at its next statement, which fails with that error instead of reaching the dead connection.
+  private readonly failed: WeakMap<object, Error>;
   // Statements with their placeholders numbered, by the text the repositories wrote, oldest first.
   private readonly texts = new Map<string, string>();
 
-  private constructor(pool: Pool, address: ServerAddress, server: DatabaseServer, options: PoolOptions) {
+  private constructor(
+    pool: Pool,
+    address: ServerAddress,
+    server: DatabaseServer,
+    options: PoolOptions,
+    failed: WeakMap<object, Error>,
+  ) {
     super(address, server, options);
     this.pool = pool;
+    this.failed = failed;
     // The pool's use, read when the metrics are: busy, idle, and how many wait for a connection.
     options.report?.connections(() => ({
       busy: pool.totalCount - pool.idleCount,
@@ -117,6 +137,7 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
           ? parse
           : pg.types.getTypeParser(oid, format ?? 'text')) as typeof pg.types.getTypeParser,
     };
+    const statementTimeoutMs = options.statementTimeoutMs ?? STATEMENT_TIMEOUT_MS;
     const config: PoolConfig = {
       // A socket's folder (postgres:///jukecord?host=/run/postgresql) or the host.
       host: address.socket ?? address.host,
@@ -130,10 +151,15 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
       connectionTimeoutMillis: address.connectTimeoutMs,
       // An unused connection is closed after half a minute, so a quiet jukecord holds none open for long.
       idleTimeoutMillis: options.idleMs ?? IDLE_MS,
-      // TCP keep-alive: a connection cut on the way (a NAT, a firewall) is noticed instead of hanging a statement.
+      // TCP keep-alive from 10 s of quiet: a connection cut on the way (a NAT, a firewall) is noticed in seconds instead
+      // of hanging a statement (the system's own default starts after two hours).
       keepAlive: true,
+      keepAliveInitialDelayMillis: KEEPALIVE_MS,
+      // A statement whose answer has not come 10 s after the server would have ended it fails, and its connection is
+      // closed (see lost(): it is a connection lost without a word).
+      query_timeout: options.answerTimeoutMs ?? statementTimeoutMs + ANSWER_MARGIN_MS,
       application_name: 'jukecord',
-      statement_timeout: options.statementTimeoutMs ?? STATEMENT_TIMEOUT_MS,
+      statement_timeout: statementTimeoutMs,
       lock_timeout: LOCK_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_MS,
       // The schema the address names, where every unqualified table name is looked for and made.
@@ -148,6 +174,17 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
         reason: error.message,
       }),
     );
+    // Every connection is listened to for its whole life: the pool's own listener above covers it only while it is
+    // idle, and a connection that fails while a transaction holds it (a server restart, a failover, an administrator,
+    // a network cut, the server's end of a transaction left idle) says so with an 'error' event, which, heard by
+    // nobody, would end jukecord. Kept here instead: the transaction's next statement fails with it.
+    const failed = new WeakMap<object, Error>();
+    pool.on('connect', (client) => {
+      client.on('error', (error: Error) => {
+        // The first error is the one that says why (the server's own words); the connection's end comes after it.
+        if (!failed.has(client)) failed.set(client, error);
+      });
+    });
     try {
       const answer = await pool.query(
         "SELECT current_setting('server_version') AS version, current_setting('server_encoding') AS encoding",
@@ -164,7 +201,7 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
         );
       }
       if (address.schema !== null) await ensureSchema(pool, address.schema);
-      return new PostgresExecutor(pool, address, { product: 'PostgreSQL', version }, options);
+      return new PostgresExecutor(pool, address, { product: 'PostgreSQL', version }, options, failed);
     } catch (error) {
       await pool.end().catch(() => {});
       throw connectionFailure(error, address) ?? error;
@@ -185,6 +222,9 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
     sql: string,
     params: readonly SqlValue[] | undefined,
   ): Promise<Answer> {
+    // A transaction's connection that failed since its last statement: this one fails as that did (see open()).
+    const failure = connection === null ? undefined : this.failed.get(connection);
+    if (failure !== undefined) throw failure;
     const target = connection ?? this.pool;
     // Without values the text goes as it is (the simple protocol, which takes several statements at once: a
     // migration); with them, numbered and bound (each value sent apart from the text, never written into it).
@@ -197,11 +237,22 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
 
   protected begin(mode: 'serializable' | 'snapshot' | 'latest'): readonly string[] {
     // A snapshot: one consistent view that never waits for a writer and is never refused (REPEATABLE READ, reads
-    // only). A migration: each statement's own view (READ COMMITTED). Every other transaction: serializable, so none
-    // sees another's change halfway (see src/store/pooled.ts).
+    // only). Work in turns already, a row read back, a migration: each statement's own view (READ COMMITTED). Every
+    // other transaction: serializable, so none sees another's change halfway (see src/store/pooled.ts).
     if (mode === 'snapshot') return ['BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'];
     if (mode === 'latest') return ['BEGIN ISOLATION LEVEL READ COMMITTED'];
     return ['BEGIN ISOLATION LEVEL SERIALIZABLE'];
+  }
+
+  protected turn(key: string): Turn {
+    // An advisory lock of the transaction's own (it ends with it, so nothing gives it back), on a 64-bit hash of the
+    // key: two keys that share a hash only take turns needlessly. The wait for it is a wait for a lock, given up
+    // after lock_timeout (10 s) with the server's own error.
+    return {
+      take: { sql: 'SELECT pg_advisory_xact_lock(hashtextextended(?, 0)) AS turn', params: [`jukecord:${key}`] },
+      taken: () => true,
+      give: null,
+    };
   }
 
   protected refused(error: unknown): boolean {
@@ -238,10 +289,17 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
 // Makes the schema an address names when it is not there yet (asked first: CREATE SCHEMA IF NOT EXISTS needs the
 // right to create schemas even when the schema exists, which a user given only that schema does not have).
 async function ensureSchema(pool: Pool, schema: string): Promise<void> {
-  const found = await pool.query('SELECT 1 FROM pg_namespace WHERE nspname = $1', [schema]);
-  if (found.rowCount === 0) {
-    // The name is a plain identifier (checked when the address was read), so it is written in as it is; IF NOT EXISTS
-    // for a jukecord starting beside this one that made it meanwhile.
+  const there = async () =>
+    ((await pool.query('SELECT 1 FROM pg_namespace WHERE nspname = $1', [schema])).rowCount ?? 0) > 0;
+  if (await there()) return;
+  try {
+    // The name is a plain identifier (checked when the address was read), so it is written in as it is.
     await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  } catch (error) {
+    // Two jukecords making it at the same moment (a core and its edges on a first install): IF NOT EXISTS does not
+    // cover that race, and the one that loses it is told the name is taken (a unique violation on pg_namespace's
+    // index, or duplicate_schema) once the other's is kept. Made by the other, then: found when looked for again.
+    const code = (error as { code?: unknown } | null)?.code;
+    if ((code !== '23505' && code !== '42P06') || !(await there())) throw error;
   }
 }

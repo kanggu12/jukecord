@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { openStore } from '../../src/store/open.ts';
 import { TABLES, VERSION_TABLE } from '../../src/store/schema.ts';
+import { StoreError } from '../../src/store/store.ts';
 import { eachDatabase } from '../support/databases.ts';
 import { LONG_SOURCE } from '../support/fill.ts';
 import { addTracks } from '../support/store.ts';
@@ -55,6 +56,32 @@ eachDatabase('what differs between the databases', (db) => {
     const upper = await store.tracks.upsert(track('https://example.com/Watch?v=A'));
     const lower = await store.tracks.upsert(track('https://example.com/watch?v=a'));
     assert.notEqual(upper.id, lower.id);
+  });
+
+  it('refuses a NUL character in any text it keeps, as an invalid request, the same on every database', async () => {
+    const store = await db.open();
+    // SQLite kept such a text cut short, PostgreSQL failed with an error of its own, MySQL kept it whole.
+    const nul = 'a\u0000b';
+    const refused = (what: string, work: () => Promise<unknown>) =>
+      assert.rejects(work, (error: unknown) => {
+        assert.ok(error instanceof StoreError, `${what}: ${String(error)}`);
+        assert.match(error.message, /NUL/);
+        return true;
+      });
+    await refused('a playlist’s name', () => store.playlists.save(GUILD, nul, [], null));
+    await refused('a token’s name', () =>
+      store.tokens.create({ hash: 'nul-token', name: nul, kind: 'host', userId: null, scope: 'read' }),
+    );
+    await refused('a track’s title', () => store.tracks.upsert(track('https://example.com/nul', nul)));
+    const list = await store.playlists.save(GUILD, 'kept', [], null);
+    await refused('a playlist’s new name', () => store.playlists.rename(list.id, nul));
+    // Nothing of them was kept.
+    assert.deepEqual(
+      (await store.playlists.list(GUILD)).map((playlist) => playlist.name),
+      ['kept'],
+    );
+    assert.equal(await store.tracks.bySource('https://example.com/nul'), null);
+    assert.equal(await store.tokens.byHash('nul-token'), null);
   });
 
   it('keeps a check and the write after it one step: of two at once at a limit, one passes', async () => {
