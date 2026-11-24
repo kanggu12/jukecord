@@ -38,7 +38,17 @@ describe('the HTTP API', () => {
   it('answers the status to anyone and everything else only after a login', async () => {
     const status = await inject({ method: 'GET', url: api('/status') });
     assert.equal(status.statusCode, 200);
-    assert.deepEqual(Object.keys(status.json()).sort(), ['discord', 'login', 'lyrics', 'mode', 'uptimeMs', 'version']);
+    assert.deepEqual(Object.keys(status.json()).sort(), [
+      'database',
+      'discord',
+      'login',
+      'lyrics',
+      'mode',
+      'uptimeMs',
+      'version',
+    ]);
+    // The kind of database alone (the test's own, on SQLite unless JUKECORD_TEST_STORE names a server).
+    assert.match(String(status.json().database), /^(sqlite|postgres|mysql|mariadb)$/);
     const me = await inject({ method: 'GET', url: api('/me') });
     assert.equal(me.statusCode, 401);
     assert.deepEqual(me.json(), { error: { code: 'unauthorized', message: 'log in first' } });

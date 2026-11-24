@@ -40,7 +40,10 @@ import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
 import { Search } from './media/search.ts';
 import { YtDlp } from './media/ytdlp.ts';
-import { Store } from './store/store.ts';
+import { describeAddress } from './store/address.ts';
+import { ConnectionError } from './store/network.ts';
+import { openStore } from './store/open.ts';
+import type { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
 import { Auth, ensureHostToken } from './web/auth.ts';
@@ -83,6 +86,8 @@ async function main(): Promise<number> {
   for (const warning of config.warnings) log.warn(warning);
   log.info(`starting jukecord ${VERSION}`, {
     data: config.dataDir,
+    // Where the database is, never with its user or password.
+    database: describeAddress(config.database.address),
     discord: config.discord.token ? 'yes' : 'browser-only',
   });
 
@@ -104,7 +109,20 @@ async function main(): Promise<number> {
     crashCheckpoint().then(exit, exit);
   });
 
-  const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
+  // The database JUKECORD_DATABASE_URL names (the data folder's SQLite file by default); a server is waited for while it
+  // does not answer yet, up to a minute. One that cannot be reached, or refuses jukecord, is said in its words and
+  // jukecord ends: there is nothing it can do without its database.
+  let store: Store;
+  try {
+    store = await openStore(config.database.address, { pool: config.database.pool, log: log.child('database') });
+  } catch (error) {
+    if (!(error instanceof ConnectionError)) throw error;
+    log.error('jukecord cannot reach its database', { reason: error.message });
+    return 1;
+  }
+  if (config.database.address.kind !== 'sqlite') {
+    log.info('the database is open', { server: `${store.sql.server.product} ${store.sql.server.version}` });
+  }
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
   const lanes = new GuildLanes();
   // Trouble said in the log and in each server's alerts channel (app/alerts.ts); the bot posts them once it exists.

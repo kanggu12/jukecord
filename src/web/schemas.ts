@@ -312,6 +312,12 @@ export const StatusSchema = Type.Object(
     uptimeMs: Type.Integer(),
     login: Type.Object({ discord: Type.Boolean({ description: 'Whether logging in with Discord is set up' }) }),
     lyrics: Type.Boolean({ description: 'Whether lyrics are looked up here (JUKECORD_LYRICS)' }),
+    database: Type.Union(
+      [Type.Literal('sqlite'), Type.Literal('postgres'), Type.Literal('mysql'), Type.Literal('mariadb')],
+      {
+        description: 'The kind of database jukecord keeps its data in (JUKECORD_DATABASE_URL)',
+      },
+    ),
   },
   { title: 'Status' },
 );

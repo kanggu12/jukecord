@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LINK_SERVICES, type LinkService } from './media/links.ts';
+import { type DatabaseAddress, defaultSqliteFile, describeAddress, parseDatabaseAddress } from './store/address.ts';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
 /** How much the logger writes; each level includes the ones after it. */
@@ -16,6 +17,15 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export interface Config {
   /** Where the database, the media cache and the logs live (an absolute path). */
   readonly dataDir: string;
+  readonly database: {
+    /**
+     * Where the database is (JUKECORD_DATABASE_URL): the data folder's SQLite file by default, or another file, or a
+     * PostgreSQL or MySQL/MariaDB server's database.
+     */
+    readonly address: DatabaseAddress;
+    /** How many connections to a database server at most (JUKECORD_DATABASE_POOL); SQLite has its one. */
+    readonly pool: number;
+  };
   /** The address the panel and the API listen on. */
   readonly host: string;
   /** The port the panel and the API listen on. */
@@ -109,6 +119,9 @@ export const DEFAULT_PORT = 8795;
 // Every variable jukecord reads. Anything else that starts with JUKECORD_ is reported as a probable typo.
 const KNOWN = new Set([
   'JUKECORD_DATA_DIR',
+  'JUKECORD_DATABASE_URL',
+  'JUKECORD_DATABASE_URL_FILE',
+  'JUKECORD_DATABASE_POOL',
   'JUKECORD_HOST',
   'JUKECORD_PORT',
   'JUKECORD_PUBLIC_URL',
@@ -267,6 +280,22 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     return content || null;
   };
 
+  // The database: the data folder's SQLite file unless JUKECORD_DATABASE_URL names another, or a server (its address
+  // read from a file by JUKECORD_DATABASE_URL_FILE too, as the other secrets: a server's address holds a password).
+  // The address is checked here; whether the server answers is found out when jukecord starts.
+  let address: DatabaseAddress = { kind: 'sqlite', file: defaultSqliteFile(dataDir) };
+  const databaseUrl = secret('JUKECORD_DATABASE_URL');
+  if (databaseUrl !== null) {
+    try {
+      address = parseDatabaseAddress(databaseUrl, dataDir);
+    } catch (error) {
+      // The reason alone, which never quotes the address (it may hold the password).
+      problems.push(`JUKECORD_DATABASE_URL ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  // Connections to a server at most: ten serve a busy jukecord; a hosted database may allow few per user.
+  const database = { address, pool: read('JUKECORD_DATABASE_POOL', 10, integer(1, 100)) };
+
   // Discord settings. Each is optional on its own; the combinations are checked below.
   const token = secret('JUKECORD_DISCORD_TOKEN');
   const clientId = read('JUKECORD_DISCORD_CLIENT_ID', null as string | null, (text) => {
@@ -418,6 +447,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
 
   return {
     dataDir,
+    database,
     host,
     port,
     publishedPort,
@@ -447,6 +477,10 @@ export function describeConfig(config: Config): Record<string, string> {
   const secret = (value: string | null): string => (value === null ? 'not set' : 'set');
   return {
     'data directory': config.dataDir,
+    // Where the database is, never with its user or password.
+    database: describeAddress(config.database.address),
+    'database connections':
+      config.database.address.kind === 'sqlite' ? 'one (a file)' : `up to ${config.database.pool}`,
     listen: `${config.host}:${config.port}`,
     'public address': config.publicUrl ?? 'not set',
     'trust proxy headers': String(config.trustProxy),
