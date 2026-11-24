@@ -72,6 +72,21 @@ export const PANEL_ACTIONS = [
   'autoplay',
   'playlist-export',
   'playlist-import',
+  // The host's own settings page: every setting, the tests of an address and of each way of logging in, the database
+  // move and the restart.
+  'host-settings',
+  'host-settings-change',
+  'settings-test-database',
+  'settings-test-cache',
+  'settings-test-bus',
+  'auth-test-discord',
+  'auth-test-oidc',
+  'auth-test-ldap',
+  'database-move',
+  'database-move-status',
+  'database-move-switch',
+  'database-move-cancel',
+  'restart',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -86,15 +101,26 @@ export const LIVE_ACTIONS: Readonly<Partial<Record<PanelAction, string>>> = {
   'voice-channels': 'voice',
 };
 
-/** A refusal from jukecord, with its code (invalid, forbidden, conflict ...). */
+/** One problem of a refused change of settings, by the settings it is about. */
+export interface SettingProblem {
+  names: string[];
+  message: string;
+}
+
+/**
+ * A refusal from jukecord, with its code (invalid, forbidden, conflict ...); a refused change of settings has each of
+ * its problems by setting.
+ */
 export class ApiError extends Error {
   override name = 'ApiError';
   readonly code: string;
   readonly status: number;
-  constructor(code: string, message: string, status: number) {
+  readonly problems: SettingProblem[];
+  constructor(code: string, message: string, status: number, problems: SettingProblem[] = []) {
     super(message);
     this.code = code;
     this.status = status;
+    this.problems = problems;
   }
 }
 
@@ -135,12 +161,13 @@ export async function request<T>(method: string, path: string, body?: unknown, s
     throw new ApiError('no-answer', `jukecord did not answer (${response.status})`, response.status);
   }
   if (!response.ok) {
-    const error = (json as { error?: { code?: string; message?: string } } | null)?.error;
+    const error = (json as { error?: { code?: string; message?: string; problems?: SettingProblem[] } } | null)?.error;
     if (response.status === 401) onLoggedOut();
     throw new ApiError(
       error?.code ?? String(response.status),
       error?.message ?? `HTTP ${response.status}`,
       response.status,
+      Array.isArray(error?.problems) ? error.problems : [],
     );
   }
   return json as T;
@@ -315,6 +342,122 @@ export interface Me {
   /** For a member, and a Discord user who logged in through OIDC: where they logged in, and their groups' level. */
   member: { provider: 'oidc' | 'ldap'; level: 'admin' | 'control' | 'read' } | null;
 }
+/** Words in each language the panel speaks (the settings' labels and sentences come so from jukecord). */
+export interface BothWords {
+  en: string;
+  ko: string;
+}
+/** A group of the host's settings page, and its parts (the ways of logging in). */
+export interface SettingGroup {
+  id: string;
+  label: BothWords;
+  parts?: { id: string; label: BothWords }[];
+}
+/** One of the host's settings as the page shows it: what it is, its value, where the value comes from. */
+export interface HostSetting {
+  name: string;
+  group: string;
+  part: string | null;
+  kind: 'text' | 'secret' | 'url' | 'integer' | 'duration' | 'size' | 'boolean' | 'choice' | 'time' | 'list';
+  label: BothWords;
+  help: BothWords;
+  default: string | null;
+  defaultNote: BothWords | null;
+  min: string | null;
+  max: string | null;
+  choices: string[] | null;
+  separator: string | null;
+  off: string | null;
+  words: string[] | null;
+  maxLength: number | null;
+  applies: 'now' | 'restart';
+  bootstrap: boolean;
+  secret: boolean;
+  roles: string[];
+  value: string | null;
+  set: boolean;
+  shown: string | null;
+  source: 'environment' | 'saved' | 'default';
+  variable: string | null;
+  editable: boolean;
+  /** environment: a variable sets it; split: each service's environment does; start: where jukecord starts does. */
+  locked: 'environment' | 'split' | 'start' | null;
+  revision: number;
+  pending: boolean;
+  running: string | null;
+  refused: string | null;
+}
+/** A service of a split jukecord: the core or an edge. */
+export interface ServiceInfo {
+  role: 'core' | 'edge';
+  name: string;
+  version: string;
+  startedAt: number | null;
+  ready: boolean | null;
+  seenAt: number | null;
+}
+/** The database move under way or done. */
+export interface MoveState {
+  phase: 'copying' | 'copied' | 'failed' | 'switching';
+  where: string;
+  kind: string | null;
+  replace: boolean;
+  startedAt: number;
+  finishedAt: number | null;
+  rows: number;
+  total: number;
+  table: string | null;
+  ms: number | null;
+  error: string | null;
+}
+/** A move's switch that did not finish (said at the next start). */
+export interface MoveFailure {
+  at: number;
+  where: string;
+  reason: string;
+}
+/** Every host setting, by group, and what waits for a restart. */
+export interface HostSettingsView {
+  groups: SettingGroup[];
+  settings: HostSetting[];
+  restart: { pending: string[]; supervisor: string; refusal: string | null };
+  role: 'all' | 'core' | 'edge';
+  strays: string[];
+  move: { state: MoveState | null; lastFailure: MoveFailure | null };
+  services: ServiceInfo[];
+}
+/** A change's answer: what it changed (a secret's values never), and the settings after it. */
+export interface SettingsChanged {
+  changed: { name: string; from: string | null; to: string | null; applies: 'now' | 'restart' }[];
+  view: HostSettingsView;
+}
+/** A database's address tried. */
+export interface DatabaseTest {
+  ok: boolean;
+  where: string;
+  kind: string | null;
+  server: string | null;
+  roundTripMs: number | null;
+  schema: number | null;
+  latest: number;
+  rows: number | null;
+  inUse: boolean;
+  newFile: boolean;
+  problem: string | null;
+}
+/** An address for the shared cache or the bus tried. */
+export interface ServerTest {
+  ok: boolean;
+  where: string;
+  server: string | null;
+  roundTripMs: number | null;
+  problem: string | null;
+}
+/** A way of logging in tested, check by check. */
+export interface LoginTest {
+  ok: boolean;
+  checks: { name: string; status: 'ok' | 'warn' | 'fail'; detail: string }[];
+}
 /** The ways of logging in that are set up here, with the words the host chose for their keys. */
 export interface AuthMethods {
   discord: boolean;
@@ -481,6 +624,25 @@ export const api = {
     request<PlaylistFile>('GET', `${g(guild)}/playlists/${encodeURIComponent(name)}/export?format=${format}`),
   'playlist-import': (guild: string, name: string, content: string) =>
     request<Imported>('POST', `${g(guild)}/playlists/import`, { name, content }),
+  'host-settings': () => request<HostSettingsView>('GET', '/settings'),
+  'host-settings-change': (values: Record<string, string | null>, revisions: Record<string, number>) =>
+    request<SettingsChanged>('PATCH', '/settings', { values, revisions }),
+  'settings-test-database': (url: string) => request<DatabaseTest>('POST', '/settings/test-database', { url }),
+  'settings-test-cache': (url: string) => request<ServerTest>('POST', '/settings/test-cache', { url }),
+  'settings-test-bus': (url: string) => request<ServerTest>('POST', '/settings/test-bus', { url }),
+  'auth-test-discord': (settings: Record<string, string>) =>
+    request<LoginTest>('POST', '/auth/test-discord', { settings }),
+  'auth-test-oidc': (settings: Record<string, string>) => request<LoginTest>('POST', '/auth/test-oidc', { settings }),
+  'auth-test-ldap': (settings: Record<string, string>, username?: string) =>
+    request<LoginTest>('POST', '/auth/test-ldap', { settings, ...(username ? { username } : {}) }),
+  'database-move': (url: string, replace: boolean) =>
+    request<MoveState>('POST', '/settings/database-move', { url, replace }),
+  'database-move-status': () =>
+    request<{ state: MoveState | null; lastFailure: MoveFailure | null }>('GET', '/settings/database-move'),
+  'database-move-switch': () =>
+    request<{ supervisor: string; restarts: boolean }>('POST', '/settings/database-move/switch'),
+  'database-move-cancel': () => request<unknown>('DELETE', '/settings/database-move'),
+  restart: () => request<{ supervisor: string; restarts: boolean }>('POST', '/restart'),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /**

@@ -66,6 +66,7 @@ function segmented<T extends string>(
 function currentPage(): string {
   if (location.pathname.startsWith('/stats')) return '/stats';
   if (location.pathname.startsWith('/logs')) return '/logs';
+  if (location.pathname.startsWith('/settings')) return '/settings';
   return '/';
 }
 
@@ -253,10 +254,30 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     close();
     inviteDialog();
   };
+  // jukecord's own settings, for the host alone (a member at the admin level may not see them): a page of its own, on
+  // every width (the pages' section above shows on narrow windows only).
+  const settings = host
+    ? h(
+        'button',
+        {
+          class: 'choice',
+          type: 'button',
+          'data-act': 'menu-settings',
+          'aria-current': currentPage() === '/settings' ? 'page' : null,
+        },
+        icon('settings'),
+        words.settings,
+      )
+    : null;
+  if (settings)
+    settings.onclick = () => {
+      close();
+      navigate('/settings');
+    };
   // A guest's menu: the look and leaving; it has no pages to move between, no shortcuts to press.
   pages.hidden = guest;
   shortcuts.hidden = guest;
-  fill(end, mayInvite() ? invite : null, shortcuts, out);
+  fill(end, settings, mayInvite() ? invite : null, shortcuts, out);
   fill(body, who, pages, look, dj, share, alerts, tokens, end);
   // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
   // which runs in the same turn).

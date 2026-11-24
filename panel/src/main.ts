@@ -34,12 +34,13 @@ import { lyricsView } from './views/lyrics.ts';
 import { applyLook, menuSheet, serversSheet, shortcutsDialog } from './views/menu.ts';
 import { loginPage, logsPage, statsPage, waitingPage } from './views/pages.ts';
 import { act, addCard, historyCard, nowCard, queueCard, refreshLikes, skipOrVote, voiceCard } from './views/player.ts';
+import { settingsPage } from './views/settings.ts';
 import { addPage } from './views/shared.ts';
 import { wrappedPage } from './views/wrapped.ts';
 
 const root = document.getElementById('app') as HTMLElement;
 
-type Route = 'player' | 'stats' | 'logs' | 'wrapped' | 'add';
+type Route = 'player' | 'stats' | 'logs' | 'wrapped' | 'add' | 'settings';
 
 // The page a path shows; the log is the host's only.
 function routeOf(path: string): Route {
@@ -51,6 +52,8 @@ function routeOf(path: string): Route {
   // What another app shared (the installed panel is a share target).
   if (path.startsWith('/add')) return 'add';
   if (path.startsWith('/logs') && hostLike()) return 'logs';
+  // jukecord's own settings are the host's alone: its token or its own login link, never a member's admin level.
+  if (path.startsWith('/settings') && state.me?.kind === 'host') return 'settings';
   return 'player';
 }
 
@@ -264,7 +267,9 @@ function frame(): void {
             ? wrappedPage()
             : route === 'add'
               ? addPage(navigate, () => serversSheet(choose))
-              : logsPage(),
+              : route === 'settings'
+                ? settingsPage()
+                : logsPage(),
       );
       leave = built.dispose;
       fill(page, built.value);

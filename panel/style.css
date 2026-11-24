@@ -5294,3 +5294,364 @@ button.lyric {
   border-top: 1px solid var(--line);
   color: var(--ink-2);
 }
+
+/* ---- the host's settings -------------------------------------------------------------------------------------- */
+/* The page: the bar of a restart that changes wait for under the title, then the sections' index beside their cards
+   on a wide window (one column of cards on a narrow one, where the index would take the cards' room). */
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gap);
+  align-items: start;
+}
+.settings-index {
+  display: none;
+}
+@media (min-width: 1100px) {
+  .settings-layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  /* The index stays in sight while the cards scroll by, under the bar. */
+  .settings-index {
+    position: sticky;
+    top: calc(var(--bar-h) + var(--gap));
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    padding-inline: var(--s-8);
+  }
+}
+/* An entry of the index: a choice's pane, its words at the column's edge. */
+.settings-index .index-link {
+  min-height: var(--control);
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.settings-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+/* Scrolled to from the index: its head clear of the bar above it. */
+.settings-card {
+  scroll-margin-top: calc(var(--bar-h) + var(--gap));
+}
+/* The restart's bar: what waits, in words, and the key that restarts, on one line at the cards' inset. */
+.restart-bar {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s-12);
+  padding: var(--s-12) var(--pad);
+}
+.restart-bar .bar-mark {
+  color: var(--pause);
+}
+.restart-words {
+  flex: 1;
+  min-width: 0;
+}
+.restart-names {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+/* A setting: what it is beside its control, a rule between it and the next. Its name stands on the control's line,
+   centred on it; what it is and its state under the name, small. */
+.setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  align-items: start;
+  gap: var(--s-8) var(--s-24);
+  padding: var(--s-12) var(--pad);
+  border-top: 1px solid var(--line);
+}
+.setting-list > .setting:first-child {
+  border-top: 0;
+}
+/* A setting changed and not saved yet: a line of the brand's blue at its start, inside its padding. */
+.setting.changed {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.setting-text {
+  min-width: 0;
+}
+.setting-name {
+  display: flex;
+  align-items: center;
+  min-height: var(--control);
+  font-weight: 500;
+}
+.setting-help,
+.setting-state,
+.setting-problem,
+.setting-found {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+.setting-help {
+  color: var(--ink-2);
+}
+/* Where its value comes from and when a change applies; a state that needs a look in its tone, with its icon. */
+.setting-state,
+.setting-problem,
+.setting-found {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-6);
+  color: var(--tone, var(--ink-3));
+}
+.setting-problem {
+  color: var(--bad);
+}
+.setting-problem[hidden] {
+  display: none;
+}
+.setting-found {
+  color: var(--tone, var(--ink-2));
+}
+.setting-found[hidden] {
+  display: none;
+}
+/* A control and the keys beside it (a field and its Test, a secret's state and Change), at the row's end. */
+.control-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-8);
+  min-width: 0;
+}
+/* The control, at the row's end, on the name's line. */
+.setting-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-8);
+  min-height: var(--control);
+  min-width: 0;
+}
+.setting-control > .field,
+.setting-control > .control-row {
+  flex: 1;
+}
+.control-row > .field {
+  flex: 1 1 0;
+}
+/* A number beside its unit, and a time of day: as wide as what they hold. */
+.control-row > .field.amount {
+  flex: 0 0 96px;
+}
+.control-row > .field.time {
+  flex: 0 0 88px;
+}
+/* A value that cannot be changed here, or a secret's state: words, cut short when long (whole in their title). */
+.setting-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+/* A narrow card: the control under what the setting is, across the row. */
+@container card (max-width: 620px) {
+  .setting {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .setting-control {
+    justify-content: flex-start;
+  }
+  .control-row {
+    justify-content: flex-start;
+  }
+}
+/* A section's foot: how many changes it holds, and its keys at the end. */
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-8);
+  padding: var(--s-12) var(--pad);
+  border-top: 1px solid var(--line);
+}
+.settings-foot > .faint {
+  margin-right: auto;
+}
+/* A part of the logins: its title and its test on one line at the card's inset, a rule above every part but the
+   first. */
+.setting-part + .setting-part {
+  border-top: 1px solid var(--line);
+}
+.part-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-8) var(--s-12);
+  padding: var(--s-12) var(--pad) 0;
+}
+.part-head h3 {
+  margin: 0;
+  flex: 1;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+  font-weight: 650;
+}
+.part-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--s-8);
+}
+.part-tools > .field {
+  width: 200px;
+  flex: none;
+}
+/* What a test found: its verdict, then a line per check, at the card's inset. */
+.test-found {
+  padding: var(--s-12) var(--pad) 0;
+}
+.test-found[hidden] {
+  display: none;
+}
+.test-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-6);
+  margin: 0;
+  color: var(--tone, var(--ink));
+}
+.checks {
+  list-style: none;
+  margin: var(--s-8) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+.checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-6);
+  color: var(--tone, var(--ink-2));
+}
+/* The services of a split jukecord: one line each, its lamp first. */
+.service-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--s-12) var(--pad);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+  border-bottom: 1px solid var(--line);
+}
+.service {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-4) var(--s-12);
+  min-width: 0;
+}
+.service-name {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The summary before a save: each setting, what it becomes, and when. */
+.change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+}
+.change-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--s-12);
+}
+.change-name {
+  font-weight: 500;
+}
+.change-to {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+/* The move's dialog of pages: where it stands (the four steps, the one shown marked), then the page's own parts. */
+.wizard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-12);
+}
+.wizard-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-4);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--ink-3);
+}
+/* Each step a line over its name: the steps done and the one shown in ink, the one shown in the brand's blue. */
+.wizard-steps li {
+  padding-top: var(--s-6);
+  border-top: 2px solid var(--line-2);
+}
+.wizard-steps li.done {
+  color: var(--ink-2);
+  border-top-color: var(--ink-3);
+}
+.wizard-steps li[aria-current="step"] {
+  color: var(--ink);
+  font-weight: 600;
+  border-top-color: var(--accent);
+}
+.wizard-note {
+  margin: 0;
+}
+.wizard-found {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+  min-height: var(--lh-md);
+}
+/* The copy's progress: a track of the field's face, filled in the charts' ink as rows arrive. */
+.copy-meter {
+  height: 8px;
+  border-radius: var(--r-round);
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.copy-meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--series);
+  transition: width 400ms ease;
+}
+.wizard-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-6);
+  color: var(--tone, var(--ink-2));
+}
+.wizard-tools {
+  display: flex;
+  justify-content: flex-start;
+}
+.wizard-tools .key[hidden] {
+  display: none;
+}
+.dialog-keys .key[hidden] {
+  display: none;
+}

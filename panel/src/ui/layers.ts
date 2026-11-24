@@ -385,17 +385,19 @@ function reachableWhenLong(scroller: HTMLElement, inner: Element, name: string):
   return () => watcher.disconnect();
 }
 
-/** Asks before something that cannot be undone. */
+/** Asks before something that cannot be undone; `content` is what it will do, when words alone do not say it. */
 export function confirmDialog(options: {
   title: string;
-  text: string;
+  text?: string;
+  content?: Node;
   ok: string;
   danger?: boolean;
 }): Promise<boolean> {
   return dialog<boolean>(
     (finish) => ({
       title: options.title,
-      text: options.text,
+      ...(options.text ? { text: options.text } : {}),
+      ...(options.content ? { content: options.content } : {}),
       keys: [
         h('button', { class: 'key', type: 'button', onclick: () => finish(false) }, t().cancel),
         h(
@@ -446,6 +448,24 @@ export function askDialog(options: {
       ],
     };
   }, null);
+}
+
+/**
+ * A dialog of pages (a guided flow): its title stays, and each page fills the content and the row of keys it returns
+ * (Back, the next step's key, Cancel). Escape and the shade close it, as any dialog; `done` settles when it closes.
+ */
+export function pagedDialog(
+  title: string,
+  content: HTMLElement,
+): { keys: HTMLElement; close: () => void; done: Promise<void> } {
+  let closeIt: () => void = () => {};
+  const done = dialog<void>((finish) => {
+    closeIt = () => finish();
+    return { title, content, keys: [] };
+  }, undefined);
+  // The dialog is on the page as soon as it is made: its own row of keys is the pages' to fill.
+  const keys = content.closest('.dialog')?.querySelector<HTMLElement>('.dialog-keys') ?? h('div');
+  return { keys, close: () => closeIt(), done };
 }
 
 /** Shows something with a close key (the shortcuts, the playlists). */
