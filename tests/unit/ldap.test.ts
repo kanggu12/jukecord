@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
+import type { ClientOptions } from 'ldapts';
 import { bindRefusal, escapeFilterValue, fillFilter, IN_CHAIN, LdapError, LdapLogin } from '../../src/auth/ldap.ts';
 import type { LdapSettings } from '../../src/auth/settings.ts';
 import { createLogger } from '../../src/log.ts';
@@ -196,6 +197,28 @@ describe('LdapLogin', () => {
         /encrypted connection only: use ldaps:\/\/ or JUKECORD_LDAP_STARTTLS=yes/.test(error.message),
     );
     assert.equal((await login(server, { startTls: true }).login('alice', 'alice-password')).name, 'Alice');
+  });
+
+  it('gives an LDAPS:// address in capitals its certificates and its name to check, as ldaps:// gets them', async () => {
+    for (const url of ['ldaps://ldap.example.test:636', 'LDAPS://ldap.example.test:636']) {
+      const fake = directory();
+      const seen: ClientOptions[] = [];
+      const ldap = new LdapLogin({
+        settings: { ...SETTINGS, url, ca: 'the CA file' },
+        log,
+        connect: (options) => {
+          seen.push(options);
+          return fake.connect();
+        },
+      });
+      await ldap.login('alice', 'alice-password');
+      assert.equal(seen[0]?.tlsOptions?.ca, 'the CA file', url);
+      assert.equal(seen[0]?.tlsOptions?.servername, 'ldap.example.test', url);
+      assert.equal(seen[0]?.tlsOptions?.minVersion, 'TLSv1.2', url);
+      // The settings' test says how it connected.
+      const tested = await ldap.test();
+      assert.match(tested.checks[0]?.detail ?? '', /answered, over TLS$/, url);
+    }
   });
 
   it('refuses a filter that finds two people', async () => {

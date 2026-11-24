@@ -22,7 +22,7 @@ import {
 import type { Logger } from '../log.ts';
 import { normalDn } from './levels.ts';
 import type { Check } from './oidc.ts';
-import type { LdapSettings } from './settings.ts';
+import { type LdapSettings, ldapsUrl } from './settings.ts';
 
 /** Active Directory's rule for "a member of this group, or of a group inside it, at any depth". */
 export const IN_CHAIN = '1.2.840.113556.1.4.1941';
@@ -178,7 +178,8 @@ export class LdapLogin {
       url: settings.url,
       timeout: settings.timeoutMs,
       connectTimeout: settings.timeoutMs,
-      ...(settings.url.startsWith('ldaps:') ? { tlsOptions } : {}),
+      // An address encrypted from the start gets the certificates and the name to check (LDAPS:// as ldaps://).
+      ...(ldapsUrl(settings.url) ? { tlsOptions } : {}),
       strictDN: true,
     };
     const client = this.options.connect ? this.options.connect(options) : new Client(options);
@@ -327,7 +328,7 @@ export class LdapLogin {
     }
     // ldapts connects at the first request: the directory's root entry, which a directory shows anyone, says whether it
     // answers (over TLS, with its certificate trusted). A refusal to show it is an answer too.
-    const how = settings.url.startsWith('ldaps:') ? 'over TLS' : settings.startTls ? 'with StartTLS' : 'unencrypted';
+    const how = ldapsUrl(settings.url) ? 'over TLS' : settings.startTls ? 'with StartTLS' : 'unencrypted';
     try {
       await client.search('', { scope: 'base', filter: '(objectClass=*)', attributes: ['1.1'], sizeLimit: 1 });
       checks.push({ name: 'connection', status: 'ok', detail: `${settings.url} answered, ${how}` });
