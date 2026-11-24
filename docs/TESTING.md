@@ -1,22 +1,87 @@
 # Testing
 
-| Suite             | Command                                      | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| :---------------- | :------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| unit              | `npm run test:unit`                          | settings, units and times, the database and its migrations, the queue, the player's states, the cache, yt-dlp's output, the actions and their limits, who may do what, logins and tokens, the API through Fastify's inject, the parity of the four ways in, the statistics, the self-check                                                                                                                                                                                |
-| integration       | `npm test` (with the unit tests)             | real ffmpeg with a fake yt-dlp: fetching, converting, seeking, retrying; the voice channel's sounds; live updates over a real WebSocket; the web server's own limits; the `jukecord` command against a real server                                                                                                                                                                                                                                                        |
-| packaging         | `node --test "tests/packaging/**/*.test.ts"` | one version everywhere, the changelog, the API document, the Dockerfile (pins, file modes, labels, what the panel's stage copies), the Compose file's limits, the front door's help, the chart (lint, template, the values it refuses, kubeconform when installed), the workflows (pins, the release's checks) the scripts, and the release's programs (their pins against the image's, the workflows building and running each, the launcher's settings and data folder) |
-| the panel         | `tests/ui/run.sh <folder>`                   | every state at eight window sizes, both themes and both languages, measured; the browser playing along                                                                                                                                                                                                                                                                                                                                                                    |
-| measurements      | `tests/perf/measure.sh [cores] [panels]`     | a server used every day for a year, on two processor cores: memory, the panel's reads, a track's encoding, a crowd of a thousand panels                                                                                                                                                                                                                                                                                                                                   |
-| the chart         | `deploy/kind/check.sh <image>`               | the chart on a throwaway kind cluster                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| the programs      | `node scripts/bundle-smoke.ts <archive>`     | one of the release's programs on its own system and processor: unpacked, its Node.js, FFmpeg, yt-dlp and voice encryption working, started with its launcher, a track played through yt-dlp and FFmpeg, stopped (`bundles.yml` runs it for every target, `downloads.yml` again from the published release)                                                                                                                                                                |
-| macOS and Windows | `platforms.yml`                              | the unit tests on macOS and Windows, which the programs run on                                                                                                                                                                                                                                                                                                                                                                                                            |
-| everything quick  | `npm run check`                              | lint, types, unit and integration tests                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Suite             | Command                                        | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| :---------------- | :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| unit              | `npm run test:unit`                            | settings, units and times, the database and its migrations, the queue, the player's states, the cache, yt-dlp's output, the actions and their limits, who may do what, logins and tokens, the API through Fastify's inject, the parity of the four ways in, the statistics, the self-check                                                                                                                                                                                |
+| integration       | `npm test` (with the unit tests)               | real ffmpeg with a fake yt-dlp: fetching, converting, seeking, retrying; the voice channel's sounds; live updates over a real WebSocket; the web server's own limits; the `jukecord` command against a real server                                                                                                                                                                                                                                                        |
+| packaging         | `node --test "tests/packaging/**/*.test.ts"`   | one version everywhere, the changelog, the API document, the Dockerfile (pins, file modes, labels, what the panel's stage copies), the Compose file's limits, the front door's help, the chart (lint, template, the values it refuses, kubeconform when installed), the workflows (pins, the release's checks) the scripts, and the release's programs (their pins against the image's, the workflows building and running each, the launcher's settings and data folder) |
+| the panel         | `tests/ui/run.sh <folder>`                     | every state at eight window sizes, both themes and both languages, measured; the browser playing along                                                                                                                                                                                                                                                                                                                                                                    |
+| measurements      | `tests/perf/measure.sh [cores] [panels]`       | a server used every day for a year, on two processor cores: memory, the panel's reads, a track's encoding, a crowd of a thousand panels                                                                                                                                                                                                                                                                                                                                   |
+| the chart         | `deploy/kind/check.sh <image>`                 | the chart on a throwaway kind cluster                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| the programs      | `node scripts/bundle-smoke.ts <archive>`       | one of the release's programs on its own system and processor: unpacked, its Node.js, FFmpeg, yt-dlp and voice encryption working, started with its launcher, a track played through yt-dlp and FFmpeg, stopped (`bundles.yml` runs it for every target, `downloads.yml` again from the published release)                                                                                                                                                                |
+| macOS and Windows | `platforms.yml`                                | the unit tests on macOS and Windows, which the programs run on                                                                                                                                                                                                                                                                                                                                                                                                            |
+| databases         | `JUKECORD_TEST_DATABASES=<addresses> npm test` | the store's tests (every repository, migrations, copies, backups, transactions racing) on SQLite and on each PostgreSQL, MySQL or MariaDB named ([databases](#databases))                                                                                                                                                                                                                                                                                                 |
+| the bus           | `JUKECORD_TEST_BUS_URL=redis://... npm test`   | the bus, the shared cache and a core with two edges in one process, on Redis or Valkey as well as in memory ([a split](#a-split-into-services))                                                                                                                                                                                                                                                                                                                           |
+| the split         | `tests/split/run.sh [postgres\|mysql] [image]` | the Compose split end to end: a core, two edges, the database, Valkey and Caddy                                                                                                                                                                                                                                                                                                                                                                                           |
+| logins            | `tests/auth/run.sh`, `tests/auth/run-ad.sh`    | logging in for real through Keycloak, an OpenLDAP and a Samba domain controller ([logins](#logins))                                                                                                                                                                                                                                                                                                                                                                       |
+| the chart, split  | `deploy/kind/check-split.sh <image>`           | the chart's split mode, with its logins, on a throwaway kind cluster                                                                                                                                                                                                                                                                                                                                                                                                      |
+| everything quick  | `npm run check`                                | lint, types, unit and integration tests                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 The integration tests need ffmpeg with libopus; they are skipped (and say so) without it. Nothing in the tests talks
 to Discord, YouTube or any other site: yt-dlp is replaced by `tests/support/fake-yt-dlp.mjs`, Discord's API by fakes,
 and every example address is on example.com or media.example. What YouTube, Deezer, Spotify and Apple Music answer
 (a search, a mix, Deezer's track, album and playlist, a Spotify and an Apple Music track's page) was read once from
 the real services and is kept in `tests/fixtures` in its real shape, with every value made up.
+
+## Databases
+
+The store's tests run on SQLite always, and on every server named in `JUKECORD_TEST_DATABASES`, separated by spaces.
+Each test gets an empty database at the latest schema: a PostgreSQL schema, or a MySQL database (`jkt_<pid>_<n>`), of
+the test process's own, emptied after each test and dropped at the end. A PostgreSQL address names a database the
+tests may make schemas in; a MySQL or MariaDB one, a user that may make databases (root, in a throwaway container):
+
+```bash
+docker run -d --rm --name jukecord-postgres -p 127.0.0.1:15432:5432 --tmpfs /var/lib/postgresql \
+  -e POSTGRES_USER=jukecord -e POSTGRES_PASSWORD=jukecord -e POSTGRES_DB=jukecord postgres:18-alpine
+docker run -d --rm --name jukecord-mysql -p 127.0.0.1:13306:3306 --tmpfs /var/lib/mysql \
+  -e MYSQL_ROOT_PASSWORD=jukecord -e MYSQL_DATABASE=jukecord mysql:8.4
+JUKECORD_TEST_DATABASES="postgres://jukecord:jukecord@127.0.0.1:15432/jukecord mysql://root:jukecord@127.0.0.1:13306/jukecord" npm test
+```
+
+CI runs them on the oldest and the newest of each: PostgreSQL 14 and 18, MySQL 8.0 and 8.4, MariaDB 10.11 and 11.8,
+each pinned by version and digest. Among them: a source address of 3,000 characters kept unique by its hash, emoji and
+names that differ only by case or accent kept apart, two transactions at a limit that both read first (one passes),
+two jukecords opening a new database at once, a copy from SQLite through each server and back with every row compared,
+a copy that fails halfway and changes nothing, and backups of each kind. `JUKECORD_TEST_STORE=<address>` puts every
+store of the whole suite on one server, to look for paths the store's own tests miss; the tests driven by a fake clock
+fail there by design, since they expect SQLite's answer within a turn of the event loop.
+
+## A split into services
+
+`tests/integration/split.test.ts` runs a core and two edges in one process, on the bus in memory, and on Redis or
+Valkey too when `JUKECORD_TEST_BUS_URL` names a server: a change made through one edge reaches the other's live
+connection, a login link made on one edge works on the other, a revoked listening link ends its guests on both, a
+person's rates are counted once across edges, and each role answers its readiness and its figures. The bus's and the
+shared cache's own tests take the same variable:
+
+```bash
+docker run -d --rm --name jukecord-valkey -p 127.0.0.1:6379:6379 valkey/valkey:8-alpine
+JUKECORD_TEST_BUS_URL=redis://127.0.0.1:6379 npm test
+```
+
+`tests/split/run.sh` brings the Compose split up under a throwaway project, browser-only: every service ready by its
+parts, a login link made in one edge used at the other, a track added through one edge playing as the other's live
+connection is told, its audio through an edge with a Range request and whole through the front, then the core
+restarted: the panels are closed with 1012, both edges are ready again, and the player is back on the same track,
+paused. It removes what it started, and runs on PostgreSQL or MySQL. `deploy/kind/check-split.sh` installs the chart in
+split mode on a throwaway kind cluster, with a PostgreSQL, a Valkey and the logins set up: `helm test`, the jukecord
+command in an edge, a token made in one edge used through the Service, only the edges reaching the core's internal port,
+and the edges ready again after the core's pod is replaced.
+
+## Logins
+
+`tests/auth/run.sh` starts a Keycloak (its realm imported from `tests/auth/keycloak-realm.json`) and an OpenLDAP (the
+people of `tests/auth/openldap.ldif`, with a certificate made for the run), and runs `tests/auth/*.test.ts` against
+jukecords it starts: logins through the provider by group and by realm role, its userinfo, logging out there, a wrong
+secret, the directory over LDAPS and StartTLS, groups from `memberOf` and from a search, refusals of each kind.
+`tests/auth/run-ad.sh` does the same against a Samba domain controller built from `tests/auth/samba`: a service account
+by its user principal name and by its down-level name, people by `sAMAccountName`, nested groups, an expired password
+and a turned-off account. The two use the same ports, so they run one after the other, and remove their containers at
+the end. CI runs both (`logins.yml`).
+
+The alert rules are checked by `promtool check rules` and `promtool test rules` when promtool is on the PATH (CI runs
+them in Prometheus's pinned image), and the dashboard's and the rules' queries may name only families jukecord
+declares, with their labels.
 
 ## The panel
 
@@ -123,6 +188,27 @@ pace, from `/proc`. In the image on two cores of a desktop processor (`docker ru
 
 A stream with a sound has its first sound ready 21 ms after it starts (the median of five), so a change of volume or
 sound is heard at once.
+
+### The database
+
+Moving the store to promises kept SQLite's speed. On the data `tests/perf/seed.ts` makes (a thousand tracks queued,
+10,000 plays), timed in one process against 0.3.4's store:
+
+| Call                         |    0.3.4 | with promises |
+| :--------------------------- | -------: | ------------: |
+| The queue, a thousand tracks |   3.9 ms |        3.5 ms |
+| Saving a player's state      | 0.025 ms |      0.008 ms |
+| Statistics                   |  2.46 ms |       2.46 ms |
+| Wrapped                      |  17.8 ms |       15.7 ms |
+| A thousand tracks reordered  |   2.6 ms |        3.2 ms |
+
+The SQL the three databases share, and writing a queue's rows a hundred at a time, followed: on SQLite a 500-track
+insert and its removal went from 4.7 to 2.1 ms, and a thousand tracks reordered from 1.8 to 2.3 ms. The same 88 API
+requests, and the live updates during them, gave the same answers from 0.3.4 and from the asynchronous store on copies
+of one database, and again from 0.4's one process and from a core with an edge.
+
+`jukecord db copy` took the same data, 12,571 rows, from SQLite to PostgreSQL 18 in 0.6 s, from there to MySQL 8.4 in
+0.5 s, and back to SQLite in 0.1 s, every column of every table the same at the end.
 
 ## On arm64 without an arm64 machine
 
