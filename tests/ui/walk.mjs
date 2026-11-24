@@ -1358,6 +1358,215 @@ await sweep('logs', FEW, async (page) => {
   // The records fade out at an edge with more beyond it (the first one in sight was sliced through its letters).
   await edgesFade(page);
 });
+
+// The host's settings page: every group as a section, values the environment sets locked (the walk's server has its
+// public address and its rest from its environment, its data folder from where it starts), the restart's bar and its
+// question, a save's summary and a refused one, a failed test of an address, a login's test, a split's services, and
+// the database move's four pages. Nothing is restarted, moved or sent anywhere: the tests, the move and the split are
+// the walk's own answers, made up as the server would give them.
+async function settingsPage(page) {
+  await page.goto(`${BASE}/settings`);
+  await page.waitForSelector('.settings-card .setting');
+}
+// A row's control, by its setting's name.
+const settingRow = (name) => `.setting[data-name="${name}"]`;
+// The walk's server runs with nothing to start it again (no restart policy), so it refuses a restart: the page as one
+// under Docker's restart policy shows it, made up over its answer (the walk never restarts it).
+async function underDocker(page) {
+  await page.route(/\/api\/v1\/settings$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    view.restart = { ...view.restart, supervisor: 'docker', refusal: null };
+    return route.fulfill({ json: view });
+  });
+}
+await sweep('settings', FEW, async (page) => {
+  await settingsPage(page);
+  // Every group of one process has its card (Services only in a split), and the page offers no move of a database
+  // the environment does not set.
+  const look = await page.evaluate(() => ({
+    cards: document.querySelectorAll('.settings-card').length,
+    locked: document.querySelectorAll('.setting .setting-state .icon').length,
+    move: Boolean(document.querySelector('[data-key="move"]:not([hidden])')),
+  }));
+  if (look.cards !== 8) throw new Error(`${look.cards} sections, not 8`);
+  if (look.locked < 3) throw new Error(`${look.locked} locked values, not 3 or more`);
+  if (!look.move) throw new Error('no key to move the database');
+});
+await sweep('settings-save', FEW, async (page) => {
+  await settingsPage(page);
+  // A change typed: its row marked, its section's count and keys on; Save asks with a summary.
+  await page.fill(`${settingRow('JUKECORD_QUEUE_MAX')} input`, '250');
+  await page.click('[data-key="save-media"]');
+  await page.waitForSelector('.dialog .change-list');
+});
+// A save taken: its toast in the bar (the setting put back to its default first, so every round saves a change).
+await sweep('settings-saved', FEW, async (page) => {
+  await api('PATCH', '/settings', { values: { JUKECORD_QUEUE_MAX: null } });
+  await settingsPage(page);
+  await page.fill(`${settingRow('JUKECORD_QUEUE_MAX')} input`, '250');
+  await page.click('[data-key="save-media"]');
+  await page.click('.dialog .key.primary');
+  await page.waitForSelector('.toasts .toast');
+});
+if (!ONLY || ONLY.has('settings-saved')) await api('PATCH', '/settings', { values: { JUKECORD_QUEUE_MAX: null } });
+await sweep('settings-refused', FEW, async (page) => {
+  page.expectedErrors = [/status of 400/];
+  await settingsPage(page);
+  // A value past the setting's limit: refused, the problem at its row in the page's language.
+  await page.fill(`${settingRow('JUKECORD_QUEUE_MAX')} input`, '5');
+  await page.click('[data-key="save-media"]');
+  await page.click('.dialog .key.primary');
+  await page.waitForSelector(`${settingRow('JUKECORD_QUEUE_MAX')} .setting-problem:not([hidden])`);
+});
+await sweep('settings-test', FEW, async (page) => {
+  // The cache's address tried: a server that is not there, said in the client's words.
+  await page.route(/\/api\/v1\/settings\/test-cache$/, (route) =>
+    route.fulfill({
+      json: {
+        ok: false,
+        where: 'redis://cache.home.example:6379',
+        server: null,
+        roundTripMs: null,
+        problem: 'redis://cache.home.example:6379: getaddrinfo ENOTFOUND cache.home.example',
+      },
+    }),
+  );
+  // A login's test: what the provider answered, check by check.
+  await page.route(/\/api\/v1\/auth\/test-oidc$/, (route) =>
+    route.fulfill({
+      json: {
+        ok: false,
+        checks: [
+          {
+            name: 'discovery',
+            status: 'ok',
+            detail:
+              'https://sso.home.example/realms/home names itself as configured, with its authorization and token endpoints',
+          },
+          {
+            name: 'signing keys',
+            status: 'ok',
+            detail: '2 keys at https://sso.home.example/realms/home/protocol/openid-connect/certs',
+          },
+          {
+            name: 'client',
+            status: 'fail',
+            detail: 'the provider refused the client ID or its secret (invalid_client: Invalid client credentials)',
+          },
+        ],
+      },
+    }),
+  );
+  await settingsPage(page);
+  await page.click(`${settingRow('JUKECORD_CACHE_URL')} .key`);
+  await page.fill(`${settingRow('JUKECORD_CACHE_URL')} input`, 'redis://cache.home.example:6379');
+  await page.click(`${settingRow('JUKECORD_CACHE_URL')} .key >> text=/^(Test|확인)$/`);
+  await page.waitForSelector(`${settingRow('JUKECORD_CACHE_URL')} .setting-found:not([hidden])`);
+  await page.click('[data-key="test-sso"]');
+  await page.waitForSelector('#settings-sso .test-found:not([hidden]) .checks');
+});
+// A split jukecord's page, made up over the walk's own answer: the core answers, what settings.json holds comes from
+// each service's environment, and the services are a core and two edges.
+await sweep('settings-split', FEW, async (page) => {
+  await page.route(/\/api\/v1\/settings$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    const now = Date.now();
+    view.role = 'core';
+    for (const setting of view.settings)
+      if (setting.bootstrap || setting.secret) Object.assign(setting, { locked: 'split', editable: false });
+    view.services = [
+      { role: 'core', name: 'core-7f3a91c2', version: '0.4.0', startedAt: now - 5_400_000, ready: true, seenAt: now },
+      { role: 'edge', name: 'edge-2b8e44d0', version: '0.4.0', startedAt: now - 5_340_000, ready: true, seenAt: now },
+      { role: 'edge', name: 'edge-c91f07a5', version: '0.4.0', startedAt: now - 120_000, ready: false, seenAt: now },
+    ];
+    return route.fulfill({ json: view });
+  });
+  await settingsPage(page);
+  await page.waitForSelector('#settings-services .service');
+});
+// The database move, page by page: the kind, the address tried, the copy under way, and the switch.
+async function movePage(page, step) {
+  let phase = 'copying';
+  const state = () => ({
+    phase,
+    where: 'PostgreSQL (database:5432, database jukecord, without TLS)',
+    kind: 'postgres',
+    replace: false,
+    startedAt: Date.now() - 4_000,
+    finishedAt: phase === 'copied' ? Date.now() : null,
+    rows: phase === 'copied' ? 6120 : 1840,
+    total: 6120,
+    table: phase === 'copied' ? null : 'plays',
+    ms: phase === 'copied' ? 5200 : null,
+    error: null,
+  });
+  await page.route(/\/api\/v1\/settings\/test-database$/, (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        where: 'PostgreSQL (database:5432, database jukecord, without TLS)',
+        kind: 'postgres',
+        server: 'PostgreSQL 18.1',
+        roundTripMs: 0.8,
+        schema: 0,
+        latest: 9,
+        rows: null,
+        inUse: false,
+        newFile: false,
+        problem: null,
+      },
+    }),
+  );
+  await page.route(/\/api\/v1\/settings\/database-move$/, (route) =>
+    route.fulfill({ json: route.request().method() === 'GET' ? { state: state(), lastFailure: null } : state() }),
+  );
+  await underDocker(page);
+  await settingsPage(page);
+  await page.click('[data-key="move"]');
+  await page.waitForSelector('.dialog .wizard-steps');
+  if (step === 1) return;
+  await page.click('.dialog .choice >> nth=1');
+  await page.click('.dialog .dialog-keys .key.primary');
+  await page.fill('.dialog .wizard input', 'postgres://jukecord:made-up-password@database:5432/jukecord');
+  await page.click('.dialog .wizard .control-row .key');
+  await page.waitForSelector('.dialog .wizard-found .test-verdict');
+  if (step === 2) return;
+  await page.click('.dialog .dialog-keys .key.primary');
+  await page.waitForSelector('.dialog .copy-meter');
+  if (step === 3) return;
+  phase = 'copied';
+  await page.waitForSelector('.dialog .dialog-keys .key.primary:not(:disabled)');
+  await page.click('.dialog .dialog-keys .key.primary');
+  await page.waitForSelector('.dialog .wizard-text');
+}
+for (const [step, name] of [
+  [1, 'kind'],
+  [2, 'address'],
+  [3, 'copy'],
+  [4, 'switch'],
+])
+  await sweep(`settings-move-${name}`, FEW, (page) => movePage(page, step));
+// The copy stopped: back at the address, the toast said in the dialog (its shade covers the bar).
+await sweep('settings-move-stopped', FEW, async (page) => {
+  await movePage(page, 3);
+  await page.click('.dialog .wizard-tools .key');
+  await page.waitForSelector('.dialog .dialog-notes .toast');
+});
+// A change that waits for a restart: the bar at the top with its key, and the question the key asks (never answered:
+// the walk's server keeps running). The pool goes back to its default after.
+if (!ONLY || ONLY.has('settings-restart')) {
+  await api('PATCH', '/settings', { values: { JUKECORD_DATABASE_POOL: '4' } });
+  await sweep('settings-restart', FEW, async (page) => {
+    await underDocker(page);
+    await settingsPage(page);
+    await page.waitForSelector('.restart-bar:not([hidden])');
+    await page.click('[data-key="restart"]');
+    await page.waitForSelector('.dialog');
+  });
+  await api('PATCH', '/settings', { values: { JUKECORD_DATABASE_POOL: null } });
+}
 // While the track gets ready there is nothing to press: the main key's place (and on a phone the listening bar's pause
 // key) says the state, the loader turning, in words on the card ("Getting ready"), with no key's fill and not dimmed (a
 // dim slab of the brand's blue saying "Pause" was the loudest thing on the card, and named what was not happening).

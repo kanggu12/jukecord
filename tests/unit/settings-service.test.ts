@@ -35,7 +35,13 @@ afterEach(() => {
 
 // A service over a store, a data folder of the test's own and an environment; what it applied is recorded.
 async function setup(
-  options: { env?: NodeJS.ProcessEnv; store?: Store; supervisor?: 'docker' | 'none'; restart?: () => void } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    store?: Store;
+    supervisor?: 'docker' | 'none';
+    restart?: () => void;
+    answerMs?: number;
+  } = {},
 ) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-settings-'));
   folders.push(dataDir);
@@ -57,8 +63,18 @@ async function setup(
     log,
     apply: (names, next) => applied.push({ names, next }),
     ...(options.restart ? { restart: options.restart } : {}),
+    ...(options.answerMs !== undefined ? { answerMs: options.answerMs } : {}),
   });
   return { settings, store, file, dataDir, sink, applied, env };
+}
+
+// Waits until an asynchronous check says yes (two seconds at most).
+async function eventually(check: () => Promise<boolean> | boolean): Promise<void> {
+  const until = Date.now() + 2000;
+  while (!(await check())) {
+    if (Date.now() > until) assert.fail('timed out');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 // The refusal a change gets, or a failure when it was taken.
@@ -291,6 +307,44 @@ describe('the settings service', () => {
       ['unavailable', 'the database does not answer; nothing was saved'],
     );
     assert.equal(fs.existsSync(path.join(dataDir, SETTINGS_FILE)), false);
+  });
+
+  it('tells a page the database is silent within its wait, and takes a change it answers late in order', async () => {
+    const { settings, store, sink, applied } = await setup({ answerMs: 50 });
+    // A server that stops answering: the write waits for it, as a statement on a paused server does.
+    const write = store.hostSettings.write.bind(store.hostSettings);
+    let answer: () => void = () => {};
+    const silent = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    store.hostSettings.write = async (changes, expected) => {
+      await silent;
+      return write(changes, expected);
+    };
+    const started = Date.now();
+    const late = await refusal(settings.change({ JUKECORD_QUEUE_MAX: '50' }));
+    assert.deepEqual(
+      [late.code, late.message],
+      ['unavailable', 'the database does not answer; the change may still be saved when it does'],
+    );
+    assert.ok(Date.now() - started < 1000, 'the page waited for the silent database');
+    // A second change meanwhile waits behind the first (one at a time, in the order they came), and is told the same.
+    const second = refusal(settings.change({ JUKECORD_QUEUE_MAX: '60' }));
+    assert.equal((await second).code, 'unavailable');
+    // The server answers again: both changes go through, the first then the second, and are taken in.
+    answer();
+    await eventually(
+      async () => (await store.hostSettings.all()).find((row) => row.name === 'JUKECORD_QUEUE_MAX')?.revision === 2,
+    );
+    const row = (await store.hostSettings.all()).find((entry) => entry.name === 'JUKECORD_QUEUE_MAX');
+    assert.deepEqual([row?.value, row?.revision], ['60', 2]);
+    await eventually(async () => applied.at(-1)?.next.queueMax === 60);
+    assert.ok(sink.records.some((record) => record.msg === 'a change was saved after the page stopped waiting'));
+    // A read while the server is silent: told so within the wait as well.
+    const all = store.hostSettings.all.bind(store.hostSettings);
+    store.hostSettings.all = async () => new Promise(() => {});
+    assert.equal((await refusal(settings.view())).message, 'the database does not answer');
+    store.hostSettings.all = all;
   });
 
   it('puts the database’s half back when settings.json cannot be written', async () => {

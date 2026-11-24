@@ -24,7 +24,7 @@ import { fill, h, icon } from '../dom.ts';
 import type { IconName } from '../icons.ts';
 import { state, t, watch } from '../state.ts';
 import { lengthText, rounded } from '../time.ts';
-import { confirmDialog, messageOf, problem, toast } from '../ui/layers.ts';
+import { confirmDialog, foundText, messageOf, problem, toast } from '../ui/layers.ts';
 import { moveWizard, waitForRestart } from './move.ts';
 
 // A setting's words in the language in use.
@@ -105,12 +105,15 @@ export function settingsPage(): HTMLElement {
   const settingsOf = (section: string): HostSetting[] =>
     (view?.settings ?? []).filter((setting) => sectionOf(setting) === section);
 
-  // The whole page from the settings read.
+  // The whole page from the settings read. What was typed and not saved goes (the page shows what is saved now): a
+  // change kept with no control showing it would be saved unseen with its section.
   const draw = (): void => {
     const words = t();
     title.textContent = words.settings;
     rows.clear();
     foots.clear();
+    edits.clear();
+    problems.clear();
     if (!view) return;
     const shown = view;
     // The Services group only where there are services: a split jukecord's core and edges.
@@ -136,6 +139,8 @@ export function settingsPage(): HTMLElement {
       class: 'card settings-card',
       id: `settings-${group}`,
       'aria-labelledby': `settings-${group}-h`,
+      // A group in parts saves part by part: the card is no section of its own then.
+      ...(parts.length > 0 ? {} : { dataset: { section: group } }),
     });
     if (parts.length > 0) {
       fill(card, head, ...parts.map((part) => partBlock(part.id, say(part.label))));
@@ -147,7 +152,14 @@ export function settingsPage(): HTMLElement {
       head,
       group === 'database' ? databaseRow() : null,
       group === 'services' ? servicesList() : null,
-      h('div', { class: 'setting-list' }, ...settingsOf(group).map((setting) => settingRow(setting))),
+      h(
+        'div',
+        { class: 'setting-list' },
+        // The database's address is its row above, changed by the move (a new address alone would leave the data).
+        ...settingsOf(group)
+          .filter((setting) => setting.name !== 'JUKECORD_DATABASE_URL')
+          .map((setting) => settingRow(setting)),
+      ),
       foot(group, label),
     );
     return card;
@@ -195,7 +207,13 @@ export function settingsPage(): HTMLElement {
     );
     return h(
       'div',
-      { class: 'setting-part', id: `settings-${part}`, role: 'group', 'aria-labelledby': `settings-${part}-h` },
+      {
+        class: 'setting-part',
+        id: `settings-${part}`,
+        role: 'group',
+        'aria-labelledby': `settings-${part}-h`,
+        dataset: { section: part },
+      },
       head,
       found,
       h('div', { class: 'setting-list' }, ...settingsOf(part).map((setting) => settingRow(setting))),
@@ -203,9 +221,11 @@ export function settingsPage(): HTMLElement {
     );
   };
 
-  // A section's foot: how many changes it holds, Undo and Save (both off while it holds none).
-  const foot = (section: string, label: string): HTMLElement => {
+  // A section's foot: how many changes it holds, Undo and Save (both off while it holds none). None where nothing can
+  // be changed here (every setting set by the environment, a split's services).
+  const foot = (section: string, label: string): HTMLElement | null => {
     const words = t();
+    if (settingsOf(section).every((setting) => setting.locked !== null)) return null;
     const count = h('span', { class: 'faint' });
     const undo = h('button', { class: 'key', type: 'button' }, words.setUndo);
     const save = h(
@@ -215,11 +235,13 @@ export function settingsPage(): HTMLElement {
       words.save,
     );
     const names = () => settingsOf(section).map((setting) => setting.name);
+    // Shown while the section holds a change: a card of settings as they are has nothing to save (a pair of keys off
+    // under every card said nothing).
+    const element = h('div', { class: 'settings-foot' }, count, undo, save);
     const refresh = () => {
       const changes = names().filter((name) => edits.has(name)).length;
       count.textContent = changes > 0 ? words.setEdits(changes) : '';
-      undo.disabled = changes === 0;
-      save.disabled = changes === 0;
+      element.hidden = changes === 0;
     };
     undo.onclick = () => {
       for (const name of names()) {
@@ -233,7 +255,7 @@ export function settingsPage(): HTMLElement {
     save.onclick = () => void saveSection(section, label);
     foots.set(section, refresh);
     refresh();
-    return h('div', { class: 'settings-foot' }, count, undo, save);
+    return element;
   };
 
   // Saves a section's changes after a summary of them: all or nothing, each problem said at its setting.
@@ -280,7 +302,7 @@ export function settingsPage(): HTMLElement {
             ? words.setDoneLater(later)
             : words.setDone(answer.changed.length),
       );
-      draw();
+      redraw(section);
     } catch (error) {
       // Each problem at its settings, and once in a toast; a change made meanwhile is read again first.
       if (error instanceof ApiError && error.code === 'conflict') {
@@ -295,6 +317,34 @@ export function settingsPage(): HTMLElement {
     }
     // The keyboard back on the section's Save key, drawn anew.
     cards.querySelector<HTMLElement>(`[data-key="save-${section}"]`)?.focus();
+  };
+
+  // The settings read again for one section (after the move's dialog), the others' typing kept.
+  const reread = async (section: string): Promise<void> => {
+    try {
+      view = await api['host-settings']();
+    } catch (error) {
+      problem(error);
+      return;
+    }
+    redraw(section);
+  };
+
+  // A section drawn anew after its save, from the settings saved; the other sections keep what is typed in them, their
+  // rows' states read again (a change of the port makes the published port wait for a restart too), and the bar.
+  const redraw = (section: string): void => {
+    const old = cards.querySelector<HTMLElement>(`[data-section="${CSS.escape(section)}"]`);
+    const group = view?.groups.find((item) => item.id === section);
+    const part = view?.groups.flatMap((item) => item.parts ?? []).find((item) => item.id === section);
+    if (!old || !(group || part)) {
+      draw();
+      return;
+    }
+    old.replaceWith(
+      part ? partBlock(part.id, say(part.label)) : groupCard(section, say(group?.label ?? { en: '', ko: '' }), []),
+    );
+    for (const name of rows.keys()) drawRow(name);
+    drawBar();
   };
 
   // One setting's row: its label, what it is, its state line and its problem, beside its control.
@@ -317,7 +367,7 @@ export function settingsPage(): HTMLElement {
       h(
         'div',
         { class: 'setting-text' },
-        h('div', { class: 'setting-name' }, h('label', { for: id }, say(setting.label))),
+        h('div', { class: 'setting-name' }, nameOf(setting, id)),
         h('p', { class: 'setting-help' }, say(setting.help)),
         stateLine,
         problemLine,
@@ -348,12 +398,12 @@ export function settingsPage(): HTMLElement {
             ? words.setBySplit
             : words.setAtStart,
       );
+    } else if (edits.get(name) === null) {
+      // Put back and not saved yet: what saving does.
+      parts.push(setting.secret ? words.setRemoved : words.setToDefault);
     } else if (edits.has(name)) {
-      // Typed and not saved: what saving does.
-      parts.push(
-        edits.get(name) === null ? (setting.secret ? words.setRemoved : words.setToDefault) : say(setting.label),
-      );
-      if (edits.get(name) !== null) parts.pop();
+      // Changed and not saved yet: said in words (a coloured mark at the row's edge said it in a border's colour).
+      parts.push(words.setUnsaved);
     }
     if (!setting.locked && !edits.has(name)) parts.push(setting.source === 'saved' ? words.setSaved : words.setDefault);
     // Its limits and its default, when it has them and is not a secret.
@@ -381,14 +431,14 @@ export function settingsPage(): HTMLElement {
     if (setting.refused) {
       tone = 'tone-bad';
       mark = 'circle-alert';
-      parts.unshift(words.setRefused(sayError(setting.refused, state.lang)));
+      parts.unshift(words.setRefused(foundText(setting.refused)));
     }
     drawn.state.className = `setting-state ${tone}`.trim();
-    fill(drawn.state, mark ? icon(mark) : null, h('span', null, parts.join(' · ')));
+    // Each part kept with the dot after it, so a line never starts with one.
+    fill(drawn.state, mark ? icon(mark) : null, h('span', null, parts.join('\u00a0· ')));
     const said = problems.get(name);
     drawn.problem.hidden = !said;
     fill(drawn.problem, said ? icon('circle-alert') : null, said ? h('span', null, said) : null);
-    drawn.row.classList.toggle('changed', edits.has(name));
   };
 
   // A secret whose way changes and that is saved: its field opened, saying it must be typed again (see SECRET_WAYS).
@@ -442,7 +492,7 @@ export function settingsPage(): HTMLElement {
       move ? words.moveOpen : words.move,
     );
     key.hidden = setting.locked !== null;
-    key.onclick = () => moveWizard(shown, () => void load());
+    key.onclick = () => moveWizard(shown, () => void reread('database'));
     const failure = shown.move.lastFailure;
     return h(
       'div',
@@ -451,7 +501,8 @@ export function settingsPage(): HTMLElement {
         'div',
         { class: 'setting-text' },
         h('div', { class: 'setting-name' }, h('span', null, say(setting.label))),
-        h('p', { class: 'setting-help' }, say(setting.help)),
+        // The database in use, as it says itself (never its user or password), in the place of what the setting is.
+        h('p', { class: 'setting-help' }, foundText(setting.shown ?? '')),
         h(
           'p',
           { class: 'setting-state' },
@@ -473,16 +524,11 @@ export function settingsPage(): HTMLElement {
               'p',
               { class: 'setting-problem' },
               icon('circle-alert'),
-              h('span', null, words.moveLastFailed(failure.where, sayError(failure.reason, state.lang))),
+              h('span', null, words.moveLastFailed(failure.where, foundText(failure.reason))),
             )
           : null,
       ),
-      h(
-        'div',
-        { class: 'setting-control' },
-        h('span', { class: 'setting-value', title: setting.shown ?? '', 'data-clip': 'ok' }, setting.shown ?? ''),
-        key,
-      ),
+      h('div', { class: 'setting-control' }, key),
     );
   };
 
@@ -629,7 +675,10 @@ export function settingsPage(): HTMLElement {
     const words = t();
     const box = h('div', { class: 'control-row' });
     const test = SERVER_TESTS[setting.name];
+    // What a test of the address typed found, under the setting's words: one line, hidden while the field is closed.
+    const found = h('p', { class: 'setting-found', hidden: true, 'aria-live': 'polite' });
     const closed = () => {
+      found.hidden = true;
       const status = h(
         'span',
         { class: 'setting-value', id, title: setting.shown ?? '', 'data-clip': 'ok' },
@@ -641,7 +690,8 @@ export function settingsPage(): HTMLElement {
       remove.hidden = !(setting.set && setting.source === 'saved');
       remove.onclick = () => {
         changed(null);
-        status.textContent = words.setRemoved;
+        // Not set once saved; the state line says that saving removes it.
+        status.textContent = words.setNotSet;
         remove.hidden = true;
       };
       fill(box, status, change, remove);
@@ -664,8 +714,7 @@ export function settingsPage(): HTMLElement {
       };
       const go = test ? h('button', { class: 'key', type: 'button' }, words.setTest) : null;
       if (go && test) {
-        const found = h('p', { class: 'setting-found', hidden: true, 'aria-live': 'polite' });
-        rows.get(setting.name)?.row.querySelector('.setting-text')?.append(found);
+        if (!found.isConnected) rows.get(setting.name)?.row.querySelector('.setting-text')?.append(found);
         go.onclick = () => void tryServer(go, found, () => input.value.trim(), test);
       }
       fill(box, h('label', { class: 'field' }, input), go, keep);
@@ -694,7 +743,7 @@ export function settingsPage(): HTMLElement {
           ? result.where === 'memory'
             ? words.setTestedMemory
             : words.setTestedServer(result.server ?? result.where, result.roundTripMs ?? 0)
-          : sayError(result.problem ?? '', state.lang);
+          : foundText(result.problem ?? '');
         fill(found, icon(result.ok ? 'check' : 'circle-alert'), h('span', null, text));
       } catch (error) {
         showFailure(found, error);
@@ -851,11 +900,7 @@ export function settingsPage(): HTMLElement {
       value: off ? '' : start.amount,
       'aria-label': say(setting.label),
     });
-    const row = h('div', {
-      class: 'seg',
-      role: 'group',
-      'aria-label': `${say(setting.label)}: ${words.setUnits.s ?? ''}`,
-    });
+    const row = h('div', { class: 'seg unit-seg', role: 'group', 'aria-label': say(setting.label) });
     const label = (word: string) => (size ? word : (words.setUnits[word] ?? word));
     const choices = [...(setting.off !== null ? [null] : []), ...units];
     const show = () => {
@@ -885,7 +930,6 @@ export function settingsPage(): HTMLElement {
       row.append(button);
     }
     input.oninput = tell;
-    row.setAttribute('aria-label', say(setting.label));
     show();
     return {
       element: h('div', { class: 'control-row' }, h('label', { class: 'field amount' }, input), row),
@@ -959,7 +1003,7 @@ export function settingsPage(): HTMLElement {
             'li',
             { class: check.status === 'fail' ? 'tone-bad' : check.status === 'warn' ? 'tone-pause' : '' },
             icon(check.status === 'ok' ? 'check' : 'circle-alert'),
-            h('span', null, h('b', null, check.name), ' ', sayError(check.detail, state.lang)),
+            h('span', null, h('b', null, check.name), ' ', foundText(check.detail)),
           ),
         ),
       ),
@@ -981,6 +1025,16 @@ export function settingsPage(): HTMLElement {
     else drawBar();
   });
   return page;
+}
+
+// A setting's name: the label of its control where that is a field or a switch (pressing the name goes to it), else
+// words (a row of choices and a value shown name themselves with their own label).
+function nameOf(setting: HostSetting, id: string): HTMLElement {
+  const fielded =
+    !setting.locked &&
+    !setting.secret &&
+    !(setting.kind === 'choice' || (setting.kind === 'list' && setting.choices !== null));
+  return fielded ? h('label', { for: id }, say(setting.label)) : h('span', null, say(setting.label));
 }
 
 // A key busy while what it started runs: its words say so, and it cannot be pressed twice.

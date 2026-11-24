@@ -287,6 +287,10 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // The host's settings (src/settings): a change refused, the database away, a restart.
   ['the database does not answer', '데이터베이스가 응답하지 않음'],
   ['the database does not answer; nothing was saved', '데이터베이스가 응답하지 않음: 아무것도 저장하지 않음'],
+  [
+    'the database does not answer; the change may still be saved when it does',
+    '데이터베이스가 응답하지 않음. 다시 응답하면 그때 저장될 수 있음',
+  ],
   ['say which settings to change', '바꿀 설정을 정하세요'],
   [/^(JUKECORD_\w+) is not a jukecord setting$/, '$1: jukecord 설정이 아님'],
   [/^(JUKECORD_\w+) is set where jukecord starts, not here$/, '$1: jukecord를 시작하는 곳에서 정함'],
@@ -304,6 +308,17 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     /^(JUKECORD_\w+): type it again for the new (.+); a saved secret is not sent to another place$/,
     '$1: 새 $2에 맞게 다시 입력하세요. 저장된 비밀 값은 다른 곳으로 보내지 않음',
   ],
+  // A database's address in words (src/store/address.ts describeAddress), as the settings page and the move show it.
+  [
+    /^(PostgreSQL|MySQL|MariaDB) \(([^,]+), database ([^,]+), schema ([^,]+), without TLS\)$/,
+    '$1 ($2, 데이터베이스 $3, 스키마 $4, TLS 없음)',
+  ],
+  [/^(PostgreSQL|MySQL|MariaDB) \(([^,]+), database ([^,]+), without TLS\)$/, '$1 ($2, 데이터베이스 $3, TLS 없음)'],
+  [
+    /^(PostgreSQL|MySQL|MariaDB) \(([^,]+), database ([^,]+), schema ([^,]+), TLS ([\w-]+)\)$/,
+    '$1 ($2, 데이터베이스 $3, 스키마 $4, TLS $5)',
+  ],
+  [/^(PostgreSQL|MySQL|MariaDB) \(([^,]+), database ([^,]+), TLS ([\w-]+)\)$/, '$1 ($2, 데이터베이스 $3, TLS $4)'],
   // Moving to another database (src/settings/move.ts).
   ['a move is under way already', '이미 옮기는 중'],
   ['the switch is under way; it cannot be stopped', '전환하는 중이라 멈출 수 없음'],

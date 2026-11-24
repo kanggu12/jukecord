@@ -5369,10 +5369,6 @@ button.lyric {
 .setting-list > .setting:first-child {
   border-top: 0;
 }
-/* A setting changed and not saved yet: a line of the brand's blue at its start, inside its padding. */
-.setting.changed {
-  box-shadow: inset 2px 0 0 var(--accent);
-}
 .setting-text {
   min-width: 0;
 }
@@ -5445,6 +5441,19 @@ button.lyric {
 .control-row > .field.time {
   flex: 0 0 88px;
 }
+/* A switch beside a field (a time that can be off) takes the field's height, its track drawn in the middle as ever, so
+   the row's controls stand one height. */
+.control-row > .switch {
+  height: var(--control);
+}
+/* The seconds' word in Korean, 초, stands its ink a pixel high in a row of choices (its strokes end above the foot the
+   other syllables reach): lowered by that pixel, where the row's choices are drawn their own height (a finger's
+   row centres it already). */
+@media (pointer: fine) {
+  :root:lang(ko) .unit-seg button[data-unit="s"] {
+    padding-top: var(--s-2);
+  }
+}
 /* A value that cannot be changed here, or a secret's state: words, cut short when long (whole in their title). */
 .setting-value {
   min-width: 0;
@@ -5453,13 +5462,18 @@ button.lyric {
   white-space: nowrap;
   color: var(--ink-2);
 }
-/* A narrow card: the control under what the setting is, across the row. */
+/* A narrow card: the control under what the setting is, across the row; the name no longer stands on the control's
+   line, so it takes only its own height. */
 @container card (max-width: 620px) {
   .setting {
     grid-template-columns: minmax(0, 1fr);
   }
+  .setting-name {
+    min-height: 0;
+  }
   .setting-control {
     justify-content: flex-start;
+    min-height: 0;
   }
   .control-row {
     justify-content: flex-start;
@@ -5476,6 +5490,9 @@ button.lyric {
 }
 .settings-foot > .faint {
   margin-right: auto;
+}
+.settings-foot[hidden] {
+  display: none;
 }
 /* A part of the logins: its title and its test on one line at the card's inset, a rule above every part but the
    first. */

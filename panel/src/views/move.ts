@@ -1,18 +1,7 @@
-/**
- * The database move, as a dialog of pages: which kind of database, its address tried, every row copied with the
- * progress shown, then the switch and the restart. Each page asks one thing and says where the move stands; Back and
- * the step's own key go between them. A move already under way (the dialog closed meanwhile, or opened in another
- * browser) opens at its copy.
- *
- * jukecord does the work (src/settings/move.ts): the test tries the address once, the copy runs from a connection of
- * its own while jukecord plays on, and the switch copies once more after every writer stopped, then restarts on the
- * new database. The source is never changed.
- */
-import { sayError } from '../../../src/core/say.ts';
 import { api, type DatabaseTest, type HostSettingsView, type MoveState } from '../api.ts';
 import { fill, h, icon } from '../dom.ts';
-import { state, t } from '../state.ts';
-import { messageOf, pagedDialog, problem, toast } from '../ui/layers.ts';
+import { t } from '../state.ts';
+import { foundText, messageOf, pagedDialog, problem, toast } from '../ui/layers.ts';
 
 // The kinds of database a move can go to, each with the address it is written as.
 const KINDS = [
@@ -57,7 +46,7 @@ export function moveWizard(view: HostSettingsView, finished: () => void): void {
   let replace = false;
   let move: MoveState | null = view.move.state;
   let stopped = false;
-  const current = view.settings.find((setting) => setting.name === 'JUKECORD_DATABASE_URL')?.shown ?? '';
+  const current = foundText(view.settings.find((setting) => setting.name === 'JUKECORD_DATABASE_URL')?.shown ?? '');
   const who = words.supervisors[view.restart.supervisor] ?? view.restart.supervisor;
 
   // A page: its step's place among the four, its own content, and its keys (Back first, the step's key last).
@@ -154,7 +143,7 @@ export function moveWizard(view: HostSettingsView, finished: () => void): void {
             'p',
             { class: 'test-verdict tone-bad' },
             icon('circle-alert'),
-            h('span', null, sayError(result.problem ?? '', state.lang)),
+            h('span', null, foundText(result.problem ?? '')),
           ),
         );
         return;
@@ -184,7 +173,7 @@ export function moveWizard(view: HostSettingsView, finished: () => void): void {
           'p',
           { class: 'test-verdict' },
           icon('check'),
-          h('span', null, `${result.where}${facts.length > 0 ? ` · ${facts.join(', ')}` : ''}`),
+          h('span', null, `${foundText(result.where)}${facts.length > 0 ? ` · ${facts.join(', ')}` : ''}`),
         ),
         h('p', { class: 'wizard-note faint' }, holds),
         (result.rows ?? 0) > 0
@@ -289,7 +278,7 @@ export function moveWizard(view: HostSettingsView, finished: () => void): void {
       fillBar.style.width = `${now?.phase === 'copied' ? 100 : share}%`;
       if (!now) return;
       if (now.phase === 'failed') {
-        fill(line, icon('circle-alert'), h('span', null, words.moveFailed(sayError(now.error ?? '', state.lang))));
+        fill(line, icon('circle-alert'), h('span', null, words.moveFailed(foundText(now.error ?? ''))));
         line.className = 'wizard-note wizard-progress tone-bad';
       } else if (now.phase === 'copied') {
         fill(line, icon('check'), h('span', null, words.moveCopied(now.rows, ((now.ms ?? 0) / 1000).toFixed(1))));
@@ -312,7 +301,7 @@ export function moveWizard(view: HostSettingsView, finished: () => void): void {
     show(
       3,
       [
-        h('p', { class: 'wizard-note faint' }, move?.where ?? ''),
+        h('p', { class: 'wizard-note faint' }, foundText(move?.where ?? '')),
         meter,
         line,
         h('div', { class: 'wizard-tools' }, stop),

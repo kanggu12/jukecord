@@ -187,6 +187,8 @@ export interface HostSettingsOptions {
   readonly role?: 'all' | 'core' | 'edge';
   /** Discord's API for the Discord login's test (tests only: they never reach Discord). */
   readonly discord?: { readonly api?: string; readonly fetch?: typeof fetch };
+  /** How long a page waits for the database before it is told the database does not answer (tests shorten it). */
+  readonly answerMs?: number;
 }
 
 // The service's methods the web layer calls.
@@ -269,7 +271,7 @@ export class HostSettings {
   async environment(): Promise<NodeJS.ProcessEnv> {
     const { env, rules } = this.options;
     try {
-      return mergedEnvironment(env, this.usable(await this.layers()), rules);
+      return mergedEnvironment(env, this.usable(await this.answered(this.layers())), rules);
     } catch (error) {
       if (error instanceof ConnectionError) throw new ActionError('unavailable', 'the database does not answer');
       throw error;
@@ -280,7 +282,7 @@ export class HostSettings {
   async view(): Promise<HostSettingsView> {
     let layers: SavedLayers;
     try {
-      layers = await this.layers();
+      layers = await this.answered(this.layers());
     } catch (error) {
       // The database not answering is said as such (503), not as jukecord's own failure.
       if (error instanceof ConnectionError) throw new ActionError('unavailable', 'the database does not answer');
@@ -380,17 +382,55 @@ export class HostSettings {
     values: Readonly<Record<string, string | null>>,
     revisions?: Readonly<Record<string, number>>,
   ): Promise<{ changed: ChangedSetting[]; view: HostSettingsView }> {
-    const release = await this.changing.acquire();
+    // The change runs to its end whatever the page does: under the lock, one change after another in the order they
+    // came, then taken in by every service. A database that stops answering holds it (its statements wait for the
+    // server); the page is not held with it.
+    const work = (async () => {
+      const release = await this.changing.acquire();
+      let changed: ChangedSetting[];
+      try {
+        changed = await this.write(values, revisions);
+      } finally {
+        release();
+      }
+      // Every service takes the change in (here: what applies at once is applied, the rest waits for a restart).
+      if (changed.length > 0)
+        await (this.options.announce ?? ((names) => this.takeIn(names)))(changed.map((c) => c.name));
+      return changed;
+    })();
     let changed: ChangedSetting[];
     try {
-      changed = await this.write(values, revisions);
-    } finally {
-      release();
+      changed = await this.answered(work, LATE_CHANGE);
+    } catch (error) {
+      // Not answered in time: what the change comes to later is said in the log (the page reads the settings again).
+      if (error instanceof ActionError && error.message === LATE_CHANGE)
+        work.then(
+          (late) =>
+            this.options.log.info('a change was saved after the page stopped waiting', {
+              names: late.map((change) => change.name),
+            }),
+          (failed) => this.options.log.warn('a change the page stopped waiting for was not saved', { error: failed }),
+        );
+      throw error;
     }
-    // Every service takes the change in (here: what applies at once is applied, the rest waits for a restart).
-    if (changed.length > 0)
-      await (this.options.announce ?? ((names) => this.takeIn(names)))(changed.map((c) => c.name));
     return { changed, view: await this.view() };
+  }
+
+  /**
+   * Waits for the database for as long as a page does: a server that stops answering (paused, or cut off on the way
+   * with nothing closed) leaves its statements waiting, and the page is told it does not answer instead (503). The
+   * work itself goes on.
+   */
+  private answered<T>(work: Promise<T>, said = 'the database does not answer'): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new ActionError('unavailable', said, { retryAfterMs: 5000 })),
+        this.options.answerMs ?? ANSWER_MS,
+      );
+      timer.unref();
+    });
+    return Promise.race([work, late]).finally(() => clearTimeout(timer));
   }
 
   /** Puts settings back to their defaults (or to the environment's value, which a saved one no longer hides). */
@@ -713,6 +753,12 @@ export function secretsMoved(
   }
   return problems;
 }
+
+// How long a page waits for the settings' database (see HostSettings.answered): far more than a server that answers
+// takes (a save is milliseconds), and short enough that a page says the database is silent rather than hang.
+const ANSWER_MS = 10_000;
+// What a page is told of a change the database has not answered for in that time.
+const LATE_CHANGE = 'the database does not answer; the change may still be saved when it does';
 
 // The settings the Discord login's test takes from the page's form: its own, and what its return address is made of.
 const DISCORD_LOGIN = [

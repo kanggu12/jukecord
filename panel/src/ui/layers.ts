@@ -9,7 +9,7 @@
  * under the bar too, so the bar and its toasts stay readable over them. The system's Back closes the layer on top.
  */
 
-import { sayError } from '../../../src/core/say.ts';
+import { sayError, together } from '../../../src/core/say.ts';
 import { ApiError } from '../api.ts';
 import { h, icon } from '../dom.ts';
 import type { IconName } from '../icons.ts';
@@ -93,6 +93,16 @@ export function messageOf(error: unknown): string {
   if (error instanceof ApiError) return sayError(error.message, state.lang);
   if (error instanceof TypeError) return t().networkFailed;
   return sayError(error instanceof Error ? error.message : String(error), state.lang);
+}
+
+/**
+ * What a test found, in the panel's language: jukecord's Korean for it when there is one, else its words as they came
+ * (inside a line of its own, a finding that starts with an address keeps its small letters, which a sentence's
+ * capital would change).
+ */
+export function foundText(text: string): string {
+  const said = sayError(text, state.lang);
+  return state.lang === 'ko' && said !== together(text) ? said : text;
 }
 
 // The open layers (the sheet and dialogs over it), newest last. Escape closes the newest only, and Tab stays inside it:
