@@ -259,12 +259,31 @@ describe('member sessions', () => {
     assert.equal((await logs(controller)).statusCode, 403);
     const admin = await memberLogin('admin');
     assert.equal((await logs(admin)).statusCode, 200);
-    const link = await inject({
+  });
+
+  it("makes login links for the host only: an admin member's would outlive the member", async () => {
+    const admin = await memberLogin('admin');
+    // A host's link would be a host's session, and a token that never expires; a friend's, thirty days.
+    for (const scope of ['admin', 'control', 'read']) {
+      const link = await inject({
+        method: 'POST',
+        url: api(`/login-links?scope=${scope}`),
+        headers: { cookie: admin.cookie, [CSRF_HEADER]: admin.csrf },
+      });
+      assert.equal(link.statusCode, 403, scope);
+      assert.equal(link.json().error.message, 'only the host can make login links');
+    }
+    // An OIDC login that is a Discord user, at the admin level: the same.
+    const linked =
+      (await server.auth.startSession({ kind: 'user', userId: ALICE, level: 'admin' })).split(';')[0] ?? '';
+    const caller = await server.auth.identify({ cookie: linked });
+    const theirs = await inject({
       method: 'POST',
-      url: api('/login-links?scope=read'),
-      headers: { cookie: admin.cookie, [CSRF_HEADER]: admin.csrf },
+      url: api('/login-links'),
+      headers: { cookie: linked, [CSRF_HEADER]: caller?.csrf ?? '' },
     });
-    assert.equal(link.statusCode, 200);
+    assert.equal(theirs.statusCode, 403);
+    assert.equal((await inject({ method: 'POST', url: api('/login-links'), headers: asHost })).statusCode, 200);
   });
 
   it("shows what a member adds by their name, and keeps their likes their own, not the host's", async () => {

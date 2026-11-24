@@ -255,7 +255,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const records = deps.host ? await deps.host.logs(asked) : readLogs(deps.logDir, asked, deps.logFiles);
     return records.map((record) => ({ ...record }));
   },
-  'login-link': async ({ query, deps }) => {
+  'login-link': async ({ caller, query, deps }) => {
+    // The host's own: a link makes a host's session (and from it a token that never expires) or a friend's of thirty
+    // days, either of which would outlive the level a member's groups gave them at their login.
+    if (caller?.principal.kind !== 'host') throw new ActionError('forbidden', 'only the host can make login links');
     const scope = query.scope ?? 'admin';
     const link = await deps.auth.createLink(scope);
     return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt, scope };

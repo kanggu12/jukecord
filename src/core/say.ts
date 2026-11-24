@@ -123,6 +123,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['a login through SSO or a directory cannot make tokens', 'SSO나 디렉터리 계정으로 로그인하면 토큰을 만들 수 없음'],
   ['the login settings cannot be tested here', '여기서는 로그인 설정을 시험할 수 없음'],
   ['only the host can test settings not saved yet', '저장하지 않은 설정은 호스트만 시험할 수 있음'],
+  ['only the host can make login links', '로그인 링크는 호스트만 만들 수 있음'],
   // The directory form's refusals (the login page says them in its own words; the API says these).
   ['logging in with a directory account is not set up here', '여기는 디렉터리 계정 로그인이 설정되지 않음'],
   ['type your name and your password', '이름과 암호를 입력하세요'],
