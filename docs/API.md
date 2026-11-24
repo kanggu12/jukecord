@@ -192,6 +192,7 @@ playlist) so a program does not need to ask again.
 | `tokens` Your API tokens (the host sees every token) | `GET /api/v1/tokens` | admin | `jukecord token list` |  |
 | `token-create` Make an API token; the secret is shown in this answer only | `POST /api/v1/tokens` | admin | `jukecord token create` |  |
 | `token-revoke` Revoke an API token | `DELETE /api/v1/tokens/{id}` | admin | `jukecord token revoke` |  |
+| `auth-methods` The ways of logging in that are set up here (what the login page shows) | `GET /api/v1/auth/methods` | anyone | `jukecord auth methods` |  |
 
 ### The host
 
@@ -201,6 +202,8 @@ playlist) so a program does not need to ask again.
 | `login-link` Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
 | `backup` Write a copy of the database to the backups folder of the data directory | `POST /api/v1/backups` | the host | `jukecord backup` |  |
 | `doctor` Check the parts jukecord needs and show the settings (secrets as set or not set) | `GET /api/v1/doctor` | the host | `jukecord doctor` |  |
+| `auth-test-oidc` Test logging in through the identity provider (OIDC) without logging anyone in: its document, its keys, the client and its secret; with settings not saved yet, or the ones in use | `POST /api/v1/auth/test-oidc` | the host | `jukecord auth test-oidc` |  |
+| `auth-test-ldap` Test logging in with a directory account (LDAP) without logging anyone in: the connection, the service account, the base DN, and with a name the person, their groups and their level (no password) | `POST /api/v1/auth/test-ldap` | the host | `jukecord auth test-ldap` |  |
 
 <!-- operations:end -->
 

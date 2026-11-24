@@ -111,6 +111,15 @@ interface AddJson {
   skippedNotFound?: number;
 }
 
+// A test's checks, one a line, as the doctor shows its own.
+function showChecks(answer: unknown): string {
+  const report = answer as { checks: { name: string; status: string; detail: string }[] };
+  const marks: Record<string, string> = { ok: 'ok  ', warn: 'warn', fail: 'FAIL' };
+  return report.checks
+    .map((check) => `${marks[check.status] ?? check.status}  ${check.name}: ${check.detail}`)
+    .join('\n');
+}
+
 // The text of the words joined, for inputs typed without quotes ("jukecord add never gonna give you up").
 function rest(words: Words, what: string): string {
   const text = words.args.join(' ').trim();
@@ -803,6 +812,41 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
     },
+  },
+  'auth-methods': {
+    name: 'auth methods',
+    usage: '',
+    summary: 'The ways of logging in that are set up here',
+    request: () => ({}),
+    show: (answer) => {
+      const methods = answer as {
+        discord: boolean;
+        sso: { label: string | null } | null;
+        directory: { label: string | null } | null;
+      };
+      return [
+        `Discord: ${methods.discord ? 'on' : 'off'}`,
+        `SSO (OIDC): ${methods.sso ? `on${methods.sso.label ? ` (${methods.sso.label})` : ''}` : 'off'}`,
+        `Directory (LDAP): ${methods.directory ? `on${methods.directory.label ? ` (${methods.directory.label})` : ''}` : 'off'}`,
+      ].join('\n');
+    },
+  },
+  'auth-test-oidc': {
+    name: 'auth test-oidc',
+    usage: '',
+    summary: 'Test logging in through the identity provider (OIDC), logging no one in',
+    request: () => ({ body: {} }),
+    show: (answer) => showChecks(answer),
+  },
+  'auth-test-ldap': {
+    name: 'auth test-ldap',
+    usage: '[username]',
+    summary: 'Test logging in with a directory account (LDAP), and look a name up (no password)',
+    request: (words) => {
+      const username = words.args.join(' ').trim();
+      return { body: username ? { username } : {} };
+    },
+    show: (answer) => showChecks(answer),
   },
   wrapped: {
     name: 'wrapped',

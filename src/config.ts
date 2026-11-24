@@ -159,7 +159,8 @@ export interface ConfigFiles {
   readable(file: string): boolean;
 }
 
-const diskFiles: ConfigFiles = {
+/** The files on this machine, as loadConfig reads them by default (the login settings' test reads them so too). */
+export const diskFiles: ConfigFiles = {
   read: (file) => fs.readFileSync(file, 'utf8'),
   readable: (file) => {
     try {

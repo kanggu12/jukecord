@@ -419,6 +419,69 @@ export const DoctorSchema = Type.Object(
   { title: 'Doctor' },
 );
 
+/** What the login page shows: the ways of logging in that are set up here, with the words of their keys. */
+export const AuthMethodsSchema = Type.Object(
+  {
+    discord: Type.Boolean({ description: 'Whether logging in with Discord is set up' }),
+    sso: Nullable(
+      Type.Object(
+        {
+          label: Nullable(
+            Type.String({ description: "The login key's words as the host wrote them; null: the panel's own" }),
+          ),
+        },
+        { description: "Logging in through the host's identity provider (OIDC); null when it is not set up" },
+      ),
+    ),
+    directory: Nullable(
+      Type.Object(
+        {
+          label: Nullable(
+            Type.String({ description: "The form key's words as the host wrote them; null: the panel's own" }),
+          ),
+        },
+        { description: 'Logging in with a directory account (LDAP, Active Directory); null when it is not set up' },
+      ),
+    ),
+  },
+  { title: 'AuthMethods' },
+);
+
+// One finding of a settings test, as the doctor's.
+const CheckSchema = Type.Object({
+  name: Type.String(),
+  status: Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')]),
+  detail: Type.String(),
+});
+
+/** Settings not saved yet to test instead of the ones in use, by their environment names (JUKECORD_OIDC_*...). */
+export const LoginSettingsSchema = Type.Record(Type.String({ maxLength: 64 }), Type.String({ maxLength: 4000 }), {
+  // As many as there are login settings, and a few to spare for the names a test refuses one by one.
+  maxProperties: 40,
+  description:
+    'Values to test in place of the ones in use, by environment name; the others stay as they are. A secret left out is the one in use.',
+});
+
+export const OidcTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'False when any check failed' }),
+    checks: Type.Array(CheckSchema),
+  },
+  { title: 'OidcTest' },
+);
+
+export const LdapTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'False when any check failed' }),
+    checks: Type.Array(CheckSchema),
+    groups: Nullable(Type.Array(Type.String(), { description: "The person's groups by DN, when a name was given" })),
+    level: Type.Union([ScopeSchema, Type.Null()], {
+      description: 'The level those groups give (null: the person would be refused, or no name was given)',
+    }),
+  },
+  { title: 'LdapTest' },
+);
+
 export const ErrorSchema = Type.Object(
   {
     error: Type.Object({

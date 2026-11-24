@@ -15,6 +15,7 @@ import {
   type VoiceControl,
 } from '../../src/app/actions.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import type { LoginChecks } from '../../src/auth/check.ts';
 import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
 import { OidcLogin } from '../../src/auth/oidc.ts';
 import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
@@ -194,6 +195,8 @@ export interface TestServerOptions {
   readonly oidc?: { readonly settings: OidcSettings; readonly fetch: typeof fetch };
   /** Logging in with a directory account: its settings, and a directory that stands in for one. */
   readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
+  /** The login settings' tests (none by default). */
+  readonly loginChecks?: LoginChecks;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -369,6 +372,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       backupDir: path.join(dataDir, 'backups'),
       discordMode: !options.browserOnly,
       loginSettings: { oidc: options.oidc?.settings ?? null, ldap: options.ldap?.settings ?? null },
+      loginChecks: options.loginChecks ?? null,
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });

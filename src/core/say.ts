@@ -100,6 +100,23 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     '보기만 하는 친구 로그인으로는 음악을 바꿀 수 없음',
   ],
   ["a friend cannot change the server's settings or tokens", '친구 로그인으로는 서버 설정이나 토큰을 바꿀 수 없음'],
+  // What a member's level (their groups at the host's identity provider or directory) does not let them do.
+  ['your groups let you look and listen, not change the music', '그룹 권한으로는 보고 듣기만 할 수 있음'],
+  [
+    "your groups let you change the music, not the server's settings or tokens",
+    '그룹 권한으로는 음악만 바꿀 수 있고 서버 설정이나 토큰은 바꿀 수 없음',
+  ],
+  ['a login through SSO or a directory cannot make tokens', 'SSO나 디렉터리 계정으로 로그인하면 토큰을 만들 수 없음'],
+  ['the login settings cannot be tested here', '여기서는 로그인 설정을 시험할 수 없음'],
+  // The directory form's refusals (the login page says them in its own words; the API says these).
+  ['logging in with a directory account is not set up here', '여기는 디렉터리 계정 로그인이 설정되지 않음'],
+  ['type your name and your password', '이름과 암호를 입력하세요'],
+  ['wrong name or password', '이름이나 암호가 틀림'],
+  ['your password has expired; change it first', '암호가 만료됨: 암호를 바꾼 뒤 로그인하세요'],
+  ['your account is turned off or locked', '계정이 꺼져 있거나 잠겨 있음'],
+  ['the directory has more than one account by that name', '디렉터리에 그 이름의 계정이 둘 이상 있음'],
+  ['the directory did not answer; try again in a moment', '디렉터리가 응답하지 않음: 잠시 뒤 다시 시도하세요'],
+  ['your account is in none of the groups jukecord lets in', 'jukecord가 들여보내는 그룹에 속해 있지 않음'],
   [/^repeat is one of (.+)$/, '반복은 $1 중 하나'],
   [/^no such address: (.+)$/, '없는 주소: $1'],
   [/^playlist (\d+) does not exist$/, '없는 플레이리스트(번호 $1)'],

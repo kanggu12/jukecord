@@ -17,6 +17,7 @@ import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { LoginChecks } from './auth/check.ts';
 import { LdapLogin } from './auth/ldap.ts';
 import { OidcLogin } from './auth/oidc.ts';
 import { MemoryCache } from './cache/memory.ts';
@@ -384,6 +385,14 @@ async function main(): Promise<number> {
       backupDir: path.join(config.dataDir, 'backups'),
       backupKeep: config.backups.keep,
       loginSettings: config.auth,
+      // The login settings' tests read the environment jukecord started with, under the values a test brings.
+      loginChecks: new LoginChecks({
+        env: process.env,
+        cwd: process.cwd(),
+        redirectUri: `${publicUrl}/auth/sso/callback`,
+        afterLogout: `${publicUrl}/login`,
+        log: log.child('auth-test'),
+      }),
       discordMode: bot !== null,
       doctor: () =>
         runDoctor({
