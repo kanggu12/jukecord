@@ -15,7 +15,7 @@ import { createLogger } from '../../src/log.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { CSRF_HEADER, memberKey, SESSION_COOKIE } from '../../src/web/auth.ts';
 import { CLIENT_ID, CLIENT_SECRET, FakeProvider, ISSUER, type ProviderPerson } from '../support/oidc.ts';
-import { ALICE, GUILD, type TestServer, testServer } from '../support/web.ts';
+import { ALICE, BOB, GUILD, type TestServer, testServer } from '../support/web.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
 const REDIRECT = 'http://localhost:8795/auth/sso/callback';
@@ -330,17 +330,14 @@ describe('logging in through SSO with the server', () => {
     assert.ok(![back.headers['set-cookie']].flat().some((value) => String(value).startsWith(`${SESSION_COOKIE}=`)));
   });
 
-  it('logs in as the Discord user the provider names, with their level on top', async () => {
+  it('links nobody to the Discord user the provider names without Discord login set up: a member logs in', async () => {
     const back = await sso({ sub: 'u-alice', idClaims: { name: 'Alice', groups: ['listeners'], discord_id: ALICE } });
+    assert.equal(back.headers.location, '/stats');
     const session = [back.headers['set-cookie']].flat().find((value) => String(value).startsWith(SESSION_COOKIE));
     const cookie = String(session).split(';')[0] ?? '';
     const me = await inject({ method: 'GET', url: `${API_PREFIX}/me`, headers: { cookie } });
-    assert.equal(me.json().kind, 'user');
-    assert.equal(me.json().id, ALICE);
-    assert.deepEqual(me.json().member, { provider: 'oidc', level: 'read' });
-    // Not in any Discord server here, yet the read level opens every server to look.
-    const guilds = await inject({ method: 'GET', url: `${API_PREFIX}/guilds`, headers: { cookie } });
-    assert.ok((guilds.json() as { id: string; mayControl: boolean }[]).some((guild) => guild.id === GUILD));
+    assert.equal(me.json().kind, 'member');
+    assert.equal(me.json().id, memberKey('oidc', 'u-alice', ISSUER));
   });
 
   it('sends the browser back with the reason when the state is not its own, and does not count that', async () => {
@@ -395,5 +392,120 @@ describe('logging in through SSO with the server', () => {
     // Others start as before.
     const other = await inject({ method: 'GET', url: '/auth/sso', remoteAddress: '10.1.0.21' });
     assert.match(String(other.headers.location), /^https:\/\/sso\./);
+  });
+});
+
+describe('linking an SSO login to the Discord user its provider names', () => {
+  // A provider whose people may carry a Discord ID (an attribute anyone could set on their own account, at worst), and
+  // Discord login set up: Discord's answers are made up, by who the test says logs in there.
+  let server: TestServer;
+  const provider = new FakeProvider();
+  let atDiscord: { id: string; name: string } = { id: ALICE, name: 'alice' };
+  const discordFetch = (async (url: string | URL) => {
+    if (String(url).endsWith('/oauth2/token')) return Response.json({ access_token: 'made-up' });
+    if (String(url).endsWith('/users/@me')) return Response.json({ id: atDiscord.id, username: atDiscord.name });
+    return new Response(null);
+  }) as typeof fetch;
+  const inject = (options: InjectOptions) => server.web.app.inject(options);
+
+  before(async () => {
+    server = await testServer({
+      oidc: { settings: { ...SETTINGS, discordClaim: 'discord_id' }, fetch: provider.fetch },
+      oauth: {
+        clientId: '108876543210987654',
+        clientSecret: 'made-up',
+        redirectUri: 'http://localhost:8795/auth/callback',
+        api: 'https://discord.test/api',
+        authorize: 'https://discord.test/oauth2/authorize',
+      },
+      fetch: discordFetch,
+    });
+    // Bob manages the server, in Discord.
+    server.directory.join(GUILD, BOB, { manage: true });
+  });
+  after(() => server.close());
+
+  // The way through the provider: its callback's answer and the cookies it set.
+  async function sso(person: ProviderPerson, address = '10.12.0.1') {
+    const start = await inject({ method: 'GET', url: '/auth/sso?next=/stats', remoteAddress: address });
+    const tie = String(start.headers['set-cookie']).split(';')[0] ?? '';
+    const back = provider.authorize(String(start.headers.location), person);
+    return inject({
+      method: 'GET',
+      url: `/auth/sso/callback?${back}`,
+      headers: { cookie: tie },
+      remoteAddress: address,
+    });
+  }
+  // On at Discord from the callback's answer: Discord sends the browser back with a code, or with an error.
+  async function discord(answer: Awaited<ReturnType<typeof sso>>, error?: string) {
+    const location = new URL(String(answer.headers.location));
+    assert.equal(`${location.origin}${location.pathname}`, 'https://discord.test/oauth2/authorize');
+    const tie = [answer.headers['set-cookie']]
+      .flat()
+      .map((value) => String(value).split(';')[0] ?? '')
+      .find((value) => value.startsWith('jukecord_oauth='));
+    const state = location.searchParams.get('state') ?? '';
+    const query = error ? `error=${error}&state=${state}` : `code=made-up&state=${state}`;
+    return inject({ method: 'GET', url: `/auth/callback?${query}`, headers: { cookie: tie ?? '' } });
+  }
+  const sessionOf = (answer: Awaited<ReturnType<typeof sso>>) =>
+    String(
+      [answer.headers['set-cookie']].flat().find((value) => String(value).startsWith(`${SESSION_COOKIE}=`)) ?? '',
+    ).split(';')[0] ?? '';
+  const meOf = async (cookie: string) =>
+    (await inject({ method: 'GET', url: `${API_PREFIX}/me`, headers: { cookie } })).json() as {
+      kind: string;
+      id: string;
+      member?: unknown;
+      csrf: string;
+    };
+  const EVE = { sub: 'u-eve', idClaims: { name: 'Eve', groups: ['listeners'], discord_id: BOB } };
+
+  it('never makes a member the Discord user their claim names before that person proves it at Discord', async () => {
+    // Eve, a reader, set Bob's Discord ID on her own account: she is sent to Discord first, logged in as nobody yet.
+    const back = await sso(EVE);
+    assert.equal(sessionOf(back), '');
+    // At Discord she can only be herself (Alice's account here): she comes in as the member she is.
+    atDiscord = { id: ALICE, name: 'alice' };
+    const done = await discord(back);
+    assert.equal(done.headers.location, '/stats');
+    const me = await meOf(sessionOf(done));
+    assert.equal(me.kind, 'member');
+    assert.equal(me.id, memberKey('oidc', 'u-eve', ISSUER));
+    // Bob's server settings stay out of her reach.
+    const role = await inject({
+      method: 'PUT',
+      url: `${API_PREFIX}/guilds/${GUILD}/settings/dj-role`,
+      headers: { cookie: sessionOf(done), [CSRF_HEADER]: me.csrf },
+      payload: { roleId: null },
+    });
+    assert.equal(role.statusCode, 403);
+    // Nothing was remembered: her next login is sent to Discord again.
+    assert.equal(await server.store.memberLinks.get(memberKey('oidc', 'u-eve', ISSUER)), null);
+    assert.match(String((await sso(EVE)).headers.location), /^https:\/\/discord\.test\//);
+  });
+
+  it('links the login once the same person logs in at Discord, remembers it, and asks no more', async () => {
+    const BOBS = { sub: 'u-bob', idClaims: { name: 'Bob', groups: ['listeners'], discord_id: BOB } };
+    atDiscord = { id: BOB, name: 'bob' };
+    const done = await discord(await sso(BOBS));
+    const me = await meOf(sessionOf(done));
+    assert.deepEqual([me.kind, me.id, me.member], ['user', BOB, { provider: 'oidc', level: 'read' }]);
+    assert.equal(await server.store.memberLinks.get(memberKey('oidc', 'u-bob', ISSUER)), BOB);
+    // The next login goes straight in, as Bob.
+    const again = await sso(BOBS);
+    assert.equal(again.headers.location, '/stats');
+    assert.equal((await meOf(sessionOf(again))).id, BOB);
+    // A claim changed to another Discord user is no longer the one proven: to Discord again.
+    const changed = await sso({ ...BOBS, idClaims: { ...BOBS.idClaims, discord_id: ALICE } });
+    assert.match(String(changed.headers.location), /^https:\/\/discord\.test\//);
+  });
+
+  it('lets a person who turns back at Discord in as the member they are', async () => {
+    const back = await sso({ sub: 'u-dan', idClaims: { name: 'Dan', groups: ['listeners'], discord_id: ALICE } });
+    const done = await discord(back, 'access_denied');
+    assert.equal(done.headers.location, '/stats');
+    assert.equal((await meOf(sessionOf(done))).kind, 'member');
   });
 });

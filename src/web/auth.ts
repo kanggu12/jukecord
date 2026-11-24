@@ -249,6 +249,20 @@ export class LoginLimiter {
   }
 }
 
+/** An SSO login waiting for the proof that its person is the Discord user its provider names (Auth.startLinkProof). */
+export interface LinkProof {
+  /** The SSO login's member key (the provider's issuer and its subject). */
+  readonly memberId: string;
+  /** Its name as the provider gave it, for the member it logs in as when the proof does not go through. */
+  readonly name: string;
+  /** The Discord user its provider names. */
+  readonly discordId: string;
+  /** The level its groups gave. */
+  readonly level: MemberLevel;
+  /** Where the person wanted to go. */
+  readonly next: string;
+}
+
 /** A panel login as the host sees it in the list of logins (see Auth.listSessions). */
 export interface SessionInfo {
   /** The first 16 hex digits of its hash: enough to tell logins apart, never the secret of its cookie. */
@@ -363,27 +377,21 @@ export class Auth {
 
   /**
    * The login a member's provider vouched for, at the level their groups reach: as themselves (by their key, under the
-   * name the provider gave), or, when the provider names their Discord user and a bot is there to ask, as that Discord
-   * user with the level on top. Null when their groups reach no level: they are refused.
+   * name the provider gave), or as the Discord user `linked` names, with the level on top: one the login was proven to
+   * be (see linkedUser). Null when their groups reach no level: they are refused.
    */
   async admit(
     provider: Provider,
-    person: {
-      readonly subject: string;
-      readonly name: string;
-      readonly issuer?: string | null;
-      readonly discordId?: string | null;
-    },
+    person: { readonly subject: string; readonly name: string; readonly issuer?: string | null },
     level: MemberLevel | null,
-    discord: boolean,
+    linked: string | null = null,
   ): Promise<MemberPrincipal | null> {
     if (level === null) return null;
     const users = this.options.store.users;
-    if (person.discordId && discord) {
+    if (linked !== null) {
       // Named here only when jukecord has not met them yet: Discord's own name and picture win once the bot has.
-      if (!(await users.get(person.discordId)))
-        await users.upsert({ id: person.discordId, name: person.name, avatar: null });
-      return { kind: 'user', userId: person.discordId, level };
+      if (!(await users.get(linked))) await users.upsert({ id: linked, name: person.name, avatar: null });
+      return { kind: 'user', userId: linked, level };
     }
     const memberId = memberKey(provider, person.subject, person.issuer ?? null);
     // Their name as the provider gave it at this login, and the time of the login: all that is kept of them.
@@ -665,8 +673,72 @@ export class Auth {
     });
   }
 
+  /**
+   * Whether an SSO login is linked to the Discord user its provider names, and to which: the claim alone links nobody
+   * (a person may be able to set it on their own account). Only with Discord login set up, and a bot to ask about the
+   * user, and only to the Discord user the login was proven to be once, by logging in with Discord as them (see
+   * startLinkProof): that user when the claim names them, 'unproven' when it names someone not proven (the person is
+   * sent to Discord to prove it), and null when nothing links.
+   */
+  async linkedUser(memberId: string, claimed: string | null, botThere: boolean): Promise<string | 'unproven' | null> {
+    if (claimed === null || !this.discordLogin || !botThere) return null;
+    return (await this.options.store.memberLinks.get(memberId)) === claimed ? claimed : 'unproven';
+  }
+
+  /**
+   * Sends an SSO login to Discord to prove that its person is the Discord user the provider names: the login waits on
+   * the cache, by the hash of the Discord login's state, for ten minutes; Discord's answer finishes it (see
+   * finishLinkProof). Where to send the browser, and the cookie that ties the way back to it.
+   */
+  async startLinkProof(proof: LinkProof): Promise<{ location: string; cookie: string }> {
+    const started = this.oauthStart(proof.next);
+    await this.options.cache.set(`auth:link-proof:${hashSecret(started.state)}`, JSON.stringify(proof), LINK_MS);
+    return { location: started.location, cookie: started.cookie };
+  }
+
+  /**
+   * The SSO login waiting for its proof in this browser, taken (it is used once): what Discord's answer finishes, or
+   * what a person who turned back at Discord logs in as. Null when none waits.
+   */
+  async takeLinkProof(cookieHeader: string | undefined): Promise<LinkProof | null> {
+    const state = (parseCookies(cookieHeader).get(STATE_COOKIE) ?? '').split('.')[0] ?? '';
+    if (state === '') return null;
+    const saved = await this.options.cache.take(`auth:link-proof:${hashSecret(state)}`);
+    if (saved === null) return null;
+    const proof = JSON.parse(saved) as Partial<LinkProof>;
+    // Only a proof of this version's shape: anything else in the cache links nobody.
+    if (
+      typeof proof.memberId !== 'string' ||
+      memberProvider(proof.memberId) !== 'oidc' ||
+      typeof proof.name !== 'string' ||
+      typeof proof.discordId !== 'string' ||
+      discordUserId(proof.discordId) === null ||
+      (proof.level !== 'admin' && proof.level !== 'control' && proof.level !== 'read') ||
+      typeof proof.next !== 'string'
+    )
+      return null;
+    return proof as LinkProof;
+  }
+
+  /**
+   * Finishes an SSO login that went to Discord for its proof: linked to the Discord user the provider named, and the
+   * pair remembered, when the person who logged in at Discord is that user; the member they are otherwise (someone
+   * else's ID in their claim links nothing), as when they turned back there (`person` null).
+   */
+  async finishLinkProof(proof: LinkProof, person: Person | null): Promise<MemberPrincipal> {
+    const { store } = this.options;
+    if (person !== null && person.id === proof.discordId) {
+      await store.memberLinks.set(proof.memberId, person.id);
+      // Discord's own name and picture, as a Discord login keeps them.
+      await store.users.upsert(person);
+      return { kind: 'user', userId: person.id, level: proof.level };
+    }
+    await store.users.upsert({ id: proof.memberId, name: proof.name, avatar: null });
+    return { kind: 'member', memberId: proof.memberId, provider: 'oidc', level: proof.level };
+  }
+
   /** Where to send a browser to log in with Discord, and the cookie that ties the way back to this browser. */
-  oauthStart(next: string): { location: string; cookie: string } {
+  oauthStart(next: string): { location: string; cookie: string; state: string } {
     const oauth = this.options.oauth;
     if (!oauth) throw new Error('logging in with Discord is not set up');
     const state = newSecret();
@@ -683,7 +755,7 @@ export class Auth {
     const location = `${oauth.authorize ?? 'https://discord.com/oauth2/authorize'}?${params}`;
     // The state and where to go afterwards travel together in a short-lived cookie.
     const value = `${state}.${Buffer.from(safeNext(next)).toString('base64url')}`;
-    return { location, cookie: cookie(STATE_COOKIE, value, { maxAgeSeconds: 600, secure: this.secure }) };
+    return { location, cookie: cookie(STATE_COOKIE, value, { maxAgeSeconds: 600, secure: this.secure }), state };
   }
 
   /**

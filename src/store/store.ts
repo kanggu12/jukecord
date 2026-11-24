@@ -178,6 +178,7 @@ export class Store {
   readonly listenLinks: ListenLinkRepository;
   readonly guests: GuestSessionRepository;
   readonly likes: LikeRepository;
+  readonly memberLinks: MemberLinkRepository;
 
   private constructor(sql: SqlExecutor, now: () => number) {
     this.sql = sql;
@@ -198,6 +199,7 @@ export class Store {
     this.listenLinks = new ListenLinkRepository(this, now);
     this.guests = new GuestSessionRepository(this, now);
     this.likes = new LikeRepository(this, now);
+    this.memberLinks = new MemberLinkRepository(this, now);
   }
 
   /**
@@ -2391,6 +2393,44 @@ export class GuestSessionRepository {
 
 /** The most tracks one login keeps liked: a long list for a person, and a bound on the table. */
 export const LIKES_MAX = 1000;
+
+/**
+ * The Discord user each SSO login was proven to be (by logging in with Discord as them, once), by the member's key:
+ * a provider's claim links the login to a Discord user only when it names the one proven here.
+ */
+export class MemberLinkRepository {
+  private readonly store: Store;
+  private readonly now: () => number;
+
+  constructor(store: Store, now: () => number) {
+    this.store = store;
+    this.now = now;
+  }
+
+  /** The Discord user this member was proven to be, or null when none was. */
+  async get(memberId: string): Promise<string | null> {
+    const row = await this.store.sql.get('SELECT discord_id FROM member_links WHERE member_id = ?', [memberId]);
+    return row ? text(row, 'discord_id') : null;
+  }
+
+  /** Remembers the Discord user a member was proven to be, in place of one proven before. */
+  async set(memberId: string, discordId: string): Promise<void> {
+    await this.store.sql.run(
+      this.store.dialect.upsert({
+        table: 'member_links',
+        columns: ['member_id', 'discord_id', 'created_at'],
+        key: ['member_id'],
+        update: ['discord_id', 'created_at'],
+      }),
+      [memberId, discordId, this.now()],
+    );
+  }
+
+  /** Forgets a member's link; false when there was none. */
+  async remove(memberId: string): Promise<boolean> {
+    return (await this.store.sql.run('DELETE FROM member_links WHERE member_id = ?', [memberId])).changes > 0;
+  }
+}
 
 /** The tracks each login liked; "owner" is a Discord user ID, or "host" for the host's login. */
 export class LikeRepository {

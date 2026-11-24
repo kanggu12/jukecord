@@ -45,6 +45,7 @@ import {
   cookie,
   DiscordLoginError,
   entryFailures,
+  memberKey,
   nameFailures,
   parseCookies,
   SESSION_COOKIE,
@@ -874,7 +875,18 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     async (request, reply) => {
       reply.header('set-cookie', auth.clearOAuthCookie());
       const { code, state, error } = request.query;
-      if (error || !code || !state) return reply.redirect('/login?error=cancelled');
+      if (error || !code || !state) {
+        // An SSO login sent here for the proof of its Discord user, turned back: in as the member it is, unlinked.
+        const proof = await auth.takeLinkProof(request.headers.cookie);
+        if (proof) {
+          const principal = await auth.finishLinkProof(proof, null);
+          reply.header('set-cookie', [auth.clearOAuthCookie(), await auth.startSession(principal)]);
+          auth.counted('oidc', 'ok');
+          log.info('logged in through SSO, its Discord user not proven (turned back at Discord)', { user: proof.name });
+          return reply.redirect(proof.next);
+        }
+        return reply.redirect('/login?error=cancelled');
+      }
       // Counted before Discord is asked, and refused when the address failed too often: whether this login works is
       // only known from Discord's answer, and a blocked address must not be able to make jukecord ask Discord over and
       // over (Discord limits how often it may), nor many tries sent at once all get through before any is counted. A
@@ -887,6 +899,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       let failed = false;
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
+        // An SSO login that came for the proof of the Discord user its provider names: linked when this is that user.
+        const proof = await auth.takeLinkProof(request.headers.cookie);
+        if (proof) {
+          const principal = await auth.finishLinkProof(proof, person);
+          if (principal.kind === 'user') deps.access.forget(principal.userId);
+          reply.header('set-cookie', [auth.clearOAuthCookie(), await auth.startSession(principal)]);
+          auth.counted('oidc', 'ok');
+          if (principal.kind === 'user')
+            log.info('logged in through SSO as a Discord user, proven', { user: person.name });
+          else
+            log.warn('an SSO login whose provider names another Discord user than the one who logged in at Discord', {
+              user: proof.name,
+            });
+          return reply.redirect(proof.next);
+        }
         await deps.store.users.upsert(person);
         // Asked afresh at every login: someone refused a minute ago may have joined the server since.
         deps.access.forget(person.id);
@@ -966,8 +993,30 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     try {
       const { identity, next } = await oidc.finish(query, parseCookies(request.headers.cookie).get(SSO_COOKIE));
       const level = levelOf(identity.groups, settings.groups, sameOidcGroup);
-      // Their Discord user, when the provider names one and a bot is there to ask about it (deps.directory).
-      const principal = await auth.admit('oidc', identity, level, deps.directory() !== null);
+      // Their Discord user, when the provider names one: linked only to the one this login was proven to be (with
+      // Discord login set up and a bot to ask about them); one not proven yet is proven first, at Discord.
+      const linked =
+        level === null
+          ? null
+          : await auth.linkedUser(
+              memberKey('oidc', identity.subject, identity.issuer),
+              identity.discordId,
+              deps.directory() !== null,
+            );
+      if (level !== null && linked === 'unproven' && identity.discordId !== null) {
+        const proof = await auth.startLinkProof({
+          memberId: memberKey('oidc', identity.subject, identity.issuer),
+          name: identity.name,
+          discordId: identity.discordId,
+          level,
+          next,
+        });
+        log.info('sent an SSO login to Discord, to prove the Discord user its provider names', { user: identity.name });
+        return reply
+          .header('set-cookie', [cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }), proof.cookie])
+          .redirect(proof.location);
+      }
+      const principal = await auth.admit('oidc', identity, level, linked === 'unproven' ? null : linked);
       if (!principal) {
         auth.counted('oidc', 'denied');
         log.info('refused a login through SSO: in none of the groups jukecord lets in', {
@@ -1045,7 +1094,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           },
         });
         const level = levelOf(identity.groups, settings.groups, sameLdapGroup);
-        const principal = await auth.admit('ldap', identity, level, false);
+        const principal = await auth.admit('ldap', identity, level);
         if (!principal) {
           auth.counted('ldap', 'denied');
           log.info('refused a directory login: in none of the groups jukecord lets in', {
