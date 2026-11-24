@@ -30,7 +30,14 @@ import {
   VERSION_TABLE,
   VERSION_TABLE_SQL,
 } from './schema.ts';
-import { isUniqueViolation, type SqlExecutor, type SqlRow, type SqlValue, StoreError } from './sql.ts';
+import {
+  isUniqueViolation,
+  type SqlExecutor,
+  type SqlRow,
+  type SqlValue,
+  StoreError,
+  type TransactionOptions,
+} from './sql.ts';
 import { SqliteExecutor } from './sqlite.ts';
 
 // Raised for requests the data does not allow (defined beside the executor, which raises it too).
@@ -301,32 +308,36 @@ export class Store {
     const before = await this.schemaVersion();
     refuseNewer(before, latest);
     if (before === latest) return;
-    await this.transaction(async () => {
-      // PostgreSQL's advisory lock ends with the transaction; MySQL's with the connection or its release below.
-      if (dialect === 'postgres') {
-        await this.sql.get('SELECT pg_advisory_xact_lock(?, ?) AS locked', [...MIGRATION_LOCK.postgres]);
-      } else {
-        const got = await this.sql.get('SELECT GET_LOCK(?, 60) AS locked', [MIGRATION_LOCK.mysql]);
-        if (!got || intOrNull(got, 'locked') !== 1) {
-          throw new StoreError('another jukecord has been bringing this database up to date for a minute; try again');
+    await this.transaction(
+      async () => {
+        // PostgreSQL's advisory lock ends with the transaction; MySQL's with the connection or its release below.
+        if (dialect === 'postgres') {
+          await this.sql.get('SELECT pg_advisory_xact_lock(?, ?) AS locked', [...MIGRATION_LOCK.postgres]);
+        } else {
+          const got = await this.sql.get('SELECT GET_LOCK(?, 60) AS locked', [MIGRATION_LOCK.mysql]);
+          if (!got || intOrNull(got, 'locked') !== 1) {
+            throw new StoreError('another jukecord has been bringing this database up to date for a minute; try again');
+          }
         }
-      }
-      try {
-        // Read again under the lock: another jukecord may have done it while this one waited.
-        const current = await this.schemaVersion();
-        refuseNewer(current, latest);
-        if (current < SERVER_BASELINE_VERSION) await this.baseline(dialect, current);
-        for (const migration of MIGRATIONS) {
-          if (migration.version <= Math.max(current, SERVER_BASELINE_VERSION)) continue;
-          const sql = migration[dialect];
-          if (sql === undefined) throw new StoreError(`migration ${migration.version} has no ${dialect} statements`);
-          await this.sql.exec(sql);
-          await this.setVersion(migration.version);
+        try {
+          // Read again under the lock: another jukecord may have done it while this one waited.
+          const current = await this.schemaVersion();
+          refuseNewer(current, latest);
+          if (current < SERVER_BASELINE_VERSION) await this.baseline(dialect, current);
+          for (const migration of MIGRATIONS) {
+            if (migration.version <= Math.max(current, SERVER_BASELINE_VERSION)) continue;
+            const sql = migration[dialect];
+            if (sql === undefined) throw new StoreError(`migration ${migration.version} has no ${dialect} statements`);
+            await this.sql.exec(sql);
+            await this.setVersion(migration.version);
+          }
+        } finally {
+          if (dialect === 'mysql') await this.sql.get('SELECT RELEASE_LOCK(?) AS released', [MIGRATION_LOCK.mysql]);
         }
-      } finally {
-        if (dialect === 'mysql') await this.sql.get('SELECT RELEASE_LOCK(?) AS released', [MIGRATION_LOCK.mysql]);
-      }
-    });
+        // Each statement sees what another jukecord made while this one waited for the lock (see TransactionOptions).
+      },
+      { latest: true },
+    );
   }
 
   // Makes schema 8 on a database jukecord never ran on (or finishes a MySQL baseline stopped halfway: the version
@@ -369,7 +380,7 @@ export class Store {
    * SqlExecutor.transaction), since everyone else's statements wait for its end. `snapshot` is for several reads of
    * one moment that write nothing (see TransactionOptions).
    */
-  transaction<T>(fn: () => Promise<T> | T, options?: { readonly snapshot?: boolean }): Promise<T> {
+  transaction<T>(fn: () => Promise<T> | T, options?: TransactionOptions): Promise<T> {
     return this.sql.transaction(fn, options);
   }
 

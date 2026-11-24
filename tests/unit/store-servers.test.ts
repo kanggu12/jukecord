@@ -7,7 +7,8 @@
  */
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { TABLES } from '../../src/store/schema.ts';
+import { openStore } from '../../src/store/open.ts';
+import { TABLES, VERSION_TABLE } from '../../src/store/schema.ts';
 import { eachDatabase } from '../support/databases.ts';
 import { LONG_SOURCE } from '../support/fill.ts';
 import { addTracks } from '../support/store.ts';
@@ -138,6 +139,23 @@ eachDatabase('what differs between the databases', (db) => {
     assert.deepEqual(seen, ['select', 'update', 'transaction', 'select failed']);
     const use = (connections as (() => { busy: number; idle: number; waiting: number }) | null)?.();
     assert.ok(use && use.busy === 0 && use.waiting === 0 && use.idle >= 0, JSON.stringify(use));
+  });
+
+  // A server only, as the test above it (two SQLite connections in one thread block each other).
+  it('brings up two jukecords opening a new database at once, the schema made by one of them', {
+    skip: db.kind === 'sqlite' ? 'two SQLite connections in one thread block each other' : false,
+  }, async () => {
+    const address = await db.another();
+    // A core and an edge starting together on a database nobody ran on: one makes the schema under the lock, the other
+    // waits for it and finds it made.
+    const [a, b] = await Promise.all([openStore(address, { pool: 2 }), openStore(address, { pool: 2 })]);
+    try {
+      assert.deepEqual([await a.schemaVersion(), await b.schemaVersion()], [8, 8]);
+      assert.equal(Number((await a.sql.get(`SELECT COUNT(*) AS n FROM ${VERSION_TABLE}`))?.n), 1);
+    } finally {
+      await a.close();
+      await b.close();
+    }
   });
 
   it('has exactly the columns a copy reads in every table (and only the servers’ own beside them)', async () => {

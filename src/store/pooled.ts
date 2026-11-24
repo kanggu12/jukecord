@@ -123,8 +123,11 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     sql: string,
     params: readonly SqlValue[] | undefined,
   ): Promise<Answer>;
-  /** The statements that begin a transaction: a serializable one, or a snapshot that only reads. */
-  protected abstract begin(snapshot: boolean): readonly string[];
+  /**
+   * The statements that begin a transaction: a serializable one, a snapshot that only reads, or one whose every
+   * statement sees the latest committed rows (see TransactionOptions).
+   */
+  protected abstract begin(mode: 'serializable' | 'snapshot' | 'latest'): readonly string[];
   /** Whether the database refused a statement for another transaction's sake, so that running it again may work. */
   protected abstract refused(error: unknown): boolean;
   /** Whether an error means the connection itself is gone (cut, timed out, closed by the server). */
@@ -214,7 +217,8 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     const transaction: Transaction<C> = { depth: 1, open: true, savepoints: new Lock(), root };
     this.holding += 1;
     try {
-      for (const statement of this.begin(options.snapshot === true)) await this.on(root, statement, undefined);
+      const mode = options.snapshot ? 'snapshot' : options.latest ? 'latest' : 'serializable';
+      for (const statement of this.begin(mode)) await this.on(root, statement, undefined);
       let value: T;
       try {
         value = await this.current.run(transaction, fn);

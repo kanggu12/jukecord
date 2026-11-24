@@ -258,12 +258,18 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
     return { rows: [], changes: header.affectedRows, lastId: header.insertId > 0 ? header.insertId : null };
   }
 
-  protected begin(snapshot: boolean): readonly string[] {
+  protected begin(mode: 'serializable' | 'snapshot' | 'latest'): readonly string[] {
     // A snapshot: REPEATABLE READ for this one transaction (plain reads under SERIALIZABLE would lock every row they
-    // read), its view taken at once, reads only. Every other one: the connection's SERIALIZABLE.
-    return snapshot
-      ? ['SET TRANSACTION ISOLATION LEVEL REPEATABLE READ', 'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY']
-      : ['START TRANSACTION'];
+    // read), its view taken at once, reads only. A migration: READ COMMITTED for it. Every other one: the
+    // connection's SERIALIZABLE.
+    if (mode === 'snapshot') {
+      return [
+        'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',
+        'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY',
+      ];
+    }
+    if (mode === 'latest') return ['SET TRANSACTION ISOLATION LEVEL READ COMMITTED', 'START TRANSACTION'];
+    return ['START TRANSACTION'];
   }
 
   protected refused(error: unknown): boolean {

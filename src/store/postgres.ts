@@ -195,10 +195,13 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
     return { rows: (one?.rows ?? []) as SqlRow[], changes: one?.rowCount ?? 0, lastId: null };
   }
 
-  protected begin(snapshot: boolean): readonly string[] {
+  protected begin(mode: 'serializable' | 'snapshot' | 'latest'): readonly string[] {
     // A snapshot: one consistent view that never waits for a writer and is never refused (REPEATABLE READ, reads
-    // only). Every other transaction: serializable, so none sees another's change halfway (see src/store/pooled.ts).
-    return [snapshot ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN ISOLATION LEVEL SERIALIZABLE'];
+    // only). A migration: each statement's own view (READ COMMITTED). Every other transaction: serializable, so none
+    // sees another's change halfway (see src/store/pooled.ts).
+    if (mode === 'snapshot') return ['BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'];
+    if (mode === 'latest') return ['BEGIN ISOLATION LEVEL READ COMMITTED'];
+    return ['BEGIN ISOLATION LEVEL SERIALIZABLE'];
   }
 
   protected refused(error: unknown): boolean {

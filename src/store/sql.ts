@@ -51,6 +51,13 @@ export interface TransactionOptions {
    * whole database, the statistics' several questions of one moment. Writing in it fails on the network databases.
    */
   readonly snapshot?: boolean;
+  /**
+   * Each statement sees what other transactions committed before it (READ COMMITTED), not one moment's view: for the
+   * schema's migration, made under a lock, which must see the tables another jukecord made while this one waited for
+   * it (a serializable transaction's view is taken by its first statement, the wait for the lock). Ignored by SQLite,
+   * whose transactions take turns.
+   */
+  readonly latest?: boolean;
 }
 
 /** What every executor may be given when it is opened. */
