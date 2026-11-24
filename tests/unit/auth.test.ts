@@ -198,6 +198,27 @@ describe('LoginLimiter', () => {
     assert.equal(await limiter.blocked([here]), false);
   });
 
+  it('counts a try before it is made: of tries at once at the limit, only the limit go through', async () => {
+    const limiter = new LoginLimiter(new MemoryCache(), { limit: 20 });
+    const keys = [addressFailures('10.0.0.1'), nameFailures('ldap', 'dave')];
+    // Thirty at once: each is counted before any is answered, so twenty go on and ten are refused, uncounted.
+    const entered = await Promise.all(Array.from({ length: 30 }, () => limiter.enter(keys)));
+    assert.equal(entered.filter(Boolean).length, 20);
+    assert.equal(await limiter.blocked(keys), true);
+    // A refused try left nothing counted: forgiving the twenty that went on opens the way again.
+    for (let i = 0; i < 20; i += 1) await limiter.forgive(keys);
+    assert.equal(await limiter.blocked(keys), false);
+    assert.equal(await limiter.enter(keys), true);
+    // Forgiving a count whose window is gone makes no count below nothing (no extra tries in the next window).
+    const fresh = new LoginLimiter(new MemoryCache(), { limit: 2 });
+    await fresh.forgive([addressFailures('10.0.0.9')]);
+    assert.deepEqual(await Promise.all([1, 2, 3].map(() => fresh.enter([addressFailures('10.0.0.9')]))), [
+      true,
+      true,
+      false,
+    ]);
+  });
+
   it('blocks on any of its keys: an address, or a name tried from many addresses', async () => {
     const limiter = new LoginLimiter(new MemoryCache(), { limit: 3 });
     const alice = nameFailures('ldap', 'Alice');

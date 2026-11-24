@@ -328,23 +328,49 @@ describe('logging in through SSO with the server', () => {
     assert.ok((guilds.json() as { id: string; mayControl: boolean }[]).some((guild) => guild.id === GUILD));
   });
 
-  it('sends the browser back with the reason when the state is not its own, and blocks an address that keeps trying', async () => {
+  it('sends the browser back with the reason when the state is not its own, and does not count that', async () => {
     const start = await inject({ method: 'GET', url: '/auth/sso', remoteAddress: '10.1.0.9' });
     const back = provider.authorize(String(start.headers.location), MINA);
     // No cookie: another browser's state.
     const forged = await inject({ method: 'GET', url: `/auth/sso/callback?${back}`, remoteAddress: '10.1.0.9' });
     assert.equal(forged.headers.location, '/login?error=sso-expired');
-    for (let i = 0; i < 20; i += 1)
-      await inject({ method: 'GET', url: '/auth/sso/callback?state=x&code=y', remoteAddress: '10.1.0.9' });
-    const blocked = await inject({
-      method: 'GET',
-      url: '/auth/sso/callback?state=x&code=y',
-      remoteAddress: '10.1.0.9',
-    });
-    assert.equal(blocked.headers.location, '/login?error=too-many');
-    // A person who turned back at the provider is told so, and not counted as a failure.
+    // Twenty-five images on some page that point at the callback: the visitor is not locked out by them.
+    for (let i = 0; i < 25; i += 1) {
+      const image = await inject({
+        method: 'GET',
+        url: '/auth/sso/callback?state=x&code=y',
+        remoteAddress: '10.1.0.9',
+      });
+      assert.equal(image.headers.location, '/login?error=sso-expired');
+    }
+    assert.equal((await sso(MINA, '10.1.0.9')).headers.location, '/stats');
+    // A person who turned back at the provider is told so, and not counted as a failure either.
     const cancelled = await sso({ error: 'access_denied' }, '10.1.0.10');
     assert.equal(cancelled.headers.location, '/login?error=sso-cancelled');
+  });
+
+  it('counts a code the provider refuses, before trading it: twenty at once reach the provider, no more', async () => {
+    // Thirty logins started from thirty addresses, their ways back all brought by one address with a code made up.
+    const ties: { cookie: string; state: string }[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      const start = await inject({ method: 'GET', url: '/auth/sso', remoteAddress: `10.1.2.${i}` });
+      const state = new URL(String(start.headers.location)).searchParams.get('state') ?? '';
+      ties.push({ cookie: String(start.headers['set-cookie']).split(';')[0] ?? '', state });
+    }
+    const traded = provider.tokenRequests.length;
+    const answers = await Promise.all(
+      ties.map(({ cookie, state }) =>
+        inject({
+          method: 'GET',
+          url: `/auth/sso/callback?state=${state}&code=made-up`,
+          headers: { cookie },
+          remoteAddress: '10.1.3.1',
+        }),
+      ),
+    );
+    assert.equal(provider.tokenRequests.length - traded, 20);
+    assert.equal(answers.filter((answer) => answer.headers.location === '/login?error=sso-failed').length, 20);
+    assert.equal(answers.filter((answer) => answer.headers.location === '/login?error=too-many').length, 10);
   });
 
   it('holds one address to ten logins started at once, then one every six seconds', async () => {

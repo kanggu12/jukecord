@@ -43,6 +43,7 @@ import {
   type Caller,
   CSRF_HEADER,
   cookie,
+  DiscordLoginError,
   nameFailures,
   parseCookies,
   SESSION_COOKIE,
@@ -872,12 +873,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       reply.header('set-cookie', auth.clearOAuthCookie());
       const { code, state, error } = request.query;
       if (error || !code || !state) return reply.redirect('/login?error=cancelled');
-      // Refused before Discord is asked: whether this login works is only known from Discord's answer, and a blocked
-      // address must not be able to make jukecord ask Discord over and over (Discord limits how often it may).
-      if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+      // Counted before Discord is asked, and refused when the address failed too often: whether this login works is
+      // only known from Discord's answer, and a blocked address must not be able to make jukecord ask Discord over and
+      // over (Discord limits how often it may), nor many tries sent at once all get through before any is counted. A
+      // try that was no failure is forgiven at the end.
+      const keys = [addressFailures(request.ip)];
+      if (!(await auth.limiter.enter(keys))) {
         auth.counted('discord', 'blocked');
         return reply.redirect('/login?error=too-many');
       }
+      let failed = false;
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
         await deps.store.users.upsert(person);
@@ -902,10 +907,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           auth.counted('discord', 'unavailable');
           return reply.redirect('/login?error=connecting');
         }
-        await auth.limiter.fail([addressFailures(request.ip)]);
         auth.counted('discord', 'failed');
         log.info('a Discord login failed', { reason: failure instanceof Error ? failure.message : String(failure) });
+        // A state that is no login of this browser (an old tab, or a link or an image another page points here) is
+        // nobody's guess: not counted, or any page could lock its visitors' address out.
+        if (failure instanceof DiscordLoginError && failure.code === 'expired')
+          return reply.redirect('/login?error=expired');
+        failed = true;
         return reply.redirect('/login?error=failed');
+      } finally {
+        if (!failed) await auth.limiter.forgive(keys);
       }
     },
   );
@@ -939,11 +950,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const oidc = auth.oidc;
     const settings = deps.loginSettings?.oidc;
     if (!oidc || !settings) return reply.redirect('/login?error=no-sso');
-    // Refused before the provider is asked: a blocked address must not be able to make jukecord trade codes on and on.
-    if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+    // Counted before the provider is asked, and refused when the address failed too often: a blocked address must not
+    // be able to make jukecord trade codes on and on, nor many sent at once all be traded before any is counted. A try
+    // that was no failure is forgiven at the end.
+    const keys = [addressFailures(request.ip)];
+    if (!(await auth.limiter.enter(keys))) {
       auth.counted('oidc', 'blocked');
       return reply.redirect('/login?error=too-many');
     }
+    let failed = false;
     // The provider's answer, as it put it after the "?".
     const query = new URLSearchParams(request.raw.url?.split('?')[1] ?? '');
     try {
@@ -974,12 +989,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       return reply.redirect(next);
     } catch (failure) {
       const code = failure instanceof OidcError ? failure.code : 'failed';
-      // The provider not answering is not the person's failure, nor is turning back there; a state that is no login
-      // of this browser and a code the provider refused are counted, as any failed login is.
-      if (code === 'expired' || code === 'failed') await auth.limiter.fail([addressFailures(request.ip)]);
+      // Only a code the provider refused counts, as any failed login does. The provider not answering is not the
+      // person's failure, nor is turning back there; nor is a state that is no login of this browser (an old tab, or a
+      // link or an image another page points here), or any page could lock its visitors' address out.
+      failed = code === 'failed';
       auth.counted('oidc', code === 'unavailable' ? 'unavailable' : code === 'cancelled' ? 'denied' : 'failed');
       log.info('a login through SSO did not go through', { reason: reasonOf(failure) });
       return reply.redirect(`/login?error=sso-${code}`);
+    } finally {
+      if (!failed) await auth.limiter.forgive(keys);
     }
   });
 
@@ -1002,11 +1020,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       const password = typeof body.password === 'string' ? body.password : '';
       const refused = (status: number, code: string, message: string) =>
         reply.code(status).send({ error: { code, message } });
+      // Counted before the directory is asked, and refused when the address or the name failed too often: tries sent
+      // at the same moment are each counted before any is answered, so twenty get through however many come at once.
+      // A try that was no failure (a person let in, a directory that did not answer) is forgiven at the end.
       const keys = [addressFailures(request.ip), nameFailures('ldap', username)];
-      if (await auth.limiter.blocked(keys)) {
+      if (!(await auth.limiter.enter(keys))) {
         auth.counted('ldap', 'blocked');
         return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
       }
+      let failed = false;
       try {
         const identity = await ldap.login(username, password);
         const level = levelOf(identity.groups, settings.groups, sameLdapGroup);
@@ -1036,13 +1058,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           auth.counted('ldap', 'denied');
           return refused(409, 'ambiguous', 'the directory has more than one account by that name');
         }
-        // A refused name or password counts against the address and the name; the try after the twentieth is refused.
-        const blocked = await auth.limiter.fail(keys);
-        auth.counted('ldap', blocked ? 'blocked' : 'failed');
-        if (blocked) return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+        // A refused name or password stays counted against the address and the name; the try after the twentieth is
+        // refused before the directory is asked.
+        failed = true;
+        auth.counted('ldap', 'failed');
         if (code === 'expired') return refused(403, 'password-expired', 'your password has expired; change it first');
         if (code === 'disabled') return refused(403, 'account-disabled', 'your account is turned off or locked');
         return refused(401, 'wrong-password', 'wrong name or password');
+      } finally {
+        if (!failed) await auth.limiter.forgive(keys);
       }
     },
   );

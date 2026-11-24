@@ -463,3 +463,61 @@ describe('failed logins under a flood of logins started elsewhere', () => {
     assert.equal((await form('erin', '10.9.1.2')).statusCode, 429);
   });
 });
+
+describe('many tries at the directory form at once', () => {
+  // The directory takes 30 ms to answer a bind, as one over a network does: every try is under way together.
+  let server: TestServer;
+  const fake = directory();
+  for (const uid of ['dave', 'fern'])
+    fake.people.push({
+      dn: `uid=${uid},ou=people,dc=example,dc=org`,
+      password: `${uid}-password`,
+      attributes: { uid },
+    });
+  const slow = () => {
+    const client = fake.connect();
+    return {
+      ...client,
+      bind: async (dn: string, password?: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return client.bind(dn, password);
+      },
+    };
+  };
+  const form = (username: string, password: string, address: string) =>
+    server.web.app.inject({
+      method: 'POST',
+      url: '/auth/directory',
+      remoteAddress: address,
+      headers: { origin: 'http://localhost:8795', host: 'localhost:8795' },
+      payload: { username, password },
+    });
+  const binds = (uid: string) =>
+    fake.log.filter((line) => line === `bind uid=${uid},ou=people,dc=example,dc=org`).length;
+
+  before(async () => {
+    server = await testServer({ ldap: { settings: SETTINGS, connect: slow } });
+  });
+  after(() => server.close());
+
+  it('lets twenty reach the directory from one address, however many are sent together', async () => {
+    const answers = await Promise.all(Array.from({ length: 60 }, (_, i) => form('dave', `guess-${i}`, '10.8.0.1')));
+    assert.equal(binds('dave'), 20);
+    assert.equal(answers.filter((answer) => answer.statusCode === 401).length, 20);
+    assert.equal(answers.filter((answer) => answer.statusCode === 429).length, 40);
+    // The right password now is refused too: the address had its twenty.
+    assert.equal((await form('dave', 'dave-password', '10.8.0.1')).statusCode, 429);
+  });
+
+  it('lets twenty reach the directory for one name, from however many addresses at once', async () => {
+    const answers = await Promise.all(
+      Array.from({ length: 60 }, (_, i) => form('fern', `guess-${i}`, `10.7.${Math.floor(i / 200)}.${i + 1}`)),
+    );
+    assert.equal(binds('fern'), 20);
+    assert.equal(answers.filter((answer) => answer.statusCode === 429).length, 40);
+    // A try that was not a failure is not counted: a person let in leaves the count as it was.
+    const other = await form('alice', 'alice-password', '10.7.9.9');
+    assert.equal(other.statusCode, 200);
+    assert.equal(await server.auth.limiter.blocked(['address:10.7.9.9']), false);
+  });
+});

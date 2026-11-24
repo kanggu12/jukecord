@@ -205,12 +205,48 @@ export class LoginLimiter {
   }
 
   /**
-   * Counts one failure for each key, and says whether any of them was blocked already before this one: the try after
-   * the twentieth failure is the first one refused, as before.
+   * Counts a try against every key before it is made, for a try that asks another side (a directory, a provider,
+   * Discord): tries sent at the same moment are each counted before any is answered, so no more than the limit get
+   * through, however many come at once. False when a key has failed too often (the try is refused, and nothing stays
+   * counted for it). A try let through stays counted, as a failure, unless it is forgiven.
+   */
+  async enter(keys: readonly string[]): Promise<boolean> {
+    // A key blocked already costs no write: a flood of refused tries counts nothing and makes no counter.
+    if (await this.blocked(keys)) return false;
+    const counts = await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs)));
+    if (counts.every((count) => count <= this.limit)) return true;
+    // Others counted at the same moment took the last places: this one is not made, and not counted.
+    await this.forgive(keys);
+    return false;
+  }
+
+  /**
+   * Takes back the count of a try (see enter) that was no failure: a person let in, or the other side's trouble rather
+   * than a guess. A count whose window has closed is gone, and stays so.
+   */
+  async forgive(keys: readonly string[]): Promise<void> {
+    await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs, -1)));
+  }
+
+  /**
+   * Counts one failure for each key, after the try (one jukecord answers itself, a token or a link), and says whether
+   * any of them was blocked already before this one: the try after the twentieth failure is the first one refused.
    */
   async fail(keys: readonly string[]): Promise<boolean> {
     const counts = await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs)));
     return counts.some((count) => count > this.limit);
+  }
+}
+
+/** Why a login with Discord did not go through: no login of this browser under way, or Discord's refusal. */
+export class DiscordLoginError extends Error {
+  override name = 'DiscordLoginError';
+  /** expired: the state is no login of this browser (late, used, or another browser's); failed: Discord refused. */
+  readonly code: 'expired' | 'failed';
+
+  constructor(code: DiscordLoginError['code'], message: string) {
+    super(message);
+    this.code = code;
   }
 }
 
@@ -570,7 +606,7 @@ export class Auth {
     // The state proves this browser started the login: a link from someone else cannot log this browser into their
     // account (login CSRF).
     if (!expected || expected.length !== state.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(state))) {
-      throw new Error('the login did not start in this browser, or took longer than 10 minutes');
+      throw new DiscordLoginError('expired', 'the login did not start in this browser, or took longer than 10 minutes');
     }
     const next = safeNext(encodedNext ? Buffer.from(encodedNext, 'base64url').toString() : '/');
     const api = oauth.api ?? 'https://discord.com/api/v10';

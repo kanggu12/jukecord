@@ -256,6 +256,7 @@ const EN = {
   loginErrors: {
     cancelled: 'The login was cancelled: log in again when you are ready',
     failed: 'Discord did not let the login through: try again',
+    expired: 'That login took over 10 minutes or began in another browser: log in again',
     'not-a-member': 'You are not in a server that jukecord is in: join one, then log in',
     link: 'That login link was used already or has expired: ask for a new one',
     'too-many': 'Too many failed logins from here: try again in 10 minutes',
@@ -816,6 +817,7 @@ const KO: Strings = {
   loginErrors: {
     cancelled: '로그인이 취소됨: 준비되면 다시 로그인하세요',
     failed: '디스코드 로그인이 되지 않음: 다시 시도하세요',
+    expired: '로그인이 10분을 넘었거나 다른 브라우저에서 시작됨: 다시 로그인하세요',
     'not-a-member': 'jukecord가 있는 서버의 멤버가 아님: 그 서버에 들어간 뒤 로그인하세요',
     link: '이미 사용했거나 만료된 로그인 링크: 새 링크를 받으세요',
     'too-many': '로그인 실패가 너무 많음: 10분 뒤 다시 시도하세요',
