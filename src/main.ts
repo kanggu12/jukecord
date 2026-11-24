@@ -17,6 +17,7 @@ import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { openCache } from './cache/open.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -105,6 +106,9 @@ async function main(): Promise<number> {
   });
 
   const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
+  // The shared cache: what the rate limits count, and what the searches and the links of other services found (see
+  // src/cache/), in this process's memory.
+  const shared = await openCache({ url: 'memory', prefix: 'jukecord', log: log.child('cache'), service: 'all' });
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
   const lanes = new GuildLanes();
   // Trouble said in the log and in each server's alerts channel (app/alerts.ts); the bot posts them once it exists.
@@ -198,9 +202,9 @@ async function main(): Promise<number> {
     watch: alerts,
     // What YouTube says a recording is, kept for finding its lyrics.
     music: store.music,
-    recent: (source) => search?.recent(source) ?? null,
+    recent: async (source) => (await search?.recent(source)) ?? null,
   });
-  search = new Search({ ytdlp, slots: resolver, log: log.child('search') });
+  search = new Search({ ytdlp, slots: resolver, log: log.child('search'), cache: shared });
   // jukecord's own requests (Deezer, Spotify, Apple Music, a file attached in Discord): public addresses only.
   const fetchOut = publicFetch({ allowPrivate: config.media.allowPrivate });
   // Lookups that come in lists (an imported playlist, a link's tracks), three at a time across every list.
@@ -213,6 +217,7 @@ async function main(): Promise<number> {
     log: log.child('links'),
     services: config.links.services,
     spotify: config.links.spotify,
+    cache: shared,
   });
   // A track when a queue runs out, for the servers that turn autoplay on.
   const autoplay = new Autoplay({
@@ -344,6 +349,7 @@ async function main(): Promise<number> {
     log: log.child('web'),
     // Open panels at once (JUKECORD_LIVE_MAX); the caps per login and per address stay at their defaults.
     live: { total: config.liveMax },
+    sharedCache: shared,
     ready: () => store.isOpen(),
     discordReady: () => bot?.ready() ?? false,
     // Connections turned away at a cap are jukecord's trouble, told to the alerts channels.
@@ -444,8 +450,8 @@ async function main(): Promise<number> {
           // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
           .then(() => schedule?.idle())
           .finally(() => {
-            // Closed once no transaction holds it, then out.
-            void store.close().finally(() => process.exit(0));
+            // Closed once no transaction holds it, then out (the shared cache with it).
+            void Promise.allSettled([store.close(), shared.close()]).finally(() => process.exit(0));
           }),
       throwFromTimer,
     );

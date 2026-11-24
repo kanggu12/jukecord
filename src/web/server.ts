@@ -13,6 +13,9 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { ActionError, likesOwner } from '../app/actions.ts';
+import type { Cache } from '../cache/cache.ts';
+import { MemoryCache } from '../cache/memory.ts';
+import { MEMORY_BUCKETS, MEMORY_ENTRIES } from '../cache/open.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
@@ -29,7 +32,7 @@ import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, ty
 import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
-import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
+import { CHANGES, COVERS, FETCHES, Limit, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
 import { type FieldSchema, misfit } from './schemas.ts';
 
@@ -62,6 +65,11 @@ export interface WebServerOptions {
    */
   readonly turnedAway?: (cap: TurnedAway) => void;
   readonly discordReady: () => boolean;
+  /**
+   * Where the rates are counted (and whatever else browsers' requests share): the process's shared cache, which several
+   * edges keep on one Redis or Valkey server. Without it the server keeps one in its memory.
+   */
+  readonly sharedCache?: Cache;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
   readonly rates?: {
     readonly changes?: Rate;
@@ -378,14 +386,22 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // Aborted when the server closes: work shared by several requests (an MP3 copy) stops with jukecord, not with one
   // of the requests.
   const stopping = new AbortController();
-  // The rates of changes, per login and per address, and whether the event loop has fallen behind.
-  const clock = options.rates?.now ?? Date.now;
-  const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
-  const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
-  const reads = new Buckets(options.rates?.reads ?? READS, { now: clock });
+  // The rates of changes, per login and per address, counted in the shared cache (a cache of its own when none is
+  // given, on the steady clock unless a test gives one), and whether the event loop has fallen behind.
+  const ownCache = options.sharedCache
+    ? null
+    : new MemoryCache({
+        capacity: MEMORY_ENTRIES,
+        buckets: MEMORY_BUCKETS,
+        ...(options.rates?.now ? { now: options.rates.now } : {}),
+      });
+  const shared = options.sharedCache ?? (ownCache as MemoryCache);
+  const changes = new Limit(shared, 'changes', options.rates?.changes ?? CHANGES, log);
+  const fetches = new Limit(shared, 'fetches', options.rates?.fetches ?? FETCHES, log);
+  const reads = new Limit(shared, 'reads', options.rates?.reads ?? READS, log);
   // Covers asked for that jukecord must fetch first (a cached one costs what a file of the panel costs, and is free).
-  const coverFetches = new Buckets(options.rates?.covers ?? COVERS, { now: clock });
-  const searches = new Buckets(options.rates?.searches ?? SEARCHES, { now: clock });
+  const coverFetches = new Limit(shared, 'covers', options.rates?.covers ?? COVERS, log);
+  const searches = new Limit(shared, 'searches', options.rates?.searches ?? SEARCHES, log);
   const pressure = options.behind ? null : new Pressure();
   const behind = options.behind ?? (() => pressure?.behind ?? false);
 
@@ -600,20 +616,25 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // that address (a household, an office) are not held back by one person's refusals; that person's login still is.
         // A refusal after a lookup on the site (a search that found nothing) cost a lookup, and keeps it spent: a person
         // with several logins or tokens behind one address otherwise had no brake from the address at all.
-        let giveBack: (() => void) | null = null;
+        let giveBack: (() => Promise<void>) | null = null;
         if (spec.method !== 'GET' && caller && caller.principal.kind !== 'host') {
           if (behind()) return later(reply, 'busy', BUSY, 2000);
           const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
           const fetching = FETCHING.has(name);
-          const forFetch = fetching ? fetches.wait(keys) : 0;
-          const wait = Math.max(changes.wait(keys), forFetch);
-          if (wait > 0) return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
-          changes.take(keys);
-          if (fetching) fetches.take(keys);
+          // Each kind takes from all its buckets or none; a kind that took while the other refused gives its token
+          // back, so a refusal costs nothing, and the wait is the longer of the two.
+          const forFetch = fetching ? await fetches.spend(keys) : 0;
+          const forChange = await changes.spend(keys);
+          if (forFetch > 0 || forChange > 0) {
+            if (fetching && forFetch === 0) await fetches.refund(keys);
+            if (forChange === 0) await changes.refund(keys);
+            const wait = Math.max(forFetch, forChange);
+            return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
+          }
           const address = keys.slice(1);
-          giveBack = () => {
-            changes.give(address);
-            if (fetching) fetches.give(address);
+          giveBack = async () => {
+            await changes.refund(address);
+            if (fetching) await fetches.refund(address);
           };
         }
         // A read from anyone but the host is held to the wider rate of reads: a logged-in one by the person behind it
@@ -626,11 +647,14 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             : [`address ${addressKey(request.ip)}`];
           // A search, which starts yt-dlp, is held to its own rate as well, by the same keys (both must have a token).
           const searching = name === 'search';
-          const forSearch = searching ? searches.wait(keys) : 0;
-          const wait = Math.max(reads.wait(keys), forSearch);
-          if (wait > 0) return later(reply, 'rate-limited', forSearch > 0 ? TOO_MANY_SEARCHES : TOO_MANY_READS, wait);
-          reads.take(keys);
-          if (searching) searches.take(keys);
+          const forSearch = searching ? await searches.spend(keys) : 0;
+          const forRead = await reads.spend(keys);
+          if (forSearch > 0 || forRead > 0) {
+            if (searching && forSearch === 0) await searches.refund(keys);
+            if (forRead === 0) await reads.refund(keys);
+            const wait = Math.max(forSearch, forRead);
+            return later(reply, 'rate-limited', forSearch > 0 ? TOO_MANY_SEARCHES : TOO_MANY_READS, wait);
+          }
         }
         const params = (request.params ?? {}) as Record<string, unknown>;
         // Aborted when the caller goes away before its answer is sent (a search whose words were typed over), so the
@@ -654,7 +678,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             signal: gone.signal,
           });
         } catch (error) {
-          if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) giveBack?.();
+          if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) await giveBack?.();
           throw error;
         }
       },
@@ -729,9 +753,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       // The host is not held to a rate, as for every other request.
       if (caller.principal.kind !== 'host') {
         const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
-        const wait = coverFetches.wait(keys);
+        const wait = await coverFetches.spend(keys);
         if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
-        coverFetches.take(keys);
       }
       try {
         cover = await options.covers.get(pictured);
@@ -790,7 +813,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (verdict === 'forbidden') return failure(reply, 'forbidden', forbiddenFor(API.search.access, caller));
       const context = await deps.access.context(caller.principal, request.params.guild);
       const address = typeof request.query.url === 'string' ? request.query.url : '';
-      const found = deps.actions.searched(context, address);
+      const found = await deps.actions.searched(context, address);
       if (!found) return failure(reply, 'not-found', 'no search found that address lately');
       return sendCover(request, reply, caller, found, 'that search result has no picture');
     },
@@ -982,6 +1005,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       hub.close();
       pressure?.stop();
       stopping.abort();
+      // A cache of its own goes with the server; a shared one is its owner's to close.
+      await ownCache?.close();
       // Fastify closes the idle connections and waits for the answers under way. Audio to a browser lasts as long as
       // the browser takes to read it (a paused <audio> reads nothing for minutes), and jukecord gives its whole stop ten
       // seconds: what is still under way after two is cut.

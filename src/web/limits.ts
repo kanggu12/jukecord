@@ -7,13 +7,17 @@
  * start a fetch somebody waits for (skip, play now, jump, drop) have a second, tighter bucket: each one starts yt-dlp
  * and ffmpeg. The host (its own command line, its login links) is not limited.
  *
+ * The buckets live in the shared cache (src/cache/): in this process's memory by default, on Redis or Valkey when
+ * several edges serve the browsers, so a login spread over them is counted once.
+ *
  * Shedding: when the event loop has fallen behind (the 99th percentile of its delay over the last second is above a
  * limit), the work that can wait (sending audio, changes from anyone but the host) is answered with 503 and a
  * Retry-After at once, so what is already running (the voice of every server, the panels' live updates) catches up.
  * The health checks, logging in and what a panel reads to come back are never turned away.
  */
 import { monitorEventLoopDelay } from 'node:perf_hooks';
-import { steadyNow } from '../core/clock.ts';
+import type { Cache } from '../cache/cache.ts';
+import type { Logger } from '../log.ts';
 
 /** A steady rate (tokens a second) and the most that may be spent at once. */
 export interface Rate {
@@ -47,69 +51,60 @@ export const READS: Rate = { perSecond: 30, burst: 60 };
  */
 export const COVERS: Rate = { perSecond: 10, burst: 60 };
 
-// One bucket: what it held at time `at`.
-interface Bucket {
-  tokens: number;
-  at: number;
-}
-
-/** Token buckets by key, the least recently used dropped beyond `capacity` (a scan from many addresses cannot grow it). */
-export class Buckets {
+/**
+ * One kind of request's rate, its buckets kept in the shared cache by family ("changes", "reads" ...), so the buckets
+ * of two kinds never mix and several edges count one login together.
+ */
+export class Limit {
+  private readonly cache: Cache;
+  private readonly family: string;
   private readonly rate: Rate;
-  private readonly now: () => number;
-  private readonly capacity: number;
-  // Insertion order is the order of last use, oldest first.
-  private readonly buckets = new Map<string, Bucket>();
+  private readonly log: Logger | null;
+  // When the log last said the cache could not count, so an outage is one line a minute.
+  private failedToldAt = Number.NEGATIVE_INFINITY;
 
-  constructor(rate: Rate, options: { now?: () => number; capacity?: number } = {}) {
+  constructor(cache: Cache, family: string, rate: Rate, log: Logger | null = null) {
+    this.cache = cache;
+    this.family = family;
     this.rate = rate;
-    // The steady clock: a system clock set back would otherwise leave every bucket empty for that long.
-    this.now = options.now ?? steadyNow;
-    this.capacity = options.capacity ?? 10_000;
+    this.log = log;
   }
 
-  /** How many milliseconds until every one of these keys has a token: 0 when they all have one now. */
-  wait(keys: readonly string[]): number {
-    let longest = 0;
-    for (const key of keys) {
-      const tokens = this.level(key);
-      // The time the missing part of one token takes to come back at the steady rate.
-      if (tokens < 1) longest = Math.max(longest, Math.ceil(((1 - tokens) * 1000) / this.rate.perSecond));
-    }
-    return longest;
-  }
-
-  /** Takes a token from each key (after wait() said 0). */
-  take(keys: readonly string[]): void {
-    const now = this.now();
-    for (const key of keys) {
-      const tokens = this.level(key);
-      // Moved to the end: the most recently used.
-      this.buckets.delete(key);
-      this.buckets.set(key, { tokens: Math.max(0, tokens - 1), at: now });
-    }
-    while (this.buckets.size > this.capacity) {
-      const oldest = this.buckets.keys().next().value;
-      if (oldest === undefined) break;
-      this.buckets.delete(oldest);
+  /**
+   * Takes a token from each key's bucket, from all of them or from none: 0 when taken, otherwise how many milliseconds
+   * until every one has a token again. A cache that cannot be reached counts nothing and lets the request through: the
+   * rates keep a flood from drowning jukecord, and turning everyone away while the cache is down would be the flood's
+   * own effect.
+   */
+  async spend(keys: readonly string[]): Promise<number> {
+    try {
+      return await this.cache.spend(this.named(keys), this.rate);
+    } catch (error) {
+      this.failed(error);
+      return 0;
     }
   }
 
-  /** Gives a token back to each key that has a bucket (one taken for a request that was then refused). */
-  give(keys: readonly string[]): void {
-    const now = this.now();
-    for (const key of keys) {
-      if (!this.buckets.has(key)) continue;
-      this.buckets.set(key, { tokens: Math.min(this.rate.burst, this.level(key) + 1), at: now });
+  /** Gives back the token a request took (one refused afterwards); nothing when the cache cannot be reached. */
+  async refund(keys: readonly string[]): Promise<void> {
+    try {
+      await this.cache.refund(this.named(keys), this.rate);
+    } catch (error) {
+      this.failed(error);
     }
   }
 
-  // What a key's bucket holds now: what it held, plus what came back since, up to the burst. A new key is full.
-  private level(key: string): number {
-    const bucket = this.buckets.get(key);
-    if (!bucket) return this.rate.burst;
-    const back = ((this.now() - bucket.at) / 1000) * this.rate.perSecond;
-    return Math.min(this.rate.burst, bucket.tokens + back);
+  // The keys as the cache keeps them: under this kind's family.
+  private named(keys: readonly string[]): string[] {
+    return keys.map((key) => `limits ${this.family} ${key}`);
+  }
+
+  private failed(error: unknown): void {
+    if (Date.now() - this.failedToldAt < 60_000) return;
+    this.failedToldAt = Date.now();
+    this.log?.warn('the rates could not be counted (the shared cache does not answer); requests go through meanwhile', {
+      error,
+    });
   }
 }
 

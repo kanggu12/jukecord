@@ -11,8 +11,11 @@
  * Every request goes through publicFetch (public addresses only). A link gives at most a hundred tracks; each is
  * searched on YouTube in the turns of BatchLookups (three at a time across every list), and the recording kept is the
  * one whose length is within a few seconds of the track's, an official audio upload first. A match found once is kept
- * for a while, so the same album added again finds its tracks at once.
+ * for a while, so the same album added again finds its tracks at once: in the shared cache when it is given one (on
+ * Redis or Valkey a day's matches outlast a restart, each a YouTube search saved), otherwise in one of its own.
  */
+import type { Cache } from '../cache/cache.ts';
+import { MemoryCache } from '../cache/memory.ts';
 import type { NewTrack, Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import type { TrackRepository } from '../store/store.ts';
@@ -178,6 +181,8 @@ export interface LinksOptions {
   readonly spotify?: { readonly clientId: string; readonly clientSecret: string } | null;
   /** The clock the matches and the Spotify token are kept by (tests set it). */
   readonly now?: () => number;
+  /** Where matches are kept: the process's shared cache, or one of its own (MATCHES_KEPT of them) without it. */
+  readonly cache?: Cache;
 }
 
 /** What a link added: its tracks found on YouTube, in order, and how many were not. */
@@ -199,14 +204,15 @@ const MATCHES_KEPT = 5000;
 export class Links {
   private readonly options: LinksOptions;
   private readonly now: () => number;
-  // Matches by the track's key, oldest first.
-  private readonly matches = new Map<string, { at: number; track: NewTrack }>();
+  // Matches by the track's key ("links match ..."), the least recently used forgotten first.
+  private readonly matches: Cache;
   // The Spotify app's token, and when it stops working.
   private spotifyToken: { token: string; until: number } | null = null;
 
   constructor(options: LinksOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
+    this.matches = options.cache ?? new MemoryCache({ capacity: MATCHES_KEPT, now: this.now });
   }
 
   /** Whether an input is a link of one of the services (turned off or not: one turned off is refused when added). */
@@ -255,21 +261,22 @@ export class Links {
     return { tracks, notFound: decided.length - tracks.length };
   }
 
-  // A track's YouTube recording, from what was found before or from a search; stored as a track.
+  // A track's YouTube recording, from what was found before or from a search; stored as a track. A cache that does not
+  // answer knows no match, and keeps none: the track is searched as if it were new.
   private async match(track: LinkTrack, signal: AbortSignal): Promise<Track> {
-    const kept = this.matches.get(track.key);
-    if (kept && this.now() - kept.at < MATCH_KEEP_MS) return this.options.tracks.upsert(kept.track);
+    const key = `links match ${track.key}`;
+    const kept = await this.matches.get(key).catch((error: unknown) => {
+      this.options.log.debug('could not read a match of a link', { error });
+      return null;
+    });
+    if (kept) return this.options.tracks.upsert(JSON.parse(kept) as NewTrack);
     const query = `${track.artists.slice(0, 2).join(' ')} ${track.title}`.trim();
     const found = await this.options.ytdlp.search(query, 6, signal);
     const best = bestMatch(track, found);
     if (!best) throw new Error(`no recording of "${query}" fits`);
-    this.matches.delete(track.key);
-    this.matches.set(track.key, { at: this.now(), track: best });
-    while (this.matches.size > MATCHES_KEPT) {
-      const oldest = this.matches.keys().next().value;
-      if (oldest === undefined) break;
-      this.matches.delete(oldest);
-    }
+    await this.matches.set(key, JSON.stringify(best), MATCH_KEEP_MS).catch((error: unknown) => {
+      this.options.log.debug('could not keep a match of a link', { error });
+    });
     return this.options.tracks.upsert(best);
   }
 

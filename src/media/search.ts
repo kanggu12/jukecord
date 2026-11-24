@@ -8,7 +8,13 @@
  * from memory, and a search already under way is shared. A search nobody waits for any more (the next key was
  * typed) is stopped, so it does not hold a slot the next one needs. Picking a result adds it from what the search
  * learned (see recent), with nothing fetched until it plays.
+ *
+ * What it found is kept in the shared cache when it is given one (src/cache/): on Redis or Valkey that outlasts a
+ * restart of the core, so searches typed again after it are not asked of YouTube again. A cache that does not answer
+ * is a cache that knows nothing: the search asks YouTube. The searches under way are this process's own.
  */
+import type { Cache } from '../cache/cache.ts';
+import { MemoryCache } from '../cache/memory.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { NewTrack } from '../core/types.ts';
 import type { Logger } from '../log.ts';
@@ -32,6 +38,11 @@ export interface SearchOptions {
   readonly size?: number;
   /** The clock results are kept by (tests set it); the steady clock by default. */
   readonly now?: () => number;
+  /**
+   * Where found results are kept: the process's shared cache. Without one, two caches of its own, bounded by `size`
+   * (the searches' answers, and the results they showed, ten for each).
+   */
+  readonly cache?: Cache;
 }
 
 /** Who asks, for the per-person and per-server shares of the slots, and when the asker stops waiting. */
@@ -58,28 +69,27 @@ export function searchWords(text: string): string {
 export class Search {
   private readonly options: SearchOptions;
   private readonly keepMs: number;
-  private readonly size: number;
-  private readonly now: () => number;
-  // Found results by their words in lower case, oldest asked first (a Map keeps the order things were set in).
-  private readonly found = new Map<string, { at: number; tracks: NewTrack[] }>();
-  // Searches under way, by the same key.
+  // Found results by their words in lower case ("search words ..."), and every track a recent search showed by its
+  // canonical address ("search shown ...", for picking it: see recent); the least recently used go first.
+  private readonly found: Cache;
+  private readonly shown: Cache;
+  // Searches under way, by the words in lower case.
   private readonly flights = new Map<string, Flight>();
-  // Every track a recent search showed, by its canonical address, for picking it (see recent).
-  private readonly shown = new Map<string, { at: number; track: NewTrack }>();
 
   constructor(options: SearchOptions) {
     this.options = options;
     this.keepMs = options.keepMs ?? 30 * 60_000;
-    this.size = options.size ?? 300;
-    this.now = options.now ?? steadyNow;
+    const size = options.size ?? 300;
+    const now = options.now ?? steadyNow;
+    // One shared cache for both, or one of its own for each, so the results shown never push out the answers.
+    this.found = options.cache ?? new MemoryCache({ capacity: size, now });
+    this.shown = options.cache ?? new MemoryCache({ capacity: size * SEARCH_MAX, now });
   }
 
   /** What a search found lately for these words, without asking YouTube (null when it is not known). */
-  cached(text: string, limit = SEARCH_MAX): NewTrack[] | null {
-    const key = searchWords(text).toLowerCase();
-    const entry = this.found.get(key);
-    if (!entry || this.now() - entry.at > this.keepMs) return null;
-    return entry.tracks.slice(0, limit);
+  async cached(text: string, limit = SEARCH_MAX): Promise<NewTrack[] | null> {
+    const tracks = await this.read<NewTrack[]>(this.found, `search words ${searchWords(text).toLowerCase()}`);
+    return tracks ? tracks.slice(0, limit) : null;
   }
 
   /**
@@ -92,16 +102,9 @@ export class Search {
     if (!words) throw new Error('nothing to search for');
     const limit = Math.max(1, Math.min(SEARCH_MAX, Math.floor(ask.limit ?? 8)));
     const key = words.toLowerCase();
-    const known = this.cached(words, limit);
-    if (known) {
-      // Asked again: the most recently asked, so it is the last forgotten.
-      const entry = this.found.get(key);
-      if (entry) {
-        this.found.delete(key);
-        this.found.set(key, entry);
-      }
-      return known;
-    }
+    // Known: asked again, so the cache keeps it as the most recently used, the last forgotten.
+    const known = await this.cached(words, limit);
+    if (known) return known;
     ask.signal?.throwIfAborted();
     const flight = this.flights.get(key) ?? this.start(key, words, ask.who ?? null, ask.server ?? null);
     flight.waiters += 1;
@@ -122,10 +125,8 @@ export class Search {
    * A track a recent search showed, by its canonical address: picking a result adds it with what the search learned
    * (title, channel, length, picture), as a search that adds its first result does.
    */
-  recent(source: string): NewTrack | null {
-    const entry = this.shown.get(source);
-    if (!entry || this.now() - entry.at > this.keepMs) return null;
-    return entry.track;
+  recent(source: string): Promise<NewTrack | null> {
+    return this.read<NewTrack>(this.shown, `search shown ${source}`);
   }
 
   // Starts a search for the words, shared by everyone who asks for them while it runs.
@@ -137,9 +138,9 @@ export class Search {
       done: false,
       promise: this.options.slots
         .run(who, server, () => this.options.ytdlp.search(words, FETCHED, stop.signal))
-        .then((tracks) => {
+        .then(async (tracks) => {
           const kept = tracks.slice(0, SEARCH_MAX);
-          this.remember(key, kept);
+          await this.remember(key, kept);
           this.options.log.debug('searched', { words, found: kept.length });
           return kept;
         }),
@@ -162,26 +163,27 @@ export class Search {
     return flight;
   }
 
-  // Keeps what a search found, and each track it showed, within their bounds.
-  private remember(key: string, tracks: NewTrack[]): void {
-    const at = this.now();
-    this.found.delete(key);
-    this.found.set(key, { at, tracks });
-    while (this.found.size > this.size) {
-      const oldest = this.found.keys().next().value;
-      if (oldest === undefined) break;
-      this.found.delete(oldest);
+  // Keeps what a search found, and each track it showed (by the canonical address the lookup made, which is what the
+  // resolver asks with), for keepMs. A cache that does not answer keeps nothing, and the search is not the worse for it.
+  private async remember(key: string, tracks: NewTrack[]): Promise<void> {
+    try {
+      await Promise.all([
+        this.found.set(`search words ${key}`, JSON.stringify(tracks), this.keepMs),
+        ...tracks.map((track) => this.shown.set(`search shown ${track.source}`, JSON.stringify(track), this.keepMs)),
+      ]);
+    } catch (error) {
+      this.options.log.debug('could not keep what a search found', { error });
     }
-    // By the canonical address the lookup made, which is what the resolver asks with.
-    for (const track of tracks) {
-      this.shown.delete(track.source);
-      this.shown.set(track.source, { at, track });
-    }
-    // Ten tracks a search, so ten times as many as the searches kept.
-    while (this.shown.size > this.size * SEARCH_MAX) {
-      const oldest = this.shown.keys().next().value;
-      if (oldest === undefined) break;
-      this.shown.delete(oldest);
+  }
+
+  // A kept value, or null when there is none, it cannot be read, or the cache does not answer.
+  private async read<T>(cache: Cache, key: string): Promise<T | null> {
+    try {
+      const text = await cache.get(key);
+      return text === null ? null : (JSON.parse(text) as T);
+    } catch (error) {
+      this.options.log.debug('could not read what a search found', { error });
+      return null;
     }
   }
 
