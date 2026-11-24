@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if and .Values.networkPolicy.enabled (eq .Values.mode "single") }}
 # In: the panel's port only. Out: DNS, and the internet (Discord's gateway and its voice servers over UDP, the sites
 # tracks come from) but none of the cluster's private networks, so a compromised jukecord cannot reach other services.

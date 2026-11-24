@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 # The panel and the API inside the cluster (an Ingress, kubectl port-forward, or another Service in front of it): the
 # one pod, or in split mode the edges.
 apiVersion: v1

@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 jukecord {{ .Chart.AppVersion }} is installed as {{ include "jukecord.fullname" . }} in {{ .Release.Namespace }}.
 {{- /* The pod the jukecord command runs in: the one pod, or in split mode an edge (which asks the core). */}}
 {{- $pod := ternary (include "jukecord.edgeName" .) (include "jukecord.fullname" .) (eq .Values.mode "split") }}

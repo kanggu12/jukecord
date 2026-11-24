@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
 # The database, the media cache and the logs. Kept when the release is uninstalled (helm.sh/resource-policy), so an
 # uninstall by mistake does not take a server's history with it; delete the claim by hand to remove the data.

@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 # helm test: the panel answers through the Service, as anything in the cluster (an Ingress) would reach it.
 apiVersion: v1
 kind: Pod

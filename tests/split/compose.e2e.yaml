@@ -1,4 +1,4 @@
-# What tests/split/run.sh adds to deploy/compose/split.yaml: each edge and the core's own port published on this
+# What tests/split/run.sh adds to deploy/split/compose.yaml: each edge and the core's own port published on this
 # machine, so a test can talk to one edge in particular; a file server in place of the sites tracks come from, with
 # private addresses allowed so the core may fetch from it; and nothing of the checkout's .env, so no Discord at all.
 services:

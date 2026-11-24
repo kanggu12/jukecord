@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if eq .Values.mode "split" }}
 # The core's Service: its internal port, which the edges stream the audio and covers from (with the internal secret),
 # and its own port, health and figures (a Prometheus in the cluster scrapes /metrics there).

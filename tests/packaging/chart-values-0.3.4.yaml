@@ -1,0 +1,127 @@
+# jukecord's Helm values. Every key is checked against values.schema.json, so a misspelt key fails the install
+# instead of being ignored.
+
+image:
+  # The released image, for amd64 and arm64. A copy in a registry of your own (docs/OFFLINE.md) or your own build goes
+  # here instead.
+  repository: ghcr.io/kanggu12/jukecord
+  # Empty: the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+discord:
+  # A Secret of yours with the key token (the pod does not start without it) and, for logging in with Discord,
+  # clientSecret (read when clientId is set). The chart refuses it together with token or clientSecret below. Either
+  # way the chart mounts them as files that jukecord reads, not as variables, which yt-dlp and ffmpeg would inherit.
+  existingSecret: ""
+  # The bot's token. Without one (and without existingSecret) jukecord runs browser-only. The release's values (helm
+  # get values) then hold it too; existingSecret keeps it in a Secret of yours.
+  token: ""
+  # The application's ID, for logging in with Discord.
+  clientId: ""
+  # The application's OAuth2 secret, for logging in to the panel with Discord.
+  clientSecret: ""
+
+# Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
+publicUrl: ""
+
+# Settings passed to jukecord as they are (JUKECORD_*; see docs/README.md), as strings: quote numbers and IDs, which
+# YAML would otherwise turn into floats. JUKECORD_HOST, JUKECORD_PORT, JUKECORD_DATA_DIR and the two *_FILE secrets
+# are the chart's, and the token and the OAuth secret go in discord above (the schema refuses them here). Example:
+#   JUKECORD_CACHE_MAX: 4GiB
+#   JUKECORD_QUEUE_MAX: "2000"
+#   JUKECORD_LOG_LEVEL: debug
+env: {}
+
+# More variables, written as Kubernetes writes them (name with value, or valueFrom a ConfigMap), for what env cannot
+# say: NODE_OPTIONS, TZ, HTTPS_PROXY. The names refused in env are refused here too. Example:
+#   - name: TZ
+#     value: Europe/Berlin
+extraEnv: []
+
+service:
+  type: ClusterIP
+  port: 8795
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # The host name of the panel; leave empty to match every host.
+  host: ""
+  # [{ secretName: jukecord-tls, hosts: [music.example.com] }]
+  tls: []
+
+persistence:
+  # The database, the media cache and the logs. Without it they live as long as the pod.
+  enabled: true
+  # A claim of yours to use instead of the chart's.
+  existingClaim: ""
+  # Empty: the cluster's default class; "-": no class.
+  storageClass: ""
+  size: 5Gi
+  accessModes:
+    - ReadWriteOnce
+
+resources:
+  # Node with the panel open in many browsers (about 200 MB), and a yt-dlp and an ffmpeg (about 70 MB each) for a
+  # track or two being fetched beside it.
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    # Node sets its heap ceiling at about half of this; yt-dlp and ffmpeg use the rest, a pair for each track being
+    # fetched (docs/KUBERNETES.md, "Memory and CPU", says how many at once). Keep it at 768Mi or more.
+    memory: 1536Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  # The data volume's files are given to fsGroup only when its top folder is not jukecord's already, instead of
+  # Kubernetes going through every file of the media cache at each start.
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+networkPolicy:
+  # Incoming: the panel's port only. Outgoing: DNS, and the internet (Discord, its voice servers, the sites tracks
+  # come from) but not the cluster's private networks.
+  enabled: true
+  # Who may reach the panel's port, as NetworkPolicy peers (podSelector, namespaceSelector, ipBlock); empty: anyone.
+  # With the Ingress on, jukecord believes the X-Forwarded-For of one proxy in front (for its login limiter), and a pod
+  # that reaches the port directly could put any address in it; naming the Ingress controller here leaves only it.
+  # helm test's pod is let in as well. A Prometheus that reads /metrics needs a peer here too. For ingress-nginx:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: ingress-nginx
+  #     podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: ingress-nginx
+  ingressFrom: []
+  # Private ranges the pod may not reach; adjust when the cluster uses others.
+  privateRanges:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+
+podAnnotations: {}
+# Labels for the pod, besides the chart's own (which win on the same key).
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

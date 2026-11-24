@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if include "jukecord.serviceMonitor" . }}
 # What the Prometheus Operator scrapes: /metrics on jukecord's Service, with the metrics token when there is one (the
 # Operator reads it from the Secret, in this namespace). In split mode the panel's Service is the edges', each one

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# jukecord split into services, end to end with Docker Compose (deploy/compose/split.yaml): a core, two edges, the
+# jukecord split into services, end to end with Docker Compose (deploy/split/compose.yaml): a core, two edges, the
 # database, Valkey and Caddy, under a throwaway project name, browser-only (no Discord). It opens a login link made in
 # one edge at the other, adds a track through one edge and sees the change arrive on a live connection of the other,
 # plays the track's audio through an edge (a Range request too, and through the front), restarts the core and sees
@@ -36,8 +36,8 @@ JUKECORD_INTERNAL_SECRET=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 JUKECORD_IMAGE=${image:-jukecord-test-split:e2e}
 JUKECORD_E2E_MEDIA=$work/media
 EOF
-files=(-f deploy/compose/split.yaml)
-if [ "$database" = mysql ]; then files+=(-f deploy/compose/split.mysql.yaml); fi
+files=(-f deploy/split/compose.yaml)
+if [ "$database" = mysql ]; then files+=(-f deploy/split/compose.mysql.yaml); fi
 files+=(-f tests/split/compose.e2e.yaml)
 compose=(docker compose -p "$project" --env-file "$work/split.env" "${files[@]}")
 
