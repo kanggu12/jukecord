@@ -1,9 +1,9 @@
 # The split with MySQL instead of PostgreSQL (MariaDB the same way, with its image):
 #
-#   docker compose -f deploy/compose/split.yaml -f deploy/compose/split.mysql.yaml up -d --build
+#   docker compose -f deploy/split/compose.yaml -f deploy/split/compose.mysql.yaml up -d --build
 #
-# Only the database and its address change; everything else is deploy/compose/split.yaml.
-x-database-url: &database-url mysql://jukecord:${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/compose/.env}@database:3306/jukecord
+# Only the database and its address change; everything else is deploy/split/compose.yaml.
+x-database-url: &database-url mysql://jukecord:${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/split/.env}@database:3306/jukecord
 
 services:
   database:
@@ -11,7 +11,7 @@ services:
     environment: !override
       MYSQL_DATABASE: jukecord
       MYSQL_USER: jukecord
-      MYSQL_PASSWORD: ${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/compose/.env}
+      MYSQL_PASSWORD: ${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/split/.env}
       # The root account gets a random password nobody needs: jukecord uses its own.
       MYSQL_RANDOM_ROOT_PASSWORD: "yes"
     volumes: !override

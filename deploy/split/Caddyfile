@@ -1,4 +1,4 @@
-# The front of jukecord split into services (deploy/compose/split.yaml): browsers spread over the edges.
+# The front of jukecord split into services (deploy/split/compose.yaml): browsers spread over the edges.
 {
 	# Nothing to manage at runtime, and plain HTTP: the published address is this machine's (put your TLS front before
 	# it, or name your domain below instead of :80 and let Caddy get its certificate).

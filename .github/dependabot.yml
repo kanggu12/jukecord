@@ -1,7 +1,7 @@
 # Dependabot proposes newer versions once a week, in as few pull requests as it can: one for the actions the workflows
 # use, one for the Node base image's digest, one for the images FFmpeg is built in for the release's programs, one for
-# the monitoring example's Prometheus and Grafana, and one for the npm packages (a new major version of a package, which
-# can break things, comes in a pull request of its own).
+# the monitoring example's Prometheus and Grafana, one for the split's PostgreSQL, MySQL, Valkey and Caddy, and one for
+# the npm packages (a new major version of a package, which can break things, comes in a pull request of its own).
 # Each pull request runs ci.yml, which builds and starts the image, and bundles.yml where the programs are touched.
 # yt-dlp, FFmpeg, OpenSSL and the programs' Node.js are release files, not packages Dependabot knows:
 # ytdlp-release.yml, ffmpeg-release.yml and node-release.yml watch those.
@@ -44,8 +44,27 @@ updates:
     directory: /deploy/monitoring
     schedule:
       interval: weekly
+    # A new major version can change the configuration it reads (prometheus.yml, the provisioning): a decision.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       monitoring-images:
+        patterns: ["*"]
+
+  # The images of the split's Compose files (deploy/split: compose.yaml and compose.mysql.yaml, names Dependabot reads),
+  # each by its major version's tag and digest: a newer digest or minor version (their fixes) comes as one pull request.
+  - package-ecosystem: docker-compose
+    directory: /deploy/split
+    schedule:
+      interval: weekly
+    # A new major version of PostgreSQL or MySQL needs its data moved (pg_upgrade, a dump and a restore), and one of
+    # Valkey or Caddy can change what they read: each is a decision, not an update to take.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      split-images:
         patterns: ["*"]
 
   # package.json and package-lock.json: the packages jukecord runs and the tools it is built and checked with.

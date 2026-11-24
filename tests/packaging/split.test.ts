@@ -56,8 +56,31 @@ function object(rendered: string, kind: string, name: string): string {
 }
 
 describe('the Compose split', () => {
+  it('is in files Compose and Dependabot find by their names, and Dependabot watches them', () => {
+    // dependabot-core's docker_compose file fetcher reads a folder's files whose names match this (Ruby's atomic group
+    // written as a plain one, the same for these names); Compose reads compose.yaml in a folder by itself.
+    const dependabotReads = /(docker-)?compose(-\w+)?(\.[\w-]+)?\.ya?ml/i;
+    for (const file of ['compose.yaml', 'compose.mysql.yaml']) {
+      assert.ok(fs.existsSync(`deploy/split/${file}`), file);
+      assert.match(file, dependabotReads, file);
+    }
+    // Their images by digest, every one watched, and no major version proposed (a database's needs its data moved).
+    const dependabot = read('.github/dependabot.yml');
+    assert.match(
+      dependabot,
+      /- package-ecosystem: docker-compose\n {4}directory: \/deploy\/split\n(?: {4}.*\n)*? {6}- dependency-name: "\*"\n {8}update-types: \["version-update:semver-major"\]\n/,
+    );
+    for (const file of ['compose.yaml', 'compose.mysql.yaml']) {
+      for (const match of read(`deploy/split/${file}`).matchAll(/^ {4}image: (\S+)$/gm)) {
+        // The jukecord image is the one exception: a local build or the release the host names.
+        if (match[1]?.startsWith('${JUKECORD_IMAGE')) continue;
+        assert.match(match[1] ?? '', /^[a-z/]+:[\w.-]+@sha256:[0-9a-f]{64}$/, `${file}: ${match[1]}`);
+      }
+    }
+  });
+
   it('publishes only the front, on this machine by default, and runs every jukecord read-only without privileges', () => {
-    const compose = read('deploy/compose/split.yaml');
+    const compose = read('deploy/split/compose.yaml');
     assert.match(compose, /"\$\{JUKECORD_BIND:-127\.0\.0\.1\}:\$\{JUKECORD_PORT:-8795\}:80"/);
     assert.equal(compose.match(/^ {4}ports:$/gm)?.length, 1, 'only the front publishes a port');
     assert.match(compose, /read_only: true/);
@@ -79,7 +102,7 @@ describe('the Compose split', () => {
       if (match[1]?.startsWith('${JUKECORD_IMAGE')) continue;
       assert.match(match[1] ?? '', /@sha256:[0-9a-f]{64}$/, `${match[1]} is not pinned by digest`);
     }
-    assert.match(read('deploy/compose/Caddyfile'), /reverse_proxy edge1:8795 edge2:8795/);
+    assert.match(read('deploy/split/Caddyfile'), /reverse_proxy edge1:8795 edge2:8795/);
   });
 
   it('is read by Compose, with PostgreSQL and with MySQL', {
@@ -92,8 +115,8 @@ describe('the Compose split', () => {
         env,
         stdio: 'pipe',
       });
-    assert.match(config('deploy/compose/split.yaml'), /JUKECORD_DATABASE_URL: postgres:\/\/jukecord:x@database:5432/);
-    const mysql = config('deploy/compose/split.yaml', 'deploy/compose/split.mysql.yaml');
+    assert.match(config('deploy/split/compose.yaml'), /JUKECORD_DATABASE_URL: postgres:\/\/jukecord:x@database:5432/);
+    const mysql = config('deploy/split/compose.yaml', 'deploy/split/compose.mysql.yaml');
     assert.match(mysql, /JUKECORD_DATABASE_URL: mysql:\/\/jukecord:x@database:3306\/jukecord/);
     assert.doesNotMatch(mysql, /POSTGRES_PASSWORD/);
   });

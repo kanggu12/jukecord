@@ -1,21 +1,22 @@
 # jukecord split into services with Docker Compose: one core, two edges, PostgreSQL, Valkey, and Caddy in front.
 #
-#   cp deploy/compose/split.env.example deploy/compose/.env     (and fill in the two secrets)
-#   docker compose -f deploy/compose/split.yaml up -d --build
+#   cp deploy/split/split.env.example deploy/split/.env     (and fill in the two secrets)
+#   docker compose -f deploy/split/compose.yaml up -d --build     (or, in this folder, docker compose up -d --build)
 #
 # The same image runs every jukecord service. The core is Discord, every server's player and queue, the media and its
 # cache (the one volume jukecord needs); the edges are the panel, the API, the live updates, logins and the browsers'
 # audio, which they stream from the core. Caddy spreads browsers over the edges, WebSockets included; nothing else is
 # published, and only on this machine unless JUKECORD_BIND says otherwise. Every jukecord service reads jukecord's
-# settings from the .env of one process (the checkout's own, beside compose.yaml), so the settings of a jukecord that
-# grew into services stay where they were; this folder's .env holds the split's own secrets, which Compose writes into
-# the services.
-# docs/INSTALL.md has the rest (one process is compose.yaml and ./jukecord; this file is the split).
+# settings from the .env of one process (the checkout's own, beside the checkout's compose.yaml), so the settings of a
+# jukecord that grew into services stay where they were; this folder's .env holds the split's own secrets, which
+# Compose writes into the services.
+# docs/INSTALL.md has the rest (one process is the checkout's compose.yaml and ./jukecord; this file is the split).
+# The file is called compose.yaml, as Compose and Dependabot look for it; compose.mysql.yaml beside it is the MySQL one.
 name: jukecord-split
 
-# What every jukecord service shares: the image, the settings of one process, and the same locks as compose.yaml. The
-# image is a local build by default; set JUKECORD_IMAGE to a released image (ghcr.io/<owner>/jukecord:<version>) to
-# pull one.
+# What every jukecord service shares: the image, the settings of one process, and the same locks as the checkout's
+# compose.yaml. The image is a local build by default; set JUKECORD_IMAGE to a released image
+# (ghcr.io/<owner>/jukecord:<version>) to pull one.
 x-jukecord: &jukecord
   image: ${JUKECORD_IMAGE:-jukecord:local}
   build:
@@ -45,9 +46,9 @@ x-services: &services
   JUKECORD_HOST: 0.0.0.0
   JUKECORD_PORT: "8795"
   JUKECORD_DATA_DIR: /data
-  JUKECORD_DATABASE_URL: postgres://jukecord:${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/compose/.env}@database:5432/jukecord
+  JUKECORD_DATABASE_URL: postgres://jukecord:${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/split/.env}@database:5432/jukecord
   JUKECORD_BUS_URL: redis://valkey:6379
-  JUKECORD_INTERNAL_SECRET: ${JUKECORD_INTERNAL_SECRET:?set JUKECORD_INTERNAL_SECRET in deploy/compose/.env (openssl rand -hex 32)}
+  JUKECORD_INTERNAL_SECRET: ${JUKECORD_INTERNAL_SECRET:?set JUKECORD_INTERNAL_SECRET in deploy/split/.env (openssl rand -hex 32)}
   # The host's time zone: "today" in the statistics and the time of day of scheduled backups.
   TZ: ${TZ:-UTC}
 
@@ -88,7 +89,7 @@ services:
     environment:
       POSTGRES_USER: jukecord
       POSTGRES_DB: jukecord
-      POSTGRES_PASSWORD: ${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/compose/.env}
+      POSTGRES_PASSWORD: ${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/split/.env}
     volumes:
       - database-data:/var/lib/postgresql
     healthcheck:
@@ -122,9 +123,9 @@ services:
     volumes:
       - core-data:/data
     tmpfs:
-      # Scratch space for yt-dlp and ffmpeg, bounded as in compose.yaml.
+      # Scratch space for yt-dlp and ffmpeg, bounded as in the checkout's compose.yaml.
       - /tmp:size=256m
-    # As one process: yt-dlp and ffmpeg beside Node (compose.yaml says why these numbers).
+    # As one process: yt-dlp and ffmpeg beside Node (the checkout's compose.yaml says why these numbers).
     mem_limit: 1g
     memswap_limit: 1g
     pids_limit: 1024
