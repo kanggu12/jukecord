@@ -46,19 +46,19 @@ for (const { name, make } of adapters) {
 
     it('keeps a value for its age, and nothing after', async () => {
       const c = await cache();
-      await c.set('a', 'one', 200);
+      await c.set('a', 'one', 600);
       assert.equal(await c.get('a'), 'one');
       assert.equal(await c.get('missing'), null);
-      await settle(260);
+      await settle(700);
       assert.equal(await c.get('a'), null);
     });
 
     it('adds only to an empty key (an expired one is empty), and deletes', async () => {
       const c = await cache();
-      assert.equal(await c.add('lock', 'first', 200), true);
-      assert.equal(await c.add('lock', 'second', 200), false);
+      assert.equal(await c.add('lock', 'first', 600), true);
+      assert.equal(await c.add('lock', 'second', 600), false);
       assert.equal(await c.get('lock'), 'first');
-      await settle(260);
+      await settle(700);
       assert.equal(await c.add('lock', 'third', 5000), true);
       await c.delete('lock');
       assert.equal(await c.get('lock'), null);
@@ -76,31 +76,38 @@ for (const { name, make } of adapters) {
 
     it('counts in a window that closes when its first count is that old', async () => {
       const c = await cache();
-      assert.equal(await c.increment('fail', 300), 1);
-      assert.equal(await c.increment('fail', 300, 2), 3);
-      await settle(150);
+      assert.equal(await c.increment('fail', 1000), 1);
+      assert.equal(await c.increment('fail', 1000, 2), 3);
+      await settle(100);
       // A later increment does not move the window's end.
-      assert.equal(await c.increment('fail', 300), 4);
-      await settle(200);
-      assert.equal(await c.increment('fail', 300), 1);
+      assert.equal(await c.increment('fail', 1000), 4);
+      await settle(1000);
+      assert.equal(await c.increment('fail', 1000), 1);
     });
 
     it('takes a token from every bucket or from none, and says how long to wait', async () => {
       const c = await cache();
-      const rate = { perSecond: 10, burst: 2 };
+      // A token every hundred seconds: nothing comes back while the test runs, however slow the machine.
+      const rate = { perSecond: 0.01, burst: 2 };
       assert.equal(await c.spend(['person', 'address'], rate), 0);
       assert.equal(await c.spend(['person', 'address'], rate), 0);
-      // Both empty: at most a tenth of a second until a token is back at ten a second.
+      // Both empty: up to a hundred seconds until a token is back.
       const wait = await c.spend(['person', 'address'], rate);
-      assert.ok(wait > 0 && wait <= 100, `${wait} ms to wait`);
+      assert.ok(wait > 90_000 && wait <= 100_000, `${wait} ms to wait`);
       // Another person behind the same address: refused for the address, and nothing taken from the new bucket.
       assert.ok((await c.spend(['other', 'address'], rate)) > 0);
       assert.equal(await c.spend(['other'], rate), 0);
       assert.equal(await c.spend(['other'], rate), 0);
       assert.ok((await c.spend(['other'], rate)) > 0);
-      // The steady rate brings tokens back.
-      await settle(wait + 20);
-      assert.equal(await c.spend(['person', 'address'], rate), 0);
+    });
+
+    it('brings tokens back at the steady rate', async () => {
+      const c = await cache();
+      const rate = { perSecond: 20, burst: 1 };
+      assert.equal(await c.spend(['steady'], rate), 0);
+      // A twentieth of a second later (and more if the machine is slow), the token is back.
+      await settle(80);
+      assert.equal(await c.spend(['steady'], rate), 0);
     });
 
     it('gives a refused request its token back, never past the burst', async () => {

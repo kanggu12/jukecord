@@ -60,17 +60,17 @@ for (const { name, make } of testBuses()) {
     it('lets one owner hold a lease at a time, renewed by it, given back by it only, and lapsing by itself', async () => {
       const t = await bus.connect('t');
       const lease = `${bus.prefix}:lease:test`;
-      assert.equal(await t.hold(lease, 'first', 300), true);
-      assert.equal(await t.hold(lease, 'second', 300), false);
-      // Renewed: still the first's after what would have been its end.
-      assert.equal(await t.hold(lease, 'first', 300), true);
+      assert.equal(await t.hold(lease, 'first', 5000), true);
+      assert.equal(await t.hold(lease, 'second', 5000), false);
+      // Renewed: still the first's.
+      assert.equal(await t.hold(lease, 'first', 5000), true);
       await t.release(lease, 'second');
-      assert.equal(await t.hold(lease, 'second', 300), false);
+      assert.equal(await t.hold(lease, 'second', 5000), false);
       await t.release(lease, 'first');
       assert.equal(await t.hold(lease, 'second', 150), true);
       // Not renewed: it lapses, and the next owner takes it.
       await settle(250);
-      assert.equal(await t.hold(lease, 'third', 300), true);
+      assert.equal(await t.hold(lease, 'third', 5000), true);
       assert.equal(await t.ping(), true);
     });
   });

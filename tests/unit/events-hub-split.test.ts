@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Ending } from '../../src/bus/relay.ts';
 import { type ElsewhereListeners, EventHub, type Listener } from '../../src/web/events.ts';
+import { eventually } from '../support/bus.ts';
 
 // A socket that keeps what the hub writes (text frames only: the fake browser does not take gzip).
 function socket() {
@@ -98,12 +99,13 @@ describe('the live updates hub of an edge', () => {
     await hub.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' }, sessionHash: 's1' } as never, {
       guild: 'G',
     });
-    await settle();
+    // Its state first (read from the "core", a few answers one after another), then it starts listening.
+    await eventually(() => browser.of('state').length === 1, 'the state');
     browser.say({ type: 'listening', on: true });
-    await settle(20);
     // This edge's own browser first, then the other edge's person; both counted.
-    const listeners = browser.of('listeners').at(-1)?.listeners as { people: Listener[]; count: number };
-    assert.equal(listeners.count, 2);
+    const last = () => browser.of('listeners').at(-1)?.listeners as { people: Listener[]; count: number } | undefined;
+    await eventually(() => last()?.count === 2, 'both listeners counted');
+    const listeners = last() as { people: Listener[]; count: number };
     assert.deepEqual(
       listeners.people.map((person) => person.id),
       ['u1', 'u2'],
@@ -121,8 +123,7 @@ describe('the live updates hub of an edge', () => {
     awayCount = 0;
     away.length = 0;
     hub.elsewhereChanged('G');
-    await settle(20);
-    assert.equal((browser.of('listeners').at(-1)?.listeners as { count: number } | undefined)?.count, 1);
+    await eventually(() => last()?.count === 1, 'the other edge gone from the count');
     assert.equal(told.length, before);
     hub.close();
   });
@@ -162,10 +163,9 @@ describe('the live updates hub of an edge', () => {
       await hub.attach(second.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' }),
       true,
     );
-    // Its state is read from the core, a few answers one after another.
-    await settle(60);
-    // The new state starts the count of snapshots afresh: a new core's first versions are not taken for old ones.
-    assert.equal(second.of('state').length, 1);
+    // Its state is read from the core, a few answers one after another. The new state starts the count of snapshots
+    // afresh: a new core's first versions are not taken for old ones.
+    await eventually(() => second.of('state').length === 1, 'the new state');
     hub.close();
   });
 });
