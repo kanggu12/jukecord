@@ -107,21 +107,18 @@ export class Prefetcher {
    * with nothing current: it was stopped (by a person, by failures, or because the server removed the bot), and its
    * queue waits for someone to press play.
    */
-  wanted(guildId: string): Track[] {
+  async wanted(guildId: string): Promise<Track[]> {
     // existing(): asking must not make a player for a server that never had one.
     const current = this.options.players.existing(guildId)?.snapshot().track ?? null;
     if (!current) return [];
-    const next = this.options.queue
-      .list(guildId)
-      .slice(0, this.options.count)
-      .map((item) => item.track);
+    const next = (await this.options.queue.list(guildId)).slice(0, this.options.count).map((item) => item.track);
     return [current, ...next];
   }
 
   // Pins what is wanted, unpins what is not, and fetches the missing tracks in order.
   private async run(guildId: string): Promise<void> {
     const plan = this.planOf(guildId);
-    const tracks = this.wanted(guildId);
+    const tracks = await this.wanted(guildId);
     const keys = new Set(tracks.map((track) => MediaCache.keyOf(track.source)));
     // Pin the new set before unpinning the old, so a key in both is never briefly unprotected.
     for (const key of keys) if (!plan.pinned.has(key)) this.options.cache.pin(key);
@@ -147,7 +144,7 @@ export class Prefetcher {
     // loop, and has not failed lately.
     const done = new Set<string>();
     while (!abort.signal.aborted && !this.stopped) {
-      const next = this.wanted(guildId).find((track) => {
+      const next = (await this.wanted(guildId)).find((track) => {
         const key = MediaCache.keyOf(track.source);
         const failedAt = plan.failed.get(key);
         const failedLately = failedAt !== undefined && clock.steady() - failedAt <= FAILED_RETRY_MS;

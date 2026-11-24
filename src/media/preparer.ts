@@ -263,7 +263,7 @@ export class Media implements MediaPreparer {
         cache.commit(key, tmp, { source: track.source, durationMs, loudness });
         // Fetched from the site just now: it answers.
         this.options.watch?.worked(track.url);
-        if (loudness !== null) this.options.tracks.setLoudness(track.id, loudness);
+        if (loudness !== null) await this.options.tracks.setLoudness(track.id, loudness);
         this.options.log.info('cached a track', {
           title: track.title,
           seconds: Math.round(durationMs / 1000),

@@ -27,10 +27,10 @@ afterEach(() => {
   else process.env.TZ = zone;
 });
 
-function setup(start: string, keep = 2) {
+async function setup(start: string, keep = 2) {
   // A clock at a local time in Seoul (UTC+9).
   const clock = new FakeClock(new Date(`${start}+09:00`).getTime());
-  const store = Store.open(path.join(dir, 'jukecord.db'), { now: () => clock.now() });
+  const store = await Store.open(path.join(dir, 'jukecord.db'), { now: () => clock.now() });
   const sink = new MemorySink();
   const alerts: Alert[] = [];
   const schedule = new BackupSchedule({
@@ -40,14 +40,18 @@ function setup(start: string, keep = 2) {
     at: { hour: 4, minute: 30 },
     clock,
     log: createLogger({ level: 'debug', sinks: [sink] }),
-    alerts: { raise: (alert: Alert) => alerts.push(alert) },
+    alerts: {
+      raise: async (alert: Alert) => {
+        alerts.push(alert);
+      },
+    },
   });
   return { clock, store, sink, alerts, schedule };
 }
 
 describe('the daily backup', () => {
   it('is made at its time once a day, and keeps the newest', async () => {
-    const { clock, store, sink, schedule } = setup('2026-11-11T03:00:00');
+    const { clock, store, sink, schedule } = await setup('2026-11-11T03:00:00');
     schedule.start();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 0);
     // 04:30 comes: one backup (written beside the main thread: waited for), and none more that day.
@@ -65,11 +69,11 @@ describe('the daily backup', () => {
     assert.equal(listBackups(path.join(dir, 'backups')).length, 2);
     assert.equal(sink.records.filter((record) => record.msg === 'made the scheduled backup').length, 3);
     schedule.stop();
-    store.close();
+    await store.close();
   });
 
   it("is made when jukecord starts after the day's time, unless one was made since", async () => {
-    const late = setup('2026-11-11T09:00:00');
+    const late = await setup('2026-11-11T09:00:00');
     late.schedule.start();
     await late.schedule.idle();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
@@ -88,11 +92,11 @@ describe('the daily backup', () => {
     await again.idle();
     assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
     again.stop();
-    late.store.close();
+    await late.store.close();
   });
 
   it('is made on a day someone put a copy of their own in the folder after its time', async () => {
-    const { clock, store, sink, schedule } = setup('2026-11-11T09:00:00');
+    const { clock, store, sink, schedule } = await setup('2026-11-11T09:00:00');
     // A copy put there by hand at 08:00, after 04:30: taken for today's backup, it put the day's own off.
     fs.mkdirSync(path.join(dir, 'backups'));
     const copy = path.join(dir, 'backups', 'jukecord-before-the-move.db');
@@ -107,11 +111,11 @@ describe('the daily backup', () => {
       'jukecord-before-the-move.db',
     ]);
     schedule.stop();
-    store.close();
+    await store.close();
   });
 
   it('says a failed backup once, in the log and to the alerts, and tries again the next day', async () => {
-    const { clock, store, sink, alerts, schedule } = setup('2026-11-11T04:00:00');
+    const { clock, store, sink, alerts, schedule } = await setup('2026-11-11T04:00:00');
     // The backups folder cannot be made: a file stands where it would be.
     fs.writeFileSync(path.join(dir, 'backups'), 'not a folder');
     schedule.start();
@@ -133,6 +137,6 @@ describe('the daily backup', () => {
     await schedule.idle();
     assert.equal(schedule.lastFailure(), null);
     schedule.stop();
-    store.close();
+    await store.close();
   });
 });

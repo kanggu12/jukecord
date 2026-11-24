@@ -18,21 +18,21 @@ const CAT = '300000000000000003';
 // A server with a DJ role, three people listening and a track playing; nobody pressing has the role.
 async function voting() {
   const people = new Set([PERSON, BEN, CAT]);
-  const made = fakeBot({ listening: () => people });
+  const made = await fakeBot({ listening: () => people });
   // Discord's side: the server has the DJ role among its roles (the bot of the tests sees no server).
   const directory = Object.assign(Object.create(made.bot), {
     roles: () => [{ id: DJ_ROLE, name: 'DJ', color: 0 }],
   }) as Directory;
   made.actions.setVoice(made.bot.voice, () => true, directory);
-  made.store.settings.setDjRole(GUILD, DJ_ROLE);
-  const tracks = addTracks(made.store, 3);
-  made.queue.add(
+  await made.store.settings.setDjRole(GUILD, DJ_ROLE);
+  const tracks = await addTracks(made.store, 3);
+  await made.queue.add(
     GUILD,
     tracks.map((track) => track.id),
     'end',
     null,
   );
-  made.players.get(GUILD).play();
+  await made.players.get(GUILD).play();
   made.media.finish(180_000);
   await flush();
   return made;
@@ -49,7 +49,7 @@ describe('the playing card and the votes to skip', () => {
     await flush();
     assert.equal(np.shown.length, 1);
     // A vote from someone listening in a browser: no change of the player, and the kept card says it all the same.
-    actions.skip({ guildId: GUILD, userId: BEN, mayControl: false, mayManage: false });
+    await actions.skip({ guildId: GUILD, userId: BEN, mayControl: false, mayManage: false });
     await clock.advance(10);
     await flush();
     const kept = np.shown.at(-1)?.text ?? '';

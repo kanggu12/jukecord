@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type ActionContext, ActionError, Actions, type VoiceControl } from '../../src/app/actions.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { Track } from '../../src/core/types.ts';
@@ -15,14 +16,16 @@ const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayCon
 const LISTENER: ActionContext = { guildId: GUILD, userId: '300000000000000002', mayControl: false, mayManage: false };
 
 // Actions over a real queue and players, with a resolver that answers from a fixed table.
-function setup() {
+async function setup() {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   const log = createLogger({ level: 'error', sinks: [] });
   const players = new Players({
+    lanes,
     queue,
     media,
     history: store.history,
@@ -32,7 +35,7 @@ function setup() {
     log,
     fetchTimeoutMs: 60_000,
   });
-  const tracks = addTracks(store, 4);
+  const tracks = await addTracks(store, 4);
   const table = new Map<string, Track[]>([
     ['one', tracks.slice(0, 1)],
     ['two', tracks.slice(1, 2)],
@@ -45,7 +48,7 @@ function setup() {
       return found;
     },
   } as unknown as Resolver;
-  const actions = new Actions({ store, queue, players, resolver, log });
+  const actions = new Actions({ lanes, store, queue, players, resolver, log });
   return { clock, store, queue, media, players, actions, tracks };
 }
 
@@ -62,7 +65,7 @@ async function code(fn: () => unknown): Promise<string> {
 
 describe('Actions', () => {
   it('adds and starts playing when idle; a playlist adds all of its tracks', async () => {
-    const { actions, media, queue } = setup();
+    const { actions, media, queue } = await setup();
     const {
       items: [item],
     } = await actions.add(DJ, 'one');
@@ -71,13 +74,13 @@ describe('Actions', () => {
     assert.equal(media.last().track.title, 'Track 1');
     await actions.add(DJ, 'list');
     assert.deepEqual(
-      queue.list(GUILD).map((entry) => entry.track.title),
+      (await queue.list(GUILD)).map((entry) => entry.track.title),
       ['Track 3', 'Track 4'],
     );
   });
 
   it('plays now by putting the track first and skipping the current one', async () => {
-    const { actions, media } = setup();
+    const { actions, media } = await setup();
     await actions.add(DJ, 'one');
     media.finish(180_000);
     await flush();
@@ -86,7 +89,7 @@ describe('Actions', () => {
   });
 
   it('turns lookup failures and impossible requests into codes the ways in can show', async () => {
-    const { actions } = setup();
+    const { actions } = await setup();
     assert.equal(await code(() => actions.add(DJ, 'missing')), 'not-found');
     assert.equal(await code(() => actions.skip(DJ)), 'conflict');
     assert.equal(await code(() => actions.seek(DJ, -1)), 'invalid');
@@ -97,34 +100,34 @@ describe('Actions', () => {
   });
 
   it('lets everyone look but only people allowed to change the music change it', async () => {
-    const { actions } = setup();
+    const { actions } = await setup();
     assert.equal(await code(() => actions.add(LISTENER, 'one')), 'forbidden');
     assert.equal(await code(() => actions.clear(LISTENER)), 'forbidden');
-    assert.deepEqual(actions.queue(LISTENER).items, []);
+    assert.deepEqual((await actions.queue(LISTENER)).items, []);
     assert.equal(actions.nowPlaying(LISTENER).status, 'idle');
   });
 
   it('saves the current track with the queue and loads it back', async () => {
-    const { actions, media, queue } = setup();
+    const { actions, media, queue } = await setup();
     await actions.add(DJ, 'one');
     await actions.add(DJ, 'list');
     media.finish(180_000);
     await flush();
-    const saved = actions.playlistSave(DJ, 'Friday');
+    const saved = await actions.playlistSave(DJ, 'Friday');
     assert.equal(saved.size, 3);
-    actions.clear(DJ);
-    actions.playlistLoad(DJ, 'Friday');
+    await actions.clear(DJ);
+    await actions.playlistLoad(DJ, 'Friday');
     assert.deepEqual(
-      queue.list(GUILD).map((item) => item.track.title),
+      (await queue.list(GUILD)).map((item) => item.track.title),
       ['Track 1', 'Track 3', 'Track 4'],
     );
     assert.equal(await code(() => actions.playlistRename(DJ, 'Friday', 'Friday')), 'none');
-    actions.playlistDelete(DJ, 'Friday');
-    assert.deepEqual(actions.playlists(DJ), []);
+    await actions.playlistDelete(DJ, 'Friday');
+    assert.deepEqual(await actions.playlists(DJ), []);
   });
 
   it('joins and leaves through the voice control once the bot provides one', async () => {
-    const { actions } = setup();
+    const { actions } = await setup();
     const calls: string[] = [];
     const voice: VoiceControl = {
       join: async (_guild, channel) => {
@@ -140,7 +143,7 @@ describe('Actions', () => {
     };
     actions.setVoice(voice, () => true);
     assert.equal((await actions.join(DJ, null)).name, 'Lounge');
-    actions.leave(DJ);
+    await actions.leave(DJ);
     assert.deepEqual(calls, ['join null', 'leave']);
     assert.equal(actions.status().discord, true);
   });
@@ -148,34 +151,34 @@ describe('Actions', () => {
 
 describe('Actions resume', () => {
   it('continues a paused track, starts the queue after a stop, and says why when it cannot', async () => {
-    const { actions } = setup();
+    const { actions } = await setup();
     await assert.rejects(async () => actions.resume(DJ), /the queue is empty/);
     await actions.add(DJ, 'list');
-    actions.stop(DJ);
+    await actions.stop(DJ);
     assert.equal(actions.nowPlaying(DJ).status, 'idle');
     // After a stop the play key starts the queue again.
-    assert.equal(actions.resume(DJ).status, 'loading');
+    assert.equal((await actions.resume(DJ)).status, 'loading');
     // While it gets ready it is on its way to playing, which is what is said (it is not playing yet).
-    assert.throws(() => actions.resume(DJ), /^ActionError: the track is getting ready$/);
+    await assert.rejects(() => actions.resume(DJ), /^ActionError: the track is getting ready$/);
   });
 
   it('says a paused track is already paused, not that nothing is playing', async () => {
-    const { actions, media } = setup();
+    const { actions, media } = await setup();
     await actions.add(DJ, 'one');
     media.finish(180_000);
     await flush();
-    actions.pause(DJ);
+    await actions.pause(DJ);
     // A second press of Pause (/pause twice, two people at once, an old card's key).
-    assert.throws(() => actions.pause(DJ), /^ActionError: it is already paused$/);
-    actions.resume(DJ);
-    assert.throws(() => actions.resume(DJ), /^ActionError: it is already playing$/);
+    await assert.rejects(() => actions.pause(DJ), /^ActionError: it is already paused$/);
+    await actions.resume(DJ);
+    await assert.rejects(() => actions.resume(DJ), /^ActionError: it is already playing$/);
     // Paused while it loads: it starts paused, which a second pause also says.
     await actions.add(DJ, 'two');
-    actions.skip(DJ);
-    actions.pause(DJ);
-    assert.throws(() => actions.pause(DJ), /^ActionError: it is already paused$/);
+    await actions.skip(DJ);
+    await actions.pause(DJ);
+    await assert.rejects(() => actions.pause(DJ), /^ActionError: it is already paused$/);
     // And with nothing at all, nothing is playing.
-    actions.stop(DJ);
-    assert.throws(() => actions.pause(DJ), /^ActionError: nothing is playing$/);
+    await actions.stop(DJ);
+    await assert.rejects(() => actions.pause(DJ), /^ActionError: nothing is playing$/);
   });
 });

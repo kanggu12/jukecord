@@ -91,7 +91,7 @@ export class GuildLanes {
       }
     };
     // An idle lane starts the task at once (as a change ran before there were lanes); a busy one after its last turn.
-    return before ? before.then(start) : start();
+    return before !== undefined ? before.then(start) : start();
   }
 
   /** Whether the code running now holds a turn of the server's lane (inside a turn still running). */

@@ -14,10 +14,10 @@ const B = '100000000000000002';
 const LOUNGE = { channelId: '400000000000000001', name: 'Lounge' };
 const STUDIO = { channelId: '400000000000000002', name: 'Studio' };
 
-function setup() {
+async function setup() {
   // The date, which a test moves on (a restart an hour later).
   const time = { now: Date.UTC(2026, 10, 13, 20) };
-  const store = memoryStore(() => time.now);
+  const store = await memoryStore(() => time.now);
   const bus = new Bus();
   const sink = new MemorySink();
   const log = createLogger({ level: 'debug', sinks: [sink] });
@@ -29,28 +29,28 @@ function setup() {
 }
 
 describe('VoiceMemory', () => {
-  it('keeps the channel the bot joins or is moved to, forgets one it leaves, and keeps them all when jukecord stops', () => {
-    const { store, bus, memory } = setup();
+  it('keeps the channel the bot joins or is moved to, forgets one it leaves, and keeps them all when jukecord stops', async () => {
+    const { store, bus, memory } = await setup();
     bus.emit('voice', { guildId: A, channel: LOUNGE });
     bus.emit('voice', { guildId: A, channel: STUDIO });
     bus.emit('voice', { guildId: B, channel: LOUNGE });
-    assert.deepEqual(store.voiceChannels.all(), [
+    assert.deepEqual(await store.voiceChannels.all(), [
       { guildId: A, channelId: STUDIO.channelId },
       { guildId: B, channelId: LOUNGE.channelId },
     ]);
     // Left (a person's /leave, nobody there, kicked): not to come back to.
     bus.emit('voice', { guildId: B, channel: null });
-    assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: STUDIO.channelId }]);
+    assert.deepEqual(await store.voiceChannels.all(), [{ guildId: A, channelId: STUDIO.channelId }]);
     // jukecord stops and leaves every channel: that is not people leaving, and the channel stays kept.
     memory.freeze();
     bus.emit('voice', { guildId: A, channel: null });
-    assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: STUDIO.channelId }]);
+    assert.deepEqual(await store.voiceChannels.all(), [{ guildId: A, channelId: STUDIO.channelId }]);
   });
 
   it('goes back after a restart where people are, says so there, and forgets a channel nobody is in', async () => {
-    const { store, bus, sink, memory } = setup();
-    store.voiceChannels.remember(A, LOUNGE.channelId);
-    store.voiceChannels.remember(B, STUDIO.channelId);
+    const { store, bus, sink, memory } = await setup();
+    await store.voiceChannels.remember(A, LOUNGE.channelId);
+    await store.voiceChannels.remember(B, STUDIO.channelId);
     const joined: string[] = [];
     const told: string[] = [];
     const back = await memory.rejoin({
@@ -69,14 +69,14 @@ describe('VoiceMemory', () => {
     assert.equal(back, 1);
     assert.deepEqual(joined, [`${A} ${LOUNGE.channelId}`]);
     assert.deepEqual(told, [A]);
-    assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
+    assert.deepEqual(await store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
     assert.ok(sink.records.some((record) => record.msg === 'came back to voice after a restart'));
   });
 
   it('goes back to an empty channel too where the server asked the bot to stay in voice', async () => {
-    const { store, bus, memory } = setup();
-    store.voiceChannels.remember(A, LOUNGE.channelId);
-    store.voiceChannels.remember(B, STUDIO.channelId);
+    const { store, bus, memory } = await setup();
+    await store.voiceChannels.remember(A, LOUNGE.channelId);
+    await store.voiceChannels.remember(B, STUDIO.channelId);
     const joined: string[] = [];
     const told: string[] = [];
     const back = await memory.rejoin({
@@ -96,12 +96,12 @@ describe('VoiceMemory', () => {
     assert.equal(back, 1);
     assert.deepEqual(joined, [`${A} ${LOUNGE.channelId}`]);
     assert.deepEqual(told, [A]);
-    assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
+    assert.deepEqual(await store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
   });
 
   it('forgets a channel it cannot go back to, and says why in the log', async () => {
-    const { store, sink, memory } = setup();
-    store.voiceChannels.remember(A, LOUNGE.channelId);
+    const { store, sink, memory } = await setup();
+    await store.voiceChannels.remember(A, LOUNGE.channelId);
     const back = await memory.rejoin({
       people: () => 3,
       inVoice: () => false,
@@ -111,14 +111,14 @@ describe('VoiceMemory', () => {
       told: async () => {},
     });
     assert.equal(back, 0);
-    assert.deepEqual(store.voiceChannels.all(), []);
+    assert.deepEqual(await store.voiceChannels.all(), []);
     assert.ok(sink.records.some((record) => record.msg === 'could not come back to voice after a restart'));
   });
 
   it('leaves alone a server whose bot someone called into voice while it went back to another', async () => {
-    const { store, bus, memory } = setup();
-    store.voiceChannels.remember(A, LOUNGE.channelId);
-    store.voiceChannels.remember(B, LOUNGE.channelId);
+    const { store, bus, memory } = await setup();
+    await store.voiceChannels.remember(A, LOUNGE.channelId);
+    await store.voiceChannels.remember(B, LOUNGE.channelId);
     // Where each server's bot is now, as the voice manager knows it.
     const inVoice = new Set<string>();
     const joined: string[] = [];
@@ -140,16 +140,16 @@ describe('VoiceMemory', () => {
     // B's bot stays with the people who called it, and the Studio stays kept for the next restart.
     assert.equal(back, 1);
     assert.deepEqual(joined, [`${A} ${LOUNGE.channelId}`]);
-    assert.deepEqual(store.voiceChannels.all(), [
+    assert.deepEqual(await store.voiceChannels.all(), [
       { guildId: A, channelId: LOUNGE.channelId },
       { guildId: B, channelId: STUDIO.channelId },
     ]);
   });
 
   it('does not go back to a server whose bot was called and sent away again while its turn came', async () => {
-    const { store, bus, memory } = setup();
-    store.voiceChannels.remember(A, LOUNGE.channelId);
-    store.voiceChannels.remember(B, LOUNGE.channelId);
+    const { store, bus, memory } = await setup();
+    await store.voiceChannels.remember(A, LOUNGE.channelId);
+    await store.voiceChannels.remember(B, LOUNGE.channelId);
     const joined: string[] = [];
     const back = await memory.rejoin({
       people: () => 2,
@@ -168,12 +168,12 @@ describe('VoiceMemory', () => {
     // B's turn reads its kept channel again: there is none now, and the bot stays away as it was told.
     assert.equal(back, 1);
     assert.deepEqual(joined, [`${A} ${LOUNGE.channelId}`]);
-    assert.deepEqual(store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
+    assert.deepEqual(await store.voiceChannels.all(), [{ guildId: A, channelId: LOUNGE.channelId }]);
   });
 
   it('says it came back at most once an hour in a server, however often jukecord restarts (a crash loop)', async () => {
-    const { store, bus, run, time } = setup();
-    store.voiceChannels.remember(A, LOUNGE.channelId);
+    const { store, bus, run, time } = await setup();
+    await store.voiceChannels.remember(A, LOUNGE.channelId);
     const told: number[] = [];
     const discord = {
       people: () => 2,

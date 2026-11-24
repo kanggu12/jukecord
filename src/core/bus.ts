@@ -52,7 +52,8 @@ export type ListenerFailure = (event: keyof BusEvents, guildId: string | null, e
  * Node's EventEmitter, typed with the events above so a misspelt event name or payload fails the type check, and
  * calling every listener even when one throws. A failing listener (a panel's message, a card) must not keep the others
  * from hearing about the change, nor reach the code that emitted it: that is often a player's timer, where the error
- * would end the process and the music of every server with it.
+ * would end the process and the music of every server with it. A listener may answer with a promise (its work reads
+ * or writes the database); that promise's rejection is told the same way as a throw.
  */
 export class Bus extends EventEmitter<BusEvents> {
   private readonly failed: ListenerFailure;
@@ -72,13 +73,17 @@ export class Bus extends EventEmitter<BusEvents> {
 
   override emit<K extends keyof BusEvents>(event: K, ...args: BusEvents[K]): boolean {
     // rawListeners keeps once() wrappers, which remove themselves when called, as emit would.
-    const listeners = this.rawListeners(event) as ((...values: BusEvents[K]) => void)[];
+    const listeners = this.rawListeners(event) as ((...values: BusEvents[K]) => unknown)[];
+    // The server the event is about, for the report of a listener that failed.
+    const about = (args[0] as { guildId?: unknown } | undefined)?.guildId;
+    const guildId = typeof about === 'string' ? about : null;
     for (const listener of listeners) {
       try {
-        listener.apply(this, args);
+        const answer = listener.apply(this, args);
+        // Work the listener goes on with after it returned: a failure of it is told as a throw would have been.
+        if (answer instanceof Promise) answer.catch((error: unknown) => this.failed(event, guildId, error));
       } catch (error) {
-        const guildId = (args[0] as { guildId?: unknown } | undefined)?.guildId;
-        this.failed(event, typeof guildId === 'string' ? guildId : null, error);
+        this.failed(event, guildId, error);
       }
     }
     return listeners.length > 0;

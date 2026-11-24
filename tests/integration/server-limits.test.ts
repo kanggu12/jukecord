@@ -70,8 +70,8 @@ describe('the web server times requests, not answers', () => {
 
   it('sends a long answer to a slow reader for as long as it takes', async () => {
     // A queued, cached track of 4 MiB, read in small steps with pauses: about four times the request limit.
-    const track = server.store.tracks.upsert(exampleTrack('slow-reader'));
-    server.queue.add(GUILD, [track.id], 'end', null);
+    const track = await server.store.tracks.upsert(exampleTrack('slow-reader'));
+    await server.queue.add(GUILD, [track.id], 'end', null);
     const key = MediaCache.keyOf(track.source);
     const tmp = server.cache.tmpPath(key);
     fs.writeFileSync(tmp, Buffer.alloc(4 * 1024 ** 2, 9));
@@ -107,8 +107,8 @@ describe('the web server times requests, not answers', () => {
     // they may hold together (a machine whose receive buffers grow to 32 MiB held all of a 32 MiB track, and the answer
     // ended before the idle limit could cut it), at least 32 MiB, at most 256 MiB.
     const size = Math.min(256 * 1024 ** 2, Math.max(32 * 1024 ** 2, 2 * socketBuffersMost()));
-    const track = server.store.tracks.upsert(exampleTrack('stalled-reader'));
-    server.queue.add(GUILD, [track.id], 'end', null);
+    const track = await server.store.tracks.upsert(exampleTrack('stalled-reader'));
+    await server.queue.add(GUILD, [track.id], 'end', null);
     const key = MediaCache.keyOf(track.source);
     const tmp = server.cache.tmpPath(key);
     fs.writeFileSync(tmp, Buffer.alloc(size, 7));
@@ -221,8 +221,8 @@ describe('the web server stops in time', () => {
   it('cuts an audio answer still under way instead of waiting for it', async () => {
     const server = await testServer({ listen: true });
     const port = Number(new URL(server.url).port);
-    const track = server.store.tracks.upsert(exampleTrack('stopping'));
-    server.queue.add(GUILD, [track.id], 'end', null);
+    const track = await server.store.tracks.upsert(exampleTrack('stopping'));
+    await server.queue.add(GUILD, [track.id], 'end', null);
     const key = MediaCache.keyOf(track.source);
     const tmp = server.cache.tmpPath(key);
     fs.writeFileSync(tmp, Buffer.alloc(16 * 1024 ** 2, 9));
@@ -384,8 +384,8 @@ describe('the web server answers a browser that needs MP3 at once', () => {
       },
     });
     try {
-      const track = server.store.tracks.upsert(exampleTrack('a-long-one', 3 * 3_600_000));
-      server.queue.add(GUILD, [track.id], 'end', null);
+      const track = await server.store.tracks.upsert(exampleTrack('a-long-one', 3 * 3_600_000));
+      await server.queue.add(GUILD, [track.id], 'end', null);
       const key = MediaCache.keyOf(track.source);
       const tmp = server.cache.tmpPath(key);
       fs.writeFileSync(tmp, Buffer.alloc(1000, 9));

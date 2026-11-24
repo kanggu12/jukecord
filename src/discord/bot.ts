@@ -125,10 +125,10 @@ export class Bot implements Directory, AlertSink {
       idleMs: options.voiceIdleMs,
       bus: options.bus,
       // A server's stay setting, read at each change of who is in voice (a lookup by the primary key).
-      stays: (guildId) => options.settings.community(guildId).stay,
+      stays: async (guildId) => (await options.settings.community(guildId)).stay,
       // A server's voice sound, read at each start of a voice stream.
-      sound: (guildId) => {
-        const settings = options.settings.community(guildId);
+      sound: async (guildId) => {
+        const settings = await options.settings.community(guildId);
         return { volume: settings.volume, preset: settings.sound };
       },
     });
@@ -202,9 +202,9 @@ export class Bot implements Directory, AlertSink {
   }
 
   // Remembers the name and avatar of whoever used a command, for the panel's "added by".
-  private remember(interaction: ChatInputCommandInteraction | ButtonInteraction): void {
+  private async remember(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     try {
-      this.options.users.upsert({
+      await this.options.users.upsert({
         id: interaction.user.id,
         name: interaction.user.displayName,
         avatar: interaction.user.avatar,
@@ -326,7 +326,7 @@ export class Bot implements Directory, AlertSink {
     // A server that adds the bot later gets the commands at once.
     this.client.on(Events.GuildCreate, (guild) => void this.register(guild));
     // A server that removes the bot (an outage comes as GuildUnavailable instead, and needs nothing).
-    this.client.on(Events.GuildDelete, (guild) => this.removed(guild.id));
+    this.client.on(Events.GuildDelete, (guild) => void this.removed(guild.id));
     this.client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand()) void this.onCommand(interaction);
       else if (interaction.isButton()) void this.onButton(interaction);
@@ -338,9 +338,9 @@ export class Bot implements Directory, AlertSink {
       this.showActivity(title);
     });
     // People coming and going in voice decide whether the bot is alone in its channel (see VoiceManager).
-    this.client.on(Events.VoiceStateUpdate, (before, after) =>
-      this.voice.voiceStateChanged(after.guild.id ?? before.guild.id),
-    );
+    this.client.on(Events.VoiceStateUpdate, (before, after) => {
+      void this.voice.voiceStateChanged(after.guild.id ?? before.guild.id);
+    });
     await this.client.login(this.options.token);
   }
 
@@ -350,11 +350,11 @@ export class Bot implements Directory, AlertSink {
    * the server adds the bot back: Discord removed them with the bot, and the stored fingerprint would say they are
    * there. The queue, the history and the playlists stay, for that day.
    */
-  removed(guildId: string): void {
+  async removed(guildId: string): Promise<void> {
     this.options.log.info('removed from a server', { guild: guildId });
-    this.options.discord.clearCommandsHash(guildId);
-    this.voice.leave(guildId);
-    this.options.players.existing(guildId)?.stop();
+    await this.options.discord.clearCommandsHash(guildId);
+    await this.voice.leave(guildId);
+    await this.options.players.existing(guildId)?.stop();
   }
 
   /** Leaves voice everywhere and logs out. */
@@ -362,7 +362,7 @@ export class Bot implements Directory, AlertSink {
     // Leaving every channel now is jukecord stopping: the channels stay kept for the restart.
     this.memory?.freeze();
     this.keeper.stop();
-    this.voice.leaveAll();
+    await this.voice.leaveAll();
     await this.client.destroy();
   }
 
@@ -380,7 +380,7 @@ export class Bot implements Directory, AlertSink {
           return channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
         },
         // A server's stay setting: the bot goes back to its channel with nobody in it too.
-        stays: (guildId) => this.options.settings.community(guildId).stay,
+        stays: async (guildId) => (await this.options.settings.community(guildId)).stay,
         // In voice by the voice manager's own account (a connection it made since the start).
         inVoice: (guildId) => this.voice.channel(guildId) !== null,
         join: (guildId, channelId) => this.voice.join(guildId, channelId, null),
@@ -398,7 +398,7 @@ export class Bot implements Directory, AlertSink {
           if (!channel.permissionsFor(me)?.has(rights)) return;
           // The server's own language: nobody asked, so there is no one person's to answer in.
           const lang = langOf(guild.preferredLocale);
-          const card = this.card(
+          const card = await this.card(
             this.options.actions.nowPlaying({ guildId, userId: null, mayControl: false, mayManage: false }),
             lang,
           );
@@ -422,9 +422,9 @@ export class Bot implements Directory, AlertSink {
       const definitions = commandDefinitions();
       // Discord allows 200 registrations per server a day; a restart with unchanged commands registers nothing.
       const hash = createHash('sha256').update(JSON.stringify(definitions)).digest('hex');
-      if (this.options.discord.commandsHash(guild.id) === hash) return;
+      if ((await this.options.discord.commandsHash(guild.id)) === hash) return;
       await guild.commands.set(definitions);
-      this.options.discord.setCommandsHash(guild.id, hash);
+      await this.options.discord.setCommandsHash(guild.id, hash);
       this.options.log.info('registered commands', { server: guild.name });
     } catch (error) {
       this.options.log.warn('could not register commands', { server: guild.name, error });
@@ -433,12 +433,12 @@ export class Bot implements Directory, AlertSink {
 
   // Who is asking and whether they may change the music: everyone, unless the server set a DJ role (one deleted in
   // Discord since counts as none, see djRoleNow). People who can manage the server always may.
-  private context(
+  private async context(
     interaction: ChatInputCommandInteraction | ButtonInteraction | AutocompleteInteraction,
-  ): ActionContext | null {
+  ): Promise<ActionContext | null> {
     if (!interaction.inGuild()) return null;
     const role = djRoleNow(
-      this.options.settings.get(interaction.guildId).djRoleId,
+      (await this.options.settings.get(interaction.guildId)).djRoleId,
       this.knownRoles(interaction.guildId),
     );
     const roles = interaction.member.roles;
@@ -454,9 +454,9 @@ export class Bot implements Directory, AlertSink {
 
   private async onCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     const lang = langOf(interaction.locale);
-    const context = this.context(interaction);
+    const context = await this.context(interaction);
     if (!context) return;
-    this.remember(interaction);
+    await this.remember(interaction);
     const actions = this.options.actions;
     const options = interaction.options;
     try {
@@ -491,21 +491,21 @@ export class Bot implements Directory, AlertSink {
         }
         case 'skip': {
           // Without the DJ role it may be a vote: the card then says how the vote stands.
-          const { snapshot } = actions.skip(context);
+          const { snapshot } = await actions.skip(context);
           await this.replyCard(interaction, snapshot, lang);
           return;
         }
         case 'drop':
-          await this.replyCard(interaction, actions.removeCurrent(context), lang);
+          await this.replyCard(interaction, await actions.removeCurrent(context), lang);
           return;
         case 'pause':
-          await this.replyCard(interaction, actions.pause(context), lang);
+          await this.replyCard(interaction, await actions.pause(context), lang);
           return;
         case 'resume':
-          await this.replyCard(interaction, actions.resume(context), lang);
+          await this.replyCard(interaction, await actions.resume(context), lang);
           return;
         case 'repeat':
-          await this.replyCard(interaction, actions.repeat(context, options.getString('mode', true)), lang);
+          await this.replyCard(interaction, await actions.repeat(context, options.getString('mode', true)), lang);
           return;
         case 'seek': {
           let at: number;
@@ -514,17 +514,17 @@ export class Bot implements Directory, AlertSink {
           } catch (error) {
             throw new ActionError('invalid', error instanceof Error ? error.message : String(error));
           }
-          await this.replyCard(interaction, actions.seek(context, at), lang);
+          await this.replyCard(interaction, await actions.seek(context, at), lang);
           return;
         }
         case 'stop': {
           // With after-track: when this track ends (True), or not after all (False); the card says which.
           const after = options.getBoolean('after-track');
           if (after !== null) {
-            await interaction.editReply(this.card(actions.stopAfter(context, after), lang));
+            await interaction.editReply(await this.card(await actions.stopAfter(context, after), lang));
             return;
           }
-          actions.stop(context);
+          await actions.stop(context);
           await interaction.editReply({
             embeds: [note(lang, 'Stopped (the queue stays)', '재생 멈춤(대기열은 그대로)')],
           });
@@ -535,24 +535,24 @@ export class Bot implements Directory, AlertSink {
           return;
         case 'queue':
           await interaction.editReply({
-            embeds: [queueCard(actions.queue(context).items, options.getInteger('page') ?? 1, lang)],
+            embeds: [queueCard((await actions.queue(context)).items, options.getInteger('page') ?? 1, lang)],
           });
           return;
         case 'remove': {
           // People see 1-based numbers in /queue; the action takes the item's ID.
-          const item = actions.queue(context).items[options.getInteger('position', true) - 1];
+          const item = (await actions.queue(context)).items[options.getInteger('position', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
-          actions.remove(context, item.id);
+          await actions.remove(context, item.id);
           const title = item.track.title;
           await interaction.editReply({ embeds: [note(lang, `Removed "${title}"`, `"${title}" 뺌`)] });
           return;
         }
         case 'move': {
-          const items = actions.queue(context).items;
+          const items = (await actions.queue(context)).items;
           const item = items[options.getInteger('from', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
           const to = Math.min(options.getInteger('to', true), items.length);
-          actions.move(context, item.id, to - 1);
+          await actions.move(context, item.id, to - 1);
           const title = item.track.title;
           await interaction.editReply({
             embeds: [note(lang, `Moved "${title}" to ${to}`, `"${title}" ${to}번으로 옮김`)],
@@ -560,17 +560,17 @@ export class Bot implements Directory, AlertSink {
           return;
         }
         case 'jump': {
-          const item = actions.queue(context).items[options.getInteger('position', true) - 1];
+          const item = (await actions.queue(context)).items[options.getInteger('position', true) - 1];
           if (!item) throw new ActionError('not-found', 'there is no track with that number in the queue');
-          await this.replyCard(interaction, actions.jump(context, item.id), lang);
+          await this.replyCard(interaction, await actions.jump(context, item.id), lang);
           return;
         }
         case 'shuffle':
-          actions.shuffle(context);
+          await actions.shuffle(context);
           await interaction.editReply({ embeds: [note(lang, 'Shuffled the queue', '대기열 섞음')] });
           return;
         case 'dedupe': {
-          const removed = actions.dedupe(context);
+          const removed = await actions.dedupe(context);
           await interaction.editReply({
             embeds: [
               removed === 0
@@ -585,7 +585,7 @@ export class Bot implements Directory, AlertSink {
           return;
         }
         case 'clear': {
-          const removed = actions.clear(context);
+          const removed = await actions.clear(context);
           await interaction.editReply({
             embeds: [
               // Nothing to take out is said as such: "Removed 0 tracks" read as if something had gone wrong.
@@ -597,7 +597,7 @@ export class Bot implements Directory, AlertSink {
           return;
         }
         case 'history':
-          await interaction.editReply({ embeds: [historyCard(actions.history(context, 10), lang)] });
+          await interaction.editReply({ embeds: [historyCard(await actions.history(context, 10), lang)] });
           return;
         case 'playlist':
           await this.onPlaylist(interaction, context, lang);
@@ -610,7 +610,7 @@ export class Bot implements Directory, AlertSink {
         case 'leave': {
           // The channel's name, read before leaving it.
           const left = this.voice.channel(context.guildId)?.name ?? '';
-          actions.leave(context);
+          await actions.leave(context);
           await interaction.editReply({ embeds: [note(lang, `Left ${left}`, `${left}에서 나감`)] });
           return;
         }
@@ -626,7 +626,10 @@ export class Bot implements Directory, AlertSink {
         case 'stats':
           await interaction.editReply({
             embeds: [
-              statsCard(actions.stats(context, options.getInteger('days') ?? 30, offsetOf(interaction.locale)), lang),
+              statsCard(
+                await actions.stats(context, options.getInteger('days') ?? 30, offsetOf(interaction.locale)),
+                lang,
+              ),
             ],
           });
           return;
@@ -634,8 +637,8 @@ export class Bot implements Directory, AlertSink {
           const sub = options.getSubcommand();
           const settings =
             sub === 'show'
-              ? actions.settings(context)
-              : actions.djRole(context, sub === 'set' ? options.getRole('role', true).id : null);
+              ? await actions.settings(context)
+              : await actions.djRole(context, sub === 'set' ? options.getRole('role', true).id : null);
           await interaction.editReply({ embeds: [djCard(settings, lang)] });
           return;
         }
@@ -652,7 +655,7 @@ export class Bot implements Directory, AlertSink {
           const period = relativePeriod(options.getString('period'), offset);
           await interaction.editReply(
             wrappedCard(
-              actions.wrapped(context, period, offset),
+              await actions.wrapped(context, period, offset),
               lang,
               interaction.guild?.name ?? '',
               this.options.panelUrl,
@@ -666,8 +669,8 @@ export class Bot implements Directory, AlertSink {
           const sub = options.getSubcommand();
           const settings =
             sub === 'show'
-              ? actions.settings(context)
-              : actions.alertsChannel(
+              ? await actions.settings(context)
+              : await actions.alertsChannel(
                   context,
                   sub === 'set' ? (options.getChannel('channel', true)?.id ?? null) : null,
                 );
@@ -685,7 +688,7 @@ export class Bot implements Directory, AlertSink {
           return;
         }
         case 'stay': {
-          const settings = actions.stay(context, options.getString('mode', true) === 'on');
+          const settings = await actions.stay(context, options.getString('mode', true) === 'on');
           await interaction.editReply({
             embeds: [
               settings.stay
@@ -696,7 +699,7 @@ export class Bot implements Directory, AlertSink {
           return;
         }
         case 'voteskip': {
-          const settings = actions.voteSkip(context, options.getString('mode', true) === 'on');
+          const settings = await actions.voteSkip(context, options.getString('mode', true) === 'on');
           await interaction.editReply({
             embeds: [
               settings.voteSkip
@@ -712,7 +715,7 @@ export class Bot implements Directory, AlertSink {
         }
         case 'turns': {
           if (options.getSubcommand() === 'now') {
-            const moved = actions.turnsNow(context);
+            const moved = await actions.turnsNow(context);
             await interaction.editReply({
               embeds: [
                 moved === 0
@@ -726,7 +729,7 @@ export class Bot implements Directory, AlertSink {
             });
             return;
           }
-          const settings = actions.takeTurns(context, options.getString('mode', true) === 'on');
+          const settings = await actions.takeTurns(context, options.getString('mode', true) === 'on');
           await interaction.editReply({
             embeds: [
               settings.takeTurns
@@ -741,7 +744,7 @@ export class Bot implements Directory, AlertSink {
           return;
         }
         case 'limit': {
-          const settings = actions.personLimit(context, options.getInteger('tracks', true));
+          const settings = await actions.personLimit(context, options.getInteger('tracks', true));
           await interaction.editReply({
             embeds: [
               settings.personLimit === 0
@@ -759,15 +762,15 @@ export class Bot implements Directory, AlertSink {
         case 'sound': {
           const sound =
             interaction.commandName === 'volume'
-              ? actions.volume(context, options.getInteger('percent', true))
-              : actions.sound(context, options.getString('preset', true));
+              ? await actions.volume(context, options.getInteger('percent', true))
+              : await actions.sound(context, options.getString('preset', true));
           await interaction.editReply({ embeds: [soundCard(sound, lang)] });
           return;
         }
         case 'like': {
           const track = actions.nowPlaying(context).track;
           if (!track) throw new ActionError('conflict', 'nothing is playing');
-          const liked = actions.like(context, track.id);
+          const liked = await actions.like(context, track.id);
           const title = liked.track.title;
           await interaction.editReply({
             embeds: [note(lang, `Liked "${title}"`, `좋아요 목록에 추가: "${title}"`)],
@@ -778,7 +781,7 @@ export class Bot implements Directory, AlertSink {
           await this.onLikes(interaction, context, lang);
           return;
         case 'autoplay':
-          await this.replyCard(interaction, actions.autoplay(context, options.getString('mode', true)), lang);
+          await this.replyCard(interaction, await actions.autoplay(context, options.getString('mode', true)), lang);
           return;
         default:
           // A command from an older registration that this version no longer has.
@@ -800,10 +803,10 @@ export class Bot implements Directory, AlertSink {
     const options = interaction.options;
     switch (options.getSubcommand()) {
       case 'list':
-        await interaction.editReply({ embeds: [playlistsCard(actions.playlists(context), lang)] });
+        await interaction.editReply({ embeds: [playlistsCard(await actions.playlists(context), lang)] });
         return;
       case 'save': {
-        const saved = actions.playlistSave(context, options.getString('name', true));
+        const saved = await actions.playlistSave(context, options.getString('name', true));
         // Saving over a playlist of that name replaces it, which is said: "Saved" read as if nothing was lost. Whether
         // it did is the store's answer, so the word and what was done agree.
         await interaction.editReply({
@@ -816,13 +819,13 @@ export class Bot implements Directory, AlertSink {
         return;
       }
       case 'load': {
-        const result = actions.playlistLoad(context, options.getString('name', true));
+        const result = await actions.playlistLoad(context, options.getString('name', true));
         await interaction.editReply({ embeds: [addedCard(result, lang)] });
         await this.autoJoin(interaction, context, lang);
         return;
       }
       case 'rename': {
-        const renamed = actions.playlistRename(
+        const renamed = await actions.playlistRename(
           context,
           options.getString('name', true),
           options.getString('new_name', true),
@@ -834,13 +837,13 @@ export class Bot implements Directory, AlertSink {
       }
       case 'delete': {
         const name = options.getString('name', true);
-        actions.playlistDelete(context, name);
+        await actions.playlistDelete(context, name);
         await interaction.editReply({ embeds: [note(lang, `Deleted "${name}"`, `"${name}" 지움`)] });
         return;
       }
       case 'export': {
         // The file itself, attached to the answer (to the person who asked).
-        const file = actions.playlistExport(
+        const file = await actions.playlistExport(
           context,
           options.getString('name', true),
           options.getString('format') ?? 'text',
@@ -882,20 +885,20 @@ export class Bot implements Directory, AlertSink {
     switch (options.getSubcommand()) {
       case 'show':
         await interaction.editReply({
-          embeds: [likesCard(actions.likes(context), options.getInteger('page') ?? 1, lang)],
+          embeds: [likesCard(await actions.likes(context), options.getInteger('page') ?? 1, lang)],
         });
         return;
       case 'add': {
-        const result = actions.likesAdd(context, options.getString('where') === 'next' ? 'next' : 'end');
+        const result = await actions.likesAdd(context, options.getString('where') === 'next' ? 'next' : 'end');
         await interaction.editReply({ embeds: [addedCard(result, lang)] });
         await this.autoJoin(interaction, context, lang);
         return;
       }
       case 'remove': {
         // The 1-based numbers of /likes show.
-        const entry = actions.likes(context)[options.getInteger('position', true) - 1];
+        const entry = (await actions.likes(context))[options.getInteger('position', true) - 1];
         if (!entry) throw new ActionError('not-found', 'that track is not in your likes');
-        actions.unlike(context, entry.track.id);
+        await actions.unlike(context, entry.track.id);
         const title = entry.track.title;
         await interaction.editReply({
           embeds: [note(lang, `Took back the like of "${title}"`, `좋아요 취소함: "${title}"`)],
@@ -920,16 +923,16 @@ export class Bot implements Directory, AlertSink {
           });
           return;
         }
-        const { code, link } = actions.listenLinkCreate(context, options.getInteger('days') ?? 7);
+        const { code, link } = await actions.listenLinkCreate(context, options.getInteger('days') ?? 7);
         await interaction.editReply({ embeds: [listenLinkCard(`${panel}/listen#${code}`, link, lang)] });
         return;
       }
       case 'list':
-        await interaction.editReply({ embeds: [listenLinksCard(actions.listenLinks(context), lang)] });
+        await interaction.editReply({ embeds: [listenLinksCard(await actions.listenLinks(context), lang)] });
         return;
       case 'revoke': {
         const id = options.getInteger('number', true);
-        actions.listenLinkRevoke(context, id);
+        await actions.listenLinkRevoke(context, id);
         await interaction.editReply({
           embeds: [note(lang, `Revoked listening link ${id}`, `듣기 링크 ${id}번 폐기함`)],
         });
@@ -940,9 +943,9 @@ export class Bot implements Directory, AlertSink {
 
   // The pause, resume and skip buttons on a "now playing" card.
   private async onButton(interaction: ButtonInteraction): Promise<void> {
-    const context = this.context(interaction);
+    const context = await this.context(interaction);
     if (!context || !interaction.customId.startsWith('jukecord:')) return;
-    this.remember(interaction);
+    await this.remember(interaction);
     const actions = this.options.actions;
     // "jukecord:pause:ko": the action, and the language the card was made in (older cards have none: the presser's);
     // Skip also carries the track the card showed ("jukecord:skip:ko:42"; older cards none).
@@ -953,10 +956,10 @@ export class Bot implements Directory, AlertSink {
       // Skip may be a vote the track does not go by: its answer says how the vote stands then.
       const answer =
         action === 'pause'
-          ? { snapshot: actions.pause(context), votes: null }
+          ? { snapshot: await actions.pause(context), votes: null }
           : action === 'resume'
-            ? { snapshot: actions.resume(context), votes: null }
-            : actions.skip(context, track);
+            ? { snapshot: await actions.resume(context), votes: null }
+            : await actions.skip(context, track);
       // The card itself is updated in place, so the channel does not fill with copies; it is the card people use now,
       // so it is the one kept current. Its Skip says how a vote stands.
       await this.updateCard(interaction, answer.snapshot, cardLang);
@@ -986,8 +989,8 @@ export class Bot implements Directory, AlertSink {
 
   // The now-playing card of a snapshot, as every card is drawn (a command's answer, a key's redraw, the card kept
   // current): with a vote to skip under way, its Skip button and the line under the bar say how the vote stands.
-  private card(snapshot: PlayerSnapshot, lang: Lang): ReturnType<typeof nowCard> {
-    return nowCard(snapshot, lang, this.options.panelUrl, openVotes(this.options.actions, snapshot.guildId));
+  private async card(snapshot: PlayerSnapshot, lang: Lang): Promise<ReturnType<typeof nowCard>> {
+    return nowCard(snapshot, lang, this.options.panelUrl, await openVotes(this.options.actions, snapshot.guildId));
   }
 
   // Answers a command with the now-playing card, and keeps that card current from now on (see keeper.ts): the newest
@@ -997,7 +1000,7 @@ export class Bot implements Directory, AlertSink {
     snapshot: PlayerSnapshot,
     lang: Lang,
   ): Promise<void> {
-    const payload = this.card(snapshot, lang);
+    const payload = await this.card(snapshot, lang);
     const message = await interaction.editReply(payload);
     this.keeper.keep(
       snapshot.guildId,
@@ -1008,7 +1011,7 @@ export class Bot implements Directory, AlertSink {
 
   // Draws a card whose key was pressed again, and keeps it current from now on.
   private async updateCard(interaction: ButtonInteraction, snapshot: PlayerSnapshot, lang: Lang): Promise<void> {
-    const payload = this.card(snapshot, lang);
+    const payload = await this.card(snapshot, lang);
     await interaction.update(payload);
     this.keeper.keep(
       snapshot.guildId,
@@ -1026,7 +1029,7 @@ export class Bot implements Directory, AlertSink {
     if (!interaction.inGuild()) return;
     const focused = interaction.options.getFocused(true);
     if (focused.name === 'input') {
-      const context = this.context(interaction);
+      const context = await this.context(interaction);
       if (!context) return;
       const person = interaction.user.id;
       this.suggesting.get(person)?.abort();
@@ -1044,8 +1047,14 @@ export class Bot implements Directory, AlertSink {
       return;
     }
     const typed = String(focused.value).toLowerCase();
-    const names = this.options.actions
-      .playlists({ guildId: interaction.guildId, userId: interaction.user.id, mayControl: false, mayManage: false })
+    const names = (
+      await this.options.actions.playlists({
+        guildId: interaction.guildId,
+        userId: interaction.user.id,
+        mayControl: false,
+        mayManage: false,
+      })
+    )
       .map((playlist) => playlist.name)
       .filter((name) => name.toLowerCase().includes(typed))
       .slice(0, 25);
@@ -1083,8 +1092,8 @@ export class Bot implements Directory, AlertSink {
 
 // How a vote to skip a server's current track stands, for a card's Skip button, while one is under way (null
 // otherwise). The same for everyone who sees the card: a card in the channel is everyone's.
-function openVotes(actions: Actions, guildId: string): { votes: number; needed: number } | null {
-  const view = actions.skipVotes({ guildId, userId: null, mayControl: false, mayManage: false });
+async function openVotes(actions: Actions, guildId: string): Promise<{ votes: number; needed: number } | null> {
+  const view = await actions.skipVotes({ guildId, userId: null, mayControl: false, mayManage: false });
   return view.on && view.votes > 0 ? { votes: view.votes, needed: view.needed } : null;
 }
 

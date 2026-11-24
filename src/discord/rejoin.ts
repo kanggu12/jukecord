@@ -33,7 +33,7 @@ export interface Rejoining {
   /** How many people (not bots) are in a voice channel now; 0 for a channel gone. */
   people(guildId: string, channelId: string): number;
   /** Whether a server asked the bot to stay in voice when everyone has left (false when not said). */
-  stays?(guildId: string): boolean;
+  stays?(guildId: string): boolean | Promise<boolean>;
   /** Whether the server's bot is in a voice channel already (someone called it since the start). */
   inVoice(guildId: string): boolean;
   /** Joins a voice channel; rejects when the bot cannot. */
@@ -54,11 +54,13 @@ export class VoiceMemory {
 
   /** Starts keeping the channel each server's bot is in. */
   start(): void {
+    // The writes go to the database in the order the events came (its statements take turns), and a failure is told
+    // as a listener's (see Bus).
     const onVoice = ({ guildId, channel }: { guildId: string; channel: { channelId: string } | null }) => {
       if (this.frozen) return;
       // Joined or moved: kept. Left (a person's leave, nobody there, kicked, removed from the server): forgotten.
-      if (channel) this.options.channels.remember(guildId, channel.channelId);
-      else this.options.channels.forget(guildId);
+      if (channel) return this.options.channels.remember(guildId, channel.channelId);
+      return this.options.channels.forget(guildId);
     };
     this.options.bus.on('voice', onVoice);
     this.off = () => this.options.bus.off('voice', onVoice);
@@ -79,24 +81,24 @@ export class VoiceMemory {
     let back = 0;
     // The servers to go back to, in the order they were kept; each one's channel is read again on its turn, since a
     // join takes up to twenty seconds and people use the bot meanwhile.
-    for (const { guildId } of this.options.channels.all()) {
+    for (const { guildId } of await this.options.channels.all()) {
       // Called into voice since the start (a /play while another server's bot connected): it stays with the people
       // who called it, and the channel it is in is the one kept now.
       if (discord.inVoice(guildId)) continue;
-      const channelId = this.options.channels.get(guildId);
+      const channelId = await this.options.channels.get(guildId);
       // Called and sent away again meanwhile (/join, then /leave): it stays away, as it was told.
       if (channelId === null) continue;
       // A server that asked the bot to stay is gone back to with nobody there: it stays there, as it would have.
-      if (!discord.stays?.(guildId) && discord.people(guildId, channelId) === 0) {
+      if (!(await discord.stays?.(guildId)) && discord.people(guildId, channelId) === 0) {
         // Nobody there now: not to be gone back to later, when nobody expects the bot.
-        this.options.channels.forget(guildId);
+        await this.options.channels.forget(guildId);
         continue;
       }
       try {
         await discord.join(guildId, channelId);
       } catch (error) {
         // Gone, or no longer allowed: nothing to come back to (unless the bot went elsewhere meanwhile: that is kept).
-        if (this.options.channels.get(guildId) === channelId) this.options.channels.forget(guildId);
+        if ((await this.options.channels.get(guildId)) === channelId) await this.options.channels.forget(guildId);
         this.options.log.info('could not come back to voice after a restart', {
           guild: guildId,
           reason: error instanceof Error ? error.message : String(error),
@@ -106,10 +108,10 @@ export class VoiceMemory {
       back += 1;
       this.options.log.info('came back to voice after a restart', { guild: guildId });
       // Said there within the hour (restarts in a row): back quietly this time.
-      const toldAt = this.options.channels.toldAt(guildId);
+      const toldAt = await this.options.channels.toldAt(guildId);
       const now = this.options.now?.() ?? Date.now();
       if (toldAt !== null && now - toldAt < TELL_EVERY_MS) continue;
-      this.options.channels.told(guildId);
+      await this.options.channels.told(guildId);
       // Saying so is a courtesy: a channel without the right to post in it still has the bot back.
       await discord
         .told(guildId, channelId)

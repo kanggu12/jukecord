@@ -545,15 +545,21 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // for such a credential: one that works still gets in, so a household behind one address is not locked out for ten
   // minutes by a browser with a stale cookie or by someone guessing. Guessing gains nothing from that: every secret is
   // 32 random bytes, and a wrong one is answered the same way as before.
-  const identify = (request: FastifyRequest, reply?: FastifyReply): { caller: Caller | null; blocked: boolean } => {
-    const caller = auth.identify({ authorization: request.headers.authorization, cookie: request.headers.cookie });
+  const identify = async (
+    request: FastifyRequest,
+    reply?: FastifyReply,
+  ): Promise<{ caller: Caller | null; blocked: boolean }> => {
+    const caller = await auth.identify({
+      authorization: request.headers.authorization,
+      cookie: request.headers.cookie,
+    });
     const session = request.headers.cookie?.includes(`${SESSION_COOKIE}=`) ?? false;
     // A request without any credential is not a failed login (a public page, or a "log in first").
     if (caller || (!request.headers.authorization && !session)) return { caller, blocked: false };
     // Asked before this failure counts, as before: the attempt after the twentieth is the first one refused.
     const blocked = auth.limiter.blocked(request.ip);
     auth.limiter.fail(request.ip);
-    if (reply && session) reply.header('set-cookie', auth.endSession(null));
+    if (reply && session) reply.header('set-cookie', await auth.endSession(null));
     return { caller: null, blocked };
   };
 
@@ -573,7 +579,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         response: { 200: plain(spec.response) },
       },
       handler: async (request, reply) => {
-        const { caller, blocked } = identify(request, reply);
+        const { caller, blocked } = await identify(request, reply);
         if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
         const verdict = permission(spec.access, caller);
         if (verdict === 'unauthorized') return failure(reply, 'unauthorized', 'log in first');
@@ -665,7 +671,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       // a moment (the panel does not take this for a format it cannot play).
       if (behind()) return later(reply, 'busy', BUSY, 2000);
       // An address that failed too often is refused here too, for a credential that does not work.
-      const { caller, blocked } = identify(request, reply);
+      const { caller, blocked } = await identify(request, reply);
       if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
       if (!caller) return failure(reply, 'unauthorized', 'log in first');
       const context = await deps.access.context(caller.principal, request.params.guild);
@@ -673,8 +679,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       const valid = Number.isSafeInteger(id) && id > 0;
       const current = options.players.get(context.guildId).snapshot().track;
       // Asked of the index, not by reading the queue: a browser seeking sends a Range request each time.
-      const queued = valid && (current?.id === id || options.queue.contains(context.guildId, id));
-      const track = queued ? deps.store.tracks.get(id) : null;
+      const queued = valid && (current?.id === id || (await options.queue.contains(context.guildId, id)));
+      const track = queued ? await deps.store.tracks.get(id) : null;
       if (!track) return failure(reply, 'not-found', 'that track is not playing or queued in this server');
       const key = MediaCache.keyOf(track.source);
       if (!options.cache.has(key)) return failure(reply, 'conflict', 'the track is not prepared yet');
@@ -746,7 +752,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   app.get<{ Params: { guild: string; track: string } }>(
     `${API_PREFIX}/guilds/:guild/tracks/:track/cover`,
     async (request, reply) => {
-      const { caller, blocked } = identify(request, reply);
+      const { caller, blocked } = await identify(request, reply);
       if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
       if (!caller) return failure(reply, 'unauthorized', 'log in first');
       const context = await deps.access.context(caller.principal, request.params.guild);
@@ -758,11 +764,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       const shown =
         valid &&
         (options.players.get(context.guildId).snapshot().track?.id === id ||
-          options.queue.contains(context.guildId, id) ||
-          deps.store.history.has(context.guildId, id) ||
-          deps.store.playlists.has(context.guildId, id) ||
-          (caller.principal.kind !== 'guest' && deps.store.likes.has(likesOwner(context), id)));
-      const track = shown ? deps.store.tracks.get(id) : null;
+          (await options.queue.contains(context.guildId, id)) ||
+          (await deps.store.history.has(context.guildId, id)) ||
+          (await deps.store.playlists.has(context.guildId, id)) ||
+          (caller.principal.kind !== 'guest' && (await deps.store.likes.has(likesOwner(context), id))));
+      const track = shown ? await deps.store.tracks.get(id) : null;
       if (!track) return failure(reply, 'not-found', 'that track is not in this server');
       return sendCover(request, reply, caller, track, 'that track has no cover');
     },
@@ -774,7 +780,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   app.get<{ Params: { guild: string }; Querystring: { url?: unknown } }>(
     `${API_PREFIX}/guilds/:guild/search/cover`,
     async (request, reply) => {
-      const { caller, blocked } = identify(request, reply);
+      const { caller, blocked } = await identify(request, reply);
       if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
       // Held to what the search itself needs, as the operations are: whoever cannot search has no result to see.
       const verdict = permission(API.search.access, caller);
@@ -793,27 +799,47 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // Live updates. A browser's cookie is only accepted from the panel's own pages (another site could otherwise open
   // a connection with it).
   app.get<{ Querystring: LiveQuery }>(`${API_PREFIX}/events`, { websocket: true }, (socket, request) => {
-    // A blocked address with a credential that does not work is told to come back later (1013), which a panel takes as
-    // "reconnect after a wait"; one that works gets in.
-    const { caller, blocked } = identify(request);
-    if (blocked) {
-      socket.close(1013, 'too many failed logins; wait ten minutes');
-      return;
-    }
-    if (!caller) {
-      socket.close(4401, 'log in first');
-      return;
-    }
-    if (caller.via === 'session' && !sameOrigin(request, options.publicUrl)) {
-      socket.close(4403, 'connections come from the panel only');
-      return;
-    }
-    hub.attach(socket, caller, {
-      guild: typeof request.query.guild === 'string' ? request.query.guild : undefined,
-      // gzip=1: the panel can decompress (it has DecompressionStream), so big messages may come as gzip frames.
-      gzip: request.query.gzip === '1',
-      // For the cap per address: the browser's address (behind a trusted proxy, the one it forwarded).
-      address: request.ip,
+    // What the browser says while its login is read from the database (the "listening" a panel sends as it opens) is
+    // kept, in order, and handed to the hub when it takes the connection: nothing it says is lost meanwhile.
+    const early: string[] = [];
+    const keep = (data: unknown): void => {
+      early.push(String(data));
+    };
+    socket.on('message', keep);
+    const take = async (): Promise<void> => {
+      // A blocked address with a credential that does not work is told to come back later (1013), which a panel takes
+      // as "reconnect after a wait"; one that works gets in.
+      const { caller, blocked } = await identify(request);
+      if (blocked) {
+        socket.close(1013, 'too many failed logins; wait ten minutes');
+        return;
+      }
+      if (!caller) {
+        socket.close(4401, 'log in first');
+        return;
+      }
+      if (caller.via === 'session' && !sameOrigin(request, options.publicUrl)) {
+        socket.close(4403, 'connections come from the panel only');
+        return;
+      }
+      await hub.attach(socket, caller, {
+        guild: typeof request.query.guild === 'string' ? request.query.guild : undefined,
+        // gzip=1: the panel can decompress (it has DecompressionStream), so big messages may come as gzip frames.
+        gzip: request.query.gzip === '1',
+        // For the cap per address: the browser's address (behind a trusted proxy, the one it forwarded).
+        address: request.ip,
+        // Handed over once, as the hub starts listening itself.
+        early: () => {
+          socket.off('message', keep);
+          return early;
+        },
+      });
+    };
+    // A login that cannot be read (the database failing) ends the connection with its reason, rather than leaving it
+    // open with nobody listening.
+    take().catch((error: unknown) => {
+      log.warn('could not take a live connection', { error });
+      socket.close(1011, 'jukecord could not take the connection');
     });
   });
 
@@ -842,13 +868,16 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (auth.limiter.blocked(request.ip)) return reply.redirect('/login?error=too-many');
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
-        deps.store.users.upsert(person);
+        await deps.store.users.upsert(person);
         // Asked afresh at every login: someone refused a minute ago may have joined the server since.
         deps.access.forget(person.id);
         // Only people in a server the bot is in get in: the panel is for those servers.
         const guilds = await deps.access.guilds({ kind: 'user', userId: person.id });
         if (guilds.length === 0) return reply.redirect('/login?error=not-a-member');
-        reply.header('set-cookie', [auth.clearOAuthCookie(), auth.startSession({ kind: 'user', userId: person.id })]);
+        reply.header('set-cookie', [
+          auth.clearOAuthCookie(),
+          await auth.startSession({ kind: 'user', userId: person.id }),
+        ]);
         log.info('logged in with Discord', { user: person.name });
         return reply.redirect(next);
       } catch (failure) {
@@ -873,7 +902,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       return reply.redirect(blocked ? '/login?error=too-many' : '/login?error=link');
     }
     log.info(scope === 'admin' ? 'logged in with a login link' : 'a friend logged in with a login link', { scope });
-    return reply.header('set-cookie', auth.startLinkSession(scope)).redirect('/');
+    return reply.header('set-cookie', await auth.startLinkSession(scope)).redirect('/');
   });
   // A listening link: /listen#<code> is the panel's own page, which sends the code here (the part after "#" never
   // reaches a server, so no log or proxy sees it). The browser comes in as a guest of the link, unless it is logged
@@ -883,8 +912,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       return failure(reply, 'forbidden', 'connections come from the panel only');
     }
     const code = typeof request.body?.code === 'string' ? request.body.code : '';
-    const { caller } = identify(request);
-    const used = auth.useListenLink(code, caller);
+    const { caller } = await identify(request);
+    const used = await auth.useListenLink(code, caller);
     if (used.kind === 'invalid') {
       // A code that does not work is a failed login like any other (a guess at the codes is held back).
       const blocked = auth.limiter.blocked(request.ip);
@@ -899,7 +928,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     return reply.header('set-cookie', used.cookie).send({ ok: true });
   });
   app.post('/auth/logout', async (request, reply) => {
-    const { caller, blocked } = identify(request);
+    const { caller, blocked } = await identify(request);
     if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
     if (caller && !auth.csrfOk(caller, request.headers[CSRF_HEADER] as string | undefined)) {
       return failure(reply, 'forbidden', "the logout came without the panel's CSRF token");
@@ -907,7 +936,10 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (caller?.principal.kind === 'user') deps.access.forget(caller.principal.userId);
     // This browser's live connection ends with its login.
     if (caller?.sessionHash) hub.end((other) => other.sessionHash === caller.sessionHash);
-    return reply.header('set-cookie', auth.endSession(caller)).code(204).send();
+    return reply
+      .header('set-cookie', await auth.endSession(caller))
+      .code(204)
+      .send();
   });
 
   // Health: alive (the process answers), ready (it can serve), and the figures for Prometheus.
@@ -926,7 +958,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (forwarded || !isPrivateAddress(peer)) {
       return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
     }
-    return reply.type('text/plain; version=0.0.4').send(metrics(options, hub, responses, pressure));
+    return reply.type('text/plain; version=0.0.4').send(await metrics(options, hub, responses, pressure));
   });
 
   // Anything else: the panel's page for a browser asking for a page (the panel draws /stats, /login ... itself), a
@@ -974,12 +1006,12 @@ function sameOrigin(request: FastifyRequest, publicUrl: string): boolean {
 }
 
 // The Prometheus text: what is playing, queues, the cache, the panels, and the answers given.
-function metrics(
+async function metrics(
   options: WebServerOptions,
   hub: EventHub,
   responses: Map<string, number>,
   pressure: Pressure | null,
-): string {
+): Promise<string> {
   const lines: string[] = [];
   const gauge = (name: string, help: string, values: [string, number][]) => {
     lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`);
@@ -996,7 +1028,7 @@ function metrics(
   for (const player of players) {
     const status = player.snapshot().status;
     byStatus.set(status, (byStatus.get(status) ?? 0) + 1);
-    queued += options.queue.size(player.guildId);
+    queued += await options.queue.size(player.guildId);
   }
   const counts = hub.counts();
   gauge('jukecord_info', 'The running version.', [[`{version="${VERSION}"}`, 1]]);

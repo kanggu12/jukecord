@@ -70,12 +70,12 @@ describe('listening links', () => {
     server = await testServer({ found: { one: [exampleTrack('a')], two: [exampleTrack('b'), exampleTrack('c')] } });
     server.directory.join(GUILD, ALICE);
     server.directory.join(GUILD, BOB, { manage: true });
-    server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: null });
+    await server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: null });
   });
   after(() => server.close());
 
   it('are made by people who may change the music, for 1, 7 or 30 days, shown once and kept as a hash', async () => {
-    const alice = sessionFor(server, ALICE);
+    const alice = await sessionFor(server, ALICE);
     const made = await inject({
       method: 'POST',
       url: api(`/guilds/${GUILD}/listen-links`),
@@ -90,7 +90,7 @@ describe('listening links', () => {
     const code = new URL(body.url).hash.slice(1);
     assert.match(code, /^[A-Za-z0-9_-]{43}$/);
     // Only the hash is in the database.
-    assert.ok(!JSON.stringify(server.store.db.prepare('SELECT * FROM listen_links').all()).includes(code));
+    assert.ok(!JSON.stringify(await server.store.sql.all('SELECT * FROM listen_links')).includes(code));
     // Another length is refused, and someone without the DJ role may not make one.
     const twice = await inject({
       method: 'POST',
@@ -99,7 +99,7 @@ describe('listening links', () => {
       payload: { days: 2 },
     });
     assert.equal(twice.statusCode, 400);
-    server.store.settings.setDjRole(GUILD, DJ_ROLE);
+    await server.store.settings.setDjRole(GUILD, DJ_ROLE);
     const refused = await inject({
       method: 'POST',
       url: api(`/guilds/${GUILD}/listen-links`),
@@ -107,7 +107,7 @@ describe('listening links', () => {
       payload: { days: 1 },
     });
     assert.equal(refused.statusCode, 403);
-    server.store.settings.setDjRole(GUILD, null);
+    await server.store.settings.setDjRole(GUILD, null);
   });
 
   it("are listed to their makers, all of them to Manage Server, and revoked by the same, nobody else's", async () => {
@@ -115,12 +115,12 @@ describe('listening links', () => {
       .json()
       .map((link: { id: number }) => link.id) as number[];
     const host = await newLink(server);
-    const alice = sessionFor(server, ALICE);
+    const alice = await sessionFor(server, ALICE);
     const asAlice = { cookie: alice.cookie, [CSRF_HEADER]: alice.csrf };
     const hers = (await inject({ method: 'GET', url: api(`/guilds/${GUILD}/listen-links`), headers: asAlice })).json();
     assert.ok(hers.every((link: { createdBy: string }) => link.createdBy === ALICE));
     assert.ok(!hers.some((link: { id: number }) => link.id === host.id));
-    const bob = sessionFor(server, BOB);
+    const bob = await sessionFor(server, BOB);
     const all = (
       await inject({ method: 'GET', url: api(`/guilds/${GUILD}/listen-links`), headers: { cookie: bob.cookie } })
     ).json();
@@ -151,7 +151,7 @@ describe('listening links', () => {
       payload: { code: link.code },
     });
     assert.equal(again.headers['set-cookie'], undefined);
-    const alice = sessionFor(server, ALICE);
+    const alice = await sessionFor(server, ALICE);
     const member = await inject({
       method: 'POST',
       url: '/auth/listen',
@@ -160,14 +160,14 @@ describe('listening links', () => {
     });
     assert.equal(member.statusCode, 200);
     assert.equal(member.headers['set-cookie'], undefined);
-    assert.equal(server.store.guests.count(link.id), 1);
+    assert.equal(await server.store.guests.count(link.id), 1);
     // Every place taken: the next browser is told so.
     for (let i = 1; i < GUESTS_PER_LINK; i += 1) await guestOf(server, link.code);
     const full = await inject({ method: 'POST', url: '/auth/listen', headers: PANEL, payload: { code: link.code } });
     assert.equal(full.statusCode, 409);
     // Leaving frees a place.
     await inject({ method: 'POST', url: '/auth/logout', headers: { cookie: guest.cookie, [CSRF_HEADER]: guest.csrf } });
-    assert.equal(server.store.guests.count(link.id), GUESTS_PER_LINK - 1);
+    assert.equal(await server.store.guests.count(link.id), GUESTS_PER_LINK - 1);
   });
 
   it('let nobody in with a wrong code, count it as a failed login, and refuse another site', async () => {
@@ -204,7 +204,7 @@ describe('listening links', () => {
       payload: { code: link.code },
     });
     assert.equal(elsewhere.statusCode, 403);
-    assert.equal(server.store.guests.count(link.id), 0);
+    assert.equal(await server.store.guests.count(link.id), 0);
   });
 });
 
@@ -291,7 +291,7 @@ describe('what a guest must not reach', () => {
       const answer = await as(method, route, payload);
       assert.equal(answer.statusCode, 403, `${method} ${route}`);
     }
-    assert.equal(server.queue.size(GUILD), 1);
+    assert.equal(await server.queue.size(GUILD), 1);
     assert.equal(server.players.get(GUILD).snapshot().repeat, 'off');
   });
 
@@ -320,7 +320,7 @@ describe('what a guest must not reach', () => {
 
   it('hears only the audio of what its server plays or has queued', async () => {
     const current = server.players.get(GUILD).snapshot().track;
-    const queued = server.queue.list(GUILD)[0]?.track;
+    const queued = (await server.queue.list(GUILD))[0]?.track;
     const elsewhere = server.players.get(OTHER_GUILD).snapshot().track;
     assert.ok(current && queued && elsewhere);
     // A file for each, so the answer is about whether it may be heard, not whether it is ready.
@@ -458,7 +458,7 @@ describe('a friend the host lets in with a login link', () => {
       );
       assert.equal(await refusal(controller, 'GET', '/logs'), 'this needs the host');
       // A friend's row is never read as the host's.
-      assert.equal(server.auth.identify({ cookie: controller.cookie })?.principal.kind, 'friend');
+      assert.equal((await server.auth.identify({ cookie: controller.cookie }))?.principal.kind, 'friend');
     } finally {
       await server.close();
     }

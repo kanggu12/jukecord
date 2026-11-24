@@ -40,10 +40,10 @@ function setup(options: {
   const directory = new FakeDirectory();
   return {
     dir,
-    run: () =>
+    run: async () =>
       runDoctor({
         config,
-        store: memoryStore(),
+        store: await memoryStore(),
         cache,
         ytdlp,
         ffmpeg,

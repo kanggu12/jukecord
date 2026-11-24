@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { afterTrack, findCommand, parseLine, run } from '../../src/cli/main.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Player } from '../../src/core/player.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { nowCard } from '../../src/discord/cards.ts';
@@ -21,11 +22,13 @@ const SONG = 180_000;
 // A player with three queued tracks, its first one playing.
 async function playing() {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   const player = new Player({
+    lanes,
     guildId: GUILD,
     queue,
     media,
@@ -36,14 +39,14 @@ async function playing() {
     log: createLogger({ level: 'error', sinks: [] }),
     fetchTimeoutMs: 60_000,
   });
-  const tracks = addTracks(store, 3);
-  queue.add(
+  const tracks = await addTracks(store, 3);
+  await queue.add(
     GUILD,
     tracks.map((track) => track.id),
     'end',
     'u1',
   );
-  player.play();
+  await player.play();
   media.finish(SONG);
   await flush();
   return { clock, store, queue, media, player };
@@ -52,65 +55,65 @@ async function playing() {
 describe('Player.setStopAfter', () => {
   it('stops when the track ends by itself, which counts as played, the queue left as it was', async () => {
     const { clock, store, queue, player } = await playing();
-    assert.equal(player.setStopAfter(true), true);
+    assert.equal(await player.setStopAfter(true), true);
     assert.equal(player.snapshot().stopAfter, true);
     // Asking again changes nothing.
-    assert.equal(player.setStopAfter(true), false);
+    assert.equal(await player.setStopAfter(true), false);
     await clock.advance(SONG);
     const snapshot = player.snapshot();
     assert.deepEqual([snapshot.status, snapshot.track, snapshot.stopAfter], ['idle', null, false]);
-    assert.equal(queue.size(GUILD), 2);
-    assert.equal(store.history.list(GUILD).length, 1);
+    assert.equal(await queue.size(GUILD), 2);
+    assert.equal((await store.history.list(GUILD)).length, 1);
     // Played on afterwards, the next track is not stopped after.
-    assert.equal(player.play(), true);
+    assert.equal(await player.play(), true);
     assert.equal(player.snapshot().stopAfter, false);
   });
 
   it('stops after the track with an output too, when the output reports the end', async () => {
     const { clock, player } = await playing();
     const output = new FakeOutput();
-    player.attach(output);
-    player.setStopAfter(true);
+    await player.attach(output);
+    await player.setStopAfter(true);
     await clock.advance(SONG);
-    player.outputEnded(output.lastSession(), output);
+    await player.outputEnded(output.lastSession(), output);
     assert.equal(player.snapshot().status, 'idle');
   });
 
   it('wins over repeating the track, and keeps a looping queue whole', async () => {
     const track = await playing();
-    track.player.setRepeat('track');
-    track.player.setStopAfter(true);
+    await track.player.setRepeat('track');
+    await track.player.setStopAfter(true);
     await track.clock.advance(SONG);
     assert.equal(track.player.snapshot().status, 'idle');
     const loop = await playing();
-    loop.player.setRepeat('queue');
-    loop.player.setStopAfter(true);
+    await loop.player.setRepeat('queue');
+    await loop.player.setStopAfter(true);
     await loop.clock.advance(SONG);
     assert.equal(loop.player.snapshot().status, 'idle');
     // The finished track went back to the end of the loop, as after any track.
     assert.deepEqual(
-      loop.queue.list(GUILD).map((item) => item.track.title),
+      (await loop.queue.list(GUILD)).map((item) => item.track.title),
       ['Track 2', 'Track 3', 'Track 1'],
     );
   });
 
   it('is forgotten when the track changes another way, and off plays on after it', async () => {
     const skipped = await playing();
-    skipped.player.setStopAfter(true);
-    skipped.player.skip();
+    await skipped.player.setStopAfter(true);
+    await skipped.player.skip();
     assert.equal(skipped.player.snapshot().stopAfter, false);
     skipped.media.finish(SONG);
     await flush();
     await skipped.clock.advance(SONG);
     assert.notEqual(skipped.player.snapshot().status, 'idle');
     const changed = await playing();
-    changed.player.setStopAfter(true);
-    assert.equal(changed.player.setStopAfter(false), true);
+    await changed.player.setStopAfter(true);
+    assert.equal(await changed.player.setStopAfter(false), true);
     await changed.clock.advance(SONG);
     assert.equal(changed.player.snapshot().status, 'loading');
     // Nothing current: nothing to stop after.
-    changed.player.stop();
-    assert.equal(changed.player.setStopAfter(true), false);
+    await changed.player.stop();
+    assert.equal(await changed.player.setStopAfter(true), false);
   });
 });
 
@@ -137,8 +140,8 @@ describe('the stop-after operation', () => {
       assert.equal(on.json().stopAfter, true);
       // Someone without the DJ role may not.
       server.directory.join(GUILD, ALICE);
-      server.store.settings.setDjRole(GUILD, DJ_ROLE);
-      const { cookie, csrf } = sessionFor(server, ALICE);
+      await server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      const { cookie, csrf } = await sessionFor(server, ALICE);
       const refused = await put({ cookie, 'x-jukecord-csrf': csrf }, false);
       assert.equal(refused.statusCode, 403);
       assert.equal(server.players.get(GUILD).snapshot().stopAfter, true);
@@ -166,8 +169,8 @@ describe('jukecord stop --after-track', () => {
 describe('the Discord card', () => {
   it('says the player stops after this track, beside the repeat mode', async () => {
     const { player } = await playing();
-    player.setRepeat('queue');
-    player.setStopAfter(true);
+    await player.setRepeat('queue');
+    await player.setStopAfter(true);
     const card = nowCard(player.snapshot(), 'en', null);
     assert.equal(card.embeds[0]?.data.footer?.text, 'Repeating the queue · Stops after this track');
     assert.equal(

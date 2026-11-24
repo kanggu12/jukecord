@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 import { type ActionContext, Actions } from '../../src/app/actions.ts';
 import { Autoplay } from '../../src/app/autoplay.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { AUTOPLAY, type NewTrack, type Track } from '../../src/core/types.ts';
@@ -28,13 +29,15 @@ const SONG = 180_000;
 
 // Actions and autoplay over a real queue and players; "t1" ... finds one stored track each. YouTube's mix of a track
 // comes when a test answers it (`mixes` holds the answers waited for).
-function setup() {
+async function setup() {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   const players = new Players({
+    lanes,
     queue,
     media,
     history: store.history,
@@ -44,7 +47,7 @@ function setup() {
     log,
     fetchTimeoutMs: 60_000,
   });
-  const tracks = addTracks(store, 40);
+  const tracks = await addTracks(store, 40);
   const resolver = {
     resolve: async (input: string): Promise<Track[]> => [tracks[Number(input.slice(1)) - 1] as Track],
     run: async <T>(_who: string | null, _server: string | null, work: () => Promise<T>) => work(),
@@ -54,6 +57,7 @@ function setup() {
     mix: () => new Promise<NewTrack[]>((resolve) => mixes.push(resolve)),
   } as unknown as YtDlp;
   const autoplay = new Autoplay({
+    lanes,
     bus,
     players,
     queue,
@@ -66,10 +70,10 @@ function setup() {
     random: () => 0,
   });
   autoplay.start();
-  const actions = new Actions({ store, queue, players, resolver, log, autoplay });
+  const actions = new Actions({ lanes, store, queue, players, resolver, log, autoplay });
   // Thirty-one plays long ago, so the history has a track clear of the newest thirty to pick.
   for (const [index, track] of tracks.slice(5, 36).entries())
-    store.history.add({
+    await store.history.add({
       guildId: GUILD,
       trackId: track.id,
       addedBy: ANN.userId,
@@ -77,9 +81,8 @@ function setup() {
       playedMs: 60_000,
     });
   // Who added each queued track, in order: a, b, h (the host) or A (autoplay).
-  const owners = () =>
-    queue
-      .list(GUILD)
+  const owners = async () =>
+    (await queue.list(GUILD))
       .map((item) =>
         item.addedBy === AUTOPLAY ? 'A' : item.addedBy === ANN.userId ? 'a' : item.addedBy === BEN.userId ? 'b' : 'h',
       )
@@ -106,124 +109,124 @@ async function settle(clock: FakeClock): Promise<void> {
 
 describe('autoplay with taking turns and the limit per person', () => {
   it("keeps autoplay's tracks after people's when people take turns, and takes turns without them", async () => {
-    const { store, queue, actions, tracks, owners } = setup();
-    actions.takeTurns(MANAGER, true);
+    const { store, queue, actions, tracks, owners } = await setup();
+    await actions.takeTurns(MANAGER, true);
     // Ann's track plays; autoplay has queued two (as when the queue ran out twice); then people add.
     await actions.add(ANN, 't1');
     const [one, two] = tracks;
     assert.ok(one && two);
-    queue.add(GUILD, [tracks[2]?.id ?? 0, tracks[3]?.id ?? 0], 'end', AUTOPLAY);
-    assert.equal(owners(), 'AA');
+    await queue.add(GUILD, [tracks[2]?.id ?? 0, tracks[3]?.id ?? 0], 'end', AUTOPLAY);
+    assert.equal(await owners(), 'AA');
     await actions.add(ANN, 't5');
     await actions.add(BEN, 't6');
     await actions.add(ANN, 't7');
     // Ben's first turn before Ann's second; both before autoplay's, which nobody's turn moves.
-    assert.equal(owners(), 'baaAA');
+    assert.equal(await owners(), 'baaAA');
     // Put in turns once: the people's tracks in turns, autoplay's after them.
-    queue.add(GUILD, [tracks[7]?.id ?? 0], 'next', AUTOPLAY);
-    assert.equal(owners(), 'AbaaAA');
-    assert.equal(actions.turnsNow(BEN), 4);
-    assert.equal(owners(), 'baaAAA');
-    store.close();
+    await queue.add(GUILD, [tracks[7]?.id ?? 0], 'next', AUTOPLAY);
+    assert.equal(await owners(), 'AbaaAA');
+    assert.equal(await actions.turnsNow(BEN), 4);
+    assert.equal(await owners(), 'baaAAA');
+    await store.close();
   });
 
   it("leaves an autoplay track people moved among theirs where it is, people's new tracks in turn around it", async () => {
-    const { queue, actions, tracks, owners } = setup();
-    actions.takeTurns(MANAGER, true);
+    const { queue, actions, tracks, owners } = await setup();
+    await actions.takeTurns(MANAGER, true);
     await actions.add(ANN, 't1');
     await actions.add(ANN, 't2');
     await actions.add(BEN, 't3');
     // Someone moved a track autoplay queued up between people's.
-    queue.add(GUILD, [tracks[9]?.id ?? 0], 1, AUTOPLAY);
-    assert.equal(owners(), 'bAa');
+    await queue.add(GUILD, [tracks[9]?.id ?? 0], 1, AUTOPLAY);
+    assert.equal(await owners(), 'bAa');
     // Ben's second turn goes after Ann's second (the second round), the autoplay track keeping its place.
     await actions.add(BEN, 't4');
-    assert.equal(owners(), 'bAab');
+    assert.equal(await owners(), 'bAab');
   });
 
   it("does not count autoplay's tracks against anyone's limit", async () => {
-    const { queue, actions, tracks, owners } = setup();
-    actions.personLimit(MANAGER, 1);
+    const { queue, actions, tracks, owners } = await setup();
+    await actions.personLimit(MANAGER, 1);
     // Ben's track plays; autoplay's three wait.
     await actions.add(BEN, 't2');
-    queue.add(GUILD, [tracks[2]?.id ?? 0, tracks[3]?.id ?? 0, tracks[4]?.id ?? 0], 'end', AUTOPLAY);
+    await queue.add(GUILD, [tracks[2]?.id ?? 0, tracks[3]?.id ?? 0, tracks[4]?.id ?? 0], 'end', AUTOPLAY);
     // Ann's one track fits (autoplay's three are nobody's) and goes before them; her second is over her limit.
     const first = await actions.add(ANN, 't1');
     assert.equal(first.skippedLimit, 0);
-    assert.equal(owners(), 'aAAA');
+    assert.equal(await owners(), 'aAAA');
     await assert.rejects(actions.add(ANN, 't6'), /each person may have 1 tracks in the queue here/);
   });
 });
 
 describe('autoplay with stop after this track and a paused player', () => {
   it('takes a stop asked for after this track as a Stop: a pick that comes after it neither queues nor plays', async () => {
-    const { clock, store, queue, media, players, actions, owners, mixes } = setup();
-    actions.autoplay(ANN, 'related');
-    queue.add(GUILD, [store.tracks.upsert(SEED).id], 'end', ANN.userId);
-    players.get(GUILD).play();
+    const { clock, store, queue, media, players, actions, owners, mixes } = await setup();
+    await actions.autoplay(ANN, 'related');
+    await queue.add(GUILD, [(await store.tracks.upsert(SEED)).id], 'end', ANN.userId);
+    await players.get(GUILD).play();
     media.finish(SONG);
     await settle(clock);
     // The last track plays, and autoplay waits for YouTube's mix of it; meanwhile the track is to stop after it.
     assert.equal(mixes.length, 1);
-    actions.stopAfter(ANN, true);
+    await actions.stopAfter(ANN, true);
     await clock.advance(SONG);
     await settle(clock);
     assert.equal(players.get(GUILD).snapshot().status, 'idle');
     // The mix comes after the stop: nothing is queued, and the music stays stopped.
     mixes[0]?.([RELATED]);
     await settle(clock);
-    assert.equal(owners(), '');
+    assert.equal(await owners(), '');
     assert.equal(players.get(GUILD).snapshot().status, 'idle');
   });
 
   it('picks nothing while a stop is asked for after this track', async () => {
-    const { clock, media, actions, owners } = setup();
+    const { clock, media, actions, owners } = await setup();
     await actions.add(ANN, 't1');
     media.finish(SONG);
     await flush();
-    actions.stopAfter(ANN, true);
-    actions.autoplay(ANN, 'history');
+    await actions.stopAfter(ANN, true);
+    await actions.autoplay(ANN, 'history');
     await settle(clock);
-    assert.equal(owners(), '');
+    assert.equal(await owners(), '');
     // Played on after all: the pick comes.
-    actions.stopAfter(ANN, false);
+    await actions.stopAfter(ANN, false);
     await settle(clock);
-    assert.equal(owners(), 'A');
+    assert.equal(await owners(), 'A');
   });
 
   it('adds nothing while the player is paused (resting with nobody listening), and picks when it plays on', async () => {
-    const { clock, media, players, actions, owners } = setup();
+    const { clock, media, players, actions, owners } = await setup();
     await actions.add(ANN, 't1');
     media.finish(SONG);
     await flush();
     // Paused (as app/rest.ts pauses a server nobody hears), then autoplay turned on: nothing is queued meanwhile.
-    players.get(GUILD).pause();
-    actions.autoplay(ANN, 'history');
+    await players.get(GUILD).pause();
+    await actions.autoplay(ANN, 'history');
     await settle(clock);
-    assert.equal(owners(), '');
+    assert.equal(await owners(), '');
     // Played on: the pick for this track comes now.
-    players.get(GUILD).resume();
+    await players.get(GUILD).resume();
     await settle(clock);
-    assert.equal(owners(), 'A');
+    assert.equal(await owners(), 'A');
   });
 
   it('queues no pick that comes back to a paused player, and picks again when it plays on', async () => {
-    const { clock, store, queue, media, players, actions, owners, mixes } = setup();
-    actions.autoplay(ANN, 'related');
-    queue.add(GUILD, [store.tracks.upsert(SEED).id], 'end', ANN.userId);
-    players.get(GUILD).play();
+    const { clock, store, queue, media, players, actions, owners, mixes } = await setup();
+    await actions.autoplay(ANN, 'related');
+    await queue.add(GUILD, [(await store.tracks.upsert(SEED)).id], 'end', ANN.userId);
+    await players.get(GUILD).play();
     media.finish(SONG);
     await settle(clock);
     assert.equal(mixes.length, 1);
     // Paused (by a person, or resting with nobody listening) while the mix was asked for: it comes, and waits.
-    players.get(GUILD).pause();
+    await players.get(GUILD).pause();
     mixes[0]?.([RELATED]);
     await settle(clock);
-    assert.equal(owners(), '');
+    assert.equal(await owners(), '');
     // Played on: the pick is made again (the mix is known now), and queued.
-    players.get(GUILD).resume();
+    await players.get(GUILD).resume();
     await settle(clock);
-    assert.equal(owners(), 'A');
+    assert.equal(await owners(), 'A');
     assert.equal(mixes.length, 1);
   });
 });

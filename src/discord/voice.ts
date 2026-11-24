@@ -33,6 +33,7 @@ import { ActionError, type VoiceChannelInfo, type VoiceControl } from '../app/ac
 import type { Bus } from '../core/bus.ts';
 import { type Clock, systemClock, type TimerHandle } from '../core/clock.ts';
 import { Countdowns } from '../core/countdowns.ts';
+import { throwFromTimer } from '../core/lanes.ts';
 import type { PlayerOutput, PreparedMedia } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import { isPlain, PLAIN_SOUND, type Sound } from '../core/sound.ts';
@@ -80,17 +81,19 @@ export class VoiceOutput implements PlayerOutput {
   // Whether the player wants this output paused. @discordjs/voice ignores a pause while a new stream is still
   // buffering (its first tens of milliseconds); the wish is kept and applied once it plays.
   private wantPaused = false;
-  // The server's sound (volume and preset), read at each start of a stream, and the sound of the stream started last
-  // (null while none plays), so a change can tell whether the stream has it already.
-  private readonly sound: () => Sound;
+  // The server's sound (volume and preset), read from its settings at each start of a stream, and the sound of the
+  // stream started last (null while none plays), so a change can tell whether the stream has it already.
+  private readonly sound: () => Sound | Promise<Sound>;
   private streaming: Sound | null = null;
+  // Whether the sound of the stream being started is still being read (see soundPending).
+  private reading = false;
 
   constructor(options: {
     ffmpeg: Ffmpeg;
     onEnded: (session: number) => void;
     log: Logger;
     parts?: VoiceParts;
-    sound?: () => Sound;
+    sound?: () => Sound | Promise<Sound>;
   }) {
     this.ffmpeg = options.ffmpeg;
     this.log = options.log;
@@ -118,9 +121,42 @@ export class VoiceOutput implements PlayerOutput {
   start(media: PreparedMedia, offsetMs: number, session: number): void {
     this.release();
     this.session = session;
-    // A start plays; a pause that follows sets the wish again.
+    // A start plays; a pause that follows sets the wish again (and is applied once the stream plays, see the player's
+    // state changes above).
     this.wantPaused = false;
     const sound = this.sound();
+    // Known at once: the stream starts now.
+    if (!(sound instanceof Promise)) {
+      this.reading = false;
+      this.play(media, offsetMs, session, sound);
+      return;
+    }
+    // Read from the server's settings, which answers a moment later: the stream starts then, unless a stop or another
+    // start came meanwhile (the session says which start is the current one). A sound that cannot be read is the plain
+    // one: the music goes on, said in the log.
+    this.reading = true;
+    void sound
+      .catch((error: unknown) => {
+        this.log.warn('could not read the voice sound; playing the track as it is', { error });
+        return PLAIN_SOUND;
+      })
+      .then((read) => {
+        if (this.session !== session) return;
+        this.reading = false;
+        this.play(media, offsetMs, session, read);
+      });
+  }
+
+  /**
+   * Whether a stream is starting and its sound is still being read: it may have been read before a change of the
+   * sound, so a change now starts the stream again (see VoiceManager.soundChanged).
+   */
+  soundPending(): boolean {
+    return this.reading;
+  }
+
+  // Starts the stream of a start (see start) with the server's sound.
+  private play(media: PreparedMedia, offsetMs: number, session: number, sound: Sound): void {
     this.streaming = sound;
     const fromStart = offsetMs < FROM_START_MS;
     if (fromStart && isPlain(sound)) {
@@ -166,6 +202,8 @@ export class VoiceOutput implements PlayerOutput {
   stop(): void {
     this.session = -1;
     this.streaming = null;
+    // A start whose sound is being read will not start now (its session is over).
+    this.reading = false;
     this.audio.stop(true);
     this.release();
   }
@@ -209,11 +247,11 @@ export class VoiceManager implements VoiceControl {
   private readonly idle: Countdowns;
   // Where joining and leaving are announced (the panel shows the channel); absent in tests that do not care.
   private readonly bus: Bus | null;
-  // Whether a server asked the bot to stay in voice when everyone has left (its stay setting).
-  private readonly stays: (guildId: string) => boolean;
+  // Whether a server asked the bot to stay in voice when everyone has left (its stay setting, read from its settings).
+  private readonly stays: (guildId: string) => boolean | Promise<boolean>;
   // A server's voice sound (volume and preset), and the clock its changes are spaced on, with when each server's last
   // change was applied and the one waiting for its turn (see soundChanged).
-  private readonly sound: (guildId: string) => Sound;
+  private readonly sound: (guildId: string) => Sound | Promise<Sound>;
   private readonly clock: Clock;
   private readonly soundAt = new Map<string, number>();
   private readonly soundTimers = new Map<string, TimerHandle>();
@@ -226,8 +264,8 @@ export class VoiceManager implements VoiceControl {
     idleMs: number;
     clock?: Clock;
     bus?: Bus;
-    stays?: (guildId: string) => boolean;
-    sound?: (guildId: string) => Sound;
+    stays?: (guildId: string) => boolean | Promise<boolean>;
+    sound?: (guildId: string) => Sound | Promise<Sound>;
   }) {
     this.bus = options.bus ?? null;
     // Without the setting (tests that do not care), the host's time alone decides for every server.
@@ -245,16 +283,18 @@ export class VoiceManager implements VoiceControl {
         guild: guildId,
         channel: this.joined.get(guildId)?.name,
       });
-      this.drop(guildId);
+      // A failure of leaving is the countdown's, as it was when this ran in its timer.
+      this.drop(guildId).catch(throwFromTimer);
     });
   }
 
   /**
    * Called on every voice change in a server. When nobody but bots is left in the bot's channel, the bot leaves after
    * the idle time (JUKECORD_VOICE_IDLE); someone coming back cancels that. The music goes on for the browsers either
-   * way: leaving voice only stops sending sound nobody is there to hear.
+   * way: leaving voice only stops sending sound nobody is there to hear. Settles once the countdown is decided (the
+   * server's stay setting is read for it).
    */
-  voiceStateChanged(guildId: string): void {
+  async voiceStateChanged(guildId: string): Promise<void> {
     let joined = this.joined.get(guildId);
     if (!joined) return;
     // Who is in the bot's channel may have changed: an open vote to skip counts again (a moment later, see votes.ts).
@@ -264,7 +304,7 @@ export class VoiceManager implements VoiceControl {
     const now = this.client.guilds.cache.get(guildId)?.members.me?.voice.channel;
     if (now && now.id !== joined.channelId && now.type !== ChannelType.GuildVoice) {
       this.log.info('left a stage the bot was moved to', { guild: guildId });
-      this.drop(guildId);
+      await this.drop(guildId);
       return;
     }
     if (now && now.id !== joined.channelId) {
@@ -274,19 +314,23 @@ export class VoiceManager implements VoiceControl {
     }
     if (this.idleMs === 0) return;
     // A server that asked the bot to stay keeps it in its channel, whoever is there: no countdown runs.
-    if (this.stays(guildId)) {
+    const stays = await this.stays(guildId);
+    // Left (or moved) while the setting was read: the countdown is for the channel it is in now, if any.
+    const still = this.joined.get(guildId);
+    if (!still) return;
+    if (stays) {
       this.idle.disarm(guildId);
       return;
     }
-    const channel = this.client.guilds.cache.get(guildId)?.channels.cache.get(joined.channelId);
+    const channel = this.client.guilds.cache.get(guildId)?.channels.cache.get(still.channelId);
     const people = channel?.isVoiceBased() ? channel.members.filter((member) => !member.user.bot).size : 0;
     if (people > 0) this.idle.disarm(guildId);
     else this.idle.arm(guildId);
   }
 
   /** The stay setting of a server changed: whether the bot counts down to leaving is decided again, at once. */
-  stayChanged(guildId: string): void {
-    this.voiceStateChanged(guildId);
+  stayChanged(guildId: string): Promise<void> {
+    return this.voiceStateChanged(guildId);
   }
 
   /**
@@ -294,14 +338,14 @@ export class VoiceManager implements VoiceControl {
    * (the player keeps the place, see Player.restartOutputs). The first change is heard at once; changes that follow
    * within SOUND_COOLDOWN_MS are merged into the last one, heard when the cooldown ends.
    */
-  soundChanged(guildId: string): void {
+  async soundChanged(guildId: string): Promise<void> {
     // Not in voice, or the stream has this sound already: the next stream starts with it by itself.
-    if (!this.stale(guildId)) return;
+    if (!(await this.stale(guildId))) return;
     const wait = (this.soundAt.get(guildId) ?? Number.NEGATIVE_INFINITY) + SOUND_COOLDOWN_MS - this.clock.now();
     // A wait longer than the cooldown is a clock set back meanwhile: not a reason to keep the old sound.
     if (wait <= 0 || wait > SOUND_COOLDOWN_MS) {
       this.soundAt.set(guildId, this.clock.now());
-      this.players.get(guildId).restartOutputs();
+      await this.players.get(guildId).restartOutputs();
       return;
     }
     // A change waits already: it reads the sound when it runs, which is this newest one.
@@ -310,19 +354,25 @@ export class VoiceManager implements VoiceControl {
       guildId,
       this.clock.setTimeout(() => {
         this.soundTimers.delete(guildId);
-        // A stream started meanwhile (the next track, a resume) has the newest sound already: nothing to start again.
-        if (!this.stale(guildId)) return;
-        this.soundAt.set(guildId, this.clock.now());
-        this.players.get(guildId).restartOutputs();
+        // Read and started again a moment later; a failure is the timer's, as it was when this ran in it.
+        void (async () => {
+          // A stream started meanwhile (the next track, a resume) has the newest sound already: nothing to start again.
+          if (!(await this.stale(guildId))) return;
+          this.soundAt.set(guildId, this.clock.now());
+          await this.players.get(guildId).restartOutputs();
+        })().catch(throwFromTimer);
       }, wait),
     );
   }
 
-  // Whether the bot is in a server's voice with a stream whose sound is not the server's sound now.
-  private stale(guildId: string): boolean {
-    const streaming = this.joined.get(guildId)?.output.streamSound() ?? null;
+  // Whether the bot is in a server's voice with a stream whose sound is not the server's sound now (or may not be: one
+  // starting with its sound still being read, which may have been read before the change).
+  private async stale(guildId: string): Promise<boolean> {
+    const output = this.joined.get(guildId)?.output;
+    if (output?.soundPending()) return true;
+    const streaming = output?.streamSound() ?? null;
     if (streaming === null) return false;
-    const now = this.sound(guildId);
+    const now = await this.sound(guildId);
     return streaming.volume !== now.volume || streaming.preset !== now.preset;
   }
 
@@ -424,7 +474,7 @@ export class VoiceManager implements VoiceControl {
     if (this.isFull(channel, me.id, allowed)) {
       throw new ActionError('conflict', `the voice channel ${channel.name} is full`);
     }
-    if (current) this.drop(guildId);
+    if (current) await this.drop(guildId);
     const connection = joinVoiceChannel({
       channelId: target,
       guildId,
@@ -441,8 +491,9 @@ export class VoiceManager implements VoiceControl {
     const output: VoiceOutput = new VoiceOutput({
       ffmpeg: this.ffmpeg,
       log: this.log,
-      // The output says which one it is: an early end restarts only that output (see Player.outputEnded).
-      onEnded: (session) => this.players.get(guildId).outputEnded(session, output),
+      // The output says which one it is: an early end restarts only that output (see Player.outputEnded), in a turn
+      // of the server's own.
+      onEnded: (session) => void this.players.get(guildId).outputEnded(session, output),
       // The server's sound as it is at each start of a stream.
       sound: () => this.sound(guildId),
     });
@@ -460,19 +511,20 @@ export class VoiceManager implements VoiceControl {
         // Only if this connection is still the one in use: a join elsewhere meanwhile replaced it.
         if (this.joined.get(guildId)?.connection !== connection) return;
         this.log.info('left voice after a disconnect that did not recover', { guild: guildId });
-        this.drop(guildId);
+        return this.drop(guildId);
       });
     });
     connection.on(VoiceConnectionStatus.Destroyed, () => {
-      // Destroyed from outside (kicked, channel deleted): the player carries on for the browsers.
-      if (this.joined.get(guildId)?.connection === connection) this.forget(guildId);
+      // Destroyed from outside (kicked, channel deleted): the player carries on for the browsers. A failure of
+      // letting the output go is an event's, as it was when this ran in the event.
+      if (this.joined.get(guildId)?.connection === connection) this.forget(guildId).catch(throwFromTimer);
     });
     this.joined.set(guildId, { connection, output, channelId: target, name: channel.name });
-    this.players.get(guildId).attach(output);
+    await this.players.get(guildId).attach(output);
     this.log.info('joined voice', { guild: guildId, channel: channel.name });
     this.bus?.emit('voice', { guildId, channel: { channelId: target, name: channel.name } });
     // Joined a channel that is already empty (the person left meanwhile): the countdown starts now.
-    this.voiceStateChanged(guildId);
+    await this.voiceStateChanged(guildId);
     return { channelId: target, name: channel.name };
   }
 
@@ -494,25 +546,26 @@ export class VoiceManager implements VoiceControl {
     return channel.members.filter((member) => member.id !== botId).size >= limit;
   }
 
-  leave(guildId: string): boolean {
+  async leave(guildId: string): Promise<boolean> {
     if (!this.joined.has(guildId)) return false;
-    this.drop(guildId);
+    await this.drop(guildId);
     return true;
   }
 
   /** Leaves every channel (shutting down). */
-  leaveAll(): void {
-    for (const guildId of [...this.joined.keys()]) this.drop(guildId);
+  async leaveAll(): Promise<void> {
+    for (const guildId of [...this.joined.keys()]) await this.drop(guildId);
   }
 
   // Detaches the output and closes the connection.
-  private drop(guildId: string): void {
-    const joined = this.forget(guildId);
+  private async drop(guildId: string): Promise<void> {
+    const joined = await this.forget(guildId);
     if (joined && joined.connection.state.status !== VoiceConnectionStatus.Destroyed) joined.connection.destroy();
   }
 
-  // Detaches the output and forgets the connection, without closing it.
-  private forget(guildId: string): Joined | undefined {
+  // Detaches the output and forgets the connection, without closing it. The connection is forgotten at once (a join
+  // asked meanwhile finds the bot out of voice); the output leaves the player in the server's turn.
+  private async forget(guildId: string): Promise<Joined | undefined> {
     const joined = this.joined.get(guildId);
     if (!joined) return undefined;
     this.joined.delete(guildId);
@@ -522,7 +575,7 @@ export class VoiceManager implements VoiceControl {
     if (waiting !== undefined) this.clock.clearTimeout(waiting);
     this.soundTimers.delete(guildId);
     this.soundAt.delete(guildId);
-    this.players.get(guildId).detach(joined.output);
+    await this.players.get(guildId).detach(joined.output);
     this.bus?.emit('voice', { guildId, channel: null });
     // Nobody listens in voice any more: an open vote to skip counts the browsers alone.
     this.bus?.emit('people', { guildId });

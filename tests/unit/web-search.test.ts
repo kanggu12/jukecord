@@ -80,7 +80,7 @@ describe('searching over HTTP', () => {
   });
 
   it("holds a login's searches to their own rate, and lets them go on as it refills", async () => {
-    const { cookie } = sessionFor(server, ALICE);
+    const { cookie } = await sessionFor(server, ALICE);
     const search = () =>
       server.web.app.inject({
         method: 'GET',

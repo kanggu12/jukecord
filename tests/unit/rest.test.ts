@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Rest } from '../../src/app/rest.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { createLogger } from '../../src/log.ts';
@@ -17,12 +18,14 @@ const GUILD = '100000000000000001';
 // A playing server whose voice and browsers a test sets, and the watch on it.
 async function setup(afterMs = 120_000) {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   const log = createLogger({ level: 'error', sinks: [] });
   const players = new Players({
+    lanes,
     queue,
     media,
     history: store.history,
@@ -34,6 +37,7 @@ async function setup(afterMs = 120_000) {
   });
   const heard = { voice: false, browsers: 0 };
   const rest = new Rest({
+    lanes,
     bus,
     players,
     inVoice: () => heard.voice,
@@ -43,15 +47,15 @@ async function setup(afterMs = 120_000) {
     log,
   });
   rest.start();
-  const tracks = addTracks(store, 3);
-  queue.add(
+  const tracks = await addTracks(store, 3);
+  await queue.add(
     GUILD,
     tracks.map((track) => track.id),
     'end',
     null,
   );
   const player = players.get(GUILD);
-  player.play();
+  await player.play();
   // A long track, so the first one plays through every wait of these tests.
   media.finish(4 * 3_600_000);
   await flush();
@@ -69,7 +73,7 @@ describe('Rest', () => {
     assert.equal(player.snapshot().notice, 'paused with nobody listening');
     // Nothing was counted as a listen for nobody, and nothing more is fetched.
     await clock.advance(3_600_000);
-    assert.equal(store.history.list(GUILD).length, 0);
+    assert.equal((await store.history.list(GUILD)).length, 0);
     rest.stop();
   });
 
@@ -96,7 +100,7 @@ describe('Rest', () => {
     await clock.advance(2000);
     assert.equal(player.snapshot().status, 'paused');
     // A person playing on clears the notice; it rests again only after another wait with nobody.
-    player.resume();
+    await player.resume();
     assert.equal(player.snapshot().notice, null);
     rest.stop();
   });

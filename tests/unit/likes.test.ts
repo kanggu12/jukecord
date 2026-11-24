@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import { type ActionContext, ActionError, Actions, likesOwner } from '../../src/app/actions.ts';
 import { COMMANDS } from '../../src/cli/commands.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { likesCard } from '../../src/discord/cards.ts';
@@ -21,12 +22,14 @@ import { ALICE, asHost, BOB, exampleTrack, GUILD, sessionFor, type TestServer, t
 const log = createLogger({ level: 'error', sinks: [] });
 const OTHER = '100000000000000002';
 
-function setup() {
+async function setup() {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const players = new Players({
+    lanes,
     queue,
     media: new FakeMedia(),
     history: store.history,
@@ -36,8 +39,8 @@ function setup() {
     log,
     fetchTimeoutMs: 60_000,
   });
-  const actions = new Actions({ store, queue, players, resolver: {} as Resolver, log });
-  const tracks = addTracks(store, 6);
+  const actions = new Actions({ lanes, store, queue, players, resolver: {} as Resolver, log });
+  const tracks = await addTracks(store, 6);
   return { store, queue, players, actions, tracks, clock };
 }
 
@@ -49,9 +52,10 @@ const as = (userId: string | null, guildId = GUILD, mayControl = true): ActionCo
 });
 
 // The error code and message of an action that refuses.
-function refusal(run: () => unknown): string {
+async function refusal(run: () => unknown): Promise<string> {
   try {
-    run();
+    // A refusal is the action's rejection (or a throw before it answers).
+    await run();
   } catch (error) {
     if (error instanceof ActionError) return `${error.code}: ${error.message}`;
     throw error;
@@ -60,102 +64,90 @@ function refusal(run: () => unknown): string {
 }
 
 describe('likes', () => {
-  it('are each login’s own, the host’s included, and need no DJ role', () => {
-    const { actions, queue, tracks } = setup();
+  it('are each login’s own, the host’s included, and need no DJ role', async () => {
+    const { actions, queue, tracks } = await setup();
     const [one, two] = tracks;
     assert.ok(one && two);
-    queue.add(GUILD, [one.id, two.id], 'end', null);
+    await queue.add(GUILD, [one.id, two.id], 'end', null);
     // A listener without the DJ role may like.
-    actions.like(as(ALICE, GUILD, false), one.id);
-    actions.like(as(null), two.id);
+    await actions.like(as(ALICE, GUILD, false), one.id);
+    await actions.like(as(null), two.id);
     assert.deepEqual(
-      actions.likes(as(ALICE)).map((entry) => entry.track.id),
+      (await actions.likes(as(ALICE))).map((entry) => entry.track.id),
       [one.id],
     );
     assert.deepEqual(
-      actions.likes(as(null)).map((entry) => entry.track.id),
+      (await actions.likes(as(null))).map((entry) => entry.track.id),
       [two.id],
     );
     assert.equal(likesOwner(as(null)), 'host');
     // Liking twice is one like.
-    actions.like(as(ALICE), one.id);
-    assert.equal(actions.likes(as(ALICE)).length, 1);
-    actions.unlike(as(ALICE), one.id);
-    assert.equal(actions.likes(as(ALICE)).length, 0);
-    assert.equal(
-      refusal(() => actions.unlike(as(ALICE), one.id)),
-      'not-found: that track is not in your likes',
-    );
+    await actions.like(as(ALICE), one.id);
+    assert.equal((await actions.likes(as(ALICE))).length, 1);
+    await actions.unlike(as(ALICE), one.id);
+    assert.equal((await actions.likes(as(ALICE))).length, 0);
+    assert.equal(await refusal(() => actions.unlike(as(ALICE), one.id)), 'not-found: that track is not in your likes');
   });
 
-  it('take only a track this server shows: playing, queued, played or in a playlist', () => {
-    const { actions, queue, players, store, tracks } = setup();
+  it('take only a track this server shows: playing, queued, played or in a playlist', async () => {
+    const { actions, queue, players, store, tracks } = await setup();
     const [playing, queued, played, listed, elsewhere] = tracks;
     assert.ok(playing && queued && played && listed && elsewhere);
-    queue.add(GUILD, [playing.id], 'end', null);
-    players.get(GUILD).play();
-    queue.add(GUILD, [queued.id], 'end', null);
-    store.history.add({ guildId: GUILD, trackId: played.id, addedBy: null, playedAt: 1, playedMs: 5000 });
-    store.playlists.save(GUILD, 'Mix', [listed.id], null);
+    await queue.add(GUILD, [playing.id], 'end', null);
+    await players.get(GUILD).play();
+    await queue.add(GUILD, [queued.id], 'end', null);
+    await store.history.add({ guildId: GUILD, trackId: played.id, addedBy: null, playedAt: 1, playedMs: 5000 });
+    await store.playlists.save(GUILD, 'Mix', [listed.id], null);
     // Another server's track, and a number no track has.
-    store.history.add({ guildId: OTHER, trackId: elsewhere.id, addedBy: null, playedAt: 1, playedMs: 5000 });
-    for (const track of [playing, queued, played, listed]) actions.like(as(ALICE), track.id);
+    await store.history.add({ guildId: OTHER, trackId: elsewhere.id, addedBy: null, playedAt: 1, playedMs: 5000 });
+    for (const track of [playing, queued, played, listed]) await actions.like(as(ALICE), track.id);
     const refused = 'not-found: that track is not playing, queued, played or in a playlist in this server';
-    assert.equal(
-      refusal(() => actions.like(as(ALICE), elsewhere.id)),
-      refused,
-    );
-    assert.equal(
-      refusal(() => actions.like(as(ALICE), 999)),
-      refused,
-    );
+    assert.equal(await refusal(() => actions.like(as(ALICE), elsewhere.id)), refused);
+    assert.equal(await refusal(() => actions.like(as(ALICE), 999)), refused);
     // In its own server it may be liked.
-    actions.like(as(ALICE, OTHER), elsewhere.id);
-    assert.equal(actions.likes(as(ALICE)).length, 5);
+    await actions.like(as(ALICE, OTHER), elsewhere.id);
+    assert.equal((await actions.likes(as(ALICE))).length, 5);
   });
 
-  it('stop at the bound of a list, and a like already there still answers', () => {
-    const { actions, store, queue, tracks } = setup();
+  it('stop at the bound of a list, and a like already there still answers', async () => {
+    const { actions, store, queue, tracks } = await setup();
     const [first, last] = tracks;
     assert.ok(first && last);
-    queue.add(GUILD, [first.id, last.id], 'end', null);
-    store.likes.add(ALICE, first.id);
+    await queue.add(GUILD, [first.id, last.id], 'end', null);
+    await store.likes.add(ALICE, first.id);
     // A full list, made in the table itself (a thousand rows of made-up tracks).
-    for (const track of addTracks(store, LIKES_MAX - 1, 'full')) store.likes.add(ALICE, track.id);
-    assert.equal(store.likes.count(ALICE), LIKES_MAX);
+    for (const track of await addTracks(store, LIKES_MAX - 1, 'full')) await store.likes.add(ALICE, track.id);
+    assert.equal(await store.likes.count(ALICE), LIKES_MAX);
     assert.equal(
-      refusal(() => actions.like(as(ALICE), last.id)),
+      await refusal(() => actions.like(as(ALICE), last.id)),
       `conflict: your likes are full (${LIKES_MAX} tracks)`,
     );
-    assert.equal(actions.like(as(ALICE), first.id).track.id, first.id);
+    assert.equal((await actions.like(as(ALICE), first.id)).track.id, first.id);
   });
 
   it('go into the queue all at once, newest first, for people who may change the music', async () => {
-    const { actions, queue, tracks, clock, players } = setup();
+    const { actions, queue, tracks, clock, players } = await setup();
     const [a, b, c] = tracks;
     assert.ok(a && b && c);
-    queue.add(GUILD, [a.id, b.id, c.id], 'end', null);
+    await queue.add(GUILD, [a.id, b.id, c.id], 'end', null);
     for (const track of [a, b, c]) {
-      actions.like(as(ALICE), track.id);
+      await actions.like(as(ALICE), track.id);
       await clock.advance(1);
     }
-    queue.clear(GUILD);
+    await queue.clear(GUILD);
     assert.equal(
-      refusal(() => actions.likesAdd(as(ALICE, GUILD, false))),
+      await refusal(() => actions.likesAdd(as(ALICE, GUILD, false))),
       'forbidden: only members with the DJ role can change the music here',
     );
-    const result = actions.likesAdd(as(ALICE));
+    const result = await actions.likesAdd(as(ALICE));
     assert.equal(result.items.length, 3);
     // The newest liked plays first (the player took it), then the others in the list's order.
     assert.equal(players.get(GUILD).snapshot().track?.id, c.id);
     assert.deepEqual(
-      queue.list(GUILD).map((item) => item.track.id),
+      (await queue.list(GUILD)).map((item) => item.track.id),
       [b.id, a.id],
     );
-    assert.equal(
-      refusal(() => actions.likesAdd(as(BOB))),
-      'invalid: there are no liked tracks to add',
-    );
+    assert.equal(await refusal(() => actions.likesAdd(as(BOB))), 'invalid: there are no liked tracks to add');
   });
 });
 
@@ -176,9 +168,9 @@ describe('likes over HTTP, in the CLI and in Discord', () => {
       headers: asHost,
       payload: { input: 'one' },
     });
-    const track = server.store.tracks.bySource('https://example.com/watch?v=a');
+    const track = await server.store.tracks.bySource('https://example.com/watch?v=a');
     assert.ok(track);
-    const { cookie, csrf } = sessionFor(server, ALICE);
+    const { cookie, csrf } = await sessionFor(server, ALICE);
     const headers = { cookie, 'x-jukecord-csrf': csrf };
     const liked = await server.web.app.inject({
       method: 'PUT',

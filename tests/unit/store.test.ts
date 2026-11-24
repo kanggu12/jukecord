@@ -12,72 +12,72 @@ const GUILD = '100000000000000001';
 const OTHER = '100000000000000002';
 
 describe('Store', () => {
-  it('creates the schema at the latest version and keeps it on reopening', () => {
+  it('creates the schema at the latest version and keeps it on reopening', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-db-'));
     try {
       const file = path.join(dir, 'sub', 'jukecord.db');
-      const store = Store.open(file);
-      assert.equal(store.schemaVersion(), MIGRATIONS.at(-1)?.version);
-      addTracks(store, 1);
-      store.close();
+      const store = await Store.open(file);
+      assert.equal(await store.schemaVersion(), MIGRATIONS.at(-1)?.version);
+      await addTracks(store, 1);
+      await store.close();
       // Reopening runs no migration again and keeps the data.
-      const again = Store.open(file);
-      assert.equal(again.tracks.get(1)?.title, 'Track 1');
-      again.close();
+      const again = await Store.open(file);
+      assert.equal((await again.tracks.get(1))?.title, 'Track 1');
+      await again.close();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('refuses a database written by a newer jukecord', () => {
+  it('refuses a database written by a newer jukecord', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-db-'));
     try {
       const file = path.join(dir, 'jukecord.db');
       const db = new DatabaseSync(file);
       db.exec('PRAGMA user_version = 999');
       db.close();
-      assert.throws(() => Store.open(file), /newer than this jukecord knows/);
+      await assert.rejects(() => Store.open(file), /newer than this jukecord knows/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('rolls back a failed transaction, and only the inner level of a nested one', () => {
-    const store = memoryStore();
-    const [track] = addTracks(store, 1);
+  it('rolls back a failed transaction, and only the inner level of a nested one', async () => {
+    const store = await memoryStore();
+    const [track] = await addTracks(store, 1);
     assert.ok(track);
-    assert.throws(() =>
-      store.transaction(() => {
-        store.queue.insert(GUILD, [track.id], 0, null);
+    await assert.rejects(() =>
+      store.transaction(async () => {
+        await store.queue.insert(GUILD, [track.id], 0, null);
         throw new Error('boom');
       }),
     );
-    assert.equal(store.queue.count(GUILD), 0);
-    store.transaction(() => {
-      store.queue.insert(GUILD, [track.id], 0, null);
-      assert.throws(() =>
-        store.transaction(() => {
-          store.queue.insert(GUILD, [track.id], 0, null);
+    assert.equal(await store.queue.count(GUILD), 0);
+    await store.transaction(async () => {
+      await store.queue.insert(GUILD, [track.id], 0, null);
+      await assert.rejects(() =>
+        store.transaction(async () => {
+          await store.queue.insert(GUILD, [track.id], 0, null);
           throw new Error('inner');
         }),
       );
     });
     // The outer insert stays; the inner one is gone.
-    assert.equal(store.queue.count(GUILD), 1);
+    assert.equal(await store.queue.count(GUILD), 1);
   });
 
-  it('writes an online backup that opens with the same data', () => {
+  it('writes an online backup that opens with the same data', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-db-'));
     try {
-      const store = Store.open(path.join(dir, 'jukecord.db'));
-      addTracks(store, 3);
+      const store = await Store.open(path.join(dir, 'jukecord.db'));
+      await addTracks(store, 3);
       const target = path.join(dir, 'backup', 'copy.db');
-      store.backup(target);
-      assert.throws(() => store.backup(target), StoreError);
-      const copy = Store.open(target);
-      assert.equal(copy.tracks.get(3)?.title, 'Track 3');
-      copy.close();
-      store.close();
+      await store.backup(target);
+      await assert.rejects(() => store.backup(target), StoreError);
+      const copy = await Store.open(target);
+      assert.equal((await copy.tracks.get(3))?.title, 'Track 3');
+      await copy.close();
+      await store.close();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -85,9 +85,9 @@ describe('Store', () => {
 });
 
 describe('TrackRepository', () => {
-  it('keeps one row per source and keeps known fields that a later lookup lacks', () => {
-    const store = memoryStore();
-    const first = store.tracks.upsert({
+  it('keeps one row per source and keeps known fields that a later lookup lacks', async () => {
+    const store = await memoryStore();
+    const first = await store.tracks.upsert({
       source: 'https://example.com/a',
       url: 'https://example.com/a',
       title: 'Old title',
@@ -95,7 +95,7 @@ describe('TrackRepository', () => {
       durationMs: 1000,
       thumbnail: 'https://example.com/a.jpg',
     });
-    const second = store.tracks.upsert({
+    const second = await store.tracks.upsert({
       source: 'https://example.com/a',
       url: 'https://example.com/a',
       title: 'New title',
@@ -107,20 +107,20 @@ describe('TrackRepository', () => {
     assert.equal(second.title, 'New title');
     assert.equal(second.uploader, 'Someone');
     assert.equal(second.thumbnail, 'https://example.com/a.jpg');
-    store.tracks.setLoudness(first.id, -14.2);
-    assert.equal(store.tracks.bySource('https://example.com/a')?.loudness, -14.2);
+    await store.tracks.setLoudness(first.id, -14.2);
+    assert.equal((await store.tracks.bySource('https://example.com/a'))?.loudness, -14.2);
   });
 });
 
 describe('QueueRepository', () => {
-  it('inserts at the end, next, or a position, keeping positions dense', () => {
-    const store = memoryStore();
-    const [a, b, c, d] = addTracks(store, 4);
+  it('inserts at the end, next, or a position, keeping positions dense', async () => {
+    const store = await memoryStore();
+    const [a, b, c, d] = await addTracks(store, 4);
     assert.ok(a && b && c && d);
-    store.queue.insert(GUILD, [a.id, b.id], Number.MAX_SAFE_INTEGER, 'u1');
-    store.queue.insert(GUILD, [c.id], 0, 'u2');
-    store.queue.insert(GUILD, [d.id], 2, null);
-    const list = store.queue.list(GUILD);
+    await store.queue.insert(GUILD, [a.id, b.id], Number.MAX_SAFE_INTEGER, 'u1');
+    await store.queue.insert(GUILD, [c.id], 0, 'u2');
+    await store.queue.insert(GUILD, [d.id], 2, null);
+    const list = await store.queue.list(GUILD);
     assert.deepEqual(
       list.map((item) => item.track.title),
       ['Track 3', 'Track 1', 'Track 4', 'Track 2'],
@@ -130,13 +130,13 @@ describe('QueueRepository', () => {
       [0, 1, 2, 3],
     );
     // Another server's queue is separate.
-    assert.equal(store.queue.count(OTHER), 0);
+    assert.equal(await store.queue.count(OTHER), 0);
   });
 
-  it('removes, moves, reorders, shifts and clears', () => {
-    const store = memoryStore();
-    const tracks = addTracks(store, 4);
-    const items = store.queue.insert(
+  it('removes, moves, reorders, shifts and clears', async () => {
+    const store = await memoryStore();
+    const tracks = await addTracks(store, 4);
+    const items = await store.queue.insert(
       GUILD,
       tracks.map((track) => track.id),
       0,
@@ -144,69 +144,69 @@ describe('QueueRepository', () => {
     );
     const [i1, i2, i3, i4] = items;
     assert.ok(i1 && i2 && i3 && i4);
-    assert.equal(store.queue.remove(GUILD, i2.id), true);
-    assert.equal(store.queue.remove(GUILD, i2.id), false);
+    assert.equal(await store.queue.remove(GUILD, i2.id), true);
+    assert.equal(await store.queue.remove(GUILD, i2.id), false);
     // A removal from another server's queue does nothing.
-    assert.equal(store.queue.remove(OTHER, i3.id), false);
-    store.queue.move(GUILD, i4.id, 0);
+    assert.equal(await store.queue.remove(OTHER, i3.id), false);
+    await store.queue.move(GUILD, i4.id, 0);
     assert.deepEqual(
-      store.queue.list(GUILD).map((item) => item.id),
+      (await store.queue.list(GUILD)).map((item) => item.id),
       [i4.id, i1.id, i3.id],
     );
-    assert.throws(() => store.queue.move(GUILD, i4.id, 5), StoreError);
-    store.queue.reorder(GUILD, [i3.id, i1.id, i4.id]);
+    await assert.rejects(() => store.queue.move(GUILD, i4.id, 5), StoreError);
+    await store.queue.reorder(GUILD, [i3.id, i1.id, i4.id]);
     assert.deepEqual(
-      store.queue.list(GUILD).map((item) => item.id),
+      (await store.queue.list(GUILD)).map((item) => item.id),
       [i3.id, i1.id, i4.id],
     );
     // An order that drops or invents an item means the caller is out of date.
-    assert.throws(() => store.queue.reorder(GUILD, [i3.id, i1.id]), StoreError);
-    assert.equal(store.queue.shift(GUILD)?.id, i3.id);
+    await assert.rejects(() => store.queue.reorder(GUILD, [i3.id, i1.id]), StoreError);
+    assert.equal((await store.queue.shift(GUILD))?.id, i3.id);
     assert.deepEqual(
-      store.queue.list(GUILD).map((item) => item.position),
+      (await store.queue.list(GUILD)).map((item) => item.position),
       [0, 1],
     );
-    assert.equal(store.queue.clear(GUILD), 2);
-    assert.equal(store.queue.shift(GUILD), null);
+    assert.equal(await store.queue.clear(GUILD), 2);
+    assert.equal(await store.queue.shift(GUILD), null);
   });
 
-  it('keeps positions 0..n-1 after a removal and a shift from the middle of a long queue, and says what it holds', () => {
-    const store = memoryStore();
-    const tracks = addTracks(store, 6);
-    const items = store.queue.insert(
+  it('keeps positions 0..n-1 after a removal and a shift from the middle of a long queue, and says what it holds', async () => {
+    const store = await memoryStore();
+    const tracks = await addTracks(store, 6);
+    const items = await store.queue.insert(
       GUILD,
       tracks.map((track) => track.id),
       0,
       null,
     );
     // The same tracks in another server: a removal or a shift here must not move them.
-    store.queue.insert(
+    await store.queue.insert(
       OTHER,
       tracks.map((track) => track.id),
       0,
       null,
     );
-    assert.equal(store.queue.remove(GUILD, items[2]?.id ?? 0), true);
-    assert.equal(store.queue.shift(GUILD)?.id, items[0]?.id);
-    const left = store.queue.list(GUILD);
+    assert.equal(await store.queue.remove(GUILD, items[2]?.id ?? 0), true);
+    assert.equal((await store.queue.shift(GUILD))?.id, items[0]?.id);
+    const left = await store.queue.list(GUILD);
     assert.deepEqual(
       left.map((item) => [item.id, item.position]),
       [items[1], items[3], items[4], items[5]].map((item, index) => [item?.id, index]),
     );
     assert.deepEqual(
-      store.queue.list(OTHER).map((item) => item.position),
+      (await store.queue.list(OTHER)).map((item) => item.position),
       [0, 1, 2, 3, 4, 5],
     );
     // has() answers from the index, for the track played or removed and for one still waiting.
-    assert.equal(store.queue.has(GUILD, tracks[0]?.id ?? 0), false);
-    assert.equal(store.queue.has(GUILD, tracks[3]?.id ?? 0), true);
-    assert.equal(store.queue.has(OTHER, tracks[0]?.id ?? 0), true);
+    assert.equal(await store.queue.has(GUILD, tracks[0]?.id ?? 0), false);
+    assert.equal(await store.queue.has(GUILD, tracks[3]?.id ?? 0), true);
+    assert.equal(await store.queue.has(OTHER, tracks[0]?.id ?? 0), true);
   });
 
-  it('removes many items in one go, closing every gap once, and counts only those that were there', () => {
-    const store = memoryStore();
-    const tracks = addTracks(store, 5);
-    const items = store.queue.insert(
+  it('removes many items in one go, closing every gap once, and counts only those that were there', async () => {
+    const store = await memoryStore();
+    const tracks = await addTracks(store, 5);
+    const items = await store.queue.insert(
       GUILD,
       tracks.map((track) => track.id),
       0,
@@ -215,9 +215,9 @@ describe('QueueRepository', () => {
     const [i1, i2, i3, i4, i5] = items;
     assert.ok(i1 && i2 && i3 && i4 && i5);
     // An ID that is not in the queue (played meanwhile) is no error; it is just not counted.
-    assert.equal(store.queue.removeMany(GUILD, [i2.id, i4.id, 999_999]), 2);
+    assert.equal(await store.queue.removeMany(GUILD, [i2.id, i4.id, 999_999]), 2);
     assert.deepEqual(
-      store.queue.list(GUILD).map((item) => [item.id, item.position]),
+      (await store.queue.list(GUILD)).map((item) => [item.id, item.position]),
       [
         [i1.id, 0],
         [i3.id, 1],
@@ -225,43 +225,49 @@ describe('QueueRepository', () => {
       ],
     );
     // Another server's items are not touched, and an empty list writes nothing.
-    assert.equal(store.queue.removeMany(OTHER, [i1.id]), 0);
-    assert.equal(store.queue.removeMany(GUILD, []), 0);
-    assert.equal(store.queue.count(GUILD), 3);
+    assert.equal(await store.queue.removeMany(OTHER, [i1.id]), 0);
+    assert.equal(await store.queue.removeMany(GUILD, []), 0);
+    assert.equal(await store.queue.count(GUILD), 3);
   });
 });
 
 describe('HistoryRepository', () => {
-  it('pages by the order entries were written in, even when the clock went back between two plays', () => {
-    const store = memoryStore();
-    const [a, b, c] = addTracks(store, 3);
+  it('pages by the order entries were written in, even when the clock went back between two plays', async () => {
+    const store = await memoryStore();
+    const [a, b, c] = await addTracks(store, 3);
     assert.ok(a && b && c);
     // The second entry says it started earlier than the first (the clock was set back): by ID it is still newer, so
     // every entry is on exactly one page.
-    store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: 5000, playedMs: 5000 });
-    store.history.add({ guildId: GUILD, trackId: b.id, addedBy: null, playedAt: 1000, playedMs: 5000 });
-    store.history.add({ guildId: GUILD, trackId: c.id, addedBy: null, playedAt: 9000, playedMs: 5000 });
-    const first = store.history.list(GUILD, 2);
-    const second = store.history.list(GUILD, 2, first.at(-1)?.id);
+    await store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: 5000, playedMs: 5000 });
+    await store.history.add({ guildId: GUILD, trackId: b.id, addedBy: null, playedAt: 1000, playedMs: 5000 });
+    await store.history.add({ guildId: GUILD, trackId: c.id, addedBy: null, playedAt: 9000, playedMs: 5000 });
+    const first = await store.history.list(GUILD, 2);
+    const second = await store.history.list(GUILD, 2, first.at(-1)?.id);
     assert.deepEqual(
       [...first, ...second].map((entry) => entry.track.title),
       ['Track 3', 'Track 2', 'Track 1'],
     );
   });
 
-  it('lists newest first and pages back', () => {
-    const store = memoryStore();
-    const [a, b, c] = addTracks(store, 3);
+  it('lists newest first and pages back', async () => {
+    const store = await memoryStore();
+    const [a, b, c] = await addTracks(store, 3);
     assert.ok(a && b && c);
-    store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: 1000, playedMs: 5000 });
-    store.history.add({ guildId: GUILD, trackId: b.id, addedBy: 'u1', playedAt: 2000, playedMs: 6000 });
-    const newest = store.history.add({ guildId: GUILD, trackId: c.id, addedBy: null, playedAt: 3000, playedMs: 7000 });
-    const page = store.history.list(GUILD, 2);
+    await store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: 1000, playedMs: 5000 });
+    await store.history.add({ guildId: GUILD, trackId: b.id, addedBy: 'u1', playedAt: 2000, playedMs: 6000 });
+    const newest = await store.history.add({
+      guildId: GUILD,
+      trackId: c.id,
+      addedBy: null,
+      playedAt: 3000,
+      playedMs: 7000,
+    });
+    const page = await store.history.list(GUILD, 2);
     assert.deepEqual(
       page.map((entry) => entry.track.title),
       ['Track 3', 'Track 2'],
     );
-    const older = store.history.list(GUILD, 2, page.at(-1)?.id);
+    const older = await store.history.list(GUILD, 2, page.at(-1)?.id);
     assert.deepEqual(
       older.map((entry) => entry.track.title),
       ['Track 1'],
@@ -271,36 +277,36 @@ describe('HistoryRepository', () => {
 });
 
 describe('PlaylistRepository', () => {
-  it('saves, replaces, finds, renames and deletes', () => {
-    const store = memoryStore();
-    const [a, b, c] = addTracks(store, 3);
+  it('saves, replaces, finds, renames and deletes', async () => {
+    const store = await memoryStore();
+    const [a, b, c] = await addTracks(store, 3);
     assert.ok(a && b && c);
-    const saved = store.playlists.save(GUILD, '  Evening  ', [a.id, b.id], 'u1');
+    const saved = await store.playlists.save(GUILD, '  Evening  ', [a.id, b.id], 'u1');
     assert.equal(saved.name, 'Evening');
     assert.equal(saved.size, 2);
     // Saving under the same name replaces the tracks.
-    const replaced = store.playlists.save(GUILD, 'Evening', [c.id], 'u1');
+    const replaced = await store.playlists.save(GUILD, 'Evening', [c.id], 'u1');
     assert.equal(replaced.id, saved.id);
     assert.deepEqual(
-      store.playlists.tracks(saved.id).map((track) => track.title),
+      (await store.playlists.tracks(saved.id)).map((track) => track.title),
       ['Track 3'],
     );
-    store.playlists.save(GUILD, 'Morning', [a.id], null);
-    assert.throws(() => store.playlists.rename(saved.id, 'Morning'), /exists/);
-    assert.equal(store.playlists.rename(saved.id, 'Night').name, 'Night');
-    assert.equal(store.playlists.find(GUILD, 'Night')?.id, saved.id);
-    assert.equal(store.playlists.remove(saved.id), true);
-    assert.equal(store.playlists.find(GUILD, 'Night'), null);
-    assert.throws(() => store.playlists.save(GUILD, '   ', [a.id], null), StoreError);
+    await store.playlists.save(GUILD, 'Morning', [a.id], null);
+    await assert.rejects(() => store.playlists.rename(saved.id, 'Morning'), /exists/);
+    assert.equal((await store.playlists.rename(saved.id, 'Night')).name, 'Night');
+    assert.equal((await store.playlists.find(GUILD, 'Night'))?.id, saved.id);
+    assert.equal(await store.playlists.remove(saved.id), true);
+    assert.equal(await store.playlists.find(GUILD, 'Night'), null);
+    await assert.rejects(() => store.playlists.save(GUILD, '   ', [a.id], null), StoreError);
   });
 });
 
 describe('PlayerStateRepository and SettingsRepository', () => {
-  it('saves and loads the current track of each server', () => {
-    const store = memoryStore();
-    const [a] = addTracks(store, 1);
+  it('saves and loads the current track of each server', async () => {
+    const store = await memoryStore();
+    const [a] = await addTracks(store, 1);
     assert.ok(a);
-    store.playerState.save({
+    await store.playerState.save({
       guildId: GUILD,
       trackId: a.id,
       addedBy: 'u1',
@@ -308,7 +314,7 @@ describe('PlayerStateRepository and SettingsRepository', () => {
       positionMs: 1234.6,
       repeat: 'off',
     });
-    assert.deepEqual(store.playerState.load(GUILD), {
+    assert.deepEqual(await store.playerState.load(GUILD), {
       guildId: GUILD,
       trackId: a.id,
       addedBy: 'u1',
@@ -318,31 +324,33 @@ describe('PlayerStateRepository and SettingsRepository', () => {
       updatedAt: Date.UTC(2026, 10, 11),
       autoplay: 'off',
     });
-    assert.equal(store.playerState.all().length, 1);
-    assert.equal(store.playerState.load(OTHER), null);
+    assert.equal((await store.playerState.all()).length, 1);
+    assert.equal(await store.playerState.load(OTHER), null);
   });
 
-  it('defaults to no DJ role and remembers one when set', () => {
-    const store = memoryStore();
-    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
-    store.settings.setDjRole(GUILD, '200000000000000001');
-    assert.deepEqual(store.settings.get(GUILD), { djRoleId: '200000000000000001', alertsChannelId: null });
-    store.settings.setDjRole(GUILD, null);
-    assert.deepEqual(store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
+  it('defaults to no DJ role and remembers one when set', async () => {
+    const store = await memoryStore();
+    assert.deepEqual(await store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
+    await store.settings.setDjRole(GUILD, '200000000000000001');
+    assert.deepEqual(await store.settings.get(GUILD), { djRoleId: '200000000000000001', alertsChannelId: null });
+    await store.settings.setDjRole(GUILD, null);
+    assert.deepEqual(await store.settings.get(GUILD), { djRoleId: null, alertsChannelId: null });
   });
 });
 
 describe('Store.open and file modes', () => {
   // Windows keeps no such bits: the user's own profile folder, where the data is, keeps other users out there.
-  it("makes a database copied in with a looser mode this user's alone", { skip: process.platform === 'win32' }, () => {
+  it("makes a database copied in with a looser mode this user's alone", {
+    skip: process.platform === 'win32',
+  }, async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-mode-'));
     try {
       const file = path.join(dir, 'jukecord.db');
-      Store.open(file).close();
+      await (await Store.open(file)).close();
       fs.chmodSync(file, 0o644);
-      const store = Store.open(file);
+      const store = await Store.open(file);
       assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-      store.close();
+      await store.close();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -350,9 +358,10 @@ describe('Store.open and file modes', () => {
 });
 
 describe('Store.transaction when the commit fails', () => {
-  it('reports the commit error, rolls back, and leaves the next transaction working', () => {
-    const store = memoryStore();
-    const db = (store as unknown as { db: { exec(sql: string): void; isTransaction: boolean } }).db;
+  it('reports the commit error, rolls back, and leaves the next transaction working', async () => {
+    const store = await memoryStore();
+    // The driver's connection, under the SQLite executor the store runs its statements through.
+    const db = (store.sql as unknown as { db: { exec(sql: string): void; isTransaction: boolean } }).db;
     // A COMMIT that fails once, as a full disk does in WAL mode.
     const exec = db.exec.bind(db);
     let failNext = true;
@@ -363,7 +372,7 @@ describe('Store.transaction when the commit fails', () => {
       }
       exec(sql);
     };
-    assert.throws(
+    await assert.rejects(
       () =>
         store.transaction(() =>
           store.tracks.upsert({
@@ -379,7 +388,7 @@ describe('Store.transaction when the commit fails', () => {
     );
     assert.equal(db.isTransaction, false);
     // The next transaction (and a nested one inside it) works as before.
-    const track = store.transaction(() =>
+    const track = await store.transaction(() =>
       store.transaction(() =>
         store.tracks.upsert({
           source: 'https://example.com/b',
@@ -392,6 +401,6 @@ describe('Store.transaction when the commit fails', () => {
       ),
     );
     assert.equal(track.title, 'B');
-    assert.equal(store.tracks.bySource('https://example.com/a'), null);
+    assert.equal(await store.tracks.bySource('https://example.com/a'), null);
   });
 });

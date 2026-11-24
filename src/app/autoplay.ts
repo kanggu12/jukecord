@@ -19,6 +19,7 @@
  */
 import type { Bus } from '../core/bus.ts';
 import type { Clock, TimerHandle } from '../core/clock.ts';
+import type { GuildLanes } from '../core/lanes.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
@@ -48,6 +49,8 @@ export interface AutoplayOptions {
   readonly players: Players;
   readonly queue: QueueService;
   readonly store: Store;
+  /** The servers' lanes: a pick is checked and queued in its server's turn (the looking for one is not). */
+  readonly lanes: GuildLanes;
   /** The lookup slots shared with the resolver and the search: a mix is one listing in one of them. */
   readonly slots: Pick<Resolver, 'run'>;
   /** YouTube's mix of a video (absent: "related" picks from the history). */
@@ -130,19 +133,12 @@ export class Autoplay {
     }
     const player = this.options.players.existing(guildId);
     if (!player) return;
+    // Looked at before the queue is counted (nothing is read for a server without autoplay), and again after, on the
+    // player as it is then: everything from there to taking the pick in hand happens in one go, as it did.
+    if (!this.wanted(state, player.snapshot())) return;
+    const waiting = await this.options.queue.size(guildId);
     const snapshot = player.snapshot();
-    // Off, or a repeat that keeps the queue from running out: a pick under way is not wanted any more.
-    if (snapshot.autoplay === 'off' || snapshot.repeat !== 'off') {
-      state.picking?.abort();
-      state.picking = null;
-      return;
-    }
-    // Picked when a track is current and nothing waits after it; once per start; not after a person's Stop.
-    if (!snapshot.track || state.stopped || state.picking) return;
-    // Only while the music goes on (a track loading or playing), and not when it stops after this track: a paused
-    // player (a person's pause, or resting with nobody listening) is looked at again when it plays on.
-    if ((snapshot.status !== 'loading' && snapshot.status !== 'playing') || snapshot.stopAfter) return;
-    if (this.options.queue.size(guildId) > 0) return;
+    if (!this.wanted(state, snapshot) || waiting > 0 || !snapshot.track) return;
     const start = `${snapshot.track.id}:${state.starts}`;
     if (state.pickedFor === start) return;
     state.pickedFor = start;
@@ -155,28 +151,33 @@ export class Autoplay {
         this.options.log.info('autoplay found nothing to play', { guild: guildId, mode: snapshot.autoplay });
         return;
       }
-      // Still wanted? Nothing queued meanwhile, the same mode, no Stop, and the player still on this start or idle
-      // after it (the track ended, or was skipped, before the pick came).
-      const now = player.snapshot();
-      // Paused meanwhile (by a person, or resting with nobody listening), or asked to stop after this track: nothing is
-      // queued now, and the pick is made again when the music goes on.
-      if (now.status === 'paused' || now.stopAfter) {
-        if (state.pickedFor === start) state.pickedFor = null;
-        return;
-      }
-      const sameStart = now.track !== null && `${now.track.id}:${state.starts}` === start;
-      if (
-        this.options.queue.size(guildId) > 0 ||
-        now.autoplay === 'off' ||
-        now.repeat !== 'off' ||
-        state.stopped ||
-        !(sameStart || now.status === 'idle')
-      )
-        return;
-      this.options.queue.add(guildId, [pick.id], 'end', AUTOPLAY);
-      this.options.log.info('autoplay queued a track', { guild: guildId, mode: snapshot.autoplay, track: pick.url });
-      // Ended by itself before the pick came: the music goes on.
-      if (now.status === 'idle') player.play();
+      // Whether it is still wanted, and queueing it, in one turn of the server's: nothing can change between the two.
+      await this.options.lanes.run(guildId, async () => {
+        // Stopped by a person while the pick waited for its turn: not wanted.
+        if (stop.signal.aborted) return;
+        // Still wanted? Nothing queued meanwhile, the same mode, no Stop, and the player still on this start or idle
+        // after it (the track ended, or was skipped, before the pick came).
+        const now = player.snapshot();
+        // Paused meanwhile (by a person, or resting with nobody listening), or asked to stop after this track: nothing
+        // is queued now, and the pick is made again when the music goes on.
+        if (now.status === 'paused' || now.stopAfter) {
+          if (state.pickedFor === start) state.pickedFor = null;
+          return;
+        }
+        const sameStart = now.track !== null && `${now.track.id}:${state.starts}` === start;
+        if (
+          (await this.options.queue.size(guildId)) > 0 ||
+          now.autoplay === 'off' ||
+          now.repeat !== 'off' ||
+          state.stopped ||
+          !(sameStart || now.status === 'idle')
+        )
+          return;
+        await this.options.queue.add(guildId, [pick.id], 'end', AUTOPLAY);
+        this.options.log.info('autoplay queued a track', { guild: guildId, mode: snapshot.autoplay, track: pick.url });
+        // Ended by itself before the pick came: the music goes on.
+        if (now.status === 'idle') await player.play();
+      });
     } catch (error) {
       if (!stop.signal.aborted)
         this.options.log.info('autoplay could not pick a track', {
@@ -188,15 +189,31 @@ export class Autoplay {
     }
   }
 
+  // Whether a pick is wanted for the player as it is (a pick under way that is not wanted any more is dropped): on, no
+  // repeat, a track current, once per start, not after a person's Stop, and the music going on.
+  private wanted(state: ServerState, snapshot: PlayerSnapshot): boolean {
+    // Off, or a repeat that keeps the queue from running out: a pick under way is not wanted any more.
+    if (snapshot.autoplay === 'off' || snapshot.repeat !== 'off') {
+      state.picking?.abort();
+      state.picking = null;
+      return false;
+    }
+    // Picked when a track is current and nothing waits after it; once per start; not after a person's Stop.
+    if (!snapshot.track || state.stopped || state.picking) return false;
+    // Only while the music goes on (a track loading or playing), and not when it stops after this track: a paused
+    // player (a person's pause, or resting with nobody listening) is looked at again when it plays on.
+    return (snapshot.status === 'loading' || snapshot.status === 'playing') && !snapshot.stopAfter;
+  }
+
   // The track to queue for the server's mode, or null.
   private async pick(guildId: string, snapshot: PlayerSnapshot, signal: AbortSignal): Promise<Track | null> {
     const current = snapshot.track;
     // Never what waits (nothing, but a person may add meanwhile) nor the track playing.
     const taken = new Set<number>();
-    for (const item of this.options.queue.list(guildId)) taken.add(item.track.id);
+    for (const item of await this.options.queue.list(guildId)) taken.add(item.track.id);
     if (current) taken.add(current.id);
     // The tracks of the newest plays, newest first, each once: clear of them as well.
-    const recent = this.options.store.history.recentTrackIds(guildId, AUTOPLAY_RECENT);
+    const recent = await this.options.store.history.recentTrackIds(guildId, AUTOPLAY_RECENT);
     const avoid = new Set([...taken, ...recent]);
     if (snapshot.autoplay === 'related' && current) {
       try {
@@ -215,19 +232,17 @@ export class Autoplay {
     // nothing to pick, and its music stopped with the queue: clear of the newer half of those tracks only, it plays on
     // with the ones heard longest ago (with two tracks, the other one).
     return (
-      this.fromHistory(guildId, avoid) ??
-      this.fromHistory(guildId, new Set([...taken, ...recent.slice(0, Math.floor(recent.length / 2))]))
+      (await this.fromHistory(guildId, avoid)) ??
+      (await this.fromHistory(guildId, new Set([...taken, ...recent.slice(0, Math.floor(recent.length / 2))])))
     );
   }
 
   /** A track drawn from the server's plays, weighted by how often it played and how many liked it; null for none. */
-  fromHistory(guildId: string, avoid: ReadonlySet<number>): Track | null {
-    const candidates = this.options.store.history
-      .playCounts(guildId)
-      .filter(
-        (entry) =>
-          !avoid.has(entry.trackId) && (entry.durationMs === null || entry.durationMs <= this.options.trackMaxMs),
-      );
+  async fromHistory(guildId: string, avoid: ReadonlySet<number>): Promise<Track | null> {
+    const candidates = (await this.options.store.history.playCounts(guildId)).filter(
+      (entry) =>
+        !avoid.has(entry.trackId) && (entry.durationMs === null || entry.durationMs <= this.options.trackMaxMs),
+    );
     if (candidates.length === 0) return null;
     const weights = candidates.map((entry) => entry.plays + LIKE_WEIGHT * entry.likes);
     const total = weights.reduce((sum, weight) => sum + weight, 0);
@@ -275,7 +290,7 @@ export class Autoplay {
       if (signal.aborted) return null;
       if (entry.source === current.source) continue;
       if (entry.durationMs !== null && entry.durationMs > this.options.trackMaxMs) continue;
-      const known = this.options.store.tracks.bySource(entry.source);
+      const known = await this.options.store.tracks.bySource(entry.source);
       if (known && avoid.has(known.id)) continue;
       // The same check as any address added: a mix lists YouTube's own pages, but nothing is taken on trust.
       try {

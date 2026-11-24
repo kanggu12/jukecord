@@ -70,37 +70,43 @@ const PEOPLE = ['Mina', 'Joon', '하늘', 'Sol', 'Ara', 'Theo', '도윤', 'Kai']
 }));
 
 fs.mkdirSync(dataDir, { recursive: true });
-const store = Store.open(path.join(dataDir, 'jukecord.db'));
-for (const person of PEOPLE) store.users.upsert({ id: person.id, name: person.name, avatar: null });
+const store = await Store.open(path.join(dataDir, 'jukecord.db'));
+for (const person of PEOPLE) await store.users.upsert({ id: person.id, name: person.name, avatar: null });
 
-const tracks = store.transaction(() =>
-  Array.from({ length: 1000 }, () => {
+const tracks = await store.transaction(async () => {
+  const made = [];
+  // One after the other, the random numbers drawn in the same order as ever, so the data is the same on every run.
+  for (let n = 0; n < 1000; n += 1) {
     const id = videoId();
     const words = Array.from({ length: 2 + Math.floor(random() * 5) }, () => pick(WORDS)).join(' ');
-    return store.tracks.upsert({
-      source: `https://media.example/watch?v=${id}`,
-      url: `https://media.example/watch?v=${id}`,
-      title: `${words}${pick(SUFFIXES)}`,
-      uploader: pick(ARTISTS),
-      // Two to seven minutes.
-      durationMs: Math.round(120_000 + random() * 300_000),
-      thumbnail: `https://images.media.example/vi/${id}/hqdefault.jpg`,
-    });
-  }),
-);
+    made.push(
+      await store.tracks.upsert({
+        source: `https://media.example/watch?v=${id}`,
+        url: `https://media.example/watch?v=${id}`,
+        title: `${words}${pick(SUFFIXES)}`,
+        uploader: pick(ARTISTS),
+        // Two to seven minutes.
+        durationMs: Math.round(120_000 + random() * 300_000),
+        thumbnail: `https://images.media.example/vi/${id}/hqdefault.jpg`,
+      }),
+    );
+  }
+  return made;
+});
 
 // The whole thousand in the queue, added by the people in turn.
-store.queue.insert(
+await store.queue.insert(
   GUILD,
   tracks.map((track) => track.id),
   0,
   null,
 );
-store.transaction(() => {
-  for (const [index, item] of store.queue.list(GUILD).entries()) {
-    store.db
-      .prepare('UPDATE queue_items SET added_by = ? WHERE id = ?')
-      .run(PEOPLE[index % PEOPLE.length]?.id ?? null, item.id);
+await store.transaction(async () => {
+  for (const [index, item] of (await store.queue.list(GUILD)).entries()) {
+    await store.sql.run('UPDATE queue_items SET added_by = ? WHERE id = ?', [
+      PEOPLE[index % PEOPLE.length]?.id ?? null,
+      item.id,
+    ]);
   }
 });
 
@@ -120,8 +126,8 @@ for (let play = 0; play < 10_000; play += 1) {
 }
 // Written oldest first, as a server writes them while it plays: the history is listed in the order it was written.
 plays.sort((a, b) => a.playedAt - b.playedAt);
-store.transaction(() => {
-  for (const play of plays) store.history.add(play);
+await store.transaction(async () => {
+  for (const play of plays) await store.history.add(play);
 });
 
 // A few saved playlists of different sizes.
@@ -130,7 +136,7 @@ for (const [name, size] of [
   ['드라이브', 120],
   ['Everything', 400],
 ] as const) {
-  store.playlists.save(
+  await store.playlists.save(
     GUILD,
     name,
     tracks.slice(0, size).map((track) => track.id),
@@ -138,9 +144,9 @@ for (const [name, size] of [
   );
 }
 
-const count = (table: string): number =>
-  (store.db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+const count = async (table: string): Promise<number> =>
+  Number((await store.sql.get(`SELECT count(*) AS n FROM ${table}`))?.n ?? 0);
 console.log(
-  `seeded ${dataDir}: ${count('tracks')} tracks, ${count('queue_items')} queued, ${count('history')} plays, ${count('playlists')} playlists`,
+  `seeded ${dataDir}: ${await count('tracks')} tracks, ${await count('queue_items')} queued, ${await count('history')} plays, ${await count('playlists')} playlists`,
 );
-store.close();
+await store.close();

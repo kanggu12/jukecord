@@ -6,16 +6,16 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type Alert, Alerts, turnedAwayAlert } from '../../src/app/alerts.ts';
 import { createLogger, MemorySink } from '../../src/log.ts';
-import { FakeClock } from '../support/fakes.ts';
+import { FakeClock, flush } from '../support/fakes.ts';
 import { memoryStore } from '../support/store.ts';
 
 const A = '100000000000000001';
 const B = '100000000000000002';
 const C = '100000000000000003';
 
-function setup() {
+async function setup() {
   const clock = new FakeClock();
-  const store = memoryStore();
+  const store = await memoryStore();
   const sink = new MemorySink();
   const posted: { guildId: string; channelId: string; alert: Alert }[] = [];
   const alerts = new Alerts({
@@ -29,30 +29,30 @@ function setup() {
     clock,
   });
   // Two servers chose a channel; the third did not.
-  store.settings.setAlertsChannel(A, '600000000000000001');
-  store.settings.setAlertsChannel(B, '600000000000000002');
+  await store.settings.setAlertsChannel(A, '600000000000000001');
+  await store.settings.setAlertsChannel(B, '600000000000000002');
   return { clock, store, sink, posted, alerts };
 }
 
 describe('Alerts', () => {
   it("tells every server that chose a channel about jukecord's own trouble, once an hour, and the log each time", async () => {
-    const { clock, sink, posted, alerts } = setup();
+    const { clock, sink, posted, alerts } = await setup();
     const restarted: Alert = { kind: 'restarted', guildId: null, en: 'jukecord restarted itself', ko: 'k' };
-    alerts.raise(restarted);
+    await alerts.raise(restarted);
     assert.deepEqual(
       posted.map((entry) => `${entry.guildId} ${entry.channelId}`),
       [`${A} 600000000000000001`, `${B} 600000000000000002`],
     );
-    alerts.raise(restarted);
+    await alerts.raise(restarted);
     assert.equal(posted.length, 2);
     await clock.advance(3_600_000);
-    alerts.raise(restarted);
+    await alerts.raise(restarted);
     assert.equal(posted.length, 4);
     assert.equal(sink.records.filter((record) => record.msg === 'jukecord restarted itself').length, 3);
   });
 
-  it('tells one server about its own trouble, a lost track apart from another, and nobody without a channel', () => {
-    const { posted, alerts } = setup();
+  it('tells one server about its own trouble, a lost track apart from another, and nobody without a channel', async () => {
+    const { posted, alerts } = await setup();
     const lost = (guildId: string, title: string): Alert => ({
       kind: 'loop',
       guildId,
@@ -61,18 +61,18 @@ describe('Alerts', () => {
       ko: 'k',
       logged: true,
     });
-    alerts.raise(lost(A, 'Track 1'));
-    alerts.raise(lost(A, 'Track 2'));
-    alerts.raise(lost(A, 'Track 1'));
-    alerts.raise(lost(C, 'Track 1'));
+    await alerts.raise(lost(A, 'Track 1'));
+    await alerts.raise(lost(A, 'Track 2'));
+    await alerts.raise(lost(A, 'Track 1'));
+    await alerts.raise(lost(C, 'Track 1'));
     assert.deepEqual(
       posted.map((entry) => `${entry.guildId} ${entry.alert.en}`),
       [`${A} Track 1: taken out of the looping queue`, `${A} Track 2: taken out of the looping queue`],
     );
   });
 
-  it("says YouTube's check for bots once as it starts and once as it ends, whatever the number of failures", () => {
-    const { posted, alerts } = setup();
+  it("says YouTube's check for bots once as it starts and once as it ends, whatever the number of failures", async () => {
+    const { posted, alerts } = await setup();
     const check = "ERROR: [youtube] abc: Sign in to confirm you're not a bot";
     alerts.failed('https://www.youtube.com/watch?v=abc', check);
     alerts.failed('search', check);
@@ -81,14 +81,16 @@ describe('Alerts', () => {
     alerts.failed('https://www.youtube.com/watch?v=def', 'HTTP Error 503: Service Unavailable');
     alerts.worked('https://music.youtube.com/watch?v=ghi');
     alerts.worked('https://www.youtube.com/watch?v=jkl');
+    // Posted once the channels are read from the settings, a moment later.
+    await flush();
     assert.deepEqual(
       posted.filter((entry) => entry.guildId === A).map((entry) => entry.alert.kind),
       ['bot-check', 'bot-check-over'],
     );
   });
 
-  it('does not end a bot check on a search or a playlist, which never reach the page where YouTube checks', () => {
-    const { posted, alerts } = setup();
+  it('does not end a bot check on a search or a playlist, which never reach the page where YouTube checks', async () => {
+    const { posted, alerts } = await setup();
     const check = "ERROR: [youtube] abc: Sign in to confirm you're not a bot";
     alerts.failed('https://www.youtube.com/watch?v=abc', check);
     // Words searched, a playlist listed: both flat (ytdlp.ts), and both work through a bot check.
@@ -96,6 +98,8 @@ describe('Alerts', () => {
     alerts.worked('https://www.youtube.com/playlist?list=PL0123456789');
     // The check still holds: the next fetch is refused, and nothing more is said (it was never over).
     alerts.failed('https://www.youtube.com/watch?v=def', check);
+    // Posted once the channels are read from the settings, a moment later.
+    await flush();
     assert.deepEqual(
       posted.filter((entry) => entry.guildId === A).map((entry) => entry.alert.kind),
       ['bot-check'],

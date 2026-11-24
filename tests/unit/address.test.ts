@@ -99,7 +99,7 @@ describe('publicAddressesOnly', () => {
 
 describe('Resolver limits', () => {
   it('refuses an address on a private network before yt-dlp runs, and a fifth lookup while four run', async () => {
-    const store = memoryStore();
+    const store = await memoryStore();
     const waiting: (() => void)[] = [];
     let runs = 0;
     const ytdlp = {
@@ -132,7 +132,7 @@ describe('Resolver limits', () => {
   });
 
   it('lets one person have two lookups running, not all four', async () => {
-    const store = memoryStore();
+    const store = await memoryStore();
     const waiting: (() => void)[] = [];
     const ytdlp = {
       lookup: () => new Promise((resolve) => waiting.push(() => resolve([]))),
@@ -155,7 +155,7 @@ describe('Resolver limits', () => {
   });
 
   it('lets one server have three lookups running, so another server still gets one', async () => {
-    const store = memoryStore();
+    const store = await memoryStore();
     const waiting: (() => void)[] = [];
     const ytdlp = {
       lookup: () => new Promise((resolve) => waiting.push(() => resolve([]))),

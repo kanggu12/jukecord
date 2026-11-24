@@ -343,10 +343,10 @@ export class Lyrics implements LyricsSource {
 
   /** A track's lyrics: what is kept when it is fresh, else looked up (once, however many ask). */
   async forTrack(track: Track): Promise<LyricsAnswer> {
-    const kept = this.options.lyrics.get(track.id);
+    const kept = await this.options.lyrics.get(track.id);
     if (kept && (kept.kind !== 'none' || this.now() - kept.fetchedAt < NONE_AGAIN_MS)) return this.answer(kept);
     const pending = this.pending.get(track.id);
-    if (pending) return pending;
+    if (pending !== undefined) return pending;
     const failedAt = this.failed.get(track.id);
     if (failedAt !== undefined && this.now() - failedAt < FAILED_WAIT_MS) {
       // Asked again only once the wait after the failure is over.
@@ -369,10 +369,10 @@ export class Lyrics implements LyricsSource {
   // Asks LRCLIB for a track's lyrics and keeps what it says, or that it found nothing. A failure is remembered (see
   // FAILED_WAIT_MS) and said as "unavailable"; it is not kept as "nothing found".
   private async lookUp(track: Track): Promise<LyricsAnswer> {
-    const song = songOf(track, this.options.music.get(track.id));
+    const song = songOf(track, await this.options.music.get(track.id));
     try {
       const record = song ? await this.find(song) : null;
-      const row = this.options.lyrics.save(
+      const row = await this.options.lyrics.save(
         record
           ? {
               trackId: track.id,

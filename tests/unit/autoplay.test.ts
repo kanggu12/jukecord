@@ -10,6 +10,7 @@ import { describe, it } from 'node:test';
 import { type ActionContext, Actions } from '../../src/app/actions.ts';
 import { Autoplay } from '../../src/app/autoplay.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { AUTOPLAY, type Track } from '../../src/core/types.ts';
@@ -25,13 +26,15 @@ const GUILD = '100000000000000001';
 const ALICE = '300000000000000001';
 const MIX = JSON.parse(fs.readFileSync(new URL('../fixtures/ytdlp-mix.json', import.meta.url), 'utf8'));
 
-function setup(options: { random?: () => number; mixFails?: boolean } = {}) {
+async function setup(options: { random?: () => number; mixFails?: boolean } = {}) {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   const players = new Players({
+    lanes,
     queue,
     media,
     history: store.history,
@@ -52,6 +55,7 @@ function setup(options: { random?: () => number; mixFails?: boolean } = {}) {
   } as unknown as YtDlp;
   const slots = new Resolver({ ytdlp: {} as YtDlp, tracks: store.tracks, log });
   const autoplay = new Autoplay({
+    lanes,
     bus,
     players,
     queue,
@@ -64,16 +68,22 @@ function setup(options: { random?: () => number; mixFails?: boolean } = {}) {
     random: options.random ?? (() => 0),
   });
   autoplay.start();
-  const actions = new Actions({ store, queue, players, resolver: {} as Resolver, log, autoplay });
-  return { clock, store, queue, media, players, autoplay, actions, mixes };
+  const actions = new Actions({ lanes, store, queue, players, resolver: {} as Resolver, log, autoplay });
+  return { clock, store, queue, media, players, autoplay, actions, mixes, lanes };
 }
 
 const DJ: ActionContext = { guildId: GUILD, userId: ALICE, mayControl: true, mayManage: false };
 
 // Records plays of tracks in the server's history, oldest first.
-function played(store: ReturnType<typeof memoryStore>, tracks: readonly Track[]): void {
+async function played(store: Awaited<ReturnType<typeof memoryStore>>, tracks: readonly Track[]): Promise<void> {
   for (const [index, track] of tracks.entries())
-    store.history.add({ guildId: GUILD, trackId: track.id, addedBy: ALICE, playedAt: index + 1, playedMs: 60_000 });
+    await store.history.add({
+      guildId: GUILD,
+      trackId: track.id,
+      addedBy: ALICE,
+      playedAt: index + 1,
+      playedMs: 60_000,
+    });
 }
 
 // Lets autoplay look (it waits a moment after a change) and finish its pick.
@@ -84,18 +94,18 @@ async function settle(clock: FakeClock): Promise<void> {
 
 describe('autoplay from the history', () => {
   it('queues a track the server played when the last one starts, as autoplay’s', async () => {
-    const { clock, store, queue, players, actions } = setup();
-    const tracks = addTracks(store, 3);
+    const { clock, store, queue, players, actions } = await setup();
+    const tracks = await addTracks(store, 3);
     const [old, , last] = tracks;
     assert.ok(old && last);
     // Thirty-one plays: the oldest one is far enough back to be picked.
-    const many = addTracks(store, 31, 'h');
-    played(store, [old, ...many]);
-    actions.autoplay(DJ, 'history');
-    queue.add(GUILD, [last.id], 'end', ALICE);
-    players.get(GUILD).play();
+    const many = await addTracks(store, 31, 'h');
+    await played(store, [old, ...many]);
+    await actions.autoplay(DJ, 'history');
+    await queue.add(GUILD, [last.id], 'end', ALICE);
+    await players.get(GUILD).play();
     await settle(clock);
-    const items = queue.list(GUILD);
+    const items = await queue.list(GUILD);
     assert.equal(items.length, 1);
     assert.equal(items[0]?.addedBy, AUTOPLAY);
     // The only one clear of the newest thirty plays, the track playing and the queue: the oldest of the thirty-one.
@@ -103,19 +113,19 @@ describe('autoplay from the history', () => {
   });
 
   it('picks from the older half of a short history, so a new server’s autoplay plays too', async () => {
-    const { clock, store, queue, players, actions, media } = setup();
+    const { clock, store, queue, players, actions, media } = await setup();
     // A server that played three tracks so far: every one of them is among its newest thirty plays.
-    const [first, second, third] = addTracks(store, 3);
+    const [first, second, third] = await addTracks(store, 3);
     assert.ok(first && second && third);
-    played(store, [first, second]);
-    actions.autoplay(DJ, 'history');
-    queue.add(GUILD, [third.id], 'end', ALICE);
+    await played(store, [first, second]);
+    await actions.autoplay(DJ, 'history');
+    await queue.add(GUILD, [third.id], 'end', ALICE);
     const player = players.get(GUILD);
-    player.play();
+    await player.play();
     await settle(clock);
     // Not the track playing, nor the newest play: the one played longest ago.
     assert.deepEqual(
-      queue.list(GUILD).map((item) => [item.track.id, item.addedBy]),
+      (await queue.list(GUILD)).map((item) => [item.track.id, item.addedBy]),
       [[first.id, AUTOPLAY]],
     );
     // The music goes on: when the pick starts, the next pick is again one played longest ago, not the one just heard.
@@ -125,26 +135,26 @@ describe('autoplay from the history', () => {
     await settle(clock);
     assert.equal(player.snapshot().track?.id, first.id);
     assert.deepEqual(
-      queue.list(GUILD).map((item) => item.track.id),
+      (await queue.list(GUILD)).map((item) => item.track.id),
       [second.id],
     );
   });
 
-  it('weighs a track by its plays and its likes', () => {
-    const { store, autoplay } = setup();
-    const [once, often, liked] = addTracks(store, 3);
+  it('weighs a track by its plays and its likes', async () => {
+    const { store, autoplay } = await setup();
+    const [once, often, liked] = await addTracks(store, 3);
     assert.ok(once && often && liked);
-    played(store, [once, often, often, often, liked]);
-    store.likes.add(ALICE, liked.id);
-    store.likes.add('host', liked.id);
+    await played(store, [once, often, often, often, liked]);
+    await store.likes.add(ALICE, liked.id);
+    await store.likes.add('host', liked.id);
     // Weights 1, 3 and 1 + 2 * 2 = 5 (in the history's order of tracks), out of 9: the draw falls by its place.
-    const order = store.history.playCounts(GUILD).map((entry) => entry.trackId);
-    const at = (fraction: number) => {
+    const order = (await store.history.playCounts(GUILD)).map((entry) => entry.trackId);
+    const at = async (fraction: number) => {
       const picker = new Autoplay({
         ...(autoplay as unknown as { options: object }).options,
         random: () => fraction,
       } as never);
-      return picker.fromHistory(GUILD, new Set())?.id;
+      return (await picker.fromHistory(GUILD, new Set()))?.id;
     };
     const weights = new Map([
       [once.id, 1],
@@ -155,63 +165,63 @@ describe('autoplay from the history', () => {
     for (const id of order) {
       const weight = weights.get(id) ?? 0;
       // Just inside the track's share of the nine.
-      assert.equal(at((edge + weight - 0.5) / 9), id);
+      assert.equal(await at((edge + weight - 0.5) / 9), id);
       edge += weight;
     }
   });
 
   it('picks nothing while a repeat is on, nor when it is off', async () => {
-    const { clock, store, queue, players, actions } = setup();
-    const tracks = addTracks(store, 40);
-    played(store, tracks.slice(0, 39));
-    actions.repeat(DJ, 'queue');
-    actions.autoplay(DJ, 'history');
-    queue.add(GUILD, [tracks[39]?.id ?? 0], 'end', ALICE);
-    players.get(GUILD).play();
+    const { clock, store, queue, players, actions } = await setup();
+    const tracks = await addTracks(store, 40);
+    await played(store, tracks.slice(0, 39));
+    await actions.repeat(DJ, 'queue');
+    await actions.autoplay(DJ, 'history');
+    await queue.add(GUILD, [tracks[39]?.id ?? 0], 'end', ALICE);
+    await players.get(GUILD).play();
     await settle(clock);
-    assert.equal(queue.size(GUILD), 0);
-    actions.repeat(DJ, 'off');
-    actions.autoplay(DJ, 'off');
+    assert.equal(await queue.size(GUILD), 0);
+    await actions.repeat(DJ, 'off');
+    await actions.autoplay(DJ, 'off');
     await settle(clock);
-    assert.equal(queue.size(GUILD), 0);
+    assert.equal(await queue.size(GUILD), 0);
     // Turned on while the last track plays: it picks now.
-    actions.autoplay(DJ, 'history');
+    await actions.autoplay(DJ, 'history');
     await settle(clock);
-    assert.equal(queue.size(GUILD), 1);
+    assert.equal(await queue.size(GUILD), 1);
   });
 
   it('picks once per start: a pick a person removed is not put back', async () => {
-    const { clock, store, queue, players, actions } = setup();
-    const tracks = addTracks(store, 40);
-    played(store, tracks.slice(0, 39));
-    actions.autoplay(DJ, 'history');
-    queue.add(GUILD, [tracks[39]?.id ?? 0], 'end', ALICE);
-    players.get(GUILD).play();
+    const { clock, store, queue, players, actions } = await setup();
+    const tracks = await addTracks(store, 40);
+    await played(store, tracks.slice(0, 39));
+    await actions.autoplay(DJ, 'history');
+    await queue.add(GUILD, [tracks[39]?.id ?? 0], 'end', ALICE);
+    await players.get(GUILD).play();
     await settle(clock);
-    const [pick] = queue.list(GUILD);
+    const [pick] = await queue.list(GUILD);
     assert.ok(pick);
-    actions.remove(DJ, pick.id);
+    await actions.remove(DJ, pick.id);
     await settle(clock);
-    assert.equal(queue.size(GUILD), 0);
+    assert.equal(await queue.size(GUILD), 0);
   });
 
   it('stops with a person’s Stop until a track starts again, and plays on after an end by itself', async () => {
-    const { clock, store, queue, players, actions, media } = setup();
-    const tracks = addTracks(store, 40);
-    played(store, tracks.slice(0, 38));
-    actions.autoplay(DJ, 'history');
-    queue.add(GUILD, [tracks[38]?.id ?? 0], 'end', ALICE);
+    const { clock, store, queue, players, actions, media } = await setup();
+    const tracks = await addTracks(store, 40);
+    await played(store, tracks.slice(0, 38));
+    await actions.autoplay(DJ, 'history');
+    await queue.add(GUILD, [tracks[38]?.id ?? 0], 'end', ALICE);
     const player = players.get(GUILD);
-    player.play();
+    await player.play();
     // Stopped before autoplay looked: nothing is queued.
-    actions.stop(DJ);
+    await actions.stop(DJ);
     await settle(clock);
-    assert.equal(queue.size(GUILD), 0);
+    assert.equal(await queue.size(GUILD), 0);
     // A track starts again: autoplay picks for it.
-    queue.add(GUILD, [tracks[39]?.id ?? 0], 'end', ALICE);
-    player.play();
+    await queue.add(GUILD, [tracks[39]?.id ?? 0], 'end', ALICE);
+    await player.play();
     await settle(clock);
-    assert.equal(queue.size(GUILD), 1);
+    assert.equal(await queue.size(GUILD), 1);
     // The track plays to its end by itself: the pick plays next, and autoplay picks again for it.
     media.finish(180_000);
     await flush();
@@ -233,39 +243,39 @@ describe('autoplay from YouTube’s mix', () => {
   };
 
   it('queues the first track of the mix that did not play lately, and asks for a mix once', async () => {
-    const { clock, store, queue, players, actions, mixes } = setup();
-    const current = store.tracks.upsert(seed);
+    const { clock, store, queue, players, actions, mixes } = await setup();
+    const current = await store.tracks.upsert(seed);
     // The mix's second track played lately: the third is picked.
-    const second = store.tracks.upsert(tracksFromInfo(MIX, 2)[1] ?? seed);
-    played(store, [second]);
-    actions.autoplay(DJ, 'related');
-    queue.add(GUILD, [current.id], 'end', ALICE);
-    players.get(GUILD).play();
+    const second = await store.tracks.upsert(tracksFromInfo(MIX, 2)[1] ?? seed);
+    await played(store, [second]);
+    await actions.autoplay(DJ, 'related');
+    await queue.add(GUILD, [current.id], 'end', ALICE);
+    await players.get(GUILD).play();
     await settle(clock);
-    const [pick] = queue.list(GUILD);
+    const [pick] = await queue.list(GUILD);
     assert.equal(pick?.addedBy, AUTOPLAY);
     assert.equal(pick?.track.source, 'https://www.youtube.com/watch?v=mixx0000003');
     assert.deepEqual(mixes, ['mixx0000001']);
     // The same track again later: the mix is known.
-    queue.clear(GUILD);
-    players.get(GUILD).stop();
-    queue.add(GUILD, [current.id], 'end', ALICE);
-    players.get(GUILD).play();
+    await queue.clear(GUILD);
+    await players.get(GUILD).stop();
+    await queue.add(GUILD, [current.id], 'end', ALICE);
+    await players.get(GUILD).play();
     await settle(clock);
     assert.deepEqual(mixes, ['mixx0000001']);
   });
 
   it('picks from the history for a track not on YouTube, or when the mix fails', async () => {
     for (const mixFails of [false, true]) {
-      const { clock, store, queue, players, actions } = setup({ mixFails });
-      const tracks = addTracks(store, 40);
-      played(store, tracks.slice(0, 39));
-      const playing = mixFails ? store.tracks.upsert(seed) : (tracks[39] as Track);
-      actions.autoplay(DJ, 'related');
-      queue.add(GUILD, [playing.id], 'end', ALICE);
-      players.get(GUILD).play();
+      const { clock, store, queue, players, actions } = await setup({ mixFails });
+      const tracks = await addTracks(store, 40);
+      await played(store, tracks.slice(0, 39));
+      const playing = mixFails ? await store.tracks.upsert(seed) : (tracks[39] as Track);
+      await actions.autoplay(DJ, 'related');
+      await queue.add(GUILD, [playing.id], 'end', ALICE);
+      await players.get(GUILD).play();
       await settle(clock);
-      const [pick] = queue.list(GUILD);
+      const [pick] = await queue.list(GUILD);
       assert.equal(pick?.addedBy, AUTOPLAY, `mix fails: ${mixFails}`);
       assert.ok(tracks.some((track) => track.id === pick?.track.id));
     }
@@ -274,15 +284,16 @@ describe('autoplay from YouTube’s mix', () => {
 
 describe('a person’s tracks and autoplay’s', () => {
   it('go before autoplay’s at the end, which say "Autoplay" for who added them', async () => {
-    const { store, queue, actions } = setup();
-    const [mine, picked, next, playing] = addTracks(store, 4);
+    const { store, queue, actions, lanes } = await setup();
+    const [mine, picked, next, playing] = await addTracks(store, 4);
     assert.ok(mine && picked && next && playing);
     // Something plays, so the adds below wait in the queue.
-    queue.add(GUILD, [playing.id], 'end', ALICE);
-    (actions as unknown as { options: { players: Players } }).options.players.get(GUILD).play();
-    queue.add(GUILD, [picked.id], 'end', AUTOPLAY);
+    await queue.add(GUILD, [playing.id], 'end', ALICE);
+    await (actions as unknown as { options: { players: Players } }).options.players.get(GUILD).play();
+    await queue.add(GUILD, [picked.id], 'end', AUTOPLAY);
     // The resolver of these actions knows the example addresses.
     const resolving = new Actions({
+      lanes,
       store,
       queue,
       players: (actions as unknown as { options: { players: Players } }).options.players,
@@ -292,24 +303,27 @@ describe('a person’s tracks and autoplay’s', () => {
     await resolving.add(DJ, 'mine');
     await resolving.add(DJ, 'next', 'next');
     assert.deepEqual(
-      queue.list(GUILD).map((item) => [item.track.id, item.addedBy]),
+      (await queue.list(GUILD)).map((item) => [item.track.id, item.addedBy]),
       [
         [next.id, ALICE],
         [mine.id, ALICE],
         [picked.id, AUTOPLAY],
       ],
     );
-    const shown = new Presenter(store.users).items(queue.list(GUILD));
+    const shown = await new Presenter(store.users).items(await queue.list(GUILD));
     assert.equal(shown[2]?.addedByName, 'Autoplay');
   });
 
-  it('keeps the mode across a restart, with the rest of the player', () => {
-    const { store, actions } = setup();
-    actions.autoplay(DJ, 'related');
+  it('keeps the mode across a restart, with the rest of the player', async () => {
+    const { store, actions } = await setup();
+    await actions.autoplay(DJ, 'related');
     const clock = new FakeClock();
     const bus = new Bus();
+    // A new jukecord over the same database: lanes of its own.
+    const lanes = new GuildLanes();
     const again = new Players({
-      queue: new QueueService(store.queue, bus),
+      lanes,
+      queue: new QueueService(store.queue, bus, lanes),
       media: new FakeMedia(),
       history: store.history,
       state: store.playerState,
@@ -318,7 +332,7 @@ describe('a person’s tracks and autoplay’s', () => {
       log,
       fetchTimeoutMs: 60_000,
     });
-    again.restoreAll(store.tracks, store.playerState);
+    await again.restoreAll(store.tracks, store.playerState);
     assert.equal(again.get(GUILD).snapshot().autoplay, 'related');
   });
 });

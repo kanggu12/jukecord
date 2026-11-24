@@ -33,8 +33,8 @@ describe('the community settings over the API', () => {
 
   const inject = (options: InjectOptions) => server.web.app.inject(options);
   // A panel session's headers for a change.
-  const as = (userId: string) => {
-    const { cookie, csrf } = sessionFor(server, userId);
+  const as = async (userId: string) => {
+    const { cookie, csrf } = await sessionFor(server, userId);
     return { cookie, [CSRF_HEADER]: csrf };
   };
 
@@ -42,7 +42,7 @@ describe('the community settings over the API', () => {
     const refused = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/settings/stay`),
-      headers: as(ALICE),
+      headers: await as(ALICE),
       payload: { on: true },
     });
     assert.equal(refused.statusCode, 403);
@@ -50,14 +50,14 @@ describe('the community settings over the API', () => {
     const set = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/settings/stay`),
-      headers: as(BOB),
+      headers: await as(BOB),
       payload: { on: true },
     });
     assert.equal(set.statusCode, 200);
     assert.equal(set.json().stay, true);
     assert.deepEqual(server.voice.stayed, [GUILD]);
     // Everyone may look, and the host may change it back.
-    const shown = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: as(ALICE) });
+    const shown = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: await as(ALICE) });
     assert.equal(shown.json().stay, true);
     const off = await inject({
       method: 'PUT',
@@ -77,21 +77,21 @@ describe('votes to skip over the API', () => {
     // A server with a DJ role: Alice and Bob are in the bot's voice channel without it, Bob manages the server.
     server.directory.join(GUILD, ALICE);
     server.directory.join(GUILD, BOB, { manage: true });
-    server.store.settings.setDjRole(GUILD, DJ_ROLE);
+    await server.store.settings.setDjRole(GUILD, DJ_ROLE);
     server.voice.inVoice.set(GUILD, [ALICE, BOB, '300000000000000003']);
   });
   after(() => server.close());
 
   const inject = (options: InjectOptions) => server.web.app.inject(options);
-  const as = (userId: string) => {
-    const { cookie, csrf } = sessionFor(server, userId);
+  const as = async (userId: string) => {
+    const { cookie, csrf } = await sessionFor(server, userId);
     return { cookie, [CSRF_HEADER]: csrf };
   };
 
   it("answers a skip without the DJ role with the vote's count, and turns votes off for those who manage", async () => {
     await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue`), headers: asHost, payload: { input: 'two' } });
     server.media.finish(180_000);
-    const vote = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: as(ALICE) });
+    const vote = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: await as(ALICE) });
     assert.equal(vote.statusCode, 200);
     assert.deepEqual(vote.json().votes, { votes: 1, needed: 2 });
     assert.equal(vote.json().track.title, 'Track a');
@@ -104,18 +104,22 @@ describe('votes to skip over the API', () => {
     const late = await inject({
       method: 'POST',
       url: api(`/guilds/${GUILD}/player/skip?track=${first}`),
-      headers: as(BOB),
+      headers: await as(BOB),
     });
     assert.equal(late.json().track.title, 'Track b');
     // Votes off: Skip needs the DJ role again.
     const off = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/settings/vote-skip`),
-      headers: as(BOB),
+      headers: await as(BOB),
       payload: { on: false },
     });
     assert.equal(off.json().voteSkip, false);
-    const refused = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/player/skip`), headers: as(ALICE) });
+    const refused = await inject({
+      method: 'POST',
+      url: api(`/guilds/${GUILD}/player/skip`),
+      headers: await as(ALICE),
+    });
     assert.equal(refused.statusCode, 403);
     assert.match(refused.json().error.message, /DJ role/);
   });
@@ -132,8 +136,8 @@ describe('taking turns and the limit per person over the API', () => {
   after(() => server.close());
 
   const inject = (options: InjectOptions) => server.web.app.inject(options);
-  const as = (userId: string) => {
-    const { cookie, csrf } = sessionFor(server, userId);
+  const as = async (userId: string) => {
+    const { cookie, csrf } = await sessionFor(server, userId);
     return { cookie, [CSRF_HEADER]: csrf };
   };
 
@@ -145,39 +149,46 @@ describe('taking turns and the limit per person over the API', () => {
       const refused = await inject({
         method: 'PUT',
         url: api(`/guilds/${GUILD}/settings/${path}`),
-        headers: as(ALICE),
+        headers: await as(ALICE),
         payload,
       });
       assert.equal(refused.statusCode, 403);
       const set = await inject({
         method: 'PUT',
         url: api(`/guilds/${GUILD}/settings/${path}`),
-        headers: as(BOB),
+        headers: await as(BOB),
         payload,
       });
       assert.equal(set.statusCode, 200);
     }
-    const shown = (await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: as(ALICE) })).json();
+    const shown = (
+      await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: await as(ALICE) })
+    ).json();
     assert.deepEqual([shown.takeTurns, shown.personLimit], [true, 1]);
     // Over the queue's own size: refused by the schema.
     const tooMany = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/settings/person-limit`),
-      headers: as(BOB),
+      headers: await as(BOB),
       payload: { tracks: 5000 },
     });
     assert.equal(tooMany.statusCode, 400);
     // Alice's first track plays at once, the second waits, the third is over her limit of one.
-    await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue`), headers: as(ALICE), payload: { input: 'one' } });
+    await inject({
+      method: 'POST',
+      url: api(`/guilds/${GUILD}/queue`),
+      headers: await as(ALICE),
+      payload: { input: 'one' },
+    });
     const added = await inject({
       method: 'POST',
       url: api(`/guilds/${GUILD}/queue`),
-      headers: as(ALICE),
+      headers: await as(ALICE),
       payload: { input: 'two' },
     });
     assert.deepEqual([added.json().items.length, added.json().skippedLimit], [1, 1]);
     // Putting the queue in turns is a change of the music: Alice may, and nothing needs to move.
-    const now = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/turns`), headers: as(ALICE) });
+    const now = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/turns`), headers: await as(ALICE) });
     assert.deepEqual(now.json(), { moved: 0 });
   });
 });
@@ -193,8 +204,8 @@ describe('the voice sound over the API', () => {
   after(() => server.close());
 
   const inject = (options: InjectOptions) => server.web.app.inject(options);
-  const as = (userId: string) => {
-    const { cookie, csrf } = sessionFor(server, userId);
+  const as = async (userId: string) => {
+    const { cookie, csrf } = await sessionFor(server, userId);
     return { cookie, [CSRF_HEADER]: csrf };
   };
 
@@ -202,34 +213,36 @@ describe('the voice sound over the API', () => {
     const volume = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/voice/volume`),
-      headers: as(ALICE),
+      headers: await as(ALICE),
       payload: { percent: 80 },
     });
     assert.deepEqual(volume.json(), { volume: 80, preset: 'off' });
     const sound = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/voice/sound`),
-      headers: as(ALICE),
+      headers: await as(ALICE),
       payload: { preset: 'voices' },
     });
     assert.deepEqual(sound.json(), { volume: 80, preset: 'voices' });
     const unknown = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/voice/sound`),
-      headers: as(ALICE),
+      headers: await as(ALICE),
       payload: { preset: 'nightcore' },
     });
     assert.equal(unknown.statusCode, 400);
     // With a DJ role, Alice (without it) may not; it is a change of the music.
-    server.store.settings.setDjRole(GUILD, DJ_ROLE);
+    await server.store.settings.setDjRole(GUILD, DJ_ROLE);
     const refused = await inject({
       method: 'PUT',
       url: api(`/guilds/${GUILD}/voice/volume`),
-      headers: as(ALICE),
+      headers: await as(ALICE),
       payload: { percent: 100 },
     });
     assert.equal(refused.statusCode, 403);
-    const shown = (await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: as(ALICE) })).json();
+    const shown = (
+      await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers: await as(ALICE) })
+    ).json();
     assert.deepEqual([shown.volume, shown.sound], [80, 'voices']);
   });
 });

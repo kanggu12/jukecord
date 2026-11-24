@@ -41,27 +41,27 @@ export class Players {
 
   /**
    * Brings back what each server had current before the restart, paused where it was (see Player.restore), and
-   * returns how many servers had something to restore.
+   * returns how many servers had something to restore. One server after the other, each in its own turn.
    */
-  restoreAll(tracks: TrackRepository, states: PlayerStateRepository): number {
+  async restoreAll(tracks: TrackRepository, states: PlayerStateRepository): Promise<number> {
     let restored = 0;
-    for (const saved of states.all()) {
+    for (const saved of await states.all()) {
       // The repeat mode comes back even for a server that was idle: it is a choice, not a state of the moment.
-      if (saved.repeat !== 'off') this.get(saved.guildId).setRepeat(saved.repeat);
+      if (saved.repeat !== 'off') await this.get(saved.guildId).setRepeat(saved.repeat);
       // So does autoplay, for the same reason.
-      if (saved.autoplay !== 'off') this.get(saved.guildId).setAutoplay(saved.autoplay);
+      if (saved.autoplay !== 'off') await this.get(saved.guildId).setAutoplay(saved.autoplay);
       // A server that was idle, or whose track has since disappeared from the database, has nothing to come back to.
       if (saved.status === 'idle' || saved.trackId === null) continue;
-      const track = tracks.get(saved.trackId);
+      const track = await tracks.get(saved.trackId);
       if (!track) continue;
-      this.get(saved.guildId).restore(track, saved.addedBy, saved.positionMs);
+      await this.get(saved.guildId).restore(track, saved.addedBy, saved.positionMs);
       restored += 1;
     }
     return restored;
   }
 
-  /** Saves every player's position; called when jukecord shuts down. */
-  checkpointAll(): void {
-    for (const player of this.players.values()) player.checkpoint();
+  /** Saves every player's position; called when jukecord shuts down (each in its server's turn, one after another). */
+  async checkpointAll(): Promise<void> {
+    for (const player of this.players.values()) await player.checkpoint();
   }
 }

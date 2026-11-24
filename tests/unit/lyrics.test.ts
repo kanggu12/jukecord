@@ -235,9 +235,9 @@ function lookup(answers: { match?: (LrclibRecord | null | Error)[]; search?: (Lr
 }
 
 // The lyrics of tracks, on a clock the test moves; sleeping moves the clock instead of waiting.
-function service(fake: LyricsLookup) {
+async function service(fake: LyricsLookup) {
   let now = Date.UTC(2026, 10, 11);
-  const store = memoryStore(() => now);
+  const store = await memoryStore(() => now);
   const slept: number[] = [];
   const lyrics = new Lyrics({
     lyrics: store.lyrics,
@@ -258,8 +258,8 @@ describe('Lyrics', () => {
 
   it('looks a track up once, keeps what it found, and answers from the database after', async () => {
     const { fake, calls } = lookup({ match: [found] });
-    const { store, lyrics } = service(fake);
-    const [stored] = addTracks(store, 1);
+    const { store, lyrics } = await service(fake);
+    const [stored] = await addTracks(store, 1);
     assert.ok(stored);
     const playing: Track = { ...stored, title: 'Example Band - Paper Boats on the River (Official Video)' };
     // Three asking at once: one lookup.
@@ -268,7 +268,7 @@ describe('Lyrics', () => {
     assert.equal(answers[0]?.kind, 'synced');
     assert.equal(answers[0]?.lines.length, 6);
     assert.match(answers[0]?.text ?? '', /^Fold the morning into paper\n/);
-    assert.equal(store.lyrics.get(stored.id)?.sourceId, 4815162);
+    assert.equal((await store.lyrics.get(stored.id))?.sourceId, 4815162);
     // Asked again later: from the database, nothing asked of LRCLIB.
     assert.equal((await lyrics.forTrack(playing)).kind, 'synced');
     assert.equal(calls.length, 1);
@@ -276,10 +276,14 @@ describe('Lyrics', () => {
 
   it('uses what the site said the recording is before the title', async () => {
     const { fake, calls } = lookup({ match: [found] });
-    const { store, lyrics } = service(fake);
-    const [stored] = addTracks(store, 1);
+    const { store, lyrics } = await service(fake);
+    const [stored] = await addTracks(store, 1);
     assert.ok(stored);
-    store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: 'Made-up Rivers' });
+    await store.music.set(stored.id, {
+      artist: 'Example Band',
+      title: 'Paper Boats on the River',
+      album: 'Made-up Rivers',
+    });
     await lyrics.forTrack(stored);
     assert.deepEqual(calls, ['match Example Band / Paper Boats on the River']);
   });
@@ -287,8 +291,8 @@ describe('Lyrics', () => {
   it('searches when the exact lookup finds nothing, by title and artist, then (for a guess) by the words', async () => {
     const records = JSON.parse(fixture('search.json')) as LrclibRecord[];
     const { fake, calls } = lookup({ match: [null], search: [[], records] });
-    const { store, lyrics, slept } = service(fake);
-    const [stored] = addTracks(store, 1);
+    const { store, lyrics, slept } = await service(fake);
+    const [stored] = await addTracks(store, 1);
     assert.ok(stored);
     const answer = await lyrics.forTrack({
       ...stored,
@@ -309,10 +313,10 @@ describe('Lyrics', () => {
   it('keeps that nothing was found for a week, then asks again; an instrumental is an answer', async () => {
     const instrumental = JSON.parse(fixture('instrumental.json')) as LrclibRecord;
     const { fake, calls } = lookup({ match: [null, instrumental] });
-    const { store, lyrics, advance } = service(fake);
-    const [stored] = addTracks(store, 1);
+    const { store, lyrics, advance } = await service(fake);
+    const [stored] = await addTracks(store, 1);
     assert.ok(stored);
-    store.music.set(stored.id, { artist: 'Demo Orchestra', title: 'Low Tide', album: null });
+    await store.music.set(stored.id, { artist: 'Demo Orchestra', title: 'Low Tide', album: null });
     assert.equal((await lyrics.forTrack(stored)).kind, 'none');
     assert.equal(calls.length, 2);
     advance(6 * 86_400_000);
@@ -326,10 +330,10 @@ describe('Lyrics', () => {
 
   it("obeys LRCLIB's wait, remembers a failure for two minutes, and says so as unavailable", async () => {
     const { fake, calls } = lookup({ match: [new LrclibWait(5000), found] });
-    const { store, lyrics, advance } = service(fake);
-    const [stored] = addTracks(store, 1);
+    const { store, lyrics, advance } = await service(fake);
+    const [stored] = await addTracks(store, 1);
     assert.ok(stored);
-    store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: null });
+    await store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: null });
     await assert.rejects(lyrics.forTrack(stored), (error: unknown) => {
       // Said with how long until asking may work: the whole two minutes.
       assert.ok(error instanceof LyricsUnavailable);
@@ -347,15 +351,15 @@ describe('Lyrics', () => {
     assert.equal(calls.length, 1);
     advance(90_000);
     assert.equal((await lyrics.forTrack(stored)).kind, 'synced');
-    assert.equal(store.lyrics.get(stored.id)?.kind, 'synced');
+    assert.equal((await store.lyrics.get(stored.id))?.kind, 'synced');
   });
 
   it('holds every request back for as long as a 429 says, with a little more at random', async () => {
     const client = lrclib([json(429, fixture('rate-limited.json'), { 'retry-after': '20' })]);
-    const { store, lyrics, slept } = service(client.client);
-    const [first, second] = addTracks(store, 2);
+    const { store, lyrics, slept } = await service(client.client);
+    const [first, second] = await addTracks(store, 2);
     assert.ok(first && second);
-    for (const stored of [first, second]) store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
+    for (const stored of [first, second]) await store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
     await assert.rejects(lyrics.forTrack(first), LyricsUnavailable);
     // The next track's lookup is turned away at once, with the 20 s (and up to a third more) left to wait: a person
     // asking does not wait out LRCLIB's minutes, and LRCLIB is asked nothing meanwhile.
@@ -368,10 +372,10 @@ describe('Lyrics', () => {
     assert.equal(client.asked.length, 1);
     // One already in the line when the 429 came is turned away the same way.
     const again = lrclib([json(429, fixture('rate-limited.json'), { 'retry-after': '20' })]);
-    const other = service(again.client);
-    const [one, two] = addTracks(other.store, 2);
+    const other = await service(again.client);
+    const [one, two] = await addTracks(other.store, 2);
     assert.ok(one && two);
-    for (const stored of [one, two]) other.store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
+    for (const stored of [one, two]) await other.store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
     const [said, inLine] = await Promise.allSettled([other.lyrics.forTrack(one), other.lyrics.forTrack(two)]);
     assert.equal(said.status, 'rejected');
     assert.ok(inLine.status === 'rejected' && inLine.reason instanceof LyricsUnavailable);
@@ -383,11 +387,11 @@ describe('Lyrics', () => {
     // A wait of LRCLIB's of five seconds: the next lookup waits it out and is answered.
     const found = JSON.parse(fixture('get-found.json')) as LrclibRecord;
     const { fake } = lookup({ match: [new LrclibWait(5000), found] });
-    const { store, lyrics, slept } = service(fake);
-    const [first, second] = addTracks(store, 2);
+    const { store, lyrics, slept } = await service(fake);
+    const [first, second] = await addTracks(store, 2);
     assert.ok(first && second);
     for (const stored of [first, second])
-      store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: null });
+      await store.music.set(stored.id, { artist: 'Example Band', title: 'Paper Boats on the River', album: null });
     await assert.rejects(lyrics.forTrack(first), LyricsUnavailable);
     assert.equal((await lyrics.forTrack(second)).kind, 'synced');
     assert.ok(slept[0] !== undefined && slept[0] >= 5000 && slept[0] <= 6700, String(slept[0]));
@@ -396,17 +400,17 @@ describe('Lyrics', () => {
   it('turns a lookup away when many are waiting already', async () => {
     // Lookups that never end, filling the places.
     const fake: LyricsLookup = { match: () => new Promise(() => {}), search: async () => [] };
-    const { store, lyrics } = service(fake);
-    const tracks = addTracks(store, 9);
-    for (const stored of tracks) store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
+    const { store, lyrics } = await service(fake);
+    const tracks = await addTracks(store, 9);
+    for (const stored of tracks) await store.music.set(stored.id, { artist: 'A', title: 'B', album: null });
     for (const stored of tracks.slice(0, 8)) void lyrics.forTrack(stored);
     await assert.rejects(lyrics.forTrack(tracks[8] as Track), /looking up other lyrics/);
   });
 
   it('keeps that none were found when no song can be read from the track, asking nothing', async () => {
     const { fake, calls } = lookup({});
-    const { store, lyrics } = service(fake);
-    const [stored] = addTracks(store, 1);
+    const { store, lyrics } = await service(fake);
+    const [stored] = await addTracks(store, 1);
     assert.ok(stored);
     assert.equal((await lyrics.forTrack({ ...stored, uploader: null, title: 'Untitled' })).kind, 'none');
     assert.deepEqual(calls, []);
@@ -430,7 +434,7 @@ describe('what YouTube says a recording is', () => {
     assert.deepEqual(found?.music, { artist: 'Example Band', title: 'Paper Boats', album: 'Made-up Rivers' });
     // A video that is not a known song says nothing of the kind.
     assert.equal(tracksFromInfo({ ...entry, track: undefined }, 1)[0]?.music, undefined);
-    const store = memoryStore();
+    const store = await memoryStore();
     const resolver = new Resolver({
       ytdlp: { lookup: async () => tracksFromInfo(entry, 1) } as unknown as YtDlp,
       tracks: store.tracks,
@@ -439,6 +443,6 @@ describe('what YouTube says a recording is', () => {
     });
     const [stored] = await resolver.resolve('https://www.youtube.com/watch?v=aaaaaaaaaaa');
     assert.ok(stored);
-    assert.equal(store.music.get(stored.id)?.album, 'Made-up Rivers');
+    assert.equal((await store.music.get(stored.id))?.album, 'Made-up Rivers');
   });
 });

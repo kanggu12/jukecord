@@ -105,22 +105,25 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     };
   });
 
-  await check('database', () => {
-    const row = options.store.db.prepare('PRAGMA quick_check').get() as { quick_check?: string } | undefined;
-    const bytes = options.store.file === ':memory:' ? 0 : fs.statSync(options.store.file).size;
+  await check('database', async () => {
+    const answer = await options.store.quickCheck();
+    // The file on this machine, if the database is one (not an in-memory one, the tests').
+    const file = options.store.file;
+    const onDisk = file !== null && file !== ':memory:';
+    const bytes = onDisk ? fs.statSync(file).size : 0;
     // What its write-ahead log holds that the file does not yet: on disk too, and folded in now and then.
     let log = 0;
     try {
-      if (options.store.file !== ':memory:') log = fs.statSync(`${options.store.file}-wal`).size;
+      if (onDisk) log = fs.statSync(`${file}-wal`).size;
     } catch {
       // No log file at the moment.
     }
-    const healthy = row?.quick_check === 'ok';
+    const healthy = answer === 'ok';
     return {
       status: healthy ? 'ok' : 'fail',
       detail: healthy
-        ? `schema ${options.store.schemaVersion()}, ${formatSize(bytes)}${log > 0 ? `, and ${formatSize(log)} in its write-ahead log` : ''}`
-        : `SQLite found damage: ${row?.quick_check ?? 'no answer'} (restore a backup)`,
+        ? `schema ${await options.store.schemaVersion()}, ${formatSize(bytes)}${log > 0 ? `, and ${formatSize(log)} in its write-ahead log` : ''}`
+        : `SQLite found damage: ${answer ?? 'no answer'} (restore a backup)`,
     };
   });
 

@@ -20,6 +20,7 @@ import { SkipVotes } from './app/votes.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
+import { GuildLanes, throwFromTimer } from './core/lanes.ts';
 import { Players } from './core/players.ts';
 import { QueueService } from './core/queue.ts';
 import { Bot } from './discord/bot.ts';
@@ -53,7 +54,9 @@ const MAX_PLAYLIST = 500;
 const PANEL_DIR = fileURLToPath(new URL('../panel/dist', import.meta.url));
 
 // What a crash runs before exiting: saving the players' positions, once they exist (see main).
-let crashCheckpoint: () => void = () => {};
+let crashCheckpoint: () => Promise<void> = async () => {};
+// Set by the first unexpected error: the exit it makes is under way.
+let crashing = false;
 
 async function main(): Promise<number> {
   // Everything jukecord writes (the database, logins, logs, the cache) is for its own user only.
@@ -90,15 +93,20 @@ async function main(): Promise<number> {
   );
   process.on('uncaughtException', (error) => {
     log.error('jukecord stopped on an error it did not expect', { error });
-    try {
-      crashCheckpoint();
-    } catch {
-      // The positions could not be saved; the restart starts where the last save left them.
-    }
-    process.exit(1);
+    // Once: a second error while the positions are saved only adds its line to the log.
+    if (crashing) return;
+    crashing = true;
+    // The positions are saved first. Saving takes each server's turn, after the change under way, so it may wait a
+    // moment, two seconds at most; whether it worked or not, jukecord then exits (the restart starts where the last
+    // save left them).
+    const exit = () => process.exit(1);
+    setTimeout(exit, 2000);
+    crashCheckpoint().then(exit, exit);
   });
 
-  const store = Store.open(path.join(config.dataDir, 'jukecord.db'));
+  const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
+  // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
+  const lanes = new GuildLanes();
   // Trouble said in the log and in each server's alerts channel (app/alerts.ts); the bot posts them once it exists.
   let alertSink: AlertSink | null = null;
   const alerts = new Alerts({
@@ -118,7 +126,7 @@ async function main(): Promise<number> {
   }
   // A listener that fails is logged with its server; the others still hear the change (see Bus).
   const bus = new Bus((event, guildId, error) => log.error('a listener failed', { event, guild: guildId, error }));
-  const queue = new QueueService(store.queue, bus);
+  const queue = new QueueService(store.queue, bus, lanes);
   const cache = new MediaCache({
     dir: path.join(config.dataDir, 'cache'),
     maxBytes: config.media.cacheMaxBytes,
@@ -163,9 +171,10 @@ async function main(): Promise<number> {
     bus,
     clock: systemClock,
     log: log.child('player'),
+    lanes,
     fetchTimeoutMs: config.media.fetchTimeoutMs,
     // A track taken out of a looping queue is told to its server's alerts channel too.
-    onLeftLoop: (guildId, track, reason) => alerts.raise(leftLoopAlert(guildId, track.title, track.id, reason)),
+    onLeftLoop: (guildId, track, reason) => void alerts.raise(leftLoopAlert(guildId, track.title, track.id, reason)),
   });
   const prefetcher = new Prefetcher({
     bus,
@@ -211,6 +220,7 @@ async function main(): Promise<number> {
     players,
     queue,
     store,
+    lanes,
     slots: resolver,
     ytdlp,
     ...(checkAddress ? { checkAddress } : {}),
@@ -244,6 +254,7 @@ async function main(): Promise<number> {
     bus,
     clock: systemClock,
     log: log.child('votes'),
+    lanes,
     // Asked when a vote is cast or counted again, long after the actions below exist.
     applies: (guildId) => actions.voteSkipApplies(guildId),
     listening: (guildId) => new Set([...audience.voice(guildId), ...audience.browsers(guildId)]),
@@ -252,6 +263,7 @@ async function main(): Promise<number> {
     store,
     queue,
     players,
+    lanes,
     resolver,
     log: log.child('actions'),
     startedAt: Date.now(),
@@ -267,7 +279,7 @@ async function main(): Promise<number> {
     links,
   });
 
-  const restored = players.restoreAll(store.tracks, store.playerState);
+  const restored = await players.restoreAll(store.tracks, store.playerState);
   if (restored > 0) log.info('restored what was playing before the restart, paused', { servers: restored });
   prefetcher.start();
   // After the restore: a restored player's queue is looked at when it plays on, not all at once at the start.
@@ -299,7 +311,7 @@ async function main(): Promise<number> {
   alertSink = bot;
   // The watchdog's restart, read at the start: raised now that the bot is there to post it (raised before, it found no
   // one to post it and was dropped).
-  if (lastRun) alerts.raise(restartedAlert(lastRun.stillMs));
+  if (lastRun) void alerts.raise(restartedAlert(lastRun.stillMs));
   // A disk that runs low is said once (and again once it had room again).
   alerts.watchDisk(config.dataDir);
   if (bot) audience.voice = (guildId) => bot.voice.people(guildId);
@@ -332,10 +344,10 @@ async function main(): Promise<number> {
     log: log.child('web'),
     // Open panels at once (JUKECORD_LIVE_MAX); the caps per login and per address stay at their defaults.
     live: { total: config.liveMax },
-    ready: () => store.db.isOpen,
+    ready: () => store.isOpen(),
     discordReady: () => bot?.ready() ?? false,
     // Connections turned away at a cap are jukecord's trouble, told to the alerts channels.
-    turnedAway: (away) => alerts.raise(turnedAwayAlert(away)),
+    turnedAway: (away) => void alerts.raise(turnedAwayAlert(away)),
     deps: {
       actions,
       access,
@@ -369,6 +381,7 @@ async function main(): Promise<number> {
   const rest = new Rest({
     bus,
     players,
+    lanes,
     inVoice: (guildId) => (bot ? bot.voice.channel(guildId) !== null : false),
     listeners: (guildId) => web.hub.listeners(guildId).count,
     clock: systemClock,
@@ -418,19 +431,24 @@ async function main(): Promise<number> {
     rest.stop();
     alerts.stop();
     schedule?.stop();
-    players.checkpointAll();
-    // The panels are told first (they reconnect to the next jukecord), then Discord, then the database.
-    void web
-      .close()
-      .catch(() => {})
-      .then(() => bot?.stop())
-      .then(() => egress?.close())
-      // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
-      .then(() => schedule?.idle())
-      .finally(() => {
-        store.close();
-        process.exit(0);
-      });
+    // Where every server is, saved first (each in its server's turn, after a change under way); a failure of that is
+    // jukecord's own trouble, thrown as before. Then the panels are told (they reconnect to the next jukecord), then
+    // Discord, then the database.
+    void players.checkpointAll().then(
+      () =>
+        web
+          .close()
+          .catch(() => {})
+          .then(() => bot?.stop())
+          .then(() => egress?.close())
+          // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
+          .then(() => schedule?.idle())
+          .finally(() => {
+            // Closed once no transaction holds it, then out.
+            void store.close().finally(() => process.exit(0));
+          }),
+      throwFromTimer,
+    );
   };
   process.once('SIGTERM', () => stop('SIGTERM'));
   process.once('SIGINT', () => stop('SIGINT'));

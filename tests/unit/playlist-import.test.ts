@@ -12,6 +12,7 @@ import { type ActionContext, ActionError, Actions } from '../../src/app/actions.
 import { writePlaylist } from '../../src/app/playlist-files.ts';
 import { COMMANDS, readImport } from '../../src/cli/commands.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { Track } from '../../src/core/types.ts';
@@ -28,12 +29,14 @@ const log = createLogger({ level: 'error', sinks: [] });
 const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayControl: true, mayManage: false };
 
 // Actions whose resolver answers a list's lines from a table, counting how many run at once.
-function setup(table: Record<string, number> = {}) {
+async function setup(table: Record<string, number> = {}) {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const players = new Players({
+    lanes,
     queue,
     media: new FakeMedia(),
     history: store.history,
@@ -43,7 +46,7 @@ function setup(table: Record<string, number> = {}) {
     log,
     fetchTimeoutMs: 60_000,
   });
-  const tracks = addTracks(store, 5);
+  const tracks = await addTracks(store, 5);
   let running = 0;
   let most = 0;
   const asked: string[] = [];
@@ -62,7 +65,16 @@ function setup(table: Record<string, number> = {}) {
   const checkAddress = async (url: URL) => {
     if (url.hostname === 'inside.example') throw new AddressError('inside.example is on a private network');
   };
-  const actions = new Actions({ store, queue, players, resolver, log, checkAddress, batch: new BatchLookups(3) });
+  const actions = new Actions({
+    lanes,
+    store,
+    queue,
+    players,
+    resolver,
+    log,
+    checkAddress,
+    batch: new BatchLookups(3),
+  });
   return { store, actions, tracks, asked, most: () => most };
 }
 
@@ -78,16 +90,16 @@ async function refusal(run: () => Promise<unknown> | unknown): Promise<string> {
 
 describe('exporting a playlist', () => {
   it('gives each kind of file with its name, and refuses an unknown playlist or kind', async () => {
-    const { store, actions, tracks } = setup();
-    store.playlists.save(GUILD, 'Friday: late', [tracks[0]?.id ?? 0, tracks[1]?.id ?? 0], null);
-    const text = actions.playlistExport(DJ, 'Friday: late', 'text');
+    const { store, actions, tracks } = await setup();
+    await store.playlists.save(GUILD, 'Friday: late', [tracks[0]?.id ?? 0, tracks[1]?.id ?? 0], null);
+    const text = await actions.playlistExport(DJ, 'Friday: late', 'text');
     assert.deepEqual(text, {
       name: 'Friday: late',
       format: 'text',
       filename: 'Friday_ late.txt',
       content: 'https://example.com/watch?v=v1\nhttps://example.com/watch?v=v2\n',
     });
-    assert.equal(actions.playlistExport(DJ, 'Friday: late', 'm3u').filename, 'Friday_ late.m3u');
+    assert.equal((await actions.playlistExport(DJ, 'Friday: late', 'm3u')).filename, 'Friday_ late.m3u');
     assert.equal(
       await refusal(() => actions.playlistExport(DJ, 'Nope', 'text')),
       'not-found: there is no playlist named "Nope"',
@@ -101,7 +113,7 @@ describe('exporting a playlist', () => {
 
 describe('importing a playlist', () => {
   it('stores what a jukecord file says, with no lookup, and keeps what jukecord knew', async () => {
-    const { store, actions, tracks, asked } = setup();
+    const { store, actions, tracks, asked } = await setup();
     const content = JSON.stringify({
       kind: 'jukecord playlist',
       version: 1,
@@ -123,7 +135,7 @@ describe('importing a playlist', () => {
     // The address on a private network is left out.
     assert.equal(result.leftOut, 1);
     assert.deepEqual(asked, []);
-    const saved = store.playlists.tracks(result.playlist.id);
+    const saved = await store.playlists.tracks(result.playlist.id);
     // The known track keeps its own title; the new one is stored as the file said.
     assert.equal(saved[0]?.id, tracks[0]?.id);
     assert.equal(saved[0]?.title, 'Track 1');
@@ -131,7 +143,7 @@ describe('importing a playlist', () => {
   });
 
   it('looks up a pasted list three at a time, in its order, and counts what it could not find', async () => {
-    const { store, actions, tracks, most } = setup({
+    const { store, actions, tracks, most } = await setup({
       'https://example.com/unknown': 2,
       'Example Band - Velvet Hours': 3,
       'Demo Orchestra - Lanterns': 4,
@@ -145,7 +157,7 @@ describe('importing a playlist', () => {
     ].join('\n');
     const result = await actions.playlistImport(DJ, 'Pasted', content);
     assert.deepEqual(
-      store.playlists.tracks(result.playlist.id).map((track) => track.id),
+      (await store.playlists.tracks(result.playlist.id)).map((track) => track.id),
       [tracks[2]?.id, tracks[1]?.id, tracks[3]?.id, tracks[4]?.id],
     );
     assert.equal(result.leftOut, 1);
@@ -154,7 +166,7 @@ describe('importing a playlist', () => {
 
   it('looks up a hundred lines at most, and refuses a taken name, an empty list and one with nothing found', async () => {
     const table = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [`song ${index}`, index % 5]));
-    const { actions, store } = setup(table);
+    const { actions, store } = await setup(table);
     const result = await actions.playlistImport(
       DJ,
       'Long',
@@ -174,7 +186,7 @@ describe('importing a playlist', () => {
       await refusal(() => actions.playlistImport(DJ, 'Missing', 'no such song')),
       'not-found: nothing in it could be found',
     );
-    assert.equal(store.playlists.find(GUILD, 'Missing'), null);
+    assert.equal(await store.playlists.find(GUILD, 'Missing'), null);
     assert.equal(
       await refusal(() => actions.playlistImport({ ...DJ, mayControl: false }, 'Mine', 'song 1')),
       'forbidden: only members with the DJ role can change the music here',

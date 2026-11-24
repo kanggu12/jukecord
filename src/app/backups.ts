@@ -198,7 +198,7 @@ export class BackupSchedule {
       log.error('the scheduled backup failed', { reason });
       // Kept for `jukecord doctor`, which otherwise said "none yet" as if all were well.
       this.failure = { at: now.getTime(), reason };
-      this.options.alerts?.raise({
+      void this.options.alerts?.raise({
         kind: 'backup',
         guildId: null,
         logged: true,

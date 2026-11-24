@@ -20,10 +20,10 @@ import { ALICE, HOST_TOKEN } from '../support/web.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
 
-function setup(options: { fetch?: typeof fetch; now?: () => number } = {}) {
+async function setup(options: { fetch?: typeof fetch; now?: () => number } = {}) {
   let now = Date.UTC(2026, 10, 11);
   const clock = options.now ?? (() => now);
-  const store = memoryStore(clock);
+  const store = await memoryStore(clock);
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
@@ -78,72 +78,72 @@ describe('ensureHostToken', () => {
 });
 
 describe('Auth tokens', () => {
-  it('knows the host token, stores other tokens as hashes, and narrows what each may do', () => {
-    const { store, auth } = setup();
-    const host = auth.identify({ authorization: `Bearer ${HOST_TOKEN}` });
+  it('knows the host token, stores other tokens as hashes, and narrows what each may do', async () => {
+    const { store, auth } = await setup();
+    const host = await auth.identify({ authorization: `Bearer ${HOST_TOKEN}` });
     assert.deepEqual([host?.principal.kind, host?.scope, host?.via], ['host', 'admin', 'token']);
     assert.ok(host);
-    const made = auth.createToken(host, 'script', 'read');
+    const made = await auth.createToken(host, 'script', 'read');
     // Only the hash is in the database.
-    const row = store.db.prepare('SELECT hash FROM api_tokens').get() as { hash: string };
-    assert.equal(row.hash, hashSecret(made.token));
-    assert.ok(!JSON.stringify(store.db.prepare('SELECT * FROM api_tokens').all()).includes(made.token));
-    const reader = auth.identify({ authorization: `Bearer ${made.token}` });
+    const row = await store.sql.get('SELECT hash FROM api_tokens');
+    assert.equal(row?.hash, hashSecret(made.token));
+    assert.ok(!JSON.stringify(await store.sql.all('SELECT * FROM api_tokens')).includes(made.token));
+    const reader = await auth.identify({ authorization: `Bearer ${made.token}` });
     assert.equal(reader?.scope, 'read');
     // A read token cannot make a wider one.
     assert.ok(reader);
-    assert.throws(() => auth.createToken(reader, 'wider', 'admin'), /cannot make/);
-    assert.equal(auth.identify({ authorization: 'Bearer jkc_not-a-real-token' }), null);
-    assert.equal(auth.identify({ authorization: 'Basic abc' }), null);
+    await assert.rejects(() => auth.createToken(reader, 'wider', 'admin'), /cannot make/);
+    assert.equal(await auth.identify({ authorization: 'Bearer jkc_not-a-real-token' }), null);
+    assert.equal(await auth.identify({ authorization: 'Basic abc' }), null);
   });
 
-  it("lets a user list and revoke only their own tokens, and the host anyone's", () => {
-    const { auth } = setup();
-    const host = auth.identify({ authorization: `Bearer ${HOST_TOKEN}` });
+  it("lets a user list and revoke only their own tokens, and the host anyone's", async () => {
+    const { auth } = await setup();
+    const host = await auth.identify({ authorization: `Bearer ${HOST_TOKEN}` });
     assert.ok(host);
     const alice = { ...host, principal: { kind: 'user' as const, userId: ALICE } };
-    const hosts = auth.createToken(host, 'host script', 'admin');
-    const alices = auth.createToken(alice, 'my phone', 'control');
+    const hosts = await auth.createToken(host, 'host script', 'admin');
+    const alices = await auth.createToken(alice, 'my phone', 'control');
     assert.deepEqual(
-      auth.listTokens(alice).map((token) => token.name),
+      (await auth.listTokens(alice)).map((token) => token.name),
       ['my phone'],
     );
-    assert.equal(auth.listTokens(host).length, 2);
-    assert.equal(auth.revokeToken(alice, hosts.info.id), false);
-    assert.equal(auth.revokeToken(alice, alices.info.id), true);
-    assert.equal(auth.identify({ authorization: `Bearer ${alices.token}` }), null);
-    assert.equal(auth.revokeToken(host, hosts.info.id), true);
+    assert.equal((await auth.listTokens(host)).length, 2);
+    assert.equal(await auth.revokeToken(alice, hosts.info.id), false);
+    assert.equal(await auth.revokeToken(alice, alices.info.id), true);
+    assert.equal(await auth.identify({ authorization: `Bearer ${alices.token}` }), null);
+    assert.equal(await auth.revokeToken(host, hosts.info.id), true);
   });
 });
 
 describe('Auth sessions', () => {
-  it('logs a browser in with a cookie, needs the CSRF token for changes, and ends on logout or after 30 days', () => {
-    const { auth, advance } = setup();
-    const set = auth.startSession({ kind: 'user', userId: ALICE });
+  it('logs a browser in with a cookie, needs the CSRF token for changes, and ends on logout or after 30 days', async () => {
+    const { auth, advance } = await setup();
+    const set = await auth.startSession({ kind: 'user', userId: ALICE });
     assert.match(
       set,
       new RegExp(`^${SESSION_COOKIE}=[A-Za-z0-9_-]{43}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000$`),
     );
     const header = set.split(';')[0];
-    const caller = auth.identify({ cookie: `other=1; ${header}` });
+    const caller = await auth.identify({ cookie: `other=1; ${header}` });
     assert.equal(caller?.via, 'session');
     assert.ok(caller?.csrf);
     assert.equal(auth.csrfOk(caller, caller.csrf), true);
     assert.equal(auth.csrfOk(caller, undefined), false);
     assert.equal(auth.csrfOk(caller, `${caller.csrf}x`), false);
     // A bearer token wins over a cookie in the same request.
-    assert.equal(auth.identify({ cookie: header, authorization: `Bearer ${HOST_TOKEN}` })?.via, 'token');
+    assert.equal((await auth.identify({ cookie: header, authorization: `Bearer ${HOST_TOKEN}` }))?.via, 'token');
     advance(30 * 86_400_000);
-    assert.equal(auth.identify({ cookie: header }), null);
-    const again = auth.startSession({ kind: 'host' }).split(';')[0];
-    const host = auth.identify({ cookie: again });
+    assert.equal(await auth.identify({ cookie: header }), null);
+    const again = (await auth.startSession({ kind: 'host' })).split(';')[0];
+    const host = await auth.identify({ cookie: again });
     assert.equal(host?.principal.kind, 'host');
-    assert.match(auth.endSession(host), /Max-Age=0/);
-    assert.equal(auth.identify({ cookie: again }), null);
+    assert.match(await auth.endSession(host), /Max-Age=0/);
+    assert.equal(await auth.identify({ cookie: again }), null);
   });
 
-  it('turns a login link into one login within ten minutes', () => {
-    const { auth, advance } = setup();
+  it('turns a login link into one login within ten minutes', async () => {
+    const { auth, advance } = await setup();
     const first = auth.createLink();
     // The host's own, unless made for a friend.
     assert.equal(auth.useLink(first.code), 'admin');
@@ -185,7 +185,7 @@ describe('Discord login', () => {
 
   it('sends people to Discord with a state, and brings them back as themselves', async () => {
     const discord = fakeDiscord();
-    const { auth } = setup({ fetch: discord.fetcher });
+    const { auth } = await setup({ fetch: discord.fetcher });
     const started = auth.oauthStart('/stats');
     const location = new URL(started.location);
     assert.equal(location.origin + location.pathname, 'https://discord.test/oauth2/authorize');
@@ -203,7 +203,7 @@ describe('Discord login', () => {
 
   it('refuses a state from another browser and never redirects off the site', async () => {
     const discord = fakeDiscord();
-    const { auth } = setup({ fetch: discord.fetcher });
+    const { auth } = await setup({ fetch: discord.fetcher });
     const started = auth.oauthStart('//evil.example/');
     const state = new URL(started.location).searchParams.get('state') ?? '';
     await assert.rejects(
@@ -218,7 +218,7 @@ describe('Discord login', () => {
 
   it('refuses a user without a proper ID', async () => {
     const discord = fakeDiscord({ id: 'not-a-snowflake', username: 'x' });
-    const { auth } = setup({ fetch: discord.fetcher });
+    const { auth } = await setup({ fetch: discord.fetcher });
     const started = auth.oauthStart('/');
     const state = new URL(started.location).searchParams.get('state') ?? '';
     await assert.rejects(auth.oauthFinish('c', state, started.cookie.split(';')[0]), /without an ID/);

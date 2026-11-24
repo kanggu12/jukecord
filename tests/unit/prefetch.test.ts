@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { Track } from '../../src/core/types.ts';
@@ -24,13 +25,15 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(count: number) {
+async function setup(count: number) {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   // The player gets its own fake so the test only sees the prefetcher's calls on `media`.
   const players = new Players({
+    lanes,
     queue,
     media: new FakeMedia(),
     history: store.history,
@@ -45,7 +48,7 @@ function setup(count: number) {
   const media = new FakeMedia();
   const prefetcher = new Prefetcher({ bus, players, queue, media, cache, clock, log, count });
   prefetcher.start();
-  return { clock, store, queue, players, media, cache, prefetcher, tracks: addTracks(store, 5) };
+  return { clock, store, queue, players, media, cache, prefetcher, tracks: await addTracks(store, 5) };
 }
 
 // Puts a track in the cache as a finished fetch would (a few bytes stand in for the audio).
@@ -63,10 +66,10 @@ function pins(cache: MediaCache): string[] {
 
 describe('Prefetcher', () => {
   it('fetches the next tracks one at a time after a burst of changes settles', async () => {
-    const { clock, queue, players, media, tracks } = setup(2);
-    for (const track of tracks) queue.add(GUILD, [track.id], 'end', null);
+    const { clock, queue, players, media, tracks } = await setup(2);
+    for (const track of tracks) await queue.add(GUILD, [track.id], 'end', null);
     // The player starts the first (with its own fetch, which the test leaves loading).
-    players.get(GUILD).play();
+    await players.get(GUILD).play();
     // Nothing happens during the burst.
     assert.equal(media.calls.length, 0);
     await clock.advance(300);
@@ -88,15 +91,15 @@ describe('Prefetcher', () => {
   });
 
   it("tells the server's player of each track it fetched from its site, and not of one found in the cache", async () => {
-    const { clock, queue, players, media, tracks } = setup(2);
-    for (const track of tracks) queue.add(GUILD, [track.id], 'end', null);
+    const { clock, queue, players, media, tracks } = await setup(2);
+    for (const track of tracks) await queue.add(GUILD, [track.id], 'end', null);
     const player = players.get(GUILD);
     // What the player hears: a track of this server fetched from its site (proof the site works, see Player.failed).
     let told = 0;
     player.fetchedAhead = () => {
       told += 1;
     };
-    player.play();
+    await player.play();
     await clock.advance(300);
     // Track 1 fetched from its site; Track 2 found in the cache (another server had fetched it meanwhile).
     media.finish(1000);
@@ -107,28 +110,28 @@ describe('Prefetcher', () => {
   });
 
   it('keeps fetching the next track through a pause, a seek or a track added at the end', async () => {
-    const { clock, queue, players, media, tracks } = setup(1);
+    const { clock, queue, players, media, tracks } = await setup(1);
     const [first, second, third] = tracks;
     assert.ok(first && second && third);
-    queue.add(GUILD, [first.id, second.id], 'end', null);
-    players.get(GUILD).play();
+    await queue.add(GUILD, [first.id, second.id], 'end', null);
+    await players.get(GUILD).play();
     await clock.advance(300);
     const fetching = media.last();
     assert.equal(fetching.track.id, first.id);
     // A change that leaves the plan's first track where it was: another track at the end.
-    queue.add(GUILD, [third.id], 'end', null);
+    await queue.add(GUILD, [third.id], 'end', null);
     await clock.advance(300);
     assert.equal(fetching.signal.aborted, false, 'the running download was thrown away');
     assert.equal(media.calls.length, 1, 'the same track was asked for twice');
   });
 
   it('pins what it plans to keep and drops a fetch the queue no longer wants', async () => {
-    const { clock, queue, players, media, cache, tracks } = setup(1);
+    const { clock, queue, players, media, cache, tracks } = await setup(1);
     const [first, second, third] = tracks;
     assert.ok(first && second && third);
-    queue.add(GUILD, [first.id], 'end', null);
-    const [item] = queue.add(GUILD, [second.id], 'end', null);
-    players.get(GUILD).play();
+    await queue.add(GUILD, [first.id], 'end', null);
+    const [item] = await queue.add(GUILD, [second.id], 'end', null);
+    await players.get(GUILD).play();
     // The track playing is cached already: the next one is the one to fetch.
     cached(cache, first);
     await clock.advance(300);
@@ -137,8 +140,8 @@ describe('Prefetcher', () => {
     assert.deepEqual(pins(cache).sort(), [first, second].map((track) => MediaCache.keyOf(track.source)).sort());
     // Replaced by another track: the old fetch is cancelled, the new one starts, and the pin moves.
     assert.ok(item);
-    queue.remove(GUILD, item.id);
-    queue.add(GUILD, [third.id], 'end', null);
+    await queue.remove(GUILD, item.id);
+    await queue.add(GUILD, [third.id], 'end', null);
     await clock.advance(300);
     assert.equal(fetching.signal.aborted, true);
     assert.equal(media.last().track.id, third.id);
@@ -146,8 +149,8 @@ describe('Prefetcher', () => {
   });
 
   it('fetches nothing for a stopped player and lets go of its pins (a server that removed the bot)', async () => {
-    const { clock, queue, players, media, cache, tracks } = setup(2);
-    queue.add(
+    const { clock, queue, players, media, cache, tracks } = await setup(2);
+    await queue.add(
       GUILD,
       tracks.map((track) => track.id),
       'end',
@@ -157,12 +160,12 @@ describe('Prefetcher', () => {
     await clock.advance(300);
     assert.equal(media.calls.length, 0);
     const player = players.get(GUILD);
-    player.play();
+    await player.play();
     await clock.advance(300);
     const fetching = media.last();
     assert.equal(pins(cache).length, 3);
     // What the bot does when a server removes it: the player stops and the queue stays.
-    player.stop();
+    await player.stop();
     await clock.advance(300);
     assert.equal(fetching.signal.aborted, true);
     assert.deepEqual(pins(cache), []);
@@ -173,12 +176,12 @@ describe('Prefetcher', () => {
   });
 
   it('plans while a track loads, though its progress reports keep coming', async () => {
-    const { clock, queue, players, media, cache, tracks } = setup(1);
+    const { clock, queue, players, media, cache, tracks } = await setup(1);
     const [first, second] = tracks;
     assert.ok(first && second);
-    queue.add(GUILD, [first.id, second.id], 'end', null);
+    await queue.add(GUILD, [first.id, second.id], 'end', null);
     cached(cache, first);
-    players.get(GUILD).play();
+    await players.get(GUILD).play();
     // The player's own fetch reports progress every 100 ms (sent on at most four times a second): the plan does not
     // wait for the reports to stop, which would be when the track has loaded.
     const loading = players.get(GUILD);

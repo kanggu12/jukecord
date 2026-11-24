@@ -86,8 +86,8 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
     delete process.env.FAKE_YTDLP_FAIL;
   });
 
-  function build() {
-    const store = memoryStore();
+  async function build() {
+    const store = await memoryStore();
     // The proxy is only passed on (the fake yt-dlp makes no connections); the cache folder is where it would keep things.
     const ytdlp = new YtDlp({
       binary: FAKE,
@@ -106,7 +106,7 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
   }
 
   it('looks up, downloads, encodes and caches a track, with its real length and loudness', async () => {
-    const { store, cache, media, resolver } = build();
+    const { store, cache, media, resolver } = await build();
     const [track] = await resolver.resolve('https://example.com/tone');
     assert.equal(track?.title, 'A tone');
     assert.ok(track);
@@ -114,7 +114,7 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
     // Within 60 ms of five seconds (the encoder pads to whole frames).
     assert.ok(Math.abs(prepared.durationMs - 5000) <= 60, `length ${prepared.durationMs}`);
     assert.equal(await oggOpusDurationMs(prepared.file), prepared.durationMs);
-    assert.ok(store.tracks.get(track.id)?.loudness !== null, 'loudness was not recorded');
+    assert.ok((await store.tracks.get(track.id))?.loudness !== null, 'loudness was not recorded');
     assert.equal(cache.count(), 1);
     // yt-dlp was told to use Node for JavaScript, to ignore config files, to keep its cache in the data directory and
     // to make every connection through the address guard: the lookup and the download alike.
@@ -156,7 +156,7 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
     process.env.FAKE_YTDLP_AUDIO = late;
     fs.writeFileSync(path.join(dir, 'args.log'), '');
     try {
-      const { cache, media, resolver } = build();
+      const { cache, media, resolver } = await build();
       const [track] = await resolver.resolve('https://example.com/tone');
       assert.ok(track);
       const prepared = await media.prepare(track, new AbortController().signal);
@@ -180,7 +180,7 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
   });
 
   it('answers a known address from the database without asking the site', async () => {
-    const { resolver } = build();
+    const { resolver } = await build();
     await resolver.resolve('https://example.com/tone');
     fs.writeFileSync(path.join(dir, 'args.log'), '');
     const [again] = await resolver.resolve('example.com/tone');
@@ -189,8 +189,8 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
   });
 
   it('shares one download between two callers and keeps it going while one still waits', async () => {
-    const { media, store } = build();
-    const track = store.tracks.upsert({
+    const { media, store } = await build();
+    const track = await store.tracks.upsert({
       source: 'https://example.com/shared',
       url: 'https://example.com/shared',
       title: 'Shared',
@@ -216,8 +216,8 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
   });
 
   it('reports the site error and leaves no partial file', async () => {
-    const { media, store, cache } = build();
-    const track = store.tracks.upsert({
+    const { media, store, cache } = await build();
+    const track = await store.tracks.upsert({
       source: 'https://example.com/gone',
       url: 'https://example.com/gone',
       title: 'Gone',
@@ -241,7 +241,7 @@ describe('media, end to end', { skip: !haveFfmpeg() && 'ffmpeg with libopus and 
   });
 
   it('makes an MP3 copy for Safari once, on request', async () => {
-    const { media, resolver, cache } = build();
+    const { media, resolver, cache } = await build();
     const [track] = await resolver.resolve('https://example.com/tone');
     assert.ok(track);
     // Not prepared yet: there is nothing to convert.

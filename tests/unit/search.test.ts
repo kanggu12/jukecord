@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { describe, it } from 'node:test';
 import { type ActionContext, ActionError, Actions } from '../../src/app/actions.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { NewTrack } from '../../src/core/types.ts';
@@ -52,14 +53,15 @@ function fakeYtDlp() {
 }
 
 // The resolver's slots, as the real resolver keeps them (four in all, two per person, three per server).
-function slots(store = memoryStore()) {
+async function slots(given?: Awaited<ReturnType<typeof memoryStore>>) {
+  const store = given ?? (await memoryStore());
   return new Resolver({ ytdlp: {} as YtDlp, tracks: store.tracks, log });
 }
 
 describe('Search', () => {
   it('finds what YouTube lists, without live streams, as many as asked for', async () => {
     const { ytdlp, calls } = fakeYtDlp();
-    const search = new Search({ ytdlp, slots: slots(), log });
+    const search = new Search({ ytdlp, slots: await slots(), log });
     const finding = search.find('  example   chill  ', { limit: 5 });
     await flush();
     // The words cleaned once, and a few more asked of yt-dlp than given, for the live streams left out.
@@ -87,7 +89,7 @@ describe('Search', () => {
   it('answers the same words again from memory, in any case, until they are old', async () => {
     const { ytdlp, calls } = fakeYtDlp();
     const clock = new FakeClock(0);
-    const search = new Search({ ytdlp, slots: slots(), log, now: () => clock.now(), keepMs: 60_000 });
+    const search = new Search({ ytdlp, slots: await slots(), log, now: () => clock.now(), keepMs: 60_000 });
     const first = search.find('Example Chill');
     await flush();
     calls[0]?.finish();
@@ -107,7 +109,7 @@ describe('Search', () => {
 
   it('shares a search under way, stops it when nobody waits, and keeps it for those who still do', async () => {
     const { ytdlp, calls } = fakeYtDlp();
-    const search = new Search({ ytdlp, slots: slots(), log });
+    const search = new Search({ ytdlp, slots: await slots(), log });
     const one = new AbortController();
     const two = new AbortController();
     const first = search.find('shared words', { signal: one.signal });
@@ -141,7 +143,7 @@ describe('Search', () => {
           });
         }),
     } as unknown as YtDlp;
-    const search = new Search({ ytdlp, slots: slots(), log });
+    const search = new Search({ ytdlp, slots: await slots(), log });
     const typed = new AbortController();
     const first = search.find('neon rain', { signal: typed.signal });
     await flush();
@@ -158,7 +160,7 @@ describe('Search', () => {
 
   it('does not keep a failure, and is counted in the lookup slots', async () => {
     const { ytdlp, calls } = fakeYtDlp();
-    const resolver = slots();
+    const resolver = await slots();
     const search = new Search({ ytdlp, slots: resolver, log });
     const failing = search.find('bad words', { who: ALICE });
     await flush();
@@ -178,7 +180,7 @@ describe('Search', () => {
 
   it('forgets the least recently asked words beyond its size', async () => {
     const { ytdlp, calls } = fakeYtDlp();
-    const search = new Search({ ytdlp, slots: slots(), log, size: 2 });
+    const search = new Search({ ytdlp, slots: await slots(), log, size: 2 });
     for (const words of ['one', 'two']) {
       const finding = search.find(words);
       await flush();
@@ -204,7 +206,7 @@ describe('Search', () => {
 
 describe('picking a result', () => {
   it('adds it from what the search found, with no lookup', async () => {
-    const store = memoryStore();
+    const store = await memoryStore();
     const { ytdlp, calls } = fakeYtDlp();
     let lookups = 0;
     let search: Search | null = null;
@@ -231,7 +233,7 @@ describe('picking a result', () => {
     assert.equal(track?.durationMs, 215_000);
     assert.equal(lookups, 0);
     // Stored like any added track.
-    assert.equal(store.tracks.bySource('https://www.youtube.com/watch?v=srch0000001')?.id, track?.id);
+    assert.equal((await store.tracks.bySource('https://www.youtube.com/watch?v=srch0000001'))?.id, track?.id);
   });
 });
 
@@ -239,12 +241,14 @@ describe('the search action', () => {
   const DJ: ActionContext = { guildId: GUILD, userId: ALICE, mayControl: true, mayManage: false };
   const LISTENER: ActionContext = { guildId: GUILD, userId: ALICE, mayControl: false, mayManage: false };
 
-  function setup(withSearch = true) {
+  async function setup(withSearch = true) {
     const clock = new FakeClock();
-    const store = memoryStore(() => clock.now());
+    const store = await memoryStore(() => clock.now());
     const bus = new Bus();
-    const queue = new QueueService(store.queue, bus);
+    const lanes = new GuildLanes();
+    const queue = new QueueService(store.queue, bus, lanes);
     const players = new Players({
+      lanes,
       queue,
       media: new FakeMedia(),
       history: store.history,
@@ -257,7 +261,7 @@ describe('the search action', () => {
     const { ytdlp, calls } = fakeYtDlp();
     const resolver = new Resolver({ ytdlp, tracks: store.tracks, log });
     const search = new Search({ ytdlp, slots: resolver, log });
-    const actions = new Actions({ store, queue, players, resolver, log, ...(withSearch ? { search } : {}) });
+    const actions = new Actions({ lanes, store, queue, players, resolver, log, ...(withSearch ? { search } : {}) });
     return { actions, calls };
   }
 
@@ -272,7 +276,7 @@ describe('the search action', () => {
   };
 
   it('searches words for people who may change the music, and refuses addresses and listeners', async () => {
-    const { actions, calls } = setup();
+    const { actions, calls } = await setup();
     const finding = actions.search(DJ, 'example chill', 4);
     await flush();
     calls[0]?.finish();
@@ -289,13 +293,13 @@ describe('the search action', () => {
   });
 
   it('says why a search failed in the short words of the reasons, and when it is not set up', async () => {
-    const { actions, calls } = setup();
+    const { actions, calls } = await setup();
     const finding = code(() => actions.search(DJ, 'failing words'));
     await flush();
     calls[0]?.fail(new Error('yt-dlp failed: ERROR: Sign in to confirm you’re not a bot'));
     assert.equal(await finding, 'not-found: YouTube is refusing this server for now');
     assert.equal(
-      await code(() => setup(false).actions.search(DJ, 'any words')),
+      await code(async () => (await setup(false)).actions.search(DJ, 'any words')),
       'unavailable: searching is not set up here',
     );
   });

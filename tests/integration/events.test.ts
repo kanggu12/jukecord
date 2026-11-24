@@ -2,6 +2,7 @@
  * Live updates over a real WebSocket: the hello, the whole state on subscribe, changes in the order they happen,
  * listeners, the clock exchange, and the refusals (no login, another site's page).
  */
+
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -9,6 +10,7 @@ import net from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import WebSocketClient from 'ws';
 import { DEFAULT_LIVE_LIMITS, EVENTS_VERSION } from '../../src/web/events.ts';
+import { inOrder } from '../support/store.ts';
 import {
   ALICE,
   BOB,
@@ -94,7 +96,7 @@ describe('live updates', () => {
     server = await testServer({ listen: true, found: { two: [exampleTrack('a'), exampleTrack('b')] } });
     base = server.url.replace('http://', 'ws://');
     server.directory.join(GUILD, ALICE);
-    server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: 'av' });
+    await server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: 'av' });
   });
   after(() => server.close());
 
@@ -162,7 +164,7 @@ describe('live updates', () => {
   });
 
   it('answers pings with the server time and tells everyone who listens', async () => {
-    const { cookie } = sessionFor(server, ALICE);
+    const { cookie } = await sessionFor(server, ALICE);
     const alice = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { cookie, origin: server.url });
     await alice.next('state');
     const host = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { authorization: `Bearer ${HOST_TOKEN}` });
@@ -185,8 +187,8 @@ describe('live updates', () => {
   it('sends a big state and queue as gzip to a panel that says it can decompress, and as text otherwise', async () => {
     // A queue of a hundred tracks is about 30 KB of JSON: over the size below which messages stay text.
     const many = Array.from({ length: 100 }, (_, index) => exampleTrack(`big${index}`));
-    const stored = many.map((track) => server.store.tracks.upsert(track).id);
-    server.queue.add(OTHER_GUILD, stored, 'end', null);
+    const stored = await inOrder(many, async (track) => (await server.store.tracks.upsert(track)).id);
+    await server.queue.add(OTHER_GUILD, stored, 'end', null);
     const packed = new Socket(`${base}/api/v1/events?guild=${OTHER_GUILD}&gzip=1`, {
       authorization: `Bearer ${HOST_TOKEN}`,
     });
@@ -200,7 +202,7 @@ describe('live updates', () => {
     assert.equal(plain.binary[plain.messages.indexOf(plainState)], false);
     // A change goes out the same way, and a small message (the pong) stays text for both.
     const changed = Promise.all([packed.next('queue'), plain.next('queue')]);
-    server.queue.shuffle(OTHER_GUILD);
+    await server.queue.shuffle(OTHER_GUILD);
     const [packedQueue, plainQueue] = await changed;
     assert.deepEqual(packedQueue, plainQueue);
     packed.send({ type: 'ping', t: 1 });
@@ -208,19 +210,19 @@ describe('live updates', () => {
     assert.equal(packed.binary.at(-1), false);
     packed.close();
     plain.close();
-    server.queue.clear(OTHER_GUILD);
+    await server.queue.clear(OTHER_GUILD);
   });
 
   it('refuses a connection without a login, and a cookie from another site', async () => {
     const anonymous = new Socket(`${base}/api/v1/events`, {});
     assert.equal((await anonymous.closed).code, 4401);
-    const { cookie } = sessionFor(server, ALICE);
+    const { cookie } = await sessionFor(server, ALICE);
     const foreign = new Socket(`${base}/api/v1/events`, { cookie, origin: 'https://evil.example' });
     assert.equal((await foreign.closed).code, 4403);
   });
 
   it('refuses to subscribe to a server the login cannot open', async () => {
-    const { cookie } = sessionFor(server, ALICE);
+    const { cookie } = await sessionFor(server, ALICE);
     const socket = new Socket(`${base}/api/v1/events`, { cookie, origin: server.url });
     await socket.next('hello');
     socket.send({ type: 'subscribe', guild: OTHER_GUILD });
@@ -235,7 +237,7 @@ describe('live updates end with the login', () => {
     const server = await testServer({ listen: true });
     try {
       server.directory.join(GUILD, ALICE);
-      const { cookie, csrf } = sessionFor(server, ALICE);
+      const { cookie, csrf } = await sessionFor(server, ALICE);
       const socket = new Socket(`${server.url.replace('http://', 'ws://')}/api/v1/events?guild=${GUILD}`, {
         cookie,
         origin: server.url,
@@ -302,7 +304,7 @@ describe('live connections are capped', () => {
     const sockets: Socket[] = [];
     try {
       server.directory.join(GUILD, ALICE);
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       // Two tabs whose browser lost the network: they still hold the login's two places.
       silent.push(await silentTab(server.url, alice.cookie), await silentTab(server.url, alice.cookie));
       const base = `${server.url.replace('http://', 'ws://')}/api/v1/events`;
@@ -337,7 +339,7 @@ describe('live connections are capped', () => {
     const clients: WebSocketClient[] = [];
     try {
       server.directory.join(GUILD, ALICE);
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       const base = `${server.url.replace('http://', 'ws://')}/api/v1/events?guild=${GUILD}`;
       const tab = () =>
         new Promise<WebSocketClient>((resolve) => {
@@ -376,7 +378,7 @@ describe('live connections are capped', () => {
         return socket;
       };
       // Two tabs of one login, and a third: over the cap for that login.
-      const first = sessionFor(server, ALICE);
+      const first = await sessionFor(server, ALICE);
       const asFirst = { cookie: first.cookie, origin: server.url };
       await open(asFirst).next('hello');
       await open(asFirst).next('hello');
@@ -385,7 +387,7 @@ describe('live connections are capped', () => {
         reason: 'too many live connections for this login; close a tab or two',
       });
       // Another login from the same address: its first tab fits, the next is one too many from this address.
-      const second = sessionFor(server, ALICE);
+      const second = await sessionFor(server, ALICE);
       const asSecond = { cookie: second.cookie, origin: server.url };
       await open(asSecond).next('hello');
       assert.deepEqual(await open(asSecond).closed, {
@@ -426,7 +428,7 @@ describe('votes to skip, live', () => {
       const base = server.url.replace('http://', 'ws://');
       // Alice has no DJ role in a server that has one; Bob is in the bot's voice channel.
       server.directory.join(GUILD, ALICE);
-      server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      await server.store.settings.setDjRole(GUILD, DJ_ROLE);
       server.voice.inVoice.set(GUILD, [BOB]);
       const host = { guildId: GUILD, userId: null, mayControl: true, mayManage: true };
       await server.actions.add(host, 'two');
@@ -437,9 +439,9 @@ describe('votes to skip, live', () => {
       assert.deepEqual(state.votes, { on: true, votes: 0, needed: 1, voted: false });
       // Not listening yet: Alice may not vote.
       const alice = { guildId: GUILD, userId: ALICE, mayControl: false, mayManage: false };
-      assert.throws(() => server.actions.skip(alice), /only people listening can vote to skip/);
+      await assert.rejects(() => server.actions.skip(alice), /only people listening can vote to skip/);
       // Her browser listens along: she counts among the people listening.
-      const { cookie } = sessionFor(server, ALICE);
+      const { cookie } = await sessionFor(server, ALICE);
       const browser = new Socket(`${base}/api/v1/events?guild=${GUILD}`, { cookie, origin: server.url });
       sockets.push(browser);
       await browser.next('state');
@@ -450,7 +452,7 @@ describe('votes to skip, live', () => {
       server.voice.inVoice.set(GUILD, [BOB, '300000000000000003']);
       const told = watcher.next('votes');
       const hers = browser.next('votes');
-      assert.deepEqual(server.actions.skip(alice).votes, { votes: 1, needed: 2 });
+      assert.deepEqual((await server.actions.skip(alice)).votes, { votes: 1, needed: 2 });
       // Every panel hears how the vote stands; only Alice's hears that the vote is hers.
       assert.deepEqual((await told).votes, { on: true, votes: 1, needed: 2, voted: false });
       assert.deepEqual((await hers).votes, { on: true, votes: 1, needed: 2, voted: true });
@@ -474,7 +476,7 @@ describe('the voice sound, live', () => {
       try {
         assert.deepEqual((await panel.next('state')).sound, { volume: 100, preset: 'off' });
         const told = panel.next('sound');
-        server.actions.sound({ guildId: GUILD, userId: null, mayControl: true, mayManage: true }, 'bright');
+        await server.actions.sound({ guildId: GUILD, userId: null, mayControl: true, mayManage: true }, 'bright');
         assert.deepEqual((await told).sound, { volume: 100, preset: 'bright' });
       } finally {
         panel.close();

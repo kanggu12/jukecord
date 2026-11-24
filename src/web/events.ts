@@ -15,12 +15,19 @@
  *
  * The browser plays along by itself, from the snapshots: the player is the clock (see core/player.ts). To turn the
  * server's times into its own, it measures the difference between the two clocks with ping/pong.
+ *
+ * Making a message can wait for the database (the names of who added what, the queue, the votes, the sound), so what
+ * goes to one server's panels takes turns in an outbox of that server's, in the order it happened: a panel that
+ * subscribes takes its turn there too, so its whole state is the first thing it gets from the server and everything
+ * after it is newer, as when the state was made in one go.
  */
 import type { WebSocket } from 'ws';
 import type { Access, Principal } from '../app/access.ts';
 import { type ActionContext, ActionError, type Actions } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
+import { GuildLanes, throwFromTimer } from '../core/lanes.ts';
+import type { PlayerSnapshot } from '../core/player.ts';
 import type { Logger } from '../log.ts';
 import type { UserRepository } from '../store/store.ts';
 import { addressKey, type Caller } from './auth.ts';
@@ -157,7 +164,7 @@ export interface EventHubOptions {
   readonly queueVersion: (guildId: string) => number;
   readonly now?: () => number;
   /** Whether a caller's login still exists (logged out, expired and revoked logins end their connections). */
-  readonly stillValid?: (caller: Caller) => boolean;
+  readonly stillValid?: (caller: Caller) => boolean | Promise<boolean>;
   /** How many connections there may be (default DEFAULT_LIVE_LIMITS). */
   readonly limits?: LiveLimits;
   /** The fewest milliseconds between queue messages and between listener messages of a server (tests shorten them). */
@@ -175,6 +182,11 @@ export interface AttachOptions {
   readonly gzip?: boolean;
   /** The address it comes from, for the per-address cap. */
   readonly address?: string | undefined;
+  /**
+   * Hands over what the browser said before the hub took the connection (its login was being read), in order, and
+   * stops keeping it: called once, as the hub starts listening to the connection itself.
+   */
+  readonly early?: () => readonly string[];
 }
 
 // The context for reading a server's state on behalf of everyone subscribed to it (reading needs no rights).
@@ -241,6 +253,9 @@ export class EventHub {
   private readonly heartbeat: NodeJS.Timeout;
   // The bus listeners, kept to remove them on close.
   private readonly off: (() => void)[] = [];
+  // What goes to each server's panels, one message (or one panel's state) at a time, in the order it happened: a
+  // message waits for the database while it is made, and must not overtake the one before it.
+  private readonly outbox = new GuildLanes();
 
   constructor(options: EventHubOptions) {
     this.options = options;
@@ -249,40 +264,49 @@ export class EventHub {
     this.queueEveryMs = options.queueEveryMs ?? QUEUE_EVERY_MS;
     this.listenersEveryMs = options.listenersEveryMs ?? LISTENERS_EVERY_MS;
     const { bus, presenter, actions } = options;
-    const onPlayer = (snapshot: Parameters<typeof presenter.player>[0]) => {
-      const room = this.rooms.get(snapshot.guildId);
-      // Built only if someone is there to get it; small, so sent at once (the browsers follow the clock with it).
-      if (!room) return;
-      const bytes = json({ type: 'player', guild: snapshot.guildId, player: presenter.player(snapshot) });
-      this.broadcast(
-        room,
-        outgoing(
-          bytes.length,
-          () => bytes,
-          () => gzip(bytes),
-        ),
-      );
+    const onPlayer = (snapshot: PlayerSnapshot) => {
+      // Built only if someone is there to get it; small, so sent at once (the browsers follow the clock with it), in
+      // its turn: the snapshot is the one of this moment, its names are read on the way.
+      if (!this.rooms.has(snapshot.guildId)) return;
+      return this.post(snapshot.guildId, async () => {
+        const player = await presenter.player(snapshot);
+        const room = this.rooms.get(snapshot.guildId);
+        if (!room) return;
+        const bytes = json({ type: 'player', guild: snapshot.guildId, player });
+        this.broadcast(
+          room,
+          outgoing(
+            bytes.length,
+            () => bytes,
+            () => gzip(bytes),
+          ),
+        );
+      });
     };
     const onQueue = ({ guildId }: { guildId: string }) => {
       const room = this.rooms.get(guildId);
       if (room) this.queueSoon(guildId, room);
     };
     const onVoice = ({ guildId }: { guildId: string }) => {
-      const room = this.rooms.get(guildId);
-      if (!room) return;
-      // Each connection gets the channels its own person can see, worked out once per person; a guest, only that
-      // the bot is in one.
-      const lists = new Map<string, unknown>();
-      for (const client of room.clients) {
-        const context = viewer(client, guildId);
-        const guest = client.principal.kind === 'guest';
-        const key = guest ? 'guest' : (context.userId ?? (context.mayManage ? 'host' : 'anyone'));
-        if (!lists.has(key)) {
-          const voice = actions.voiceChannels(context);
-          lists.set(key, guest ? guestVoice(voice) : voice);
+      if (!this.rooms.has(guildId)) return;
+      // In its turn, as every message to a server's panels: a state being made goes out before it.
+      return this.post(guildId, () => {
+        const room = this.rooms.get(guildId);
+        if (!room) return;
+        // Each connection gets the channels its own person can see, worked out once per person; a guest, only that
+        // the bot is in one.
+        const lists = new Map<string, unknown>();
+        for (const client of room.clients) {
+          const context = viewer(client, guildId);
+          const guest = client.principal.kind === 'guest';
+          const key = guest ? 'guest' : (context.userId ?? (context.mayManage ? 'host' : 'anyone'));
+          if (!lists.has(key)) {
+            const voice = actions.voiceChannels(context);
+            lists.set(key, guest ? guestVoice(voice) : voice);
+          }
+          this.send(client, { type: 'voice', guild: guildId, voice: lists.get(key) });
         }
-        this.send(client, { type: 'voice', guild: guildId, voice: lists.get(key) });
-      }
+      });
     };
     // The votes to skip changed: the panels hear the new view soon, at most four times a second.
     const onVotes = ({ guildId }: { guildId: string }) => {
@@ -291,17 +315,21 @@ export class EventHub {
     };
     // The voice channel's sound changed (a person's change, held to the rates): small, made once, sent at once.
     const onSound = ({ guildId }: { guildId: string }) => {
-      const room = this.rooms.get(guildId);
-      if (!room) return;
-      const bytes = json({ type: 'sound', guild: guildId, sound: actions.currentSound(guildId) });
-      this.broadcast(
-        room,
-        outgoing(
-          bytes.length,
-          () => bytes,
-          () => gzip(bytes),
-        ),
-      );
+      if (!this.rooms.has(guildId)) return;
+      return this.post(guildId, async () => {
+        const sound = await actions.currentSound(guildId);
+        const room = this.rooms.get(guildId);
+        if (!room) return;
+        const bytes = json({ type: 'sound', guild: guildId, sound });
+        this.broadcast(
+          room,
+          outgoing(
+            bytes.length,
+            () => bytes,
+            () => gzip(bytes),
+          ),
+        );
+      });
     };
     bus.on('player', onPlayer);
     bus.on('queue', onQueue);
@@ -321,10 +349,15 @@ export class EventHub {
 
   /**
    * Takes over a new connection from a logged-in caller; `guild` subscribes at once when given. A connection over one
-   * of the caps is closed with 1013 and the reason, and false is returned.
+   * of the caps is closed with 1013 and the reason, and false is returned (false too for a browser gone meanwhile).
    */
-  attach(socket: WebSocket, caller: Caller, options: AttachOptions = {}): boolean {
+  async attach(socket: WebSocket, caller: Caller, options: AttachOptions = {}): Promise<boolean> {
     const principal = caller.principal;
+    // The person's name and picture are read first: from the caps' check to the connection counted nothing waits, so
+    // two connections at once cannot both take the last place.
+    const person = principal.kind === 'user' ? await this.options.users.get(principal.userId) : null;
+    // Gone while the name was read: nothing to take, and no goodbye will come for it.
+    if (socket.readyState !== socket.OPEN) return false;
     // The host is not held to the per-login and per-address caps: it is the machine's own, and its tabs and scripts
     // are its business. Every connection counts in the total.
     const host = principal.kind === 'host';
@@ -367,7 +400,6 @@ export class EventHub {
       }
       return false;
     }
-    const person = principal.kind === 'user' ? this.options.users.get(principal.userId) : null;
     const who: Listener =
       principal.kind === 'host'
         ? { id: null, name: 'Host', avatar: null }
@@ -405,11 +437,21 @@ export class EventHub {
       client.pongAt = steadyNow();
     });
     socket.on('message', (data) => void this.onMessage(client, String(data)));
+    // What it said before it was taken (while its login was read), handed over now that the hub listens itself.
+    const early = options.early?.() ?? [];
     socket.on('close', () => this.drop(client));
     socket.on('error', (error) => this.options.log.debug('a panel connection failed', { error }));
     this.send(client, { type: 'hello', serverTime: this.now(), you: who });
     if (options.guild) void this.subscribe(client, options.guild);
+    // Heard in the order it was said, after the subscribe the connection asked for in its address.
+    for (const text of early) void this.onMessage(client, text);
     return true;
+  }
+
+  // Sends to a server's panels in that server's turn of the outbox (see the module comment): `task` makes the
+  // message and writes it, after everything asked for before.
+  private post(guildId: string, task: () => void | Promise<void>): Promise<void> {
+    return this.outbox.later(guildId, task);
   }
 
   // Pings the connections that match, unless they were pinged for the same cap within the last probe, and closes the
@@ -526,40 +568,51 @@ export class EventHub {
     }
     // Asked again later, or closed while Discord answered: this answer is not needed.
     if (client.asking !== mine || !this.clients.has(client)) return;
-    const before = client.guild;
-    if (before !== guildId) {
-      this.leaveRoom(client);
-      client.guild = guildId;
-      this.roomOf(guildId).clients.add(client);
-      // A listener who switches servers stops counting in the old one and starts in the new one, before the state
-      // below is made: the listeners in it count this one already.
-      if (client.listening) {
-        if (before) this.listenersChanged(before);
-        this.listenersChanged(guildId);
+    // Its turn among what goes to the server's panels: the state is the first thing this connection gets from the
+    // server, and every message after it is newer.
+    await this.post(guildId, async () => {
+      // Asked again later, or closed, while it waited for its turn: not needed either.
+      if (client.asking !== mine || !this.clients.has(client)) return;
+      const before = client.guild;
+      if (before !== guildId) {
+        this.leaveRoom(client);
+        client.guild = guildId;
+        this.roomOf(guildId).clients.add(client);
+        // A listener who switches servers stops counting in the old one and starts in the new one, before the state
+        // below is made: the listeners in it count this one already.
+        if (client.listening) {
+          if (before) this.listenersChanged(before);
+          this.listenersChanged(guildId);
+        }
       }
-    }
-    const room = this.roomOf(guildId);
-    const { actions, presenter } = this.options;
-    // The queue, the big part, is the start made once per version; only the end is this connection's own.
-    const start = this.queueStart(guildId, room);
-    client.queueVersion = start.version;
-    const voice = actions.voiceChannels(viewer(client, guildId));
-    const ending = Buffer.from(
-      `,"type":"state","player":${JSON.stringify(presenter.player(actions.nowPlaying(reader(guildId))))},` +
-        `"voice":${JSON.stringify(client.principal.kind === 'guest' ? guestVoice(voice) : voice)},` +
-        `"listeners":${JSON.stringify(this.listenersOf(room))},` +
-        // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
-        `"votes":${JSON.stringify(actions.skipVotes(viewer(client, guildId)))},` +
-        `"sound":${JSON.stringify(actions.currentSound(guildId))}}`,
-    );
-    this.write(
-      client,
-      outgoing(
-        start.bytes.length + ending.length,
-        () => Buffer.concat([start.bytes, ending]),
-        () => gzipJoined(this.compressedStart(start), ending),
-      )(client),
-    );
+      const room = this.roomOf(guildId);
+      const { actions, presenter } = this.options;
+      // The player as it is at this turn: a change of it from now on is sent after this state.
+      const snapshot = actions.nowPlaying(reader(guildId));
+      // The queue, the big part, is the start made once per version; only the end is this connection's own.
+      const start = await this.queueStart(guildId, room);
+      client.queueVersion = start.version;
+      const voice = actions.voiceChannels(viewer(client, guildId));
+      const player = await presenter.player(snapshot);
+      // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
+      const votes = await actions.skipVotes(viewer(client, guildId));
+      const sound = await actions.currentSound(guildId);
+      const ending = Buffer.from(
+        `,"type":"state","player":${JSON.stringify(player)},` +
+          `"voice":${JSON.stringify(client.principal.kind === 'guest' ? guestVoice(voice) : voice)},` +
+          `"listeners":${JSON.stringify(this.listenersOf(room))},` +
+          `"votes":${JSON.stringify(votes)},` +
+          `"sound":${JSON.stringify(sound)}}`,
+      );
+      this.write(
+        client,
+        outgoing(
+          start.bytes.length + ending.length,
+          () => Buffer.concat([start.bytes, ending]),
+          () => gzipJoined(this.compressedStart(start), ending),
+        )(client),
+      );
+    });
   }
 
   // The room of a server, made when the first connection shows it.
@@ -602,12 +655,13 @@ export class EventHub {
     room.votesTimer = null;
   }
 
-  // The start of every message with this server's queue, made again only when the queue has changed since.
-  private queueStart(guildId: string, room: Room): QueueStart {
+  // The start of every message with this server's queue, made again only when the queue has changed since. Made in
+  // the server's turn of the outbox, so two are never made at once.
+  private async queueStart(guildId: string, room: Room): Promise<QueueStart> {
     const kept = room.queue;
     if (kept && kept.version === this.options.queueVersion(guildId)) return kept;
     const { actions, presenter } = this.options;
-    const queue = presenter.queue(actions.queue(reader(guildId)));
+    const queue = await presenter.queue(await actions.queue(reader(guildId)));
     const bytes = Buffer.from(
       `{"v":${EVENTS_VERSION},"guild":${JSON.stringify(guildId)},"queue":${JSON.stringify(queue)}`,
     );
@@ -630,21 +684,25 @@ export class EventHub {
     room.queueTimer = setTimeout(() => {
       room.queueTimer = null;
       room.queueSentAt = steadyNow();
-      // The room may have closed meanwhile (its last connection left); then this is the old room, and nobody needs it.
-      if (this.rooms.get(guildId) !== room) return;
-      const start = this.queueStart(guildId, room);
-      const ending = Buffer.from(',"type":"queue"}');
-      const frame = outgoing(
-        start.bytes.length + ending.length,
-        () => Buffer.concat([start.bytes, ending]),
-        () => gzipJoined(this.compressedStart(start), ending),
-      );
-      for (const client of room.clients) {
-        // A state sent since (a subscribe) had this queue already.
-        if (client.queueVersion >= start.version) continue;
-        client.queueVersion = start.version;
-        this.write(client, frame(client));
-      }
+      // Made and sent in its turn; a failure is the timer's, as it was when this ran in it.
+      void this.post(guildId, async () => {
+        // The room may have closed meanwhile (its last connection left); then this is the old room, and nobody needs
+        // it.
+        if (this.rooms.get(guildId) !== room) return;
+        const start = await this.queueStart(guildId, room);
+        const ending = Buffer.from(',"type":"queue"}');
+        const frame = outgoing(
+          start.bytes.length + ending.length,
+          () => Buffer.concat([start.bytes, ending]),
+          () => gzipJoined(this.compressedStart(start), ending),
+        );
+        for (const client of room.clients) {
+          // A state sent since (a subscribe) had this queue already.
+          if (client.queueVersion >= start.version) continue;
+          client.queueVersion = start.version;
+          this.write(client, frame(client));
+        }
+      }).catch(throwFromTimer);
     }, wait);
     room.queueTimer.unref();
   }
@@ -682,16 +740,19 @@ export class EventHub {
     room.listenersTimer = setTimeout(() => {
       room.listenersTimer = null;
       room.listenersSentAt = steadyNow();
-      if (this.rooms.get(guildId) !== room) return;
-      const bytes = json({ type: 'listeners', guild: guildId, listeners: this.listenersOf(room) });
-      this.broadcast(
-        room,
-        outgoing(
-          bytes.length,
-          () => bytes,
-          () => gzip(bytes),
-        ),
-      );
+      // In its turn, after a state being made (which counts the listeners as they are then).
+      void this.post(guildId, () => {
+        if (this.rooms.get(guildId) !== room) return;
+        const bytes = json({ type: 'listeners', guild: guildId, listeners: this.listenersOf(room) });
+        this.broadcast(
+          room,
+          outgoing(
+            bytes.length,
+            () => bytes,
+            () => gzip(bytes),
+          ),
+        );
+      }).catch(throwFromTimer);
     }, wait);
     room.listenersTimer.unref();
   }
@@ -705,26 +766,31 @@ export class EventHub {
     room.votesTimer = setTimeout(() => {
       room.votesTimer = null;
       room.votesSentAt = steadyNow();
-      // The room may have closed meanwhile; then nobody needs it.
-      if (this.rooms.get(guildId) !== room) return;
-      const { actions } = this.options;
-      // Made for no one in particular (voted: false), and the people whose votes count, once for the whole room.
-      const view = actions.skipVotes(reader(guildId));
-      const voters = actions.skipVoters(guildId);
-      const form = (voted: boolean) => {
-        const bytes = json({ type: 'votes', guild: guildId, votes: { ...view, voted } });
-        return outgoing(
-          bytes.length,
-          () => bytes,
-          () => gzip(bytes),
-        );
-      };
-      const others = form(false);
-      // The voters' form only when someone voted; each form is packed at most once, whoever needs it first.
-      const theirs = voters.size > 0 ? form(true) : others;
-      this.broadcast(room, (client) => (voters.has(client.person) ? theirs : others)(client));
+      void this.post(guildId, () => this.sendVotes(guildId, room)).catch(throwFromTimer);
     }, wait);
     room.votesTimer.unref();
+  }
+
+  // The votes message of a server, made once for every panel in it (see votesSoon), in the server's turn.
+  private async sendVotes(guildId: string, room: Room): Promise<void> {
+    // The room may have closed meanwhile; then nobody needs it.
+    if (this.rooms.get(guildId) !== room) return;
+    const { actions } = this.options;
+    // Made for no one in particular (voted: false), and the people whose votes count, once for the whole room.
+    const view = await actions.skipVotes(reader(guildId));
+    const voters = await actions.skipVoters(guildId);
+    const form = (voted: boolean) => {
+      const bytes = json({ type: 'votes', guild: guildId, votes: { ...view, voted } });
+      return outgoing(
+        bytes.length,
+        () => bytes,
+        () => gzip(bytes),
+      );
+    };
+    const others = form(false);
+    // The voters' form only when someone voted; each form is packed at most once, whoever needs it first.
+    const theirs = voters.size > 0 ? form(true) : others;
+    this.broadcast(room, (client) => (voters.has(client.person) ? theirs : others)(client));
   }
 
   // Sends one message, made once, to every connection showing a server.
@@ -767,18 +833,8 @@ export class EventHub {
         this.drop(client);
         continue;
       }
-      // Read from the database; if that fails this once, the connection stays and the next beat asks again.
-      let valid = true;
-      try {
-        valid = this.options.stillValid?.(client.caller) ?? true;
-      } catch (error) {
-        this.options.log.debug('could not check a login', { error });
-      }
-      if (!valid) {
-        client.socket.close(4401, 'the login has ended');
-        this.drop(client);
-        continue;
-      }
+      // Read from the database, which answers a moment later (see loginEnded).
+      void this.loginEnded(client);
       if (client.guild) {
         const guild = client.guild;
         // Membership answers are kept for a minute (Access), so this costs Discord at most one question a minute.
@@ -793,6 +849,21 @@ export class EventHub {
       client.alive = false;
       client.socket.ping();
     }
+  }
+
+  // Ends a connection whose login has ended (logged out, expired, revoked, a guest's link gone). If the database cannot
+  // say this once, the connection stays and the next beat asks again.
+  private async loginEnded(client: Client): Promise<void> {
+    let valid = true;
+    try {
+      valid = (await this.options.stillValid?.(client.caller)) ?? true;
+    } catch (error) {
+      this.options.log.debug('could not check a login', { error });
+    }
+    // Still good, or gone meanwhile by itself.
+    if (valid || !this.clients.has(client)) return;
+    client.socket.close(4401, 'the login has ended');
+    this.drop(client);
   }
 
   // Forgets a connection; a listener leaving is announced to the others.

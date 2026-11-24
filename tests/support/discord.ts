@@ -5,6 +5,7 @@
 import { Actions } from '../../src/app/actions.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { Track } from '../../src/core/types.ts';
@@ -22,16 +23,21 @@ export const PERSON = '300000000000000001';
  * A bot over real actions and players, with a resolver that answers from a table; with `listening`, votes to skip
  * too, counting the people it names as listening.
  */
-export function fakeBot(
-  options: { found?: Record<string, () => Track[]>; listening?: (guildId: string) => ReadonlySet<string> } = {},
+export async function fakeBot(
+  options: {
+    found?: Record<string, () => Track[] | Promise<Track[]>>;
+    listening?: (guildId: string) => ReadonlySet<string>;
+  } = {},
 ) {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
   const media = new FakeMedia();
   const logs = new MemorySink();
   const log = createLogger({ level: 'debug', sinks: [logs] });
-  const queue = new QueueService(store.queue, bus);
+  // One lane per server, shared by everything that changes one, as in main.ts.
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const players = new Players({
     queue,
     media,
@@ -40,6 +46,7 @@ export function fakeBot(
     bus,
     clock,
     log,
+    lanes,
     fetchTimeoutMs: 60_000,
   });
   const resolver = {
@@ -56,11 +63,12 @@ export function fakeBot(
         bus,
         clock,
         log,
+        lanes,
         applies: (guildId) => actions.voteSkipApplies(guildId),
         listening,
       })
     : undefined;
-  const actions = new Actions({ store, queue, players, resolver, log, ...(votes ? { votes, bus } : {}) });
+  const actions = new Actions({ store, queue, players, lanes, resolver, log, ...(votes ? { votes, bus } : {}) });
   const bot = new Bot({
     token: 'not used',
     actions,

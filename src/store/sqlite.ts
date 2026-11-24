@@ -15,7 +15,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { Lock } from '../util/lock.ts';
 import { type RunResult, type SqlExecutor, type SqlRow, type SqlValue, StoreError } from './sql.ts';
@@ -27,6 +27,10 @@ interface Transaction {
   open: boolean;
   readonly savepoints: Lock;
 }
+
+// How many prepared statements are kept: the repositories have a hundred or so texts (the settings' few variants
+// among them), so this keeps them all and still bounds a text made up at random.
+const STATEMENTS_KEPT = 500;
 
 // The outcome of synchronous work as a promise: its value, or its error as a rejection, never a throw at the call.
 function settled<T>(work: () => T): Promise<T> {
@@ -47,6 +51,9 @@ export class SqliteExecutor implements SqlExecutor {
   private readonly lock = new Lock();
   // The transaction the code running now is inside, if any.
   private readonly current = new AsyncLocalStorage<Transaction>();
+  // Prepared statements by their text, oldest first: preparing is most of what a simple statement costs (a thousand
+  // rows written in a reorder took six times as long, prepared one by one), and the repositories' texts repeat.
+  private readonly statements = new Map<string, StatementSync>();
 
   private constructor(db: DatabaseSync, file: string) {
     this.db = db;
@@ -91,16 +98,16 @@ export class SqliteExecutor implements SqlExecutor {
 
   all(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
     // The driver's rows are plain objects of its own value types, every one of which is an SqlValue.
-    return this.use(() => this.db.prepare(sql).all(...params) as SqlRow[]);
+    return this.use(() => this.prepared(sql).all(...params) as SqlRow[]);
   }
 
   get(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow | undefined> {
-    return this.use(() => this.db.prepare(sql).get(...params) as SqlRow | undefined);
+    return this.use(() => this.prepared(sql).get(...params) as SqlRow | undefined);
   }
 
   run(sql: string, params: readonly SqlValue[] = []): Promise<RunResult> {
     return this.use(() => {
-      const result = this.db.prepare(sql).run(...params);
+      const result = this.prepared(sql).run(...params);
       // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
       return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
     });
@@ -200,16 +207,36 @@ export class SqliteExecutor implements SqlExecutor {
   async close(): Promise<void> {
     // Inside a transaction (a test that closes halfway): closed now, as before the executor; its next statement fails.
     if (this.inside()) {
-      if (this.db.isOpen) this.db.close();
+      this.shut();
       return;
     }
     // Otherwise once no transaction holds the connection: closed under one, it would end halfway.
     const release = await this.lock.acquire();
     try {
-      if (this.db.isOpen) this.db.close();
+      this.shut();
     } finally {
       release();
     }
+  }
+
+  // Closes the connection and lets its prepared statements go, so a statement after this fails as one would on a
+  // closed connection (the database is not open), not on a statement the close ended.
+  private shut(): void {
+    this.statements.clear();
+    if (this.db.isOpen) this.db.close();
+  }
+
+  // The prepared statement for a text: kept from before, or prepared now and kept (the oldest let go past the bound).
+  private prepared(sql: string): StatementSync {
+    const kept = this.statements.get(sql);
+    if (kept) return kept;
+    const statement = this.db.prepare(sql);
+    this.statements.set(sql, statement);
+    if (this.statements.size > STATEMENTS_KEPT) {
+      const oldest = this.statements.keys().next().value;
+      if (oldest !== undefined) this.statements.delete(oldest);
+    }
+    return statement;
   }
 
   /**

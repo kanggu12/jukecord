@@ -9,6 +9,7 @@
  * take an edit for just then (busy, the network) is drawn again at the next change.
  */
 import type { Clock, TimerHandle } from '../core/clock.ts';
+import { throwFromTimer } from '../core/lanes.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Logger } from '../log.ts';
 import type { Lang } from './cards.ts';
@@ -26,8 +27,8 @@ export interface KeptCard {
 
 export interface CardKeeperOptions {
   readonly clock: Clock;
-  /** Draws the card of a snapshot in a language. */
-  readonly render: (snapshot: PlayerSnapshot, lang: Lang) => CardPayload;
+  /** Draws the card of a snapshot in a language (the vote to skip under way is read for it, so it may answer later). */
+  readonly render: (snapshot: PlayerSnapshot, lang: Lang) => CardPayload | Promise<CardPayload>;
   readonly log: Logger;
   /** The fewest milliseconds between two edits of a server's card (5 s by default). */
   readonly everyMs?: number;
@@ -92,7 +93,10 @@ export class CardKeeper {
     kept.latest = snapshot;
     if (kept.timer !== null) return;
     const wait = Math.max(0, kept.editedAt + this.everyMs - this.options.clock.steady());
-    kept.timer = this.options.clock.setTimeout(() => this.draw(snapshot.guildId, kept), wait);
+    kept.timer = this.options.clock.setTimeout(() => {
+      // Drawn a moment later (the card reads the votes); a failure is the timer's, as it was when this ran in it.
+      this.draw(snapshot.guildId, kept).catch(throwFromTimer);
+    }, wait);
   }
 
   /** Stops keeping every card (shutting down): no timer is left behind. */
@@ -100,12 +104,29 @@ export class CardKeeper {
     for (const guildId of [...this.cards.keys()]) this.drop(guildId);
   }
 
-  // Draws a kept card again with the newest state, when that shows something else than the card does.
-  private draw(guildId: string, kept: Kept): void {
-    kept.timer = null;
+  // Draws a kept card again with the newest state, when that shows something else than the card does. While it is
+  // drawn the timer stays marked as set, so the changes meanwhile only leave their snapshot; the newest is drawn.
+  private async draw(guildId: string, kept: Kept): Promise<void> {
     // Replaced by a newer card meanwhile: that one is drawn on its own.
-    if (this.cards.get(guildId) !== kept || !kept.latest) return;
-    const payload = this.options.render(kept.latest, kept.card.lang);
+    if (this.cards.get(guildId) !== kept || !kept.latest) {
+      kept.timer = null;
+      return;
+    }
+    let drawn = kept.latest;
+    let payload: CardPayload;
+    try {
+      payload = await this.options.render(drawn, kept.card.lang);
+      // A change came while it was drawn: drawn again with it, so the edit shows the newest state as before.
+      while (kept.latest !== null && kept.latest !== drawn) {
+        drawn = kept.latest;
+        payload = await this.options.render(drawn, kept.card.lang);
+      }
+    } finally {
+      // Drawn (or failed): the next change sets a timer of its own again.
+      kept.timer = null;
+    }
+    // Replaced by a newer card while it was drawn: that one is drawn on its own.
+    if (this.cards.get(guildId) !== kept) return;
     const shown = JSON.stringify(payload);
     if (shown === kept.shown) return;
     // What the card showed before this edit: still what it shows when the edit fails.

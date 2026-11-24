@@ -14,6 +14,7 @@
  */
 import type { Bus } from '../core/bus.ts';
 import type { Clock, TimerHandle } from '../core/clock.ts';
+import { type GuildLanes, throwFromTimer } from '../core/lanes.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import { ActionError } from './actions.ts';
@@ -45,8 +46,10 @@ export interface SkipVotesOptions {
   readonly bus: Bus;
   readonly clock: Clock;
   readonly log: Logger;
-  /** Whether Skip from someone without the DJ role is a vote in a server now. */
-  readonly applies: (guildId: string) => boolean;
+  /** The servers' lanes: a count made again after a change of who listens takes its server's turn (it may skip). */
+  readonly lanes: GuildLanes;
+  /** Whether Skip from someone without the DJ role is a vote in a server now (read from its settings). */
+  readonly applies: (guildId: string) => boolean | Promise<boolean>;
   /** Who listens in a server now, by Discord ID ("host" for the host): the bot's voice channel and the browsers. */
   readonly listening: (guildId: string) => ReadonlySet<string>;
   /** How long after a change of who listens an open vote is counted again (default 250 ms). */
@@ -86,9 +89,9 @@ export class SkipVotes {
    * How the votes of a server's current track stand, for `person` (a Discord ID, or null for no one in particular):
    * whether they have a vote that counts in it.
    */
-  view(guildId: string, person: string | null = null): VotesView {
+  async view(guildId: string, person: string | null = null): Promise<VotesView> {
     // Votes off: nothing to count, and nothing for anyone to show.
-    if (!this.options.applies(guildId)) return { on: false, votes: 0, needed: 0, voted: false };
+    if (!(await this.options.applies(guildId))) return { on: false, votes: 0, needed: 0, voted: false };
     const people = this.options.listening(guildId);
     const open = this.live(guildId);
     return {
@@ -104,19 +107,20 @@ export class SkipVotes {
    * The people whose votes count in a server's open vote now (none without one): the live updates tell each panel of
    * theirs that it voted, without telling anyone who else did.
    */
-  voters(guildId: string): ReadonlySet<string> {
+  async voters(guildId: string): Promise<ReadonlySet<string>> {
     const open = this.live(guildId);
     // No open vote, or votes no longer apply (a DJ role deleted meanwhile): nobody's vote counts.
-    if (!open || !this.options.applies(guildId)) return new Set();
+    if (!open || !(await this.options.applies(guildId))) return new Set();
     const people = this.options.listening(guildId);
     return new Set([...open.voters].filter((voter) => people.has(voter)));
   }
 
   /**
    * A vote to skip from `voter` (a Discord ID). Refused for someone who is not listening; a second vote of the same
-   * person in the same play changes nothing. Enough votes skip the track at once.
+   * person in the same play changes nothing. Enough votes skip the track at once. Called in the server's turn (the
+   * skip action's), which the skip it may make goes on in.
    */
-  vote(guildId: string, voter: string): VoteResult {
+  async vote(guildId: string, voter: string): Promise<VoteResult> {
     const people = this.options.listening(guildId);
     if (!people.has(voter)) throw new ActionError('forbidden', NOT_LISTENING);
     // A vote of an ended play is no vote for this one: a new play starts its own.
@@ -137,7 +141,7 @@ export class SkipVotes {
   }
 
   // Skips the track when the votes that count reach the votes needed; either way the panels hear the count.
-  private decide(guildId: string, open: Open, people: ReadonlySet<string>): VoteResult {
+  private async decide(guildId: string, open: Open, people: ReadonlySet<string>): Promise<VoteResult> {
     const votes = counted(open, people);
     const need = needed(people);
     if (votes < need) {
@@ -148,7 +152,7 @@ export class SkipVotes {
     this.open.delete(guildId);
     this.cancelRecount(guildId);
     this.options.log.info('skipped the track by a vote', { guild: guildId, votes, needed: need });
-    this.options.players.get(guildId).skip();
+    await this.options.players.get(guildId).skip();
     this.changed(guildId);
     return { votes, needed: need, skipped: true };
   }
@@ -178,20 +182,27 @@ export class SkipVotes {
       guildId,
       this.options.clock.setTimeout(() => {
         this.recounts.delete(guildId);
-        const open = this.live(guildId);
-        if (!open) {
-          // Ended meanwhile without a snapshot saying so (an idle player has none to send twice): nothing more to do.
-          if (this.open.has(guildId)) this.end(guildId);
-          return;
-        }
-        // Votes no longer apply (the DJ role deleted in Discord meanwhile): the open vote goes, and the panels hear so.
-        if (!this.options.applies(guildId)) {
-          this.end(guildId);
-          return;
-        }
-        this.decide(guildId, open, this.options.listening(guildId));
+        // The count may skip the track: it takes the server's turn, a turn of its own, as any timer's work does. A
+        // failure is the timer's, as it was when the count ran in it.
+        void this.options.lanes.later(guildId, () => this.recount(guildId)).catch(throwFromTimer);
       }, this.recountMs),
     );
+  }
+
+  // Counts an open vote again (see recountSoon), in the server's turn.
+  private async recount(guildId: string): Promise<void> {
+    const open = this.live(guildId);
+    if (!open) {
+      // Ended meanwhile without a snapshot saying so (an idle player has none to send twice): nothing more to do.
+      if (this.open.has(guildId)) this.end(guildId);
+      return;
+    }
+    // Votes no longer apply (the DJ role deleted in Discord meanwhile): the open vote goes, and the panels hear so.
+    if (!(await this.options.applies(guildId))) {
+      this.end(guildId);
+      return;
+    }
+    await this.decide(guildId, open, this.options.listening(guildId));
   }
 
   private cancelRecount(guildId: string): void {

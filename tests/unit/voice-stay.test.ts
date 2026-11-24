@@ -55,7 +55,7 @@ describe('staying in voice', () => {
   it('keeps the bot in a channel nobody is in while the server asks it to stay', async () => {
     const stay = { on: true };
     const { clock, voice, destroyed } = alone(stay);
-    voice.voiceStateChanged('G');
+    await voice.voiceStateChanged('G');
     await clock.advance(10 * 60_000);
     assert.equal(voice.channel('G')?.name, 'Lounge');
     assert.equal(destroyed(), 0);
@@ -64,10 +64,10 @@ describe('staying in voice', () => {
   it('leaves after the time alone once the setting is turned off, counting from the change', async () => {
     const stay = { on: true };
     const { clock, voice, destroyed } = alone(stay);
-    voice.voiceStateChanged('G');
+    await voice.voiceStateChanged('G');
     await clock.advance(5 * 60_000);
     stay.on = false;
-    voice.stayChanged('G');
+    await voice.stayChanged('G');
     // The host's minute alone starts at the change, not at the last change of who is in the channel.
     await clock.advance(59_000);
     assert.equal(voice.channel('G')?.name, 'Lounge');
@@ -79,10 +79,10 @@ describe('staying in voice', () => {
   it('stops a countdown under way when the setting is turned on', async () => {
     const stay = { on: false };
     const { clock, voice } = alone(stay);
-    voice.voiceStateChanged('G');
+    await voice.voiceStateChanged('G');
     await clock.advance(30_000);
     stay.on = true;
-    voice.stayChanged('G');
+    await voice.stayChanged('G');
     await clock.advance(5 * 60_000);
     assert.equal(voice.channel('G')?.name, 'Lounge');
   });

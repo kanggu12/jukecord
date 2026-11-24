@@ -16,6 +16,7 @@ import {
 } from '../../src/app/actions.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { NewTrack } from '../../src/core/types.ts';
@@ -132,6 +133,8 @@ export interface TestServer {
   readonly actions: Actions;
   readonly players: Players;
   readonly queue: QueueService;
+  /** The servers' lanes, which the actions, the players and the queue share. */
+  readonly lanes: GuildLanes;
   readonly cache: MediaCache;
   readonly covers: Covers;
   /** The pictures asked of the made-up image hosts, by address, in order. */
@@ -200,9 +203,11 @@ export function exampleTrack(name: string, durationMs = 180_000): NewTrack {
 /** Starts a test server. */
 export async function testServer(options: TestServerOptions = {}): Promise<TestServer> {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  // One lane per server, shared by everything that changes one, as in main.ts.
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   const logs = new MemorySink();
   const log = createLogger({ level: 'debug', sinks: [logs] });
@@ -214,6 +219,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     bus,
     clock,
     log,
+    lanes,
     fetchTimeoutMs: 60_000,
   });
   const found = options.found ?? {};
@@ -227,7 +233,10 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
         throw new BusyError('jukecord is looking up other tracks right now; try again in a moment');
       const tracks = found[input];
       if (!tracks) throw new Error(`nothing to add for "${input}"`);
-      return tracks.map((track) => store.tracks.upsert(track));
+      // Stored one after the other, as the resolver stores what it found.
+      const stored = [];
+      for (const track of tracks) stored.push(await store.tracks.upsert(track));
+      return stored;
     },
   } as unknown as Resolver;
   // The search answers from its table, as many as asked for, and remembers what it showed by the canonical address, as
@@ -252,6 +261,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     bus,
     clock,
     log,
+    lanes,
     applies: (guildId) => actions.voteSkipApplies(guildId),
     listening: (guildId) => new Set([...voice.people(guildId), ...browsers(guildId)]),
   });
@@ -259,6 +269,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     store,
     queue,
     players,
+    lanes,
     resolver,
     log,
     startedAt: clock.now(),
@@ -350,6 +361,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     actions,
     players,
     queue,
+    lanes,
     cache,
     covers,
     pictureRequests,
@@ -358,7 +370,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     url,
     close: async () => {
       await web.close();
-      store.close();
+      await store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },
     voice,
@@ -369,10 +381,10 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
 export const asHost = { authorization: `Bearer ${HOST_TOKEN}` };
 
 /** Logs a Discord user in (as the OAuth callback would) and returns the headers a panel would send for changes. */
-export function sessionFor(server: TestServer, userId: string | null): { cookie: string; csrf: string } {
-  const setCookie = server.auth.startSession(userId === null ? { kind: 'host' } : { kind: 'user', userId });
+export async function sessionFor(server: TestServer, userId: string | null): Promise<{ cookie: string; csrf: string }> {
+  const setCookie = await server.auth.startSession(userId === null ? { kind: 'host' } : { kind: 'user', userId });
   const cookie = setCookie.split(';')[0] ?? '';
-  const caller = server.auth.identify({ cookie });
+  const caller = await server.auth.identify({ cookie });
   if (!caller?.csrf) throw new Error('the session just made does not log in');
   return { cookie, csrf: caller.csrf };
 }

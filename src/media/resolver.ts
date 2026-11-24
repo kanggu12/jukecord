@@ -82,11 +82,11 @@ export class Resolver {
       // A single address seen before: answered from the database, with nothing fetched now (playing it later goes
       // through yt-dlp and its address guard like any other track).
       const source = canonicalSource(input.url);
-      const known = this.options.tracks.bySource(source);
+      const known = await this.options.tracks.bySource(source);
       if (known) return [known];
       // A result of a recent search: stored from what the search learned, the same as a search that adds it would.
       const found = this.options.recent?.(source);
-      if (found) return [this.store(found)];
+      if (found) return [await this.store(found)];
     }
     let found: Awaited<ReturnType<YtDlp['lookup']>>;
     try {
@@ -125,7 +125,9 @@ export class Resolver {
         this.options.log.info('left out a playlist entry on a private network', { title: track.title });
       }
     }
-    const tracks = allowed.map((track) => this.store(track));
+    // Stored one after the other, so the new tracks' IDs follow the list's order.
+    const tracks: Track[] = [];
+    for (const track of allowed) tracks.push(await this.store(track));
     this.options.log.info('looked up', {
       input: input.kind === 'search' ? `search: ${input.query}` : input.url.href,
       tracks: tracks.length,
@@ -134,9 +136,9 @@ export class Resolver {
   }
 
   // Stores a track found, and what the site said the recording is beside it, for finding its lyrics.
-  private store(track: NewTrack): Track {
-    const stored = this.options.tracks.upsert(track);
-    if (track.music) this.options.music?.set(stored.id, track.music);
+  private async store(track: NewTrack): Promise<Track> {
+    const stored = await this.options.tracks.upsert(track);
+    if (track.music) await this.options.music?.set(stored.id, track.music);
     return stored;
   }
 

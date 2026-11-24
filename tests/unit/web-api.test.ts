@@ -29,7 +29,7 @@ describe('the HTTP API', () => {
       found: { one: [exampleTrack('a')], three: [exampleTrack('b'), exampleTrack('c'), exampleTrack('d')] },
     });
     server.directory.join(GUILD, ALICE);
-    server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: null });
+    await server.store.users.upsert({ id: ALICE, name: 'Alice', avatar: null });
   });
   after(() => server.close());
 
@@ -140,7 +140,7 @@ describe('the HTTP API', () => {
   });
 
   it('needs the CSRF header for changes made with a session cookie', async () => {
-    const { cookie, csrf } = sessionFor(server, ALICE);
+    const { cookie, csrf } = await sessionFor(server, ALICE);
     assert.equal(
       (await inject({ method: 'GET', url: api(`/guilds/${GUILD}/queue`), headers: { cookie } })).statusCode,
       200,
@@ -159,7 +159,7 @@ describe('the HTTP API', () => {
   });
 
   it('applies the DJ role and membership to a Discord login', async () => {
-    const { cookie, csrf } = sessionFor(server, ALICE);
+    const { cookie, csrf } = await sessionFor(server, ALICE);
     const headers = { cookie, [CSRF_HEADER]: csrf };
     // Not a member of the other server.
     assert.equal((await inject({ method: 'GET', url: api(`/guilds/${OTHER_GUILD}/queue`), headers })).statusCode, 403);
@@ -183,7 +183,7 @@ describe('the HTTP API', () => {
     assert.equal(shuffle.statusCode, 403);
     assert.match(shuffle.json().error.message, /DJ role/);
     // The role deleted in Discord since: it counts as none, for changes and in the settings shown.
-    server.store.settings.setDjRole(GUILD, '500000000000000099');
+    await server.store.settings.setDjRole(GUILD, '500000000000000099');
     const again = await inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/shuffle`), headers });
     assert.equal(again.statusCode, 200);
     const shown = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/settings`), headers });
@@ -195,7 +195,7 @@ describe('the HTTP API', () => {
       payload: { roleId: null },
     });
     // Bob is in no server at all.
-    const bob = sessionFor(server, BOB);
+    const bob = await sessionFor(server, BOB);
     assert.deepEqual(
       (await inject({ method: 'GET', url: api('/guilds'), headers: { cookie: bob.cookie } })).json(),
       [],
@@ -203,7 +203,7 @@ describe('the HTTP API', () => {
   });
 
   it('sets the alerts channel for people who can manage the server, to a channel the bot may post in', async () => {
-    const { cookie, csrf } = sessionFor(server, ALICE);
+    const { cookie, csrf } = await sessionFor(server, ALICE);
     const headers = { cookie, [CSRF_HEADER]: csrf };
     const set = (payload: unknown, as: Record<string, string> = asHost) =>
       inject({
@@ -231,7 +231,7 @@ describe('the HTTP API', () => {
   });
 
   it('keeps the host operations to the host', async () => {
-    const { cookie } = sessionFor(server, ALICE);
+    const { cookie } = await sessionFor(server, ALICE);
     assert.equal((await inject({ method: 'GET', url: api('/logs'), headers: { cookie } })).statusCode, 403);
     assert.equal((await inject({ method: 'GET', url: api('/logs'), headers: asHost })).statusCode, 200);
     assert.equal((await inject({ method: 'GET', url: api('/doctor'), headers: asHost })).json().ok, true);
@@ -274,7 +274,7 @@ describe('the HTTP API', () => {
     assert.equal((await from('10.0.0.7', { cookie: `${SESSION_COOKIE}=stale` })).statusCode, 429);
     // A credential that works still gets in from that address: one stale browser does not lock out the household.
     assert.equal((await from('10.0.0.7', asHost)).statusCode, 200);
-    const alice = sessionFor(server, ALICE);
+    const alice = await sessionFor(server, ALICE);
     assert.equal((await from('10.0.0.7', { cookie: alice.cookie })).statusCode, 200);
     // No credential at all is not an attempt: the public status answers, the rest asks for a login.
     assert.equal((await from('10.0.0.7', {}, api('/status'))).statusCode, 200);
@@ -359,7 +359,7 @@ describe('the HTTP API', () => {
   });
 
   it("serves a server's queued track with Range, and nothing else", async () => {
-    const track = server.store.tracks.upsert(exampleTrack('audio'));
+    const track = await server.store.tracks.upsert(exampleTrack('audio'));
     const url = api(`/guilds/${GUILD}/tracks/${track.id}/audio`);
     // Not queued anywhere yet: not served, whatever the cache holds.
     assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404);
@@ -368,7 +368,7 @@ describe('the HTTP API', () => {
       const answer = await inject({ method: 'GET', url: api(`/guilds/${GUILD}/tracks/${odd}/audio`), headers: asHost });
       assert.equal(answer.statusCode, 404, odd);
     }
-    server.queue.add(GUILD, [track.id], 'end', null);
+    await server.queue.add(GUILD, [track.id], 'end', null);
     assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 409);
     const key = MediaCache.keyOf(track.source);
     const tmp = server.cache.tmpPath(key);
@@ -391,7 +391,7 @@ describe('the HTTP API', () => {
       404,
     );
     // A member of neither server cannot ask at all.
-    const stranger = sessionFor(server, BOB);
+    const stranger = await sessionFor(server, BOB);
     assert.equal((await inject({ method: 'GET', url, headers: { cookie: stranger.cookie } })).statusCode, 403);
   });
 });

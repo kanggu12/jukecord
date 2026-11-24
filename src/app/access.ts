@@ -120,7 +120,7 @@ export class Access {
     const answers = await Promise.all(
       guilds.map(async (guild) => {
         const member = await this.member(directory, guild.id, principal.userId);
-        return member ? { ...guild, ...this.rights(directory, guild.id, member) } : null;
+        return member ? { ...guild, ...(await this.rights(directory, guild.id, member)) } : null;
       }),
     );
     return answers.filter((guild): guild is GuildAccess => guild !== null);
@@ -150,7 +150,7 @@ export class Access {
       return { guildId, userId: null, ...narrowed(principal) };
     const member = await this.member(directory, guildId, principal.userId);
     if (!member) throw new ActionError('forbidden', 'you are not a member of that server');
-    return { guildId, userId, ...this.rights(directory, guildId, member) };
+    return { guildId, userId, ...(await this.rights(directory, guildId, member)) };
   }
 
   /** Drops what is remembered about a person (after logging out), or about everyone. */
@@ -164,12 +164,12 @@ export class Access {
 
   // The rights a member has: the DJ role (or Manage Server) to change the music, Manage Server for the settings. A DJ
   // role deleted in Discord counts as none (see djRoleNow); the server is one the bot sees here, so its roles are known.
-  private rights(
+  private async rights(
     directory: Directory,
     guildId: string,
     member: MemberInfo,
-  ): { mayControl: boolean; mayManage: boolean } {
-    const role = djRoleNow(this.options.settings.get(guildId).djRoleId, directory.roles(guildId));
+  ): Promise<{ mayControl: boolean; mayManage: boolean }> {
+    const role = djRoleNow((await this.options.settings.get(guildId)).djRoleId, directory.roles(guildId));
     return { mayControl: role === null || member.roles.includes(role) || member.manage, mayManage: member.manage };
   }
 
@@ -179,7 +179,7 @@ export class Access {
     const known = this.members.get(key);
     if (known && this.now() - known.at < this.ttlMs) return known.member;
     const pending = this.asking.get(key);
-    if (pending) return pending;
+    if (pending !== undefined) return pending;
     const question = directory
       .member(guildId, userId)
       .then((member) => {

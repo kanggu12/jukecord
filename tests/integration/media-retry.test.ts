@@ -59,7 +59,7 @@ describe('media reinforcements', { skip: !haveFfmpeg() && 'ffmpeg with libopus i
     process.env.FAKE_YTDLP_MARKER = path.join(dir, 'failed-once');
     const sink = new MemorySink();
     const log = createLogger({ level: 'info', sinks: [sink] });
-    const store = memoryStore();
+    const store = await memoryStore();
     const cache = new MediaCache({ dir: path.join(dir, 'cache'), maxBytes: 1024 ** 3, log });
     cache.init();
     const media = new Media({
@@ -70,7 +70,7 @@ describe('media reinforcements', { skip: !haveFfmpeg() && 'ffmpeg with libopus i
       log,
       timeoutMs: 60_000,
     });
-    const track = store.tracks.upsert({
+    const track = await store.tracks.upsert({
       source: 'https://example.com/flaky',
       url: 'https://example.com/flaky',
       title: 'Flaky',
@@ -96,7 +96,7 @@ describe('media reinforcements', { skip: !haveFfmpeg() && 'ffmpeg with libopus i
     process.env.FAKE_YTDLP_FAIL_ONCE = 'Video unavailable';
     process.env.FAKE_YTDLP_MARKER = path.join(dir, 'failed-once-2');
     const log = createLogger({ level: 'error', sinks: [] });
-    const store = memoryStore();
+    const store = await memoryStore();
     const cache = new MediaCache({ dir: path.join(dir, 'cache-2'), maxBytes: 1024 ** 3, log });
     cache.init();
     const media = new Media({
@@ -107,7 +107,7 @@ describe('media reinforcements', { skip: !haveFfmpeg() && 'ffmpeg with libopus i
       log,
       timeoutMs: 60_000,
     });
-    const track = store.tracks.upsert({
+    const track = await store.tracks.upsert({
       source: 'https://example.com/gone',
       url: 'https://example.com/gone',
       title: 'Gone',

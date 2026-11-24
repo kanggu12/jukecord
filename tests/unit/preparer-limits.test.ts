@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { fetchLimitMs } from '../../src/core/player.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
@@ -13,7 +14,7 @@ import type { Ffmpeg } from '../../src/media/ffmpeg.ts';
 import { Media } from '../../src/media/preparer.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
 import { FakeClock, flush } from '../support/fakes.ts';
-import { addTracks, memoryStore } from '../support/store.ts';
+import { addTracks, inOrder, memoryStore } from '../support/store.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
 let dir = '';
@@ -54,8 +55,8 @@ function fakeFfmpeg() {
   return { seen, ffmpeg: ffmpeg as unknown as Ffmpeg };
 }
 
-function setup() {
-  const store = memoryStore();
+async function setup() {
+  const store = await memoryStore();
   const cache = new MediaCache({ dir, maxBytes: 1024 ** 3, log });
   cache.init();
   const { seen, ffmpeg } = fakeFfmpeg();
@@ -74,8 +75,8 @@ function setup() {
 
 describe('Media under a crowd', () => {
   it('runs at most four downloads somebody waits for while skips cancel each other, and starts the newest', async () => {
-    const { store, media, seen } = setup();
-    const tracks = addTracks(store, 30);
+    const { store, media, seen } = await setup();
+    const tracks = await addTracks(store, 30);
     // A crowd pressing skip: each new track's fetch cancels the one before, as the player does.
     let previous: AbortController | null = null;
     const loads: Promise<unknown>[] = [];
@@ -99,11 +100,13 @@ describe('Media under a crowd', () => {
   });
 
   it('does not count the wait for a place against a track somebody waits for', async () => {
-    const { store, media, seen } = setup();
+    const { store, media, seen } = await setup();
     const clock = new FakeClock();
     const bus = new Bus();
-    const queue = new QueueService(store.queue, bus);
+    const lanes = new GuildLanes();
+    const queue = new QueueService(store.queue, bus, lanes);
     const players = new Players({
+      lanes,
       queue,
       media,
       history: store.history,
@@ -117,25 +120,25 @@ describe('Media under a crowd', () => {
     // is three hours long, so its own time limit (60 s and a tenth of its length) outlasts every wait below and only a
     // stop frees its place. A three-minute mix gave up at 78 s, inside the five minutes, and the check that nothing had
     // started yet held only while the clock's five minutes took less real time than a killed download takes to end.
-    const [mix1, mix2, mix3, mix4, ...songs] = addTracks(store, 9).map((track, index) =>
+    const [mix1, mix2, mix3, mix4, ...songs] = await inOrder(await addTracks(store, 9), (track, index) =>
       // The first four become mixes: the same track stored again with a longer length.
       index < 4 ? store.tracks.upsert({ ...track, durationMs: 3 * 3_600_000 }) : track,
     );
     for (const [index, mix] of [mix1, mix2, mix3, mix4].entries()) {
-      queue.add(`mix-server-${index}`, [mix?.id ?? 0], 'end', null);
-      players.get(`mix-server-${index}`).play();
+      await queue.add(`mix-server-${index}`, [mix?.id ?? 0], 'end', null);
+      await players.get(`mix-server-${index}`).play();
     }
     await flush();
     assert.equal(seen.running, 4);
     // A fifth server's songs wait their turn: five minutes on, none has started, and none was given up on.
-    queue.add(
+    await queue.add(
       'fifth',
       songs.map((song) => song.id),
       'end',
       null,
     );
     const fifth = players.get('fifth');
-    fifth.play();
+    await fifth.play();
     await clock.advance(5 * 60_000);
     assert.equal(seen.started, 4);
     // The mixes still hold their places: none was given up on either.
@@ -148,7 +151,7 @@ describe('Media under a crowd', () => {
     assert.equal(fifth.snapshot().error, null);
     assert.equal(fifth.snapshot().track?.title, 'Track 5');
     // A mix server stops: its place goes to the fifth server, whose time limit counts from there.
-    players.get('mix-server-0').stop();
+    await players.get('mix-server-0').stop();
     await new Promise((resolve) => setTimeout(resolve, 50));
     await flush();
     assert.equal(seen.started, 5);
@@ -158,13 +161,13 @@ describe('Media under a crowd', () => {
     // And it is still given up on once that limit has passed since it started.
     await clock.advance(2000);
     assert.match(fifth.snapshot().error ?? '', /getting it took too long/);
-    for (const player of players.all()) player.stop();
+    for (const player of players.all()) await player.stop();
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   it('gives an MP3 copy the time limit of the track, which grows with its length', async () => {
-    const { store, cache, media, seen } = setup();
-    const [track] = addTracks(store, 1);
+    const { store, cache, media, seen } = await setup();
+    const [track] = await addTracks(store, 1);
     assert.ok(track);
     // A three-hour track in the cache (a few bytes stand in for its audio; the length is the sidecar's).
     const key = MediaCache.keyOf(track.source);
@@ -181,7 +184,7 @@ describe('Media under a crowd', () => {
 
 describe('Media making MP3 copies', () => {
   it('does not make a copy that just failed again for every request, and says why in the log', async () => {
-    const store = memoryStore();
+    const store = await memoryStore();
     const cache = new MediaCache({ dir, maxBytes: 1024 ** 3, log });
     cache.init();
     const records: { msg: string }[] = [];
@@ -201,7 +204,7 @@ describe('Media making MP3 copies', () => {
       log: createLogger({ level: 'debug', sinks: [{ write: (record) => records.push(record) }] }),
       timeoutMs: 60_000,
     });
-    const [track] = addTracks(store, 1);
+    const [track] = await addTracks(store, 1);
     assert.ok(track);
     const key = MediaCache.keyOf(track.source);
     const tmp = cache.tmpPath(key);

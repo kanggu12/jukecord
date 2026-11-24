@@ -246,7 +246,7 @@ export class Auth {
    * Who is calling, from the Authorization header (a token) or the session cookie; null when neither is valid.
    * A bearer header wins over a cookie: a script that also carries a browser's cookie means its token.
    */
-  identify(headers: { authorization?: string | undefined; cookie?: string | undefined }): Caller | null {
+  async identify(headers: { authorization?: string | undefined; cookie?: string | undefined }): Promise<Caller | null> {
     const bearer = /^Bearer\s+(\S+)$/i.exec(headers.authorization ?? '')?.[1];
     if (bearer) return this.fromToken(bearer);
     const secret = parseCookies(headers.cookie).get(SESSION_COOKIE);
@@ -265,7 +265,7 @@ export class Auth {
   }
 
   // A token: the host's (compared in constant time) or one from the database.
-  private fromToken(secret: string): Caller | null {
+  private async fromToken(secret: string): Promise<Caller | null> {
     if (!secret.startsWith(TOKEN_PREFIX)) return null;
     const hash = hashSecret(secret);
     if (timingSafeEqual(Buffer.from(hash, 'hex'), this.hostHash)) {
@@ -278,21 +278,21 @@ export class Auth {
         tokenId: null,
       };
     }
-    const row = this.options.store.tokens.byHash(hash);
+    const row = await this.options.store.tokens.byHash(hash);
     if (!row) return null;
-    this.noteUse(row.id);
+    await this.noteUse(row.id);
     const principal: Principal =
       row.kind === 'host' || row.userId === null ? { kind: 'host' } : { kind: 'user', userId: row.userId };
     return { principal, scope: row.scope, via: 'token', sessionHash: null, csrf: null, tokenId: row.id };
   }
 
   // A session cookie.
-  private fromSession(secret: string): Caller | null {
+  private async fromSession(secret: string): Promise<Caller | null> {
     const hash = hashSecret(secret);
-    const session = this.options.store.sessions.get(hash);
+    const session = await this.options.store.sessions.get(hash);
     if (!session) return null;
     // Noted at most once a minute, like tokens.
-    if (this.now() - session.seenAt > SEEN_EVERY_MS) this.options.store.sessions.touch(hash);
+    if (this.now() - session.seenAt > SEEN_EVERY_MS) await this.options.store.sessions.touch(hash);
     // A friend's login is a friend's whatever else the row says: never the host's, never wider than control.
     const principal: Principal =
       session.kind === 'friend'
@@ -306,11 +306,11 @@ export class Auth {
 
   // A guest's session cookie (see useListenLink): looks and listens in its link's server, with a CSRF token like any
   // panel login (its one change is leaving).
-  private fromGuest(secret: string): Caller | null {
+  private async fromGuest(secret: string): Promise<Caller | null> {
     const hash = hashSecret(secret);
-    const guest = this.options.store.guests.get(hash);
+    const guest = await this.options.store.guests.get(hash);
     if (!guest) return null;
-    if (this.now() - guest.seenAt > SEEN_EVERY_MS) this.options.store.guests.touch(hash);
+    if (this.now() - guest.seenAt > SEEN_EVERY_MS) await this.options.store.guests.touch(hash);
     return {
       principal: { kind: 'guest', linkId: guest.linkId, guildId: guest.guildId, expiresAt: guest.expiresAt },
       scope: 'read',
@@ -322,12 +322,12 @@ export class Auth {
   }
 
   // Writes "used now" for a token at most once a minute.
-  private noteUse(id: number): void {
+  private async noteUse(id: number): Promise<void> {
     const last = this.touched.get(id) ?? 0;
     if (this.now() - last < 60_000) return;
     this.touched.set(id, this.now());
     try {
-      this.options.store.tokens.touch(id);
+      await this.options.store.tokens.touch(id);
     } catch (error) {
       this.options.log.debug('could not note a token as used', { error });
     }
@@ -335,19 +335,19 @@ export class Auth {
 
   /** Whether a caller's login still exists: a session not logged out or expired, a token not revoked, a guest whose
    * link was not revoked and has not expired. */
-  stillValid(caller: Caller): boolean {
+  async stillValid(caller: Caller): Promise<boolean> {
     if (caller.principal.kind === 'guest')
-      return caller.sessionHash !== null && this.options.store.guests.get(caller.sessionHash) !== null;
-    if (caller.sessionHash) return this.options.store.sessions.get(caller.sessionHash) !== null;
-    if (caller.tokenId !== null) return this.options.store.tokens.get(caller.tokenId) !== null;
+      return caller.sessionHash !== null && (await this.options.store.guests.get(caller.sessionHash)) !== null;
+    if (caller.sessionHash) return (await this.options.store.sessions.get(caller.sessionHash)) !== null;
+    if (caller.tokenId !== null) return (await this.options.store.tokens.get(caller.tokenId)) !== null;
     // The host token: valid as long as jukecord runs with it.
     return true;
   }
 
   /** Starts a panel login and returns the Set-Cookie value. A guest's comes from useListenLink instead. */
-  startSession(principal: MemberPrincipal): string {
+  async startSession(principal: MemberPrincipal): Promise<string> {
     const secret = newSecret();
-    this.options.store.sessions.create({
+    await this.options.store.sessions.create({
       idHash: hashSecret(secret),
       kind: principal.kind,
       userId: principal.kind === 'user' ? principal.userId : null,
@@ -357,15 +357,16 @@ export class Auth {
       expiresAt: this.now() + SESSION_MS,
     });
     // Old logins are cleared now and then; the start of a new one is a natural moment.
-    this.options.store.sessions.prune();
+    await this.options.store.sessions.prune();
     return cookie(SESSION_COOKIE, secret, { maxAgeSeconds: SESSION_MS / 1000, secure: this.secure });
   }
 
   /** Ends the caller's session (if it is one) and returns the Set-Cookie value that removes the cookie. */
-  endSession(caller: Caller | null): string {
+  async endSession(caller: Caller | null): Promise<string> {
     // A guest's place under its link is free again; a member's login is gone.
-    if (caller?.sessionHash && caller.principal.kind === 'guest') this.options.store.guests.remove(caller.sessionHash);
-    else if (caller?.sessionHash) this.options.store.sessions.remove(caller.sessionHash);
+    if (caller?.sessionHash && caller.principal.kind === 'guest')
+      await this.options.store.guests.remove(caller.sessionHash);
+    else if (caller?.sessionHash) await this.options.store.sessions.remove(caller.sessionHash);
     return cookie(SESSION_COOKIE, '', { maxAgeSeconds: 0, secure: this.secure });
   }
 
@@ -392,39 +393,47 @@ export class Auth {
   }
 
   /** The login a used login link makes: the host's own for admin, a friend's for view or control. */
-  startLinkSession(scope: TokenScope): string {
+  startLinkSession(scope: TokenScope): Promise<string> {
     return this.startSession(scope === 'admin' ? { kind: 'host' } : { kind: 'friend', scope });
   }
 
   /**
    * Lets a browser in as a guest with a listening link's code: a session of its own (in the guests' table) that ends
    * with the link, while the link has room for one more. A browser logged in already keeps its login (a guest of
-   * another link moves to this one); a code that does not work, or a full link, lets nobody in.
+   * another link moves to this one); a code that does not work, or a full link, lets nobody in. One transaction from
+   * the look at the link to the new session, so nothing comes in between.
    */
-  useListenLink(code: string, current: Caller | null): ListenLinkUse {
+  useListenLink(code: string, current: Caller | null): Promise<ListenLinkUse> {
     const store = this.options.store;
-    const link = store.listenLinks.byHash(hashSecret(code));
-    if (!link) return { kind: 'invalid' };
-    if (current && (current.principal.kind !== 'guest' || current.principal.linkId === link.id)) {
-      return { kind: 'already' };
-    }
-    // A guest of another link leaves it, freeing its place there.
-    if (current) this.endSession(current);
-    // Guests whose time is up no longer hold places; counted and made with nothing in between, so two browsers at
-    // once cannot both take the last place.
-    store.guests.prune();
-    if (store.guests.count(link.id) >= link.maxGuests) return { kind: 'full' };
-    const secret = newSecret(GUEST_PREFIX);
-    store.guests.create({ idHash: hashSecret(secret), linkId: link.id, csrf: newSecret(), expiresAt: link.expiresAt });
-    return {
-      kind: 'guest',
-      cookie: cookie(SESSION_COOKIE, secret, {
-        maxAgeSeconds: (link.expiresAt - this.now()) / 1000,
-        secure: this.secure,
-      }),
-      linkId: link.id,
-      guildId: link.guildId,
-    };
+    return store.transaction(async (): Promise<ListenLinkUse> => {
+      const link = await store.listenLinks.byHash(hashSecret(code));
+      if (!link) return { kind: 'invalid' };
+      if (current && (current.principal.kind !== 'guest' || current.principal.linkId === link.id)) {
+        return { kind: 'already' };
+      }
+      // A guest of another link leaves it, freeing its place there.
+      if (current) await this.endSession(current);
+      // Guests whose time is up no longer hold places; counted and made with nothing in between, so two browsers at
+      // once cannot both take the last place.
+      await store.guests.prune();
+      if ((await store.guests.count(link.id)) >= link.maxGuests) return { kind: 'full' };
+      const secret = newSecret(GUEST_PREFIX);
+      await store.guests.create({
+        idHash: hashSecret(secret),
+        linkId: link.id,
+        csrf: newSecret(),
+        expiresAt: link.expiresAt,
+      });
+      return {
+        kind: 'guest',
+        cookie: cookie(SESSION_COOKIE, secret, {
+          maxAgeSeconds: (link.expiresAt - this.now()) / 1000,
+          secure: this.secure,
+        }),
+        linkId: link.id,
+        guildId: link.guildId,
+      };
+    });
   }
 
   /** Where to send a browser to log in with Discord, and the cookie that ties the way back to this browser. */
@@ -521,14 +530,14 @@ export class Auth {
   }
 
   /** Makes an API token for the caller's login, never wider than the caller's own scope. */
-  createToken(caller: Caller, name: string, scope: TokenScope): { token: string; info: TokenRow } {
+  async createToken(caller: Caller, name: string, scope: TokenScope): Promise<{ token: string; info: TokenRow }> {
     const principal = caller.principal;
     // A friend and a guest have no token of their own: a token made by one would be read as the host's.
     if (principal.kind === 'friend' || principal.kind === 'guest') throw new Error('this login cannot make tokens');
     const rank = { read: 0, control: 1, admin: 2 } as const;
     if (rank[scope] > rank[caller.scope]) throw new Error(`a ${caller.scope} token cannot make a ${scope} token`);
     const token = newSecret(TOKEN_PREFIX);
-    const info = this.options.store.tokens.create({
+    const info = await this.options.store.tokens.create({
       hash: hashSecret(token),
       name,
       kind: principal.kind,
@@ -539,7 +548,7 @@ export class Auth {
   }
 
   /** The caller's tokens; the host sees everyone's, a friend and a guest none. */
-  listTokens(caller: Caller): TokenRow[] {
+  async listTokens(caller: Caller): Promise<TokenRow[]> {
     const principal = caller.principal;
     if (principal.kind === 'friend' || principal.kind === 'guest') return [];
     return principal.kind === 'host'
@@ -548,8 +557,8 @@ export class Auth {
   }
 
   /** Revokes a token the caller owns (the host may revoke any); false when there is no such token of theirs. */
-  revokeToken(caller: Caller, id: number): boolean {
-    const row = this.options.store.tokens.get(id);
+  async revokeToken(caller: Caller, id: number): Promise<boolean> {
+    const row = await this.options.store.tokens.get(id);
     if (!row) return false;
     const principal = caller.principal;
     if (principal.kind === 'friend' || principal.kind === 'guest') return false;

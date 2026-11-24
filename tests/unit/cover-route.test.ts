@@ -4,6 +4,7 @@ import type { InjectOptions } from 'fastify';
 import { sayError } from '../../src/core/say.ts';
 import { CoverError } from '../../src/media/covers.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
+import { inOrder } from '../support/store.ts';
 import {
   ALICE,
   asHost,
@@ -49,12 +50,12 @@ describe('covers through jukecord', () => {
     const inject = (options: InjectOptions) => server.web.app.inject(options);
     try {
       const { store, queue } = server;
-      const queued = store.tracks.upsert(pictured('queued'));
+      const queued = await store.tracks.upsert(pictured('queued'));
       const url = api(`/guilds/${GUILD}/tracks/${queued.id}/cover`);
       // Not in the server at all yet: nothing is fetched for it.
       assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404);
       assert.deepEqual(server.pictureRequests, []);
-      queue.add(GUILD, [queued.id], 'end', null);
+      await queue.add(GUILD, [queued.id], 'end', null);
       const first = await inject({ method: 'GET', url, headers: asHost });
       assert.equal(first.statusCode, 200);
       assert.equal(first.headers['content-type'], 'image/png');
@@ -66,10 +67,10 @@ describe('covers through jukecord', () => {
       assert.equal(again.statusCode, 304);
       assert.equal(server.pictureRequests.length, 1);
       // Played once, or only in a saved playlist: shown in the history and the playlists, so served too.
-      const played = store.tracks.upsert(pictured('played'));
-      store.history.add({ guildId: GUILD, trackId: played.id, addedBy: null, playedAt: 1, playedMs: 60_000 });
-      const saved = store.tracks.upsert(pictured('saved'));
-      store.playlists.save(GUILD, 'Later', [saved.id], null);
+      const played = await store.tracks.upsert(pictured('played'));
+      await store.history.add({ guildId: GUILD, trackId: played.id, addedBy: null, playedAt: 1, playedMs: 60_000 });
+      const saved = await store.tracks.upsert(pictured('saved'));
+      await store.playlists.save(GUILD, 'Later', [saved.id], null);
       for (const id of [played.id, saved.id]) {
         const answer = await inject({
           method: 'GET',
@@ -87,9 +88,9 @@ describe('covers through jukecord', () => {
       assert.equal(elsewhere.statusCode, 404);
       assert.equal(elsewhere.json().error.message, 'that track is not in this server');
       // A member of the server may see it; someone who is not, cannot ask; nobody logged in neither.
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       assert.equal((await inject({ method: 'GET', url, headers: { cookie: alice.cookie } })).statusCode, 200);
-      const bob = sessionFor(server, BOB);
+      const bob = await sessionFor(server, BOB);
       assert.equal((await inject({ method: 'GET', url, headers: { cookie: bob.cookie } })).statusCode, 403);
       assert.equal((await inject({ method: 'GET', url })).statusCode, 401);
       // Numbers that are not a track's are not looked for.
@@ -111,17 +112,17 @@ describe('covers through jukecord', () => {
     const inject = (options: InjectOptions) => server.web.app.inject(options);
     try {
       // Played in the other server, and liked by Alice there: not in this server's player, queue, history or lists.
-      const other = server.store.tracks.upsert(pictured('other'));
-      server.store.history.add({
+      const other = await server.store.tracks.upsert(pictured('other'));
+      await server.store.history.add({
         guildId: OTHER_GUILD,
         trackId: other.id,
         addedBy: ALICE,
         playedAt: 1,
         playedMs: 60_000,
       });
-      server.store.likes.add(ALICE, other.id);
+      await server.store.likes.add(ALICE, other.id);
       const url = api(`/guilds/${GUILD}/tracks/${other.id}/cover`);
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       assert.equal((await inject({ method: 'GET', url, headers: { cookie: alice.cookie } })).statusCode, 200);
       // In nobody else's likes: not in this server for them.
       assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404);
@@ -133,9 +134,9 @@ describe('covers through jukecord', () => {
   it('says a cover that cannot be had is not there, for an hour, without asking the site again', async () => {
     const server = await serverWithPictures();
     try {
-      const gone = server.store.tracks.upsert(pictured('gone'));
-      const bare = server.store.tracks.upsert(exampleTrack('bare'));
-      server.queue.add(GUILD, [gone.id, bare.id], 'end', null);
+      const gone = await server.store.tracks.upsert(pictured('gone'));
+      const bare = await server.store.tracks.upsert(exampleTrack('bare'));
+      await server.queue.add(GUILD, [gone.id, bare.id], 'end', null);
       for (let round = 0; round < 2; round += 1) {
         const answer = await server.web.app.inject({
           method: 'GET',
@@ -163,10 +164,12 @@ describe('covers through jukecord', () => {
   it('holds the covers it must fetch to a rate per login, sends cached ones freely, and the host is not held', async () => {
     const server = await serverWithPictures({ rates: { covers: { perSecond: 0.001, burst: 1 } } });
     try {
-      const [one, two] = [pictured('one'), pictured('two')].map((track) => server.store.tracks.upsert(track));
+      const [one, two] = await inOrder([pictured('one'), pictured('two')], (track) =>
+        server.store.tracks.upsert(track),
+      );
       if (!one || !two) throw new Error('no tracks');
-      server.queue.add(GUILD, [one.id, two.id], 'end', null);
-      const alice = sessionFor(server, ALICE);
+      await server.queue.add(GUILD, [one.id, two.id], 'end', null);
+      const alice = await sessionFor(server, ALICE);
       const ask = (id: number, headers: Record<string, string>) =>
         server.web.app.inject({ method: 'GET', url: api(`/guilds/${GUILD}/tracks/${id}/cover`), headers });
       assert.equal((await ask(one.id, { cookie: alice.cookie })).statusCode, 200);
@@ -191,9 +194,11 @@ describe('covers through jukecord', () => {
       behind: () => behind,
     });
     try {
-      const [cached, busy] = [pictured('cached'), pictured('busy')].map((track) => server.store.tracks.upsert(track));
+      const [cached, busy] = await inOrder([pictured('cached'), pictured('busy')], (track) =>
+        server.store.tracks.upsert(track),
+      );
       if (!cached || !busy) throw new Error('no tracks');
-      server.queue.add(GUILD, [cached.id, busy.id], 'end', null);
+      await server.queue.add(GUILD, [cached.id, busy.id], 'end', null);
       const ask = (id: number) =>
         server.web.app.inject({ method: 'GET', url: api(`/guilds/${GUILD}/tracks/${id}/cover`), headers: asHost });
       assert.equal((await ask(cached.id)).statusCode, 200);
@@ -251,8 +256,8 @@ describe("search results' pictures through jukecord", () => {
         assert.equal((await inject({ method: 'GET', url, headers: asHost })).statusCode, 404, url);
       }
       // Added: the track's cover is the file the result's picture was kept as, so the site is not asked again.
-      const track = server.store.tracks.upsert(found);
-      server.queue.add(GUILD, [track.id], 'end', null);
+      const track = await server.store.tracks.upsert(found);
+      await server.queue.add(GUILD, [track.id], 'end', null);
       const cover = await inject({
         method: 'GET',
         url: api(`/guilds/${GUILD}/tracks/${track.id}/cover`),
@@ -270,13 +275,13 @@ describe("search results' pictures through jukecord", () => {
     const inject = (options: InjectOptions) => server.web.app.inject(options);
     try {
       await searchFor(server, asHost);
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       // Every member may change the music while the server has no DJ role.
       assert.equal(
         (await inject({ method: 'GET', url: picture(found.url), headers: { cookie: alice.cookie } })).statusCode,
         200,
       );
-      server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      await server.store.settings.setDjRole(GUILD, DJ_ROLE);
       const held = await inject({ method: 'GET', url: picture(found.url), headers: { cookie: alice.cookie } });
       assert.equal(held.statusCode, 403);
       const created = await inject({
@@ -287,7 +292,7 @@ describe("search results' pictures through jukecord", () => {
       });
       const reader = { authorization: `Bearer ${created.json().token}` };
       assert.equal((await inject({ method: 'GET', url: picture(found.url), headers: reader })).statusCode, 403);
-      const bob = sessionFor(server, BOB);
+      const bob = await sessionFor(server, BOB);
       assert.equal(
         (await inject({ method: 'GET', url: picture(found.url), headers: { cookie: bob.cookie } })).statusCode,
         403,
@@ -318,8 +323,8 @@ describe("search results' pictures through jukecord", () => {
         payload: { name: 'reader', scope: 'read' },
       });
       messages.push(await said({ authorization: `Bearer ${created.json().token}` }));
-      server.store.settings.setDjRole(GUILD, DJ_ROLE);
-      messages.push(await said({ cookie: sessionFor(server, ALICE).cookie }));
+      await server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      messages.push(await said({ cookie: (await sessionFor(server, ALICE)).cookie }));
       assert.equal(new Set(messages).size, 5, messages.join('\n'));
       // The panel shows a refusal in the reader's language from the same table as the bot (src/core/say.ts).
       for (const message of messages) assert.notEqual(sayError(message, 'ko'), sayError(message, 'en'), message);

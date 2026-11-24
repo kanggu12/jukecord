@@ -98,16 +98,19 @@ export class Alerts implements FetchWatch {
     this.everyMs = options.everyMs ?? 3_600_000;
   }
 
-  /** Says an alert in the log and in the alerts channel of each server it is for, unless said there lately. */
-  raise(alert: Alert): void {
+  /**
+   * Says an alert in the log and in the alerts channel of each server it is for, unless said there lately. Settles once
+   * the channels are found (their settings read) and the posts are on their way; the posting itself is not waited for.
+   */
+  async raise(alert: Alert): Promise<void> {
     if (!alert.logged)
       this.options.log.warn(alert.en, { kind: alert.kind, ...(alert.guildId ? { guild: alert.guildId } : {}) });
     const sink = this.options.sink();
     if (!sink) return;
     // The server it is about, or every server that chose a channel.
     const targets = alert.guildId
-      ? [{ guildId: alert.guildId, channelId: this.options.settings.get(alert.guildId).alertsChannelId }]
-      : this.options.settings.withAlerts();
+      ? [{ guildId: alert.guildId, channelId: (await this.options.settings.get(alert.guildId)).alertsChannelId }]
+      : await this.options.settings.withAlerts();
     const now = this.options.clock.steady();
     for (const { guildId, channelId } of targets) {
       if (!channelId) continue;
@@ -130,7 +133,7 @@ export class Alerts implements FetchWatch {
     // held, and the next refusal was then held back for the hour.
     if (!this.refused || !youtube(address) || flat(address)) return;
     this.refused = false;
-    this.raise({
+    void this.raise({
       kind: 'bot-check-over',
       guildId: null,
       over: true,
@@ -142,7 +145,7 @@ export class Alerts implements FetchWatch {
   failed(_address: string, reason: string): void {
     if (this.refused || !BOT_CHECK.test(reason)) return;
     this.refused = true;
-    this.raise({
+    void this.raise({
       kind: 'bot-check',
       guildId: null,
       en: 'YouTube is refusing this jukecord for now (its check for bots): tracks not in the cache cannot be fetched',
@@ -165,7 +168,7 @@ export class Alerts implements FetchWatch {
       if (free >= 2 * LOW_DISK) this.low = false;
       if (this.low || free >= LOW_DISK) return;
       this.low = true;
-      this.raise({
+      void this.raise({
         kind: 'disk',
         guildId: null,
         en: `The disk of jukecord's data has ${formatSize(free)} free`,

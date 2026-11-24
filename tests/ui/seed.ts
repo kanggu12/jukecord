@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Track } from '../../src/core/types.ts';
 import { createLogger } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import { Store } from '../../src/store/store.ts';
@@ -70,8 +71,8 @@ const PEOPLE = [
 ];
 
 fs.mkdirSync(dataDir, { recursive: true });
-const store = Store.open(path.join(dataDir, 'jukecord.db'));
-for (const person of PEOPLE) store.users.upsert({ id: person.id, name: person.name, avatar: null });
+const store = await Store.open(path.join(dataDir, 'jukecord.db'));
+for (const person of PEOPLE) await store.users.upsert({ id: person.id, name: person.name, avatar: null });
 
 // One audio file, copied for every track: a soft three-minute tone (the panel needs real Opus to play along).
 const cacheDir = path.join(dataDir, 'cache');
@@ -101,9 +102,11 @@ execFileSync(ffmpeg, [
   sample,
 ]);
 
-const tracks = TITLES.map((title, index) => {
+// One after the other, so the IDs follow the titles.
+const tracks: Track[] = [];
+for (const [index, title] of TITLES.entries()) {
   const id = `demo${String(index + 1).padStart(3, '0')}`;
-  const track = store.tracks.upsert({
+  const track = await store.tracks.upsert({
     source: `https://media.example/${id}`,
     url: `https://media.example/${id}`,
     title,
@@ -120,23 +123,24 @@ const tracks = TITLES.map((title, index) => {
     path.join(cacheDir, `${key}.json`),
     JSON.stringify({ source: track.source, durationMs: 180_000, loudness: -14 }),
   );
-  return track;
-});
+  tracks.push(track);
+}
 fs.rmSync(sample);
 
 // The queue: tracks 2.. in order, added by the people in turn (the first track is left for "play" in the walk).
-store.queue.insert(
+await store.queue.insert(
   GUILD,
   tracks.slice(1, 1 + queueSize).map((track) => track.id),
   0,
   null,
 );
-const items = store.queue.list(GUILD);
-store.transaction(() => {
+const items = await store.queue.list(GUILD);
+await store.transaction(async () => {
   for (const [index, item] of items.entries()) {
-    store.db
-      .prepare('UPDATE queue_items SET added_by = ? WHERE id = ?')
-      .run(PEOPLE[index % PEOPLE.length]?.id ?? null, item.id);
+    await store.sql.run('UPDATE queue_items SET added_by = ? WHERE id = ?', [
+      PEOPLE[index % PEOPLE.length]?.id ?? null,
+      item.id,
+    ]);
   }
 });
 
@@ -202,24 +206,24 @@ for (let day = 364; day >= 30; day -= 1) {
 }
 // Written oldest first, as a server writes them while it plays: the history is listed in the order it was written.
 plays.sort((a, b) => a.playedAt - b.playedAt);
-store.transaction(() => {
-  for (const play of plays) store.history.add(play);
+await store.transaction(async () => {
+  for (const play of plays) await store.history.add(play);
 });
 
 // Saved playlists.
-store.playlists.save(
+await store.playlists.save(
   GUILD,
   'Friday night',
   tracks.slice(0, 12).map((track) => track.id),
   PEOPLE[0]?.id ?? null,
 );
-store.playlists.save(
+await store.playlists.save(
   GUILD,
   '드라이브',
   tracks.slice(10, 22).map((track) => track.id),
   PEOPLE[2]?.id ?? null,
 );
-store.playlists.save(
+await store.playlists.save(
   GUILD,
   'Quiet hours',
   tracks.slice(5, 9).map((track) => track.id),
@@ -230,20 +234,22 @@ store.playlists.save(
 // on it, and one by the host this morning for a day. The Invite dialog then lists links that differ (the walk's own
 // are all made as it runs). Only a hash of a link's code is kept, and these are no code's hash: nobody can use them.
 const hour = 3_600_000;
-store.transaction(() => {
-  const link = store.db.prepare(
-    `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
-     VALUES (?, ?, ?, ?, ?, 25) RETURNING id`,
-  );
-  const minas = link.get('seeded-link-mina', GUILD, PEOPLE[0]?.id ?? null, now - 50 * hour, now + 118 * hour) as {
-    id: number;
-  };
-  link.run('seeded-link-host', GUILD, null, now - 5 * hour, now + 19 * hour);
-  const guest = store.db.prepare(
-    `INSERT INTO guest_sessions (id_hash, link_id, csrf, created_at, seen_at, expires_at)
-     VALUES (?, ?, 'seeded', ?, ?, ?)`,
-  );
-  for (const n of [1, 2, 3]) guest.run(`seeded-guest-${n}`, minas.id, now - 40 * hour, now - hour, now + 118 * hour);
+await store.transaction(async () => {
+  const link = `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
+     VALUES (?, ?, ?, ?, ?, 25) RETURNING id`;
+  const minas = await store.sql.get(link, [
+    'seeded-link-mina',
+    GUILD,
+    PEOPLE[0]?.id ?? null,
+    now - 50 * hour,
+    now + 118 * hour,
+  ]);
+  await store.sql.run(link, ['seeded-link-host', GUILD, null, now - 5 * hour, now + 19 * hour]);
+  const guest = `INSERT INTO guest_sessions (id_hash, link_id, csrf, created_at, seen_at, expires_at)
+     VALUES (?, ?, 'seeded', ?, ?, ?)`;
+  for (const n of [1, 2, 3]) {
+    await store.sql.run(guest, [`seeded-guest-${n}`, Number(minas?.id), now - 40 * hour, now - hour, now + 118 * hour]);
+  }
 });
-store.close();
+await store.close();
 process.stdout.write(`seeded ${dataDir}: ${tracks.length} tracks, ${items.length} queued, ${plays.length} plays\n`);

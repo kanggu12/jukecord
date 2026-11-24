@@ -29,7 +29,7 @@ export function track(value: Track) {
   };
 }
 
-/** Looks up names for the IDs in a response, once per response. */
+/** Looks up names for the IDs in a response, once per response (read from the database, so each answers later). */
 export class Presenter {
   private readonly users: UserRepository;
 
@@ -44,8 +44,8 @@ export class Presenter {
     return id === null ? null : (people.get(id)?.name ?? null);
   }
 
-  items(values: readonly QueueItem[]) {
-    const people = this.users.many(values.flatMap((item) => (item.addedBy ? [item.addedBy] : [])));
+  async items(values: readonly QueueItem[]) {
+    const people = await this.users.many(values.flatMap((item) => (item.addedBy ? [item.addedBy] : [])));
     return values.map((item) => ({
       id: item.id,
       position: item.position,
@@ -56,12 +56,12 @@ export class Presenter {
     }));
   }
 
-  queue(value: { items: readonly QueueItem[]; version: number }) {
-    return { items: this.items(value.items), version: value.version };
+  async queue(value: { items: readonly QueueItem[]; version: number }) {
+    return { items: await this.items(value.items), version: value.version };
   }
 
-  player(snapshot: PlayerSnapshot) {
-    const people = this.users.many(snapshot.addedBy ? [snapshot.addedBy] : []);
+  async player(snapshot: PlayerSnapshot) {
+    const people = await this.users.many(snapshot.addedBy ? [snapshot.addedBy] : []);
     return {
       guildId: snapshot.guildId,
       status: snapshot.status,
@@ -82,8 +82,8 @@ export class Presenter {
     };
   }
 
-  history(entries: readonly HistoryEntry[]) {
-    const people = this.users.many(entries.flatMap((entry) => (entry.addedBy ? [entry.addedBy] : [])));
+  async history(entries: readonly HistoryEntry[]) {
+    const people = await this.users.many(entries.flatMap((entry) => (entry.addedBy ? [entry.addedBy] : [])));
     return entries.map((entry) => ({
       id: entry.id,
       track: track(entry.track),
@@ -106,8 +106,8 @@ export class Presenter {
   }
 
   /** Listening links with their makers' names. */
-  listenLinks(links: readonly ListenLinkRow[]) {
-    const people = this.users.many(links.flatMap((link) => (link.createdBy ? [link.createdBy] : [])));
+  async listenLinks(links: readonly ListenLinkRow[]) {
+    const people = await this.users.many(links.flatMap((link) => (link.createdBy ? [link.createdBy] : [])));
     return links.map((link) => ({
       id: link.id,
       createdBy: link.createdBy,
@@ -123,8 +123,8 @@ export class Presenter {
     return { track: track(entry.track), likedAt: entry.likedAt };
   }
 
-  stats(view: StatsView) {
-    const people = this.users.many(view.topPeople.flatMap((entry) => (entry.userId ? [entry.userId] : [])));
+  async stats(view: StatsView) {
+    const people = await this.users.many(view.topPeople.flatMap((entry) => (entry.userId ? [entry.userId] : [])));
     return {
       span: view.span,
       from: view.from,
@@ -149,10 +149,10 @@ export class Presenter {
     };
   }
 
-  wrapped(view: WrappedView) {
+  async wrapped(view: WrappedView) {
     // The names of the top people and of whoever added the first track, looked up once.
     const ids = [...view.topPeople.map((entry) => entry.userId), view.firstPlay?.addedBy ?? null];
-    const people = this.users.many(ids.flatMap((id) => (id ? [id] : [])));
+    const people = await this.users.many(ids.flatMap((id) => (id ? [id] : [])));
     const first = view.firstPlay;
     return {
       period: { ...view.period },

@@ -78,56 +78,57 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'now-playing': ({ context, deps }) => deps.presenter.player(deps.actions.nowPlaying(context)),
   'play-now': async ({ context, body, deps }) => {
     const result = await deps.actions.playNow(context, body.input);
-    return { ...result, items: deps.presenter.items(result.items) };
+    return { ...result, items: await deps.presenter.items(result.items) };
   },
-  skip: ({ context, query, deps }) => {
-    const { snapshot, votes } = deps.actions.skip(context, query.track);
-    return { ...deps.presenter.player(snapshot), votes };
+  skip: async ({ context, query, deps }) => {
+    const { snapshot, votes } = await deps.actions.skip(context, query.track);
+    return { ...(await deps.presenter.player(snapshot)), votes };
   },
-  'remove-current': ({ context, deps }) => deps.presenter.player(deps.actions.removeCurrent(context)),
-  pause: ({ context, deps }) => deps.presenter.player(deps.actions.pause(context)),
-  resume: ({ context, deps }) => deps.presenter.player(deps.actions.resume(context)),
-  seek: ({ context, body, deps }) => deps.presenter.player(deps.actions.seek(context, body.positionMs)),
-  repeat: ({ context, body, deps }) => deps.presenter.player(deps.actions.repeat(context, body.mode)),
-  stop: ({ context, deps }) => deps.presenter.player(deps.actions.stop(context)),
+  'remove-current': async ({ context, deps }) => deps.presenter.player(await deps.actions.removeCurrent(context)),
+  pause: async ({ context, deps }) => deps.presenter.player(await deps.actions.pause(context)),
+  resume: async ({ context, deps }) => deps.presenter.player(await deps.actions.resume(context)),
+  seek: async ({ context, body, deps }) => deps.presenter.player(await deps.actions.seek(context, body.positionMs)),
+  repeat: async ({ context, body, deps }) => deps.presenter.player(await deps.actions.repeat(context, body.mode)),
+  stop: async ({ context, deps }) => deps.presenter.player(await deps.actions.stop(context)),
 
-  queue: ({ context, deps }) => deps.presenter.queue(deps.actions.queue(context)),
+  queue: async ({ context, deps }) => deps.presenter.queue(await deps.actions.queue(context)),
   add: async ({ context, body, deps }) => {
     const result = await deps.actions.add(context, body.input, body.at ?? 'end');
-    return { ...result, items: deps.presenter.items(result.items) };
+    return { ...result, items: await deps.presenter.items(result.items) };
   },
-  clear: ({ context, deps }) => ({ removed: deps.actions.clear(context) }),
-  remove: ({ context, params, deps }) => {
-    deps.actions.remove(context, params.item);
+  clear: async ({ context, deps }) => ({ removed: await deps.actions.clear(context) }),
+  remove: async ({ context, params, deps }) => {
+    await deps.actions.remove(context, params.item);
     return OK;
   },
-  move: ({ context, params, body, deps }) => {
-    deps.actions.move(context, params.item, body.index);
+  move: async ({ context, params, body, deps }) => {
+    await deps.actions.move(context, params.item, body.index);
     return OK;
   },
-  jump: ({ context, params, deps }) => deps.presenter.player(deps.actions.jump(context, params.item)),
-  shuffle: ({ context, deps }) => {
-    deps.actions.shuffle(context);
+  jump: async ({ context, params, deps }) => deps.presenter.player(await deps.actions.jump(context, params.item)),
+  shuffle: async ({ context, deps }) => {
+    await deps.actions.shuffle(context);
     return OK;
   },
-  dedupe: ({ context, deps }) => ({ removed: deps.actions.dedupe(context) }),
+  dedupe: async ({ context, deps }) => ({ removed: await deps.actions.dedupe(context) }),
 
-  history: ({ context, query, deps }) =>
-    deps.presenter.history(deps.actions.history(context, query.limit ?? 50, query.before)),
-  stats: ({ context, query, deps }) =>
-    deps.presenter.stats(deps.actions.stats(context, query.days ?? 30, query.tz ?? 0)),
+  history: async ({ context, query, deps }) =>
+    deps.presenter.history(await deps.actions.history(context, query.limit ?? 50, query.before)),
+  stats: async ({ context, query, deps }) =>
+    deps.presenter.stats(await deps.actions.stats(context, query.days ?? 30, query.tz ?? 0)),
 
-  playlists: ({ context, deps }) =>
-    deps.actions.playlists(context).map((playlist) => deps.presenter.playlist(playlist)),
-  'playlist-save': ({ context, body, deps }) => deps.presenter.playlist(deps.actions.playlistSave(context, body.name)),
-  'playlist-load': ({ context, params, body, deps }) => {
-    const result = deps.actions.playlistLoad(context, params.name, body.at ?? 'end');
-    return { ...result, items: deps.presenter.items(result.items) };
+  playlists: async ({ context, deps }) =>
+    (await deps.actions.playlists(context)).map((playlist) => deps.presenter.playlist(playlist)),
+  'playlist-save': async ({ context, body, deps }) =>
+    deps.presenter.playlist(await deps.actions.playlistSave(context, body.name)),
+  'playlist-load': async ({ context, params, body, deps }) => {
+    const result = await deps.actions.playlistLoad(context, params.name, body.at ?? 'end');
+    return { ...result, items: await deps.presenter.items(result.items) };
   },
-  'playlist-rename': ({ context, params, body, deps }) =>
-    deps.presenter.playlist(deps.actions.playlistRename(context, params.name, body.name)),
-  'playlist-delete': ({ context, params, deps }) => {
-    deps.actions.playlistDelete(context, params.name);
+  'playlist-rename': async ({ context, params, body, deps }) =>
+    deps.presenter.playlist(await deps.actions.playlistRename(context, params.name, body.name)),
+  'playlist-delete': async ({ context, params, deps }) => {
+    await deps.actions.playlistDelete(context, params.name);
     return OK;
   },
 
@@ -136,13 +137,13 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     await deps.actions.join(context, body.channelId ?? null);
     return deps.actions.voiceChannels(context);
   },
-  leave: ({ context, deps }) => {
-    deps.actions.leave(context);
+  leave: async ({ context, deps }) => {
+    await deps.actions.leave(context);
     return deps.actions.voiceChannels(context);
   },
 
-  settings: ({ context, deps }) => settingsAnswer(deps.actions.settings(context)),
-  'dj-role': ({ context, body, deps }) => settingsAnswer(deps.actions.djRole(context, body.roleId)),
+  settings: async ({ context, deps }) => settingsAnswer(await deps.actions.settings(context)),
+  'dj-role': async ({ context, body, deps }) => settingsAnswer(await deps.actions.djRole(context, body.roleId)),
   status: ({ deps }) => {
     const status = deps.actions.status();
     return {
@@ -155,7 +156,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     };
   },
 
-  me: ({ caller, deps }) => {
+  me: async ({ caller, deps }) => {
     const { principal, scope, csrf } = who(caller);
     const bot = deps.directory()?.self() ?? null;
     if (principal.kind === 'host')
@@ -175,7 +176,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
         guest: { guildId: principal.guildId, expiresAt: principal.expiresAt },
       };
     }
-    const person = deps.store.users.get(principal.userId);
+    const person = await deps.store.users.get(principal.userId);
     return {
       kind: 'user' as const,
       id: principal.userId,
@@ -189,15 +190,15 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   },
   guilds: async ({ caller, deps }) => (await deps.access.guilds(who(caller).principal)).map((guild) => ({ ...guild })),
   tokens: ({ caller, deps }) => deps.auth.listTokens(who(caller)),
-  'token-create': ({ caller, body, deps }) => {
+  'token-create': async ({ caller, body, deps }) => {
     try {
-      return deps.auth.createToken(who(caller), body.name, body.scope);
+      return await deps.auth.createToken(who(caller), body.name, body.scope);
     } catch (error) {
       throw new ActionError('forbidden', error instanceof Error ? error.message : String(error));
     }
   },
-  'token-revoke': ({ caller, params, deps }) => {
-    if (!deps.auth.revokeToken(who(caller), params.id))
+  'token-revoke': async ({ caller, params, deps }) => {
+    if (!(await deps.auth.revokeToken(who(caller), params.id)))
       throw new ActionError('not-found', 'there is no such token of yours');
     return OK;
   },
@@ -229,9 +230,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return { ok: report.ok, checks: report.checks.map((check) => ({ ...check })), settings: { ...report.settings } };
   },
 
-  wrapped: ({ context, query, deps }) =>
-    deps.presenter.wrapped(deps.actions.wrapped(context, query.period, query.tz ?? 0)),
-  'alerts-channel': ({ context, body, deps }) => settingsAnswer(deps.actions.alertsChannel(context, body.channelId)),
+  wrapped: async ({ context, query, deps }) =>
+    deps.presenter.wrapped(await deps.actions.wrapped(context, query.period, query.tz ?? 0)),
+  'alerts-channel': async ({ context, body, deps }) =>
+    settingsAnswer(await deps.actions.alertsChannel(context, body.channelId)),
   lyrics: async ({ context, deps }) => {
     const lyrics = await deps.actions.lyrics(context);
     return {
@@ -243,43 +245,45 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       source: lyrics.kind === 'none' ? null : { ...LYRICS_SOURCE },
     };
   },
-  'stop-after': ({ context, body, deps }) => deps.presenter.player(deps.actions.stopAfter(context, body.on)),
-  'listen-links': ({ context, deps }) => deps.presenter.listenLinks(deps.actions.listenLinks(context)),
-  'listen-link-create': ({ context, body, deps }) => {
-    const { code, link } = deps.actions.listenLinkCreate(context, body.days);
-    const [shown] = deps.presenter.listenLinks([link]);
+  'stop-after': async ({ context, body, deps }) =>
+    deps.presenter.player(await deps.actions.stopAfter(context, body.on)),
+  'listen-links': async ({ context, deps }) => deps.presenter.listenLinks(await deps.actions.listenLinks(context)),
+  'listen-link-create': async ({ context, body, deps }) => {
+    const { code, link } = await deps.actions.listenLinkCreate(context, body.days);
+    const [shown] = await deps.presenter.listenLinks([link]);
     if (!shown) throw new Error('the listening link just made cannot be shown');
     // The code after a "#": the browser keeps it to itself, so no log or proxy on the way sees it.
     return { url: `${deps.publicUrl}/listen#${code}`, link: shown };
   },
-  'listen-link-revoke': ({ context, params, deps }) => {
-    deps.actions.listenLinkRevoke(context, params.id);
+  'listen-link-revoke': async ({ context, params, deps }) => {
+    await deps.actions.listenLinkRevoke(context, params.id);
     return OK;
   },
 
-  stay: ({ context, body, deps }) => settingsAnswer(deps.actions.stay(context, body.on)),
-  'vote-skip': ({ context, body, deps }) => settingsAnswer(deps.actions.voteSkip(context, body.on)),
-  'take-turns': ({ context, body, deps }) => settingsAnswer(deps.actions.takeTurns(context, body.on)),
-  'turns-now': ({ context, deps }) => ({ moved: deps.actions.turnsNow(context) }),
-  'person-limit': ({ context, body, deps }) => settingsAnswer(deps.actions.personLimit(context, body.tracks)),
-  volume: ({ context, body, deps }) => ({ ...deps.actions.volume(context, body.percent) }),
-  sound: ({ context, body, deps }) => ({ ...deps.actions.sound(context, body.preset) }),
+  stay: async ({ context, body, deps }) => settingsAnswer(await deps.actions.stay(context, body.on)),
+  'vote-skip': async ({ context, body, deps }) => settingsAnswer(await deps.actions.voteSkip(context, body.on)),
+  'take-turns': async ({ context, body, deps }) => settingsAnswer(await deps.actions.takeTurns(context, body.on)),
+  'turns-now': async ({ context, deps }) => ({ moved: await deps.actions.turnsNow(context) }),
+  'person-limit': async ({ context, body, deps }) =>
+    settingsAnswer(await deps.actions.personLimit(context, body.tracks)),
+  volume: async ({ context, body, deps }) => ({ ...(await deps.actions.volume(context, body.percent)) }),
+  sound: async ({ context, body, deps }) => ({ ...(await deps.actions.sound(context, body.preset)) }),
 
-  likes: ({ context, deps }) => deps.actions.likes(context).map((entry) => deps.presenter.liked(entry)),
-  like: ({ context, params, deps }) => deps.presenter.liked(deps.actions.like(context, params.track)),
-  unlike: ({ context, params, deps }) => {
-    deps.actions.unlike(context, params.track);
+  likes: async ({ context, deps }) => (await deps.actions.likes(context)).map((entry) => deps.presenter.liked(entry)),
+  like: async ({ context, params, deps }) => deps.presenter.liked(await deps.actions.like(context, params.track)),
+  unlike: async ({ context, params, deps }) => {
+    await deps.actions.unlike(context, params.track);
     return OK;
   },
-  'likes-add': ({ context, body, deps }) => {
-    const result = deps.actions.likesAdd(context, body.at ?? 'end');
-    return { ...result, items: deps.presenter.items(result.items) };
+  'likes-add': async ({ context, body, deps }) => {
+    const result = await deps.actions.likesAdd(context, body.at ?? 'end');
+    return { ...result, items: await deps.presenter.items(result.items) };
   },
 
-  autoplay: ({ context, body, deps }) => deps.presenter.player(deps.actions.autoplay(context, body.mode)),
+  autoplay: async ({ context, body, deps }) => deps.presenter.player(await deps.actions.autoplay(context, body.mode)),
 
-  'playlist-export': ({ context, params, query, deps }) => ({
-    ...deps.actions.playlistExport(context, params.name, query.format ?? 'text'),
+  'playlist-export': async ({ context, params, query, deps }) => ({
+    ...(await deps.actions.playlistExport(context, params.name, query.format ?? 'text')),
   }),
   'playlist-import': async ({ context, body, deps, signal }) => {
     const result = await deps.actions.playlistImport(context, body.name, body.content, signal);

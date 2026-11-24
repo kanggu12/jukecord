@@ -15,19 +15,19 @@ describe('listening statistics', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a, b] = addTracks(store, 2);
+      const [a, b] = await addTracks(store, 2);
       assert.ok(a && b);
       const play = (trackId: number, at: number, by: string | null, ms = 180_000) =>
         store.history.add({ guildId: GUILD, trackId, addedBy: by, playedAt: at, playedMs: ms });
       // 2026-11-10 23:30 UTC is already 11-11 in Seoul (08:30).
-      play(a.id, Date.UTC(2026, 10, 10, 23, 30), ALICE);
-      play(a.id, Date.UTC(2026, 10, 11, 10), ALICE);
-      play(b.id, Date.UTC(2026, 10, 9, 5), null, 60_000);
+      await play(a.id, Date.UTC(2026, 10, 10, 23, 30), ALICE);
+      await play(a.id, Date.UTC(2026, 10, 11, 10), ALICE);
+      await play(b.id, Date.UTC(2026, 10, 9, 5), null, 60_000);
       // Too old for a seven-day span.
-      play(b.id, NOW - 9 * DAY, null);
-      store.users.upsert({ id: ALICE, name: 'Alice', avatar: null });
+      await play(b.id, NOW - 9 * DAY, null);
+      await store.users.upsert({ id: ALICE, name: 'Alice', avatar: null });
       const context = { guildId: GUILD, userId: null, mayControl: false, mayManage: false };
-      const seoul = actions.stats(context, 7, 540, NOW);
+      const seoul = await actions.stats(context, 7, 540, NOW);
       assert.equal(seoul.span, 7);
       assert.equal(seoul.from, '2026-11-05');
       assert.deepEqual(
@@ -58,7 +58,7 @@ describe('listening statistics', () => {
           ['Track 2', 1],
         ],
       );
-      const shown = new Presenter(store.users).stats(seoul);
+      const shown = await new Presenter(store.users).stats(seoul);
       assert.deepEqual(
         shown.topPeople.map((entry) => [entry.name, entry.plays]),
         [
@@ -67,13 +67,13 @@ describe('listening statistics', () => {
         ],
       );
       // In UTC the late play is still the 10th.
-      const utc = actions.stats(context, 7, 0, NOW);
+      const utc = await actions.stats(context, 7, 0, NOW);
       assert.equal(utc.days.find((day) => day.day === '2026-11-10')?.plays, 1);
-      assert.throws(
+      await assert.rejects(
         () => actions.stats(context, 0),
         (error: unknown) => error instanceof ActionError,
       );
-      assert.throws(
+      await assert.rejects(
         () => actions.stats(context, 7, 900),
         (error: unknown) => error instanceof ActionError,
       );

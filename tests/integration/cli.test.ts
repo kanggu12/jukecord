@@ -153,7 +153,7 @@ describe('the jukecord command', () => {
     const later = await testServer({ listen: true, rates: { changes: { perSecond: 1, burst: 1 } } });
     try {
       later.directory.join(GUILD, '300000000000000001');
-      const made = later.auth.createToken(
+      const made = await later.auth.createToken(
         { principal: { kind: 'user', userId: '300000000000000001' }, scope: 'control', via: 'token' } as never,
         'script',
         'control',

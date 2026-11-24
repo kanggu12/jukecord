@@ -5,8 +5,8 @@ import { ActionError, djRoleNow } from '../../src/app/actions.ts';
 import { memoryStore } from '../support/store.ts';
 import { ALICE, BOB, DJ_ROLE, FakeDirectory, GUILD, OTHER_GUILD } from '../support/web.ts';
 
-function setup(browserOnly = false) {
-  const store = memoryStore();
+async function setup(browserOnly = false) {
+  const store = await memoryStore();
   const directory = new FakeDirectory();
   let now = 0;
   const access = new Access({
@@ -28,15 +28,15 @@ const code = async (fn: () => Promise<unknown>) => {
 
 describe('Access and a DJ role deleted in Discord', () => {
   it('counts the role as none: everyone may change the music again, and the settings show no role', async () => {
-    const { store, directory, access } = setup();
+    const { store, directory, access } = await setup();
     directory.join(GUILD, ALICE);
     // A role that was chosen and has since been deleted in Discord (the server's roles no longer list it).
     const gone = '500000000000000099';
-    store.settings.setDjRole(GUILD, gone);
+    await store.settings.setDjRole(GUILD, gone);
     assert.equal((await access.context({ kind: 'user', userId: ALICE }, GUILD)).mayControl, true);
     assert.equal((await access.guilds({ kind: 'user', userId: ALICE }))[0]?.mayControl, true);
     // A role that still exists still decides.
-    store.settings.setDjRole(GUILD, DJ_ROLE);
+    await store.settings.setDjRole(GUILD, DJ_ROLE);
     assert.equal((await access.context({ kind: 'user', userId: ALICE }, GUILD)).mayControl, false);
   });
 
@@ -50,7 +50,7 @@ describe('Access and a DJ role deleted in Discord', () => {
 
 describe('Access', () => {
   it('lets the host do everything in every server the bot is in, and nothing in others', async () => {
-    const { access } = setup();
+    const { access } = await setup();
     const guilds = await access.guilds({ kind: 'host' });
     assert.deepEqual(
       guilds.map((guild) => [guild.id, guild.mayControl, guild.mayManage]),
@@ -64,7 +64,7 @@ describe('Access', () => {
   });
 
   it('gives a member control unless a DJ role is set, and the settings only with Manage Server', async () => {
-    const { store, directory, access } = setup();
+    const { store, directory, access } = await setup();
     directory.join(GUILD, ALICE);
     directory.join(GUILD, BOB, { roles: [DJ_ROLE] });
     assert.deepEqual(await access.context({ kind: 'user', userId: ALICE }, GUILD), {
@@ -73,7 +73,7 @@ describe('Access', () => {
       mayControl: true,
       mayManage: false,
     });
-    store.settings.setDjRole(GUILD, DJ_ROLE);
+    await store.settings.setDjRole(GUILD, DJ_ROLE);
     assert.equal((await access.context({ kind: 'user', userId: ALICE }, GUILD)).mayControl, false);
     assert.equal((await access.context({ kind: 'user', userId: BOB }, GUILD)).mayControl, true);
     // Only the servers the person is in are listed.
@@ -85,8 +85,8 @@ describe('Access', () => {
   });
 
   it('lets Manage Server change the music even with a DJ role set', async () => {
-    const { store, directory, access } = setup();
-    store.settings.setDjRole(GUILD, DJ_ROLE);
+    const { store, directory, access } = await setup();
+    await store.settings.setDjRole(GUILD, DJ_ROLE);
     directory.join(GUILD, ALICE, { manage: true });
     const context = await access.context({ kind: 'user', userId: ALICE }, GUILD);
     assert.equal(context.mayControl, true);
@@ -94,7 +94,7 @@ describe('Access', () => {
   });
 
   it('asks Discord once a minute per person and server, and once for questions asked together', async () => {
-    const { directory, access, advance } = setup();
+    const { directory, access, advance } = await setup();
     directory.join(GUILD, ALICE);
     await Promise.all([1, 2, 3].map(() => access.context({ kind: 'user', userId: ALICE }, GUILD)));
     assert.equal(directory.asked, 1);
@@ -109,7 +109,7 @@ describe('Access', () => {
   });
 
   it('drops answers too old to use, so it remembers the people of the last minutes, not everyone ever seen', async () => {
-    const { directory, access, advance } = setup();
+    const { directory, access, advance } = await setup();
     const remembered = () => (access as unknown as { members: Map<string, unknown> }).members.size;
     // A thousand people open the panel once (none of them a member: the answer is remembered all the same).
     for (let person = 0; person < 1000; person += 1) {
@@ -134,7 +134,7 @@ describe('Access', () => {
   });
 
   it('says Discord is not answering instead of locking people out', async () => {
-    const { directory, access } = setup();
+    const { directory, access } = await setup();
     directory.down = true;
     assert.equal(await code(() => access.context({ kind: 'user', userId: ALICE }, GUILD)), 'unavailable');
     // A moment's trouble, said with when to ask again (Retry-After), as jukecord's own busy answers are.
@@ -145,7 +145,7 @@ describe('Access', () => {
   });
 
   it('has one local server in browser-only mode, for the host only', async () => {
-    const { access } = setup(true);
+    const { access } = await setup(true);
     assert.deepEqual(
       (await access.guilds({ kind: 'host' })).map((guild) => guild.id),
       [LOCAL_GUILD.id],

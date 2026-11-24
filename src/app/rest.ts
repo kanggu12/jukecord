@@ -13,12 +13,15 @@
 import type { Bus } from '../core/bus.ts';
 import type { Clock } from '../core/clock.ts';
 import { Countdowns } from '../core/countdowns.ts';
+import { type GuildLanes, throwFromTimer } from '../core/lanes.ts';
 import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 
 export interface RestOptions {
   readonly bus: Bus;
   readonly players: Players;
+  /** The servers' lanes: a server rests in its own turn, a turn of its own (the countdown's). */
+  readonly lanes: GuildLanes;
   /** Whether the bot is in the server's voice channel, which is where its sound goes. */
   readonly inVoice: (guildId: string) => boolean;
   /** How many browsers of the server play along. */
@@ -82,13 +85,18 @@ export class Rest {
     else this.waits.disarm(guildId);
   }
 
-  // The wait is over: still unheard, so it rests.
+  // The wait is over: still unheard, so it rests. Looked at and paused in one turn of the server's, after whatever
+  // change it waited behind; a failure is the countdown's, as it was when this ran in its timer.
   private expired(guildId: string): void {
-    if (!this.unheard(guildId)) return;
-    if (this.options.players.existing(guildId)?.rest())
-      this.options.log.info('paused: nobody was listening', {
-        guild: guildId,
-        afterSeconds: Math.round(this.options.afterMs / 1000),
-      });
+    void this.options.lanes
+      .later(guildId, async () => {
+        if (!this.unheard(guildId)) return;
+        if (await this.options.players.existing(guildId)?.rest())
+          this.options.log.info('paused: nobody was listening', {
+            guild: guildId,
+            afterSeconds: Math.round(this.options.afterMs / 1000),
+          });
+      })
+      .catch(throwFromTimer);
   }
 }

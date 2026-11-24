@@ -2,10 +2,12 @@
  * The queue service: every change to a server's queue goes through here, whichever way it was asked for.
  *
  * The panel, the slash commands, the API and the CLI all call these methods, so they behave the same and each
- * change is announced once on the bus with a new version number.
+ * change is announced once on the bus with a new version number. Every change takes its server's turn (see
+ * core/lanes.ts), so two changes of one queue never interleave, whoever asks; reads do not wait.
  */
 import type { QueueRepository } from '../store/store.ts';
 import type { Bus } from './bus.ts';
+import type { GuildLanes } from './lanes.ts';
 import { addInTurns, inTurns, type Playing } from './turns.ts';
 import { AUTOPLAY, type QueueItem } from './types.ts';
 
@@ -18,28 +20,30 @@ export type Random = () => number;
 export class QueueService {
   private readonly repo: QueueRepository;
   private readonly bus: Bus;
+  private readonly lanes: GuildLanes;
   // The change counter of each server, starting at 0 when jukecord starts. Every live message carries the whole queue
   // with its counter, so a client keeps the newest it has seen; changes close together can arrive as one message, and
   // the counter then jumps (see web/events.ts).
   private readonly versions = new Map<string, number>();
 
-  constructor(repo: QueueRepository, bus: Bus) {
+  constructor(repo: QueueRepository, bus: Bus, lanes: GuildLanes) {
     this.repo = repo;
     this.bus = bus;
+    this.lanes = lanes;
   }
 
   /** A server's queue in play order. */
-  list(guildId: string): QueueItem[] {
+  list(guildId: string): Promise<QueueItem[]> {
     return this.repo.list(guildId);
   }
 
   /** How many tracks wait. */
-  size(guildId: string): number {
+  size(guildId: string): Promise<number> {
     return this.repo.count(guildId);
   }
 
   /** Whether a track waits in a server's queue (the audio route asks on every request, so the queue is not read). */
-  contains(guildId: string, trackId: number): boolean {
+  contains(guildId: string, trackId: number): Promise<boolean> {
     return this.repo.has(guildId, trackId);
   }
 
@@ -49,32 +53,41 @@ export class QueueService {
   }
 
   /** Adds tracks (already stored as tracks) and returns the new queue items. */
-  add(guildId: string, trackIds: readonly number[], at: InsertAt, addedBy: string | null): QueueItem[] {
-    // Nothing to add is not an error (an empty playlist), but it is not a change either.
-    if (trackIds.length === 0) return [];
-    const index = at === 'end' ? Number.MAX_SAFE_INTEGER : at === 'next' ? 0 : at;
-    const items = this.repo.insert(guildId, trackIds, index, addedBy);
-    this.changed(guildId);
-    return items;
+  add(guildId: string, trackIds: readonly number[], at: InsertAt, addedBy: string | null): Promise<QueueItem[]> {
+    // Every change of a queue takes the server's turn (see core/lanes.ts); a caller holding it already goes on in it.
+    return this.lanes.run(guildId, async () => {
+      // Nothing to add is not an error (an empty playlist), but it is not a change either.
+      if (trackIds.length === 0) return [];
+      const index = at === 'end' ? Number.MAX_SAFE_INTEGER : at === 'next' ? 0 : at;
+      const items = await this.repo.insert(guildId, trackIds, index, addedBy);
+      this.changed(guildId);
+      return items;
+    });
   }
 
   /** Removes one item; false when it was not there (someone else removed it or it started playing). */
-  remove(guildId: string, itemId: number): boolean {
-    const removed = this.repo.remove(guildId, itemId);
-    if (removed) this.changed(guildId);
-    return removed;
+  remove(guildId: string, itemId: number): Promise<boolean> {
+    return this.lanes.run(guildId, async () => {
+      const removed = await this.repo.remove(guildId, itemId);
+      if (removed) this.changed(guildId);
+      return removed;
+    });
   }
 
   /** Moves one item to a position in the queue. */
-  move(guildId: string, itemId: number, index: number): void {
-    this.repo.move(guildId, itemId, index);
-    this.changed(guildId);
+  move(guildId: string, itemId: number, index: number): Promise<void> {
+    return this.lanes.run(guildId, async () => {
+      await this.repo.move(guildId, itemId, index);
+      this.changed(guildId);
+    });
   }
 
   /** Puts the queue in a given order (drag and drop of several rows, or a client that reorders locally). */
-  reorder(guildId: string, itemIds: readonly number[]): void {
-    this.repo.reorder(guildId, itemIds);
-    this.changed(guildId);
+  reorder(guildId: string, itemIds: readonly number[]): Promise<void> {
+    return this.lanes.run(guildId, async () => {
+      await this.repo.reorder(guildId, itemIds);
+      this.changed(guildId);
+    });
   }
 
   /**
@@ -83,51 +96,59 @@ export class QueueService {
    * The common shortcut, sorting by a random key, favours some orders; people notice when the same songs keep
    * landing first.
    */
-  shuffle(guildId: string, random: Random = Math.random): void {
-    const ids = this.repo.list(guildId).map((item) => item.id);
-    // Fewer than two items have only one order; skip the write and the event.
-    if (ids.length < 2) return;
-    for (let i = ids.length - 1; i > 0; i -= 1) {
-      // Pick a place from 0..i and swap it into place i.
-      const j = Math.floor(random() * (i + 1));
-      const a = ids[i];
-      const b = ids[j];
-      if (a === undefined || b === undefined) continue;
-      ids[i] = b;
-      ids[j] = a;
-    }
-    this.repo.reorder(guildId, ids);
-    this.changed(guildId);
+  shuffle(guildId: string, random: Random = Math.random): Promise<void> {
+    return this.lanes.run(guildId, async () => {
+      const ids = (await this.repo.list(guildId)).map((item) => item.id);
+      // Fewer than two items have only one order; skip the write and the event.
+      if (ids.length < 2) return;
+      for (let i = ids.length - 1; i > 0; i -= 1) {
+        // Pick a place from 0..i and swap it into place i.
+        const j = Math.floor(random() * (i + 1));
+        const a = ids[i];
+        const b = ids[j];
+        if (a === undefined || b === undefined) continue;
+        ids[i] = b;
+        ids[j] = a;
+      }
+      await this.repo.reorder(guildId, ids);
+      this.changed(guildId);
+    });
   }
 
   /** Removes later copies of tracks that are queued more than once, keeping the first; returns how many went. */
-  dedupe(guildId: string): number {
-    const seen = new Set<number>();
-    const extra: number[] = [];
-    // The first copy keeps its place, which is what someone pressing "remove duplicates" expects.
-    for (const item of this.repo.list(guildId)) {
-      if (seen.has(item.track.id)) extra.push(item.id);
-      else seen.add(item.track.id);
-    }
-    if (extra.length === 0) return 0;
-    // All of them in one transaction with one renumbering (see QueueRepository.removeMany), and one event.
-    const removed = this.repo.removeMany(guildId, extra);
-    if (removed > 0) this.changed(guildId);
-    return removed;
+  dedupe(guildId: string): Promise<number> {
+    return this.lanes.run(guildId, async () => {
+      const seen = new Set<number>();
+      const extra: number[] = [];
+      // The first copy keeps its place, which is what someone pressing "remove duplicates" expects.
+      for (const item of await this.repo.list(guildId)) {
+        if (seen.has(item.track.id)) extra.push(item.id);
+        else seen.add(item.track.id);
+      }
+      if (extra.length === 0) return 0;
+      // All of them in one transaction with one renumbering (see QueueRepository.removeMany), and one event.
+      const removed = await this.repo.removeMany(guildId, extra);
+      if (removed > 0) this.changed(guildId);
+      return removed;
+    });
   }
 
   /** Empties a server's queue and returns how many tracks were in it. */
-  clear(guildId: string): number {
-    const count = this.repo.clear(guildId);
-    if (count > 0) this.changed(guildId);
-    return count;
+  clear(guildId: string): Promise<number> {
+    return this.lanes.run(guildId, async () => {
+      const count = await this.repo.clear(guildId);
+      if (count > 0) this.changed(guildId);
+      return count;
+    });
   }
 
   /** Takes the next item out of the queue for the player, or null when the queue is empty. */
-  shift(guildId: string): QueueItem | null {
-    const item = this.repo.shift(guildId);
-    if (item) this.changed(guildId);
-    return item;
+  shift(guildId: string): Promise<QueueItem | null> {
+    return this.lanes.run(guildId, async () => {
+      const item = await this.repo.shift(guildId);
+      if (item) this.changed(guildId);
+      return item;
+    });
   }
 
   // Bumps the server's counter and tells listeners.
@@ -146,77 +167,86 @@ export class QueueService {
    * it is among them, after the people's tracks before it and before a new track placed after those (people's tracks go
    * before autoplay's, which only fill a queue that ran out).
    */
-  addInTurns(guildId: string, trackIds: readonly number[], addedBy: string | null, playing: Playing): QueueItem[] {
-    if (trackIds.length === 0) return [];
-    const before = this.repo.owners(guildId);
-    // People's items, in order, and autoplay's by the people's item they follow (-1: before them all).
-    const people: { id: number; addedBy: string | null }[] = [];
-    const fillers = new Map<number, number[]>();
-    for (const item of before) {
-      if (item.addedBy !== AUTOPLAY) {
-        people.push(item);
-        continue;
+  addInTurns(
+    guildId: string,
+    trackIds: readonly number[],
+    addedBy: string | null,
+    playing: Playing,
+  ): Promise<QueueItem[]> {
+    return this.lanes.run(guildId, async () => {
+      if (trackIds.length === 0) return [];
+      const before = await this.repo.owners(guildId);
+      // People's items, in order, and autoplay's by the people's item they follow (-1: before them all).
+      const people: { id: number; addedBy: string | null }[] = [];
+      const fillers = new Map<number, number[]>();
+      for (const item of before) {
+        if (item.addedBy !== AUTOPLAY) {
+          people.push(item);
+          continue;
+        }
+        const after = people.length - 1;
+        fillers.set(after, [...(fillers.get(after) ?? []), item.id]);
       }
-      const after = people.length - 1;
-      fillers.set(after, [...(fillers.get(after) ?? []), item.id]);
-    }
-    // In at the end first (one insert), then the whole order written once with each new item in its turn.
-    const items = this.repo.insert(guildId, trackIds, Number.MAX_SAFE_INTEGER, addedBy);
-    const order: number[] = [];
-    // The people's item last written: the autoplay items after it come before the next people's item.
-    let last = -1;
-    const flush = () => {
-      for (const id of fillers.get(last) ?? []) order.push(id);
-      fillers.delete(last);
-    };
-    for (const index of addInTurns(
-      people.map((item) => item.addedBy),
-      playing,
-      addedBy,
-      items.length,
-    )) {
-      // An item already there by its index, a new one as -(its place among the new ones + 1).
-      if (index >= 0) {
-        flush();
-        const id = people[index]?.id;
-        if (id !== undefined) order.push(id);
-        last = index;
-      } else {
-        const id = items[-index - 1]?.id;
-        if (id !== undefined) order.push(id);
+      // In at the end first (one insert), then the whole order written once with each new item in its turn.
+      const items = await this.repo.insert(guildId, trackIds, Number.MAX_SAFE_INTEGER, addedBy);
+      const order: number[] = [];
+      // The people's item last written: the autoplay items after it come before the next people's item.
+      let last = -1;
+      const flush = () => {
+        for (const id of fillers.get(last) ?? []) order.push(id);
+        fillers.delete(last);
+      };
+      for (const index of addInTurns(
+        people.map((item) => item.addedBy),
+        playing,
+        addedBy,
+        items.length,
+      )) {
+        // An item already there by its index, a new one as -(its place among the new ones + 1).
+        if (index >= 0) {
+          flush();
+          const id = people[index]?.id;
+          if (id !== undefined) order.push(id);
+          last = index;
+        } else {
+          const id = items[-index - 1]?.id;
+          if (id !== undefined) order.push(id);
+        }
       }
-    }
-    flush();
-    this.repo.reorder(guildId, order);
-    this.changed(guildId);
-    const places = new Map(order.map((id, index) => [id, index]));
-    return items.map((item) => ({ ...item, position: places.get(item.id) ?? item.position }));
+      flush();
+      await this.repo.reorder(guildId, order);
+      this.changed(guildId);
+      const places = new Map(order.map((id, index) => [id, index]));
+      return items.map((item) => ({ ...item, position: places.get(item.id) ?? item.position }));
+    });
   }
 
   /**
    * Puts the whole queue in turns once (see core/turns.ts) and returns how many tracks changed place. Autoplay's tracks
    * are nobody's turn: they go after people's, in their order.
    */
-  takeTurns(guildId: string, playing: Playing): number {
-    const items = this.repo.owners(guildId);
-    const people = items.filter((item) => item.addedBy !== AUTOPLAY);
-    const order = [
-      ...inTurns(
-        people.map((item) => item.addedBy),
-        playing,
-      ).flatMap((index) => (people[index] ? [people[index].id] : [])),
-      ...items.filter((item) => item.addedBy === AUTOPLAY).map((item) => item.id),
-    ];
-    const moved = order.filter((id, index) => items[index]?.id !== id).length;
-    // Already in turns: nothing written, and no change for the panels.
-    if (moved === 0) return 0;
-    this.repo.reorder(guildId, order);
-    this.changed(guildId);
-    return moved;
+  takeTurns(guildId: string, playing: Playing): Promise<number> {
+    return this.lanes.run(guildId, async () => {
+      const items = await this.repo.owners(guildId);
+      const people = items.filter((item) => item.addedBy !== AUTOPLAY);
+      const order = [
+        ...inTurns(
+          people.map((item) => item.addedBy),
+          playing,
+        ).flatMap((index) => (people[index] ? [people[index].id] : [])),
+        ...items.filter((item) => item.addedBy === AUTOPLAY).map((item) => item.id),
+      ];
+      const moved = order.filter((id, index) => items[index]?.id !== id).length;
+      // Already in turns: nothing written, and no change for the panels.
+      if (moved === 0) return 0;
+      await this.repo.reorder(guildId, order);
+      this.changed(guildId);
+      return moved;
+    });
   }
 
   /** How many tracks one person has waiting in a server's queue (null: the host's). */
-  countBy(guildId: string, addedBy: string | null): number {
+  countBy(guildId: string, addedBy: string | null): Promise<number> {
     return this.repo.countBy(guildId, addedBy);
   }
 }

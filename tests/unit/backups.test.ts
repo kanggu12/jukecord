@@ -69,13 +69,13 @@ describe('backups in the data folder', () => {
 
   it('is made beside the main thread, which goes on answering while the copy is written', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-backups-'));
-    const store = Store.open(path.join(dir, 'jukecord.db'));
+    const store = await Store.open(path.join(dir, 'jukecord.db'));
     try {
       // Some tracks, so the copy has something to write.
-      store.db.exec('CREATE TABLE filler (b BLOB)');
-      store.transaction(() => {
-        const insert = store.db.prepare('INSERT INTO filler VALUES (?)');
-        for (let i = 0; i < 2000; i += 1) insert.run(Buffer.alloc(4096, i % 251));
+      await store.sql.exec('CREATE TABLE filler (b BLOB)');
+      await store.transaction(async () => {
+        for (let i = 0; i < 2000; i += 1)
+          await store.sql.run('INSERT INTO filler VALUES (?)', [Buffer.alloc(4096, i % 251)]);
       });
       // A turn of the event loop asked for as the backup starts: made in the main thread, the copy held the loop for
       // its whole length (seconds for a large database: the voices' audio stood still, and past thirty the watchdog
@@ -91,11 +91,11 @@ describe('backups in the data folder', () => {
       assert.equal(made.turned, true);
       // A whole copy, which opens and holds the tracks.
       assert.equal(listBackups(path.join(dir, 'backups')).length, 1);
-      const copy = Store.open(made.backup.file);
-      assert.equal((copy.db.prepare('SELECT count(*) AS n FROM filler').get() as { n: number }).n, 2000);
-      copy.close();
+      const copy = await Store.open(made.backup.file);
+      assert.equal((await copy.sql.get('SELECT count(*) AS n FROM filler'))?.n, 2000);
+      await copy.close();
     } finally {
-      store.close();
+      await store.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

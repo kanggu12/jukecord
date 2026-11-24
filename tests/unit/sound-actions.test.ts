@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type ActionContext, ActionError, Actions, type VoiceControl } from '../../src/app/actions.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { Sound } from '../../src/core/sound.ts';
@@ -20,13 +21,15 @@ const DJ: ActionContext = { guildId: GUILD, userId: '300000000000000001', mayCon
 const LISTENER: ActionContext = { guildId: GUILD, userId: '300000000000000002', mayControl: false, mayManage: false };
 
 // Actions with a voice side that counts how often it was told the sound changed, and a count of the panels' messages.
-function setup() {
+async function setup() {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const log = createLogger({ level: 'error', sinks: [] });
   const players = new Players({
+    lanes,
     queue,
     media: new FakeMedia(),
     history: store.history,
@@ -36,7 +39,7 @@ function setup() {
     log,
     fetchTimeoutMs: 60_000,
   });
-  const actions = new Actions({ store, queue, players, resolver: {} as Resolver, log, bus });
+  const actions = new Actions({ lanes, store, queue, players, resolver: {} as Resolver, log, bus });
   const changed: string[] = [];
   actions.setVoice({ soundChanged: (guildId: string) => changed.push(guildId) } as unknown as VoiceControl, () => true);
   const told: string[] = [];
@@ -45,9 +48,10 @@ function setup() {
 }
 
 // The code and message of an action's refusal.
-function refusal(fn: () => unknown): string {
+async function refusal(fn: () => unknown): Promise<string> {
   try {
-    fn();
+    // A refusal is the action's rejection (or a throw before it answers).
+    await fn();
   } catch (error) {
     if (error instanceof ActionError) return `${error.code}: ${error.message}`;
     throw error;
@@ -56,40 +60,28 @@ function refusal(fn: () => unknown): string {
 }
 
 describe('the voice sound through the actions', () => {
-  it('sets the volume and the preset, tells the voice and the panels once per change, and nothing for the same', () => {
-    const { actions, changed, told } = setup();
-    assert.deepEqual(actions.volume(DJ, 150), { volume: 150, preset: 'off' });
-    assert.deepEqual(actions.sound(DJ, 'night'), { volume: 150, preset: 'night' });
+  it('sets the volume and the preset, tells the voice and the panels once per change, and nothing for the same', async () => {
+    const { actions, changed, told } = await setup();
+    assert.deepEqual(await actions.volume(DJ, 150), { volume: 150, preset: 'off' });
+    assert.deepEqual(await actions.sound(DJ, 'night'), { volume: 150, preset: 'night' });
     // The same again: nothing starts again, and the panels hear nothing new.
-    actions.sound(DJ, 'night');
+    await actions.sound(DJ, 'night');
     assert.deepEqual(changed, [GUILD, GUILD]);
     assert.deepEqual(told, [GUILD, GUILD]);
-    assert.deepEqual(actions.currentSound(GUILD), { volume: 150, preset: 'night' });
-    assert.equal(actions.settings(DJ).volume, 150);
+    assert.deepEqual(await actions.currentSound(GUILD), { volume: 150, preset: 'night' });
+    assert.equal((await actions.settings(DJ)).volume, 150);
   });
 
-  it('refuses what is not a volume or a preset, and anyone who may not change the music', () => {
-    const { actions } = setup();
+  it('refuses what is not a volume or a preset, and anyone who may not change the music', async () => {
+    const { actions } = await setup();
+    assert.equal(await refusal(() => actions.volume(DJ, 201)), 'invalid: the volume is 0 to 200 percent');
+    assert.equal(await refusal(() => actions.volume(DJ, 12.5)), 'invalid: the volume is 0 to 200 percent');
     assert.equal(
-      refusal(() => actions.volume(DJ, 201)),
-      'invalid: the volume is 0 to 200 percent',
-    );
-    assert.equal(
-      refusal(() => actions.volume(DJ, 12.5)),
-      'invalid: the volume is 0 to 200 percent',
-    );
-    assert.equal(
-      refusal(() => actions.sound(DJ, 'nightcore')),
+      await refusal(() => actions.sound(DJ, 'nightcore')),
       'invalid: the sound is one of off, bass, voices, bright, night',
     );
-    assert.match(
-      refusal(() => actions.volume(LISTENER, 50)),
-      /^forbidden: only members with the DJ role/,
-    );
-    assert.match(
-      refusal(() => actions.sound(LISTENER, 'bass')),
-      /^forbidden: only members with the DJ role/,
-    );
+    assert.match(await refusal(() => actions.volume(LISTENER, 50)), /^forbidden: only members with the DJ role/);
+    assert.match(await refusal(() => actions.sound(LISTENER, 'bass')), /^forbidden: only members with the DJ role/);
   });
 });
 
@@ -117,49 +109,50 @@ describe('the voice side and a change of sound', () => {
       clock,
       sound: () => sound,
     });
-    const change = (next: Sound) => {
+    const change = async (next: Sound) => {
       sound = next;
-      voice.soundChanged('G');
+      await voice.soundChanged('G');
     };
     // Not in voice: nothing to start again.
-    change({ volume: 90, preset: 'off' });
+    await change({ volume: 90, preset: 'off' });
     assert.equal(restarts, 0);
     // In voice, as a join leaves it, its stream playing.
     (voice as unknown as { joined: Map<string, unknown> }).joined.set('G', {
       connection: { state: { status: 'ready' }, destroy: () => {} },
-      output: { streamSound: () => streaming },
+      // A stream whose sound is known (none is being read for a start).
+      output: { streamSound: () => streaming, soundPending: () => false },
       channelId: '1',
       name: 'Lounge',
     });
-    change({ volume: 80, preset: 'off' });
+    await change({ volume: 80, preset: 'off' });
     assert.equal(restarts, 1);
     // Three more within the cooldown: one, when it ends, with the last of them.
     await clock.advance(100);
-    change({ volume: 70, preset: 'off' });
-    change({ volume: 60, preset: 'bass' });
+    await change({ volume: 70, preset: 'off' });
+    await change({ volume: 60, preset: 'bass' });
     await clock.advance(100);
-    change({ volume: 50, preset: 'bass' });
+    await change({ volume: 50, preset: 'bass' });
     assert.equal(restarts, 1);
     await clock.advance(200);
     assert.equal(restarts, 2);
     assert.deepEqual(streaming, { volume: 50, preset: 'bass' });
     // A change back and forth within the cooldown, ending where the stream is: nothing to start again.
-    change({ volume: 40, preset: 'bass' });
-    change({ volume: 50, preset: 'bass' });
+    await change({ volume: 40, preset: 'bass' });
+    await change({ volume: 50, preset: 'bass' });
     await clock.advance(1000);
     assert.equal(restarts, 2);
     // A stream that started meanwhile with the newest sound (the next track) is not started again.
     await clock.advance(1000);
-    change({ volume: 30, preset: 'bass' });
+    await change({ volume: 30, preset: 'bass' });
     assert.equal(restarts, 3);
-    change({ volume: 20, preset: 'bass' });
+    await change({ volume: 20, preset: 'bass' });
     streaming = { volume: 20, preset: 'bass' };
     await clock.advance(1000);
     assert.equal(restarts, 3);
     // Leaving voice drops a change still waiting.
-    change({ volume: 10, preset: 'bass' });
-    change({ volume: 15, preset: 'bass' });
-    voice.leave('G');
+    await change({ volume: 10, preset: 'bass' });
+    await change({ volume: 15, preset: 'bass' });
+    await voice.leave('G');
     await clock.advance(1000);
     assert.equal(restarts, 4);
   });

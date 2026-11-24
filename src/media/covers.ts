@@ -312,7 +312,7 @@ export class Covers {
     if (failedAt !== undefined && this.now() - failedAt < FAILED_FOR_MS) return null;
     // Under way for someone else already: the same answer.
     const running = this.running.get(key);
-    if (running) return running;
+    if (running !== undefined) return running;
     if (this.active >= this.limit() && this.waiting.length >= (this.options.waitingMax ?? 32)) {
       throw new BusyError('jukecord is fetching other covers right now; try again in a moment');
     }

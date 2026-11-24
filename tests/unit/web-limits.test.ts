@@ -90,7 +90,7 @@ describe('the rates of changes and shedding when behind', () => {
     const server = await testServer({ rates: { now: () => now } });
     try {
       server.directory.join(GUILD, ALICE);
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       const asAlice = { cookie: alice.cookie, [CSRF_HEADER]: alice.csrf };
       const shuffle = (headers: Record<string, string>, remoteAddress = '10.1.0.1') =>
         server.web.app.inject({ method: 'POST', url: api(`/guilds/${GUILD}/queue/shuffle`), headers, remoteAddress });
@@ -126,7 +126,7 @@ describe('the rates of changes and shedding when behind', () => {
     try {
       server.directory.join(GUILD, ALICE);
       server.directory.join(GUILD, BOB);
-      const alice = sessionFor(server, ALICE);
+      const alice = await sessionFor(server, ALICE);
       const read = (headers: Record<string, string>, remoteAddress = '10.2.0.1') =>
         server.web.app.inject({ method: 'GET', url: api(`/guilds/${GUILD}/stats?days=365`), headers, remoteAddress });
       // Sixty at once pass (a panel reads a handful when it opens), the next is refused until one has come back.
@@ -137,14 +137,14 @@ describe('the rates of changes and shedding when behind', () => {
         error: { code: 'rate-limited', message: 'too many requests at once; try again in a moment' },
       });
       // A second login of the same person (another browser, a token) shares that person's share.
-      const again = sessionFor(server, ALICE);
+      const again = await sessionFor(server, ALICE);
       assert.equal((await read({ cookie: again.cookie })).statusCode, 429);
       now += 34;
       assert.equal((await read({ cookie: alice.cookie })).statusCode, 200);
       // Someone else behind the same address (a household, an office, Docker's bridge, a proxy not trusted) has a
       // share of their own: fifteen panels opening at once behind one address were refused, and a refused /me shows
       // the panel's start-failed page.
-      const bob = sessionFor(server, BOB);
+      const bob = await sessionFor(server, BOB);
       for (let i = 0; i < 60; i += 1) assert.equal((await read({ cookie: bob.cookie })).statusCode, 200);
       // Without a login, the address alone counts, apart from the people there.
       const status = (remoteAddress: string) =>
@@ -165,9 +165,9 @@ describe('the rates of changes and shedding when behind', () => {
       // Alice is not a DJ, Bob is; both are behind one address (a household, an office).
       server.directory.join(GUILD, ALICE);
       server.directory.join(GUILD, BOB, { roles: [DJ_ROLE] });
-      server.store.settings.setDjRole(GUILD, DJ_ROLE);
-      const alice = sessionFor(server, ALICE);
-      const bob = sessionFor(server, BOB);
+      await server.store.settings.setDjRole(GUILD, DJ_ROLE);
+      const alice = await sessionFor(server, ALICE);
+      const bob = await sessionFor(server, BOB);
       const shuffle = (session: { cookie: string; csrf: string }) =>
         server.web.app.inject({
           method: 'POST',
@@ -190,8 +190,8 @@ describe('the rates of changes and shedding when behind', () => {
       // Two people behind one address; Alice searches for something that is not there, again and again.
       server.directory.join(GUILD, ALICE);
       server.directory.join(GUILD, BOB);
-      const alice = sessionFor(server, ALICE);
-      const bob = sessionFor(server, BOB);
+      const alice = await sessionFor(server, ALICE);
+      const bob = await sessionFor(server, BOB);
       const add = (session: { cookie: string; csrf: string }, input: string) =>
         server.web.app.inject({
           method: 'POST',
@@ -237,7 +237,7 @@ describe('the rates of changes and shedding when behind', () => {
     const server = await testServer({ rates: { now: () => 5_000 } });
     try {
       server.directory.join(GUILD, ALICE);
-      const sessions = [sessionFor(server, ALICE), sessionFor(server, ALICE)];
+      const sessions = [await sessionFor(server, ALICE), await sessionFor(server, ALICE)];
       const change = (session: { cookie: string; csrf: string }, path: string, remoteAddress: string) =>
         server.web.app.inject({
           method: 'POST',
@@ -267,9 +267,9 @@ describe('the rates of changes and shedding when behind', () => {
     const server = await testServer({ behind: () => behind });
     try {
       server.directory.join(GUILD, ALICE);
-      const alice = sessionFor(server, ALICE);
-      const track = server.store.tracks.upsert(exampleTrack('shed'));
-      server.queue.add(GUILD, [track.id], 'end', null);
+      const alice = await sessionFor(server, ALICE);
+      const track = await server.store.tracks.upsert(exampleTrack('shed'));
+      await server.queue.add(GUILD, [track.id], 'end', null);
       const key = MediaCache.keyOf(track.source);
       const tmp = server.cache.tmpPath(key);
       fs.writeFileSync(tmp, Buffer.alloc(1000, 7));

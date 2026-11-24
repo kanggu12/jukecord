@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import type { Player as Snapshot } from '../../panel/src/api.ts';
 import { playEnded } from '../../panel/src/plays.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Player } from '../../src/core/player.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { createLogger } from '../../src/log.ts';
@@ -21,13 +22,15 @@ const SONG = 180_000;
 // and the snapshots it sends from now on.
 async function playing(queued: number[] = [0, 1, 2]) {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
-  const queue = new QueueService(store.queue, bus);
+  const lanes = new GuildLanes();
+  const queue = new QueueService(store.queue, bus, lanes);
   const media = new FakeMedia();
   // The server's player; made again as jukecord makes it when it starts again (see the restart below).
   const make = () =>
     new Player({
+      lanes,
       guildId: GUILD,
       queue,
       media,
@@ -39,14 +42,14 @@ async function playing(queued: number[] = [0, 1, 2]) {
       fetchTimeoutMs: 60_000,
     });
   const player = make();
-  const tracks = addTracks(store, 3);
-  queue.add(
+  const tracks = await addTracks(store, 3);
+  await queue.add(
     GUILD,
     queued.map((index) => tracks[index]?.id ?? 0),
     'end',
     'u1',
   );
-  player.play();
+  await player.play();
   media.finish(SONG);
   await flush();
   // What a panel is sent, as it gets it (the panel's own type: the same fields, read the same way).
@@ -77,7 +80,7 @@ describe('the end of a play, from the snapshots', () => {
 
   it('is seen when the track repeats (repeat one): the same track again from the top is a new play', async () => {
     const { clock, player, sent } = await playing();
-    player.setRepeat('track');
+    await player.setRepeat('track');
     // The timer is set from here: the snapshot that said repeat one.
     const from = sent.at(-1) as Snapshot;
     sent.length = 0;
@@ -95,7 +98,7 @@ describe('the end of a play, from the snapshots', () => {
     // The same track queued twice in a row: skipped to the second, it is the same track, a play of its own.
     const { clock, media, player, first, sent } = await playing([0, 0, 1]);
     await clock.advance(40_000);
-    player.skip();
+    await player.skip();
     media.finish(SONG);
     await flush();
     assert.equal(player.snapshot().track?.id, first.track?.id);
@@ -104,14 +107,14 @@ describe('the end of a play, from the snapshots', () => {
 
   it('is seen when the player stops, the track is removed, or the player stops after it', async () => {
     const stopped = await playing();
-    stopped.player.stop();
+    await stopped.player.stop();
     assert.notEqual(endedAt(stopped.first, stopped.sent), -1);
     const removed = await playing();
-    removed.player.removeCurrent();
+    await removed.player.removeCurrent();
     assert.notEqual(endedAt(removed.first, removed.sent), -1);
     const after = await playing();
-    after.player.setRepeat('track');
-    after.player.setStopAfter(true);
+    await after.player.setRepeat('track');
+    await after.player.setStopAfter(true);
     await after.clock.advance(SONG + 1000);
     assert.notEqual(endedAt(after.first, after.sent), -1);
   });
@@ -122,26 +125,26 @@ describe('the end of a play, from the snapshots', () => {
     // A while later jukecord starts again, and its new player brings the track back where it was (as it does, paused).
     await clock.advance(20_000);
     const restarted = make();
-    restarted.restore(player.snapshot().track, 'u1', 85_000);
+    await restarted.restore(player.snapshot().track, 'u1', 85_000);
     assert.equal(restarted.snapshot().status, 'loading');
     assert.equal(endedAt(first, sent.slice(-1)), -1);
   });
 
   it('is not taken from a seek, back to the start or forward, a pause or a resume', async () => {
     const { clock, player, sent } = await playing();
-    player.setRepeat('track');
+    await player.setRepeat('track');
     const from = sent.at(-1) as Snapshot;
     sent.length = 0;
     await clock.advance(90_000);
     // Back to the start, as a person does with the bar.
-    player.seek(0);
+    await player.seek(0);
     await clock.advance(1000);
     // And forward, past the middle.
-    player.seek(150_000);
+    await player.seek(150_000);
     await clock.advance(1000);
-    player.pause();
+    await player.pause();
     await clock.advance(60_000);
-    player.resume();
+    await player.resume();
     await clock.advance(5000);
     assert.equal(endedAt(from, sent), -1);
   });

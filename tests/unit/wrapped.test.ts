@@ -22,22 +22,22 @@ describe('Wrapped', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a, b, c] = addTracks(store, 3);
+      const [a, b, c] = await addTracks(store, 3);
       assert.ok(a && b && c);
       const play = (trackId: number, at: number, by: string | null, ms = 180_000) =>
         store.history.add({ guildId: GUILD, trackId, addedBy: by, playedAt: at, playedMs: ms });
       // New Year's Eve 16:00 UTC is already the new year in Seoul (01:00), so it is 2026's first track there.
-      play(c.id, Date.UTC(2025, 11, 31, 16), BOB);
+      await play(c.id, Date.UTC(2025, 11, 31, 16), BOB);
       // Track 1 comes back on three days; track 2 is played four times in one night (more plays, fewer days).
-      play(a.id, Date.UTC(2026, 2, 6, 13), ALICE);
-      play(a.id, Date.UTC(2026, 2, 13, 13), ALICE);
-      play(a.id, Date.UTC(2026, 5, 19, 13), null);
-      for (let n = 0; n < 4; n += 1) play(b.id, Date.UTC(2026, 6, 4, 12, n * 10), ALICE, 600_000);
+      await play(a.id, Date.UTC(2026, 2, 6, 13), ALICE);
+      await play(a.id, Date.UTC(2026, 2, 13, 13), ALICE);
+      await play(a.id, Date.UTC(2026, 5, 19, 13), null);
+      for (let n = 0; n < 4; n += 1) await play(b.id, Date.UTC(2026, 6, 4, 12, n * 10), ALICE, 600_000);
       // Last year's, which this year leaves out.
-      play(a.id, Date.UTC(2025, 5, 1), ALICE);
-      store.users.upsert({ id: ALICE, name: 'Alice', avatar: 'abc' });
-      store.users.upsert({ id: BOB, name: 'Bob', avatar: null });
-      const seoul = actions.wrapped(look, undefined, 540, NOW);
+      await play(a.id, Date.UTC(2025, 5, 1), ALICE);
+      await store.users.upsert({ id: ALICE, name: 'Alice', avatar: 'abc' });
+      await store.users.upsert({ id: BOB, name: 'Bob', avatar: null });
+      const seoul = await actions.wrapped(look, undefined, 540, NOW);
       assert.deepEqual(seoul.period, { kind: 'year', key: '2026', from: '2026-01-01', to: '2026-11-11' });
       assert.equal(seoul.plays, 8);
       assert.equal(seoul.playedMs, 4 * 180_000 + 4 * 600_000);
@@ -78,11 +78,11 @@ describe('Wrapped', () => {
       assert.deepEqual(seoul.months, ['2026-07', '2026-06', '2026-03', '2026-01', '2025-06']);
       assert.equal(seoul.keptFrom, null);
       // In UTC the New Year's Eve play is last year's.
-      const utc = actions.wrapped(look, '2026', 0, NOW);
+      const utc = await actions.wrapped(look, '2026', 0, NOW);
       assert.equal(utc.plays, 7);
       assert.equal(utc.firstPlay?.track.title, 'Track 1');
       // The names come with the API's answer, the host's as none.
-      const shown = new Presenter(store.users).wrapped(seoul);
+      const shown = await new Presenter(store.users).wrapped(seoul);
       assert.deepEqual(
         shown.topPeople.map((entry) => [entry.name, entry.avatar]),
         [
@@ -101,16 +101,16 @@ describe('Wrapped', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a, b] = addTracks(store, 2);
+      const [a, b] = await addTracks(store, 2);
       assert.ok(a && b);
       const play = (trackId: number, at: number, by: string | null) =>
         store.history.add({ guildId: GUILD, trackId, addedBy: by, playedAt: at, playedMs: 180_000 });
       // Autoplay played most; Alice twice; the host once.
-      for (let n = 0; n < 5; n += 1) play(b.id, Date.UTC(2026, 3, 1 + n, 12), AUTOPLAY);
-      play(a.id, Date.UTC(2026, 3, 10, 12), ALICE);
-      play(a.id, Date.UTC(2026, 3, 11, 12), ALICE);
-      play(a.id, Date.UTC(2026, 3, 12, 12), null);
-      const view = actions.wrapped(look, '2026', 0, NOW);
+      for (let n = 0; n < 5; n += 1) await play(b.id, Date.UTC(2026, 3, 1 + n, 12), AUTOPLAY);
+      await play(a.id, Date.UTC(2026, 3, 10, 12), ALICE);
+      await play(a.id, Date.UTC(2026, 3, 11, 12), ALICE);
+      await play(a.id, Date.UTC(2026, 3, 12, 12), null);
+      const view = await actions.wrapped(look, '2026', 0, NOW);
       // Every play counts as a play; autoplay is no person.
       assert.equal(view.plays, 8);
       assert.equal(view.people, 2);
@@ -132,11 +132,23 @@ describe('Wrapped', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a] = addTracks(store, 1);
+      const [a] = await addTracks(store, 1);
       assert.ok(a);
-      store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: NOW - 400 * DAY, playedMs: 5000 });
-      store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: NOW - 300 * DAY, playedMs: 5000 });
-      const march = actions.wrapped(look, '2026-03', 540, NOW);
+      await store.history.add({
+        guildId: GUILD,
+        trackId: a.id,
+        addedBy: null,
+        playedAt: NOW - 400 * DAY,
+        playedMs: 5000,
+      });
+      await store.history.add({
+        guildId: GUILD,
+        trackId: a.id,
+        addedBy: null,
+        playedAt: NOW - 300 * DAY,
+        playedMs: 5000,
+      });
+      const march = await actions.wrapped(look, '2026-03', 540, NOW);
       assert.deepEqual(march.period, { kind: 'month', key: '2026-03', from: '2026-03-01', to: '2026-03-31' });
       assert.equal(march.plays, 0);
       assert.equal(march.song, null);
@@ -144,7 +156,7 @@ describe('Wrapped', () => {
       assert.equal(march.firstPlay, null);
       assert.deepEqual(march.weekdays, [0, 0, 0, 0, 0, 0, 0]);
       // From the day after this date a year ago, through today.
-      const year = actions.wrapped(look, 'last-12-months', 540, NOW);
+      const year = await actions.wrapped(look, 'last-12-months', 540, NOW);
       assert.deepEqual(year.period, {
         kind: 'last-12-months',
         key: 'last-12-months',
@@ -153,15 +165,15 @@ describe('Wrapped', () => {
       });
       assert.equal(year.plays, 1);
       // A time that is over ends on its own last day.
-      assert.equal(actions.wrapped(look, '2025', 540, NOW).period.to, '2025-12-31');
+      assert.equal((await actions.wrapped(look, '2025', 540, NOW)).period.to, '2025-12-31');
       for (const wrong of ['26', '2026-13', '2026-3', 'last-year', '1969', ' 2026']) {
-        assert.throws(
+        await assert.rejects(
           () => actions.wrapped(look, wrong, 540, NOW),
           (error: unknown) => error instanceof ActionError && error.code === 'invalid',
           wrong,
         );
       }
-      assert.throws(
+      await assert.rejects(
         () => actions.wrapped(look, '2026', 900, NOW),
         (error: unknown) => error instanceof ActionError,
       );
@@ -174,16 +186,16 @@ describe('Wrapped', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a] = addTracks(store, 1);
+      const [a] = await addTracks(store, 1);
       assert.ok(a);
-      store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: NOW - DAY, playedMs: 5000 });
-      const first = actions.wrapped(look, '2026', 540, NOW);
-      assert.equal(actions.wrapped(look, '2026', 540, NOW), first);
+      await store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: NOW - DAY, playedMs: 5000 });
+      const first = await actions.wrapped(look, '2026', 540, NOW);
+      assert.equal(await actions.wrapped(look, '2026', 540, NOW), first);
       // Another time zone or another day is another question.
-      assert.notEqual(actions.wrapped(look, '2026', 0, NOW), first);
-      assert.notEqual(actions.wrapped(look, '2026', 540, NOW + DAY), first);
-      store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: NOW, playedMs: 5000 });
-      const after = actions.wrapped(look, '2026', 540, NOW);
+      assert.notEqual(await actions.wrapped(look, '2026', 0, NOW), first);
+      assert.notEqual(await actions.wrapped(look, '2026', 540, NOW + DAY), first);
+      await store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: NOW, playedMs: 5000 });
+      const after = await actions.wrapped(look, '2026', 540, NOW);
       assert.notEqual(after, first);
       assert.equal(after.plays, 2);
     } finally {
@@ -195,13 +207,13 @@ describe('Wrapped', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a] = addTracks(store, 1);
+      const [a] = await addTracks(store, 1);
       assert.ok(a);
       // As many plays as are kept, the oldest on 2026-03-03 (Seoul), the rest every ten minutes after.
       const start = Date.UTC(2026, 2, 2, 16);
-      store.transaction(() => {
+      await store.transaction(async () => {
         for (let n = 0; n < HISTORY_KEEP; n += 1)
-          store.history.add({
+          await store.history.add({
             guildId: GUILD,
             trackId: a.id,
             addedBy: null,
@@ -209,9 +221,9 @@ describe('Wrapped', () => {
             playedMs: 5000,
           });
       });
-      assert.equal(actions.wrapped(look, '2026', 540, NOW).keptFrom, '2026-03-03');
+      assert.equal((await actions.wrapped(look, '2026', 540, NOW)).keptFrom, '2026-03-03');
       // A time that starts after the oldest play kept is whole.
-      assert.equal(actions.wrapped(look, '2026-04', 540, NOW).keptFrom, null);
+      assert.equal((await actions.wrapped(look, '2026-04', 540, NOW)).keptFrom, null);
     } finally {
       await server.close();
     }
@@ -220,9 +232,15 @@ describe('Wrapped', () => {
   it('answers over the API to any login that can open the server, in the shape the schema says', async () => {
     const server = await testServer();
     try {
-      const [a] = addTracks(server.store, 1);
+      const [a] = await addTracks(server.store, 1);
       assert.ok(a);
-      server.store.history.add({ guildId: GUILD, trackId: a.id, addedBy: null, playedAt: Date.now(), playedMs: 5000 });
+      await server.store.history.add({
+        guildId: GUILD,
+        trackId: a.id,
+        addedBy: null,
+        playedAt: Date.now(),
+        playedMs: 5000,
+      });
       const url = `${API_PREFIX}/guilds/${GUILD}/wrapped`;
       const answer = await server.web.app.inject({
         method: 'GET',
@@ -394,17 +412,17 @@ describe('Wrapped in Discord', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a] = addTracks(store, 1);
+      const [a] = await addTracks(store, 1);
       assert.ok(a);
-      store.tracks.upsert({ ...a, thumbnail: 'https://images.example.com/a.jpg' });
-      store.history.add({
+      await store.tracks.upsert({ ...a, thumbnail: 'https://images.example.com/a.jpg' });
+      await store.history.add({
         guildId: GUILD,
         trackId: a.id,
         addedBy: ALICE,
         playedAt: Date.UTC(2026, 5, 19, 13),
         playedMs: 4_000_000,
       });
-      const view = actions.wrapped(look, '2026', 540, NOW);
+      const view = await actions.wrapped(look, '2026', 540, NOW);
       const english = wrappedCard(view, 'en', 'Night Owls', 'https://music.example.com', 540);
       const card = english.embeds[0]?.toJSON();
       assert.equal(card?.title, 'Night Owls · 2026, wrapped');
@@ -441,11 +459,17 @@ describe('Wrapped in Discord', () => {
       assert.equal(kard?.footer?.text, '2026년 1월 1일 ~ 11월 11일');
       assert.equal(korean.components.length, 0);
       // Nothing played: said in the card, which keeps its title.
-      const quiet = wrappedCard(actions.wrapped(look, '2026-03', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const quiet = wrappedCard(
+        await actions.wrapped(look, '2026-03', 540, NOW),
+        'en',
+        '',
+        null,
+        540,
+      ).embeds[0]?.toJSON();
       assert.equal(quiet?.title, 'March 2026, wrapped');
       assert.equal(quiet?.description, 'Nothing was played in this period');
       const twelve = wrappedCard(
-        actions.wrapped(look, 'last-12-months', 540, NOW),
+        await actions.wrapped(look, 'last-12-months', 540, NOW),
         'en',
         '',
         null,
@@ -461,7 +485,7 @@ describe('Wrapped in Discord', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a, b] = addTracks(store, 2);
+      const [a, b] = await addTracks(store, 2);
       assert.ok(a && b);
       // Two tracks played once each, added by two people: a tie in both lists (numbered 1 and 2, the second read as
       // played less).
@@ -469,14 +493,14 @@ describe('Wrapped in Discord', () => {
         [a.id, ALICE, 19],
         [b.id, BOB, 20],
       ] as const)
-        store.history.add({
+        await store.history.add({
           guildId: GUILD,
           trackId: track,
           addedBy: by,
           playedAt: Date.UTC(2026, 5, day, 13),
           playedMs: 180_000,
         });
-      const card = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const card = wrappedCard(await actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
       const description = card?.description ?? '';
       // Any space between a count and its word (words may keep them together with a no-break space).
       assert.match(description, /\*\*Most played\*\*\n1\. .* · 1\splay\n1\. .* · 1\splay\n/);
@@ -490,7 +514,7 @@ describe('Wrapped in Discord', () => {
     const server = await testServer();
     try {
       const { store, actions } = server;
-      const [a] = addTracks(store, 1);
+      const [a] = await addTracks(store, 1);
       assert.ok(a);
       // Music on nine Fridays and one Tuesday of 2026, at 21:30 in Seoul (12:30 UTC): Fridays, alone at the top, and
       // the hour 21 alone, over more than a week of days, none of them most of the plays.
@@ -507,28 +531,28 @@ describe('Wrapped in Discord', () => {
         Date.UTC(2026, 2, 3),
       ];
       for (const day of days)
-        store.history.add({
+        await store.history.add({
           guildId: GUILD,
           trackId: a.id,
           addedBy: ALICE,
           playedAt: day + 12.5 * 3600_000,
           playedMs: 180_000,
         });
-      const card = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const card = wrappedCard(await actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
       const fields = Object.fromEntries((card?.fields ?? []).map((field) => [field.name, field.value]));
       assert.equal(fields['Busiest day'], 'Fridays');
       // The hour as the panel's page and picture write it, not "21:00-22:00" (core/facts.ts hourSpan()).
       assert.equal(fields['Busiest hour'], '21:00 – 22:00');
       // Eight Tuesdays more, at 11:00: as many Tuesdays as Fridays, a tie, and the card names no busiest day.
       for (let week = 0; week < 8; week += 1)
-        store.history.add({
+        await store.history.add({
           guildId: GUILD,
           trackId: a.id,
           addedBy: ALICE,
           playedAt: Date.UTC(2026, 3, 7 + week * 7, 2),
           playedMs: 180_000,
         });
-      const tied = wrappedCard(actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
+      const tied = wrappedCard(await actions.wrapped(look, '2026', 540, NOW), 'en', '', null, 540).embeds[0]?.toJSON();
       const names = (tied?.fields ?? []).map((field) => field.name);
       assert.ok(!names.includes('Busiest day'), `a tie named a busiest day: ${JSON.stringify(tied?.fields)}`);
     } finally {

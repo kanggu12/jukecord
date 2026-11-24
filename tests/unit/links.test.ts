@@ -4,11 +4,13 @@
  * the order the tracks are handed on in, and the add actions that queue them as they come. Nothing here reaches a
  * site: the fetch answers from a table, and the search makes up its results.
  */
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
 import { type ActionContext, ActionError, Actions } from '../../src/app/actions.ts';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import type { NewTrack } from '../../src/core/types.ts';
@@ -19,7 +21,7 @@ import { bestMatch, LinkError, type LinkService, Links, linkTarget, metaTags } f
 import type { Resolver } from '../../src/media/resolver.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
 import { FakeClock, FakeMedia, flush } from '../support/fakes.ts';
-import { memoryStore } from '../support/store.ts';
+import { inOrder, memoryStore } from '../support/store.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
 const fixture = (name: string) => fs.readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf8');
@@ -76,8 +78,8 @@ function madeUpSearch(lengths: Record<string, number>) {
   return { ytdlp, queries };
 }
 
-function links(fetch: PublicFetch, ytdlp: YtDlp, options: { spotify?: boolean; services?: LinkService[] } = {}) {
-  const store = memoryStore();
+async function links(fetch: PublicFetch, ytdlp: YtDlp, options: { spotify?: boolean; services?: LinkService[] } = {}) {
+  const store = await memoryStore();
   return {
     store,
     links: new Links({
@@ -146,7 +148,7 @@ describe('links of other services', () => {
       'https://api.deezer.com/track/1': fixture('deezer-error.json'),
     });
     const { ytdlp, queries } = madeUpSearch(lengths);
-    const { links: reader } = links(fetch, ytdlp);
+    const { links: reader } = await links(fetch, ytdlp);
     const single = await reader.resolve('https://www.deezer.com/track/900001');
     assert.deepEqual(
       single.tracks.map((found) => [found.title, found.uploader]),
@@ -170,7 +172,7 @@ describe('links of other services', () => {
       'https://open.spotify.com/track/0exampletrack0000000AB': fixture('spotify-track.html'),
     });
     const { ytdlp, queries } = madeUpSearch({ 'Paper Boats on the River': 214 });
-    const { links: reader } = links(fetch, ytdlp);
+    const { links: reader } = await links(fetch, ytdlp);
     const result = await reader.resolve('https://open.spotify.com/track/0exampletrack0000000AB?si=shared');
     assert.equal(result.tracks[0]?.uploader, 'The Placeholders - Topic');
     assert.equal(queries[0], 'Example Band Paper Boats on the River');
@@ -202,7 +204,7 @@ describe('links of other services', () => {
         JSON.stringify({ items: [{ track: item('c', 'Small Victories', 231) }, { track: null }] }),
     });
     const { ytdlp } = madeUpSearch({ 'Low Tide': 203, Lanterns: 198, 'Small Victories': 231 });
-    const { links: reader } = links(fetch, ytdlp, { spotify: true });
+    const { links: reader } = await links(fetch, ytdlp, { spotify: true });
     assert.deepEqual(
       (await reader.resolve('https://open.spotify.com/album/0examplealbum000000000')).tracks.map(
         (found) => found.title,
@@ -231,7 +233,7 @@ describe('links of other services', () => {
     const page = 'https://music.apple.com/us/album/example-album/1000000001?i=1000000002';
     const { fetch } = tableFetch({ [page]: fixture('apple-track.html') });
     const { ytdlp, queries } = madeUpSearch({ 'Paper Boats on the River': 213 });
-    const { links: reader } = links(fetch, ytdlp);
+    const { links: reader } = await links(fetch, ytdlp);
     const result = await reader.resolve(page);
     assert.equal(result.tracks.length, 1);
     assert.equal(queries[0], 'Example Band Paper Boats on the River');
@@ -244,12 +246,12 @@ describe('links of other services', () => {
   it('refuse a service turned off, and keep a match for the next time', async () => {
     const { fetch } = tableFetch({ 'https://api.deezer.com/track/900001': fixture('deezer-track.json') });
     const { ytdlp, queries } = madeUpSearch({ 'Paper Boats on the River': 170 });
-    const off = links(fetch, ytdlp, { services: ['spotify'] }).links;
+    const off = (await links(fetch, ytdlp, { services: ['spotify'] })).links;
     await assert.rejects(
       off.resolve('https://www.deezer.com/track/900001'),
       (error) => error instanceof LinkError && /does not read Deezer links here/.test(error.message),
     );
-    const { links: reader } = links(fetch, ytdlp);
+    const { links: reader } = await links(fetch, ytdlp);
     await reader.resolve('https://www.deezer.com/track/900001');
     await reader.resolve('https://www.deezer.com/track/900001');
     assert.equal(queries.length, 1);
@@ -272,7 +274,7 @@ describe('links of other services', () => {
       [playlist('0exampleplaylist000002')]: JSON.stringify({ items: [{ track: local('Lanterns', 198) }] }),
     });
     const { ytdlp, queries } = madeUpSearch({ 'Low Tide': 203, Lanterns: 198 });
-    const { links: reader } = links(fetch, ytdlp, { spotify: true });
+    const { links: reader } = await links(fetch, ytdlp, { spotify: true });
     const first = await reader.resolve('spotify:playlist:0exampleplaylist000001');
     const second = await reader.resolve('spotify:playlist:0exampleplaylist000002');
     // Each file is its own song: the second is searched for, not given the first one's recording.
@@ -294,12 +296,14 @@ describe('links of other services', () => {
 
 describe('adding a link', () => {
   // Actions over a real queue whose links come from a stand-in that hands its tracks on in two parts.
-  function setup() {
+  async function setup() {
     const clock = new FakeClock();
-    const store = memoryStore(() => clock.now());
+    const store = await memoryStore(() => clock.now());
     const bus = new Bus();
-    const queue = new QueueService(store.queue, bus);
+    const lanes = new GuildLanes();
+    const queue = new QueueService(store.queue, bus, lanes);
     const players = new Players({
+      lanes,
       queue,
       media: new FakeMedia(),
       history: store.history,
@@ -309,7 +313,7 @@ describe('adding a link', () => {
       log,
       fetchTimeoutMs: 60_000,
     });
-    const tracks = ['one', 'two', 'three'].map((name, index) =>
+    const tracks = await inOrder(['one', 'two', 'three'], (name, index) =>
       store.tracks.upsert(found(`Link track ${name}`, 'Example Band', 180, `link00000${index}`)),
     );
     let release: (() => void) | null = null;
@@ -326,12 +330,12 @@ describe('adding a link', () => {
       },
     } as unknown as Links;
     const resolver = { resolve: async () => [] } as unknown as Resolver;
-    const actions = new Actions({ store, queue, players, resolver, log, links });
+    const actions = new Actions({ lanes, store, queue, players, resolver, log, links });
     return { queue, players, actions, tracks, release: () => release?.() };
   }
 
   it('plays the first track as soon as it is found, and puts the rest after it in order', async () => {
-    const { queue, players, actions, tracks, release } = setup();
+    const { queue, players, actions, tracks, release } = await setup();
     const playing = players.get(GUILD);
     const adding = actions.add(DJ, 'https://www.deezer.com/album/900002');
     await flush();
@@ -342,15 +346,15 @@ describe('adding a link', () => {
     assert.equal(result.items.length, 3);
     assert.equal(result.skippedNotFound, 2);
     assert.deepEqual(
-      queue.list(GUILD).map((item) => item.track.id),
+      (await queue.list(GUILD)).map((item) => item.track.id),
       [tracks[1]?.id, tracks[2]?.id],
     );
   });
 
   it('plays now: the first found skips the current track, the rest go next in order', async () => {
-    const { queue, players, actions, tracks, release } = setup();
-    const other = queue.add(GUILD, [tracks[2]?.id ?? 0, tracks[2]?.id ?? 0], 'end', null);
-    players.get(GUILD).play();
+    const { queue, players, actions, tracks, release } = await setup();
+    const other = await queue.add(GUILD, [tracks[2]?.id ?? 0, tracks[2]?.id ?? 0], 'end', null);
+    await players.get(GUILD).play();
     const adding = actions.playNow(DJ, 'https://www.deezer.com/album/900002');
     await flush();
     assert.equal(players.get(GUILD).snapshot().track?.id, tracks[0]?.id);
@@ -358,13 +362,13 @@ describe('adding a link', () => {
     await adding;
     // The link's other tracks before what waited already.
     assert.deepEqual(
-      queue.list(GUILD).map((item) => item.track.id),
+      (await queue.list(GUILD)).map((item) => item.track.id),
       [tracks[1]?.id, tracks[2]?.id, other[1]?.track.id],
     );
   });
 
   it('refuses without the DJ role, before anything is read', async () => {
-    const { actions } = setup();
+    const { actions } = await setup();
     await assert.rejects(
       actions.add({ ...DJ, mayControl: false }, 'https://www.deezer.com/album/900002'),
       (error) => error instanceof ActionError && error.code === 'forbidden',

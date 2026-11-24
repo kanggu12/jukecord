@@ -18,11 +18,12 @@ function hub(
     onEmit?: (name: string) => void;
   } = {},
 ) {
-  const handlers = new Map<string, (payload: { guildId: string }) => void>();
+  // A handler answers with the work it starts (a message made in its server's turn), which a test can wait for.
+  const handlers = new Map<string, (payload: { guildId: string }) => unknown>();
   // What the hub tells the bus itself (who listens in a server), in order.
   const emitted: { name: string; payload: unknown }[] = [];
   const bus = {
-    on: (name: string, fn: (payload: { guildId: string }) => void) => handlers.set(name, fn),
+    on: (name: string, fn: (payload: { guildId: string }) => unknown) => handlers.set(name, fn),
     off: () => {},
     // What the hub says itself (who listens changed, for the votes to skip) is kept for the tests that look.
     told: [] as { name: string; guildId: string }[],
@@ -132,13 +133,13 @@ describe('EventHub', () => {
     // The server in the address (A) takes longer to check than the one chosen while connecting (B).
     const { events, handlers } = hub({ A: 60, B: 5 });
     const browser = socket();
-    events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u' } } as never, { guild: 'A' });
+    await events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u' } } as never, { guild: 'A' });
     browser.say({ type: 'subscribe', guild: 'B' });
     await settle(150);
     const states = browser.sent.filter((message) => message.type === 'state').map((message) => message.guild);
     assert.deepEqual(states, ['B'], 'the late answer for A must not move the connection back');
-    handlers.get('player')?.({ guildId: 'A' });
-    handlers.get('player')?.({ guildId: 'B' });
+    await handlers.get('player')?.({ guildId: 'A' });
+    await handlers.get('player')?.({ guildId: 'B' });
     const players = browser.sent.filter((message) => message.type === 'player').map((message) => message.guild);
     assert.deepEqual(players, ['B']);
     events.close();
@@ -148,8 +149,8 @@ describe('EventHub', () => {
     const { events, handlers } = hub();
     const host = socket();
     const alice = socket();
-    events.attach(host.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
-    events.attach(alice.fake as never, { principal: { kind: 'user', userId: 'alice' } } as never, { guild: 'G' });
+    await events.attach(host.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(alice.fake as never, { principal: { kind: 'user', userId: 'alice' } } as never, { guild: 'G' });
     await settle(20);
     const view = (browser: ReturnType<typeof socket>, type: string) =>
       (browser.sent.findLast((message) => message.type === type)?.voice as { channels: { id: string }[] })?.channels[0]
@@ -168,14 +169,15 @@ describe('EventHub', () => {
     const { events } = hub({}, { stillValid: () => valid, refuse: () => refusal });
     const ended = socket();
     const left = socket();
-    events.attach(ended.fake as never, { principal: { kind: 'user', userId: 'a' } } as never, { guild: 'G' });
+    await events.attach(ended.fake as never, { principal: { kind: 'user', userId: 'a' } } as never, { guild: 'G' });
     await settle(10);
-    // A logged-out or revoked login.
+    // A logged-out or revoked login (read from the database, which answers a moment later).
     valid = false;
     beat(events);
+    await settle(0);
     assert.deepEqual(ended.closed, [4401]);
     valid = true;
-    events.attach(left.fake as never, { principal: { kind: 'user', userId: 'b' } } as never, { guild: 'G' });
+    await events.attach(left.fake as never, { principal: { kind: 'user', userId: 'b' } } as never, { guild: 'G' });
     await settle(10);
     // Someone who left the server.
     refusal = new ActionError('forbidden', 'you are not a member of that server');
@@ -198,7 +200,7 @@ describe('EventHub', () => {
       },
     );
     const browser = socket();
-    events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'c' } } as never, { guild: 'G' });
+    await events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'c' } } as never, { guild: 'G' });
     await settle(10);
     fail = 'discord';
     beat(events);
@@ -213,7 +215,7 @@ describe('EventHub', () => {
   it('sends a burst of queue changes as one message with the latest queue, then at most one per interval', async () => {
     const { events, handlers, queue } = hub({}, { queueEveryMs: 60 });
     const browser = socket();
-    events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     // Five changes in one moment (three failed tracks put back, the next taken out, say): one message, the last queue.
     for (let change = 1; change <= 5; change += 1) {
@@ -244,7 +246,7 @@ describe('EventHub', () => {
   it('keeps sending queue changes and listeners when the system clock is set back', async () => {
     const { events, handlers, queue } = hub({}, { queueEveryMs: 60, listenersEveryMs: 60 });
     const browser = socket();
-    events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     const change = () => {
       queue.version += 1;
@@ -277,9 +279,9 @@ describe('EventHub', () => {
     const { events } = hub({}, { listenersEveryMs: 1000 });
     // A panel shows server G (nobody listens there yet); a listener is in server H.
     const watcher = socket();
-    events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     const listener = socket();
-    events.attach(listener.fake as never, { principal: { kind: 'host' } } as never, { guild: 'H' });
+    await events.attach(listener.fake as never, { principal: { kind: 'host' } } as never, { guild: 'H' });
     await settle(10);
     listener.say({ type: 'listening', on: true });
     await settle(10);
@@ -298,9 +300,9 @@ describe('EventHub', () => {
     const first = socket();
     const second = socket();
     const old = socket();
-    events.attach(first.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G', gzip: true });
-    events.attach(second.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G', gzip: true });
-    events.attach(old.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(first.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G', gzip: true });
+    await events.attach(second.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G', gzip: true });
+    await events.attach(old.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     queue.version = 1;
     handlers.get('queue')?.({ guildId: 'G' });
@@ -323,7 +325,7 @@ describe('EventHub', () => {
     queue.version = 3;
     const browsers = Array.from({ length: 20 }, () => socket());
     for (const [index, browser] of browsers.entries()) {
-      events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, {
+      await events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, {
         guild: 'G',
         gzip: index % 2 === 0,
       });
@@ -349,7 +351,7 @@ describe('EventHub', () => {
     }
     // A change: read again, once.
     queue.version = 4;
-    events.attach(socket().fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(socket().fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     assert.equal(queue.reads, 2);
     events.close();
@@ -358,7 +360,7 @@ describe('EventHub', () => {
   it('does not send a combined queue message to a panel whose state already had it', async () => {
     const { events, handlers, queue } = hub({}, { queueEveryMs: 40 });
     const early = socket();
-    events.attach(early.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(early.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     queue.version = 1;
     handlers.get('queue')?.({ guildId: 'G' });
@@ -367,7 +369,7 @@ describe('EventHub', () => {
     queue.version = 2;
     handlers.get('queue')?.({ guildId: 'G' });
     const late = socket();
-    events.attach(late.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(late.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(80);
     assert.deepEqual(
       early.of('queue').map((message) => (message.queue as { version: number }).version),
@@ -384,10 +386,10 @@ describe('EventHub', () => {
     // The interval as jukecord has it: thirty presses fit well inside a second even on a slow machine.
     const { events } = hub({}, { listenersEveryMs: 1000 });
     const watcher = socket();
-    events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     const people = Array.from({ length: 30 }, () => socket());
     for (const [index, browser] of people.entries()) {
-      events.attach(browser.fake as never, { principal: { kind: 'user', userId: `u${index}` } } as never, {
+      await events.attach(browser.fake as never, { principal: { kind: 'user', userId: `u${index}` } } as never, {
         guild: 'G',
       });
     }
@@ -409,7 +411,7 @@ describe('EventHub', () => {
   it('tells the rest of jukecord at once how many browsers of a server play along, the last one leaving too', async () => {
     const { events, emitted } = hub();
     const browser = socket();
-    events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
     await settle(10);
     browser.say({ type: 'listening', on: true });
     await settle(1);
@@ -426,8 +428,10 @@ describe('EventHub', () => {
     const made = hub({}, { onEmit: (name) => name === 'listeners' && read.push(made.events.listeners('G').count) });
     const watcher = socket();
     const browser = socket();
-    made.events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
-    made.events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await made.events.attach(watcher.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await made.events.attach(browser.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, {
+      guild: 'G',
+    });
     await settle(10);
     browser.say({ type: 'listening', on: true });
     await settle(1);
@@ -442,12 +446,12 @@ describe('EventHub', () => {
     const { events, handlers } = hub({}, { queueEveryMs: 0 });
     const slow = socket();
     const quick = socket();
-    events.attach(slow.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
-    events.attach(quick.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(slow.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(quick.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     // Without compression per connection, the count is of bytes waiting to be sent.
     slow.fake.bufferedAmount = 8 * 1024 ** 2 + 1;
-    handlers.get('player')?.({ guildId: 'G' });
+    await handlers.get('player')?.({ guildId: 'G' });
     assert.equal(slow.terminated(), true);
     assert.equal(quick.terminated(), false);
     assert.equal(quick.of('player').length, 1);
@@ -460,9 +464,9 @@ describe('EventHub', () => {
     const host = socket();
     const tab = socket();
     const other = socket();
-    events.attach(host.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
-    events.attach(tab.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
-    events.attach(other.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await events.attach(host.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(tab.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
+    await events.attach(other.fake as never, { principal: { kind: 'user', userId: 'u1' } } as never, { guild: 'G' });
     await settle(10);
     // Two tabs of one person and the host: two people. Each change of who listens is said on the bus.
     for (const browser of [host, tab, other]) browser.say({ type: 'listening', on: true });
@@ -483,7 +487,7 @@ describe('EventHub', () => {
     ];
     const browsers = callers.map(() => socket());
     for (const [index, browser] of browsers.entries())
-      events.attach(browser.fake as never, callers[index] as never, { guild: 'G' });
+      await events.attach(browser.fake as never, callers[index] as never, { guild: 'G' });
     await settle(10);
     for (const browser of browsers) browser.say({ type: 'listening', on: true });
     await settle(5);
@@ -497,7 +501,7 @@ describe('EventHub', () => {
   it('sends the votes of a server to its panels, a burst of changes as one message', async () => {
     const { events, handlers } = hub({}, { queueEveryMs: 40 });
     const panel = socket();
-    events.attach(panel.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
+    await events.attach(panel.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
     // The state had them; then three changes close together.
     assert.deepEqual(panel.of('state')[0]?.votes, { on: false, votes: 0, needed: 0, voted: false });

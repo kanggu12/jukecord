@@ -15,14 +15,14 @@ const kept = (text: string) => text.replaceAll('⍽', String.fromCharCode(0xa0))
 
 describe('the bot answers', () => {
   it('draws an old card again from what plays now when its key would do nothing, instead of refusing', async () => {
-    const { store, queue, players, media, bot } = fakeBot();
-    const [track] = addTracks(store, 1);
+    const { store, queue, players, media, bot } = await fakeBot();
+    const [track] = await addTracks(store, 1);
     assert.ok(track);
-    queue.add('100000000000000001', [track.id], 'end', null);
-    players.get('100000000000000001').play();
+    await queue.add('100000000000000001', [track.id], 'end', null);
+    await players.get('100000000000000001').play();
     media.finish(180_000);
     await flush();
-    players.get('100000000000000001').pause();
+    await players.get('100000000000000001').pause();
     // A card made while it played still shows Pause; someone presses it now that the music is paused.
     const press = interaction('button', 'jukecord:pause:en');
     await handlers(bot).onButton(press.interaction);
@@ -31,7 +31,7 @@ describe('the bot answers', () => {
     assert.match(press.shown[0]?.text ?? '', /^Paused \| /);
     assert.match(press.shown[0]?.text ?? '', /\[Resume jukecord:resume:en\]/);
     // Someone without the DJ role is still told why, privately, and the card is left as it is.
-    store.settings.setDjRole('100000000000000001', '500000000000000001');
+    await store.settings.setDjRole('100000000000000001', '500000000000000001');
     const refused = interaction('button', 'jukecord:resume:en');
     await handlers(bot).onButton(refused.interaction);
     assert.equal(refused.shown[0]?.kind, 'reply');
@@ -44,15 +44,15 @@ describe('the bot answers', () => {
 describe('the bot answers commands', () => {
   // A bot with two tracks to find, one of them playing.
   async function playing() {
-    const made = fakeBot();
-    const tracks = addTracks(made.store, 3);
-    made.queue.add(
+    const made = await fakeBot();
+    const tracks = await addTracks(made.store, 3);
+    await made.queue.add(
       '100000000000000001',
       tracks.map((track) => track.id),
       'end',
       null,
     );
-    made.players.get('100000000000000001').play();
+    await made.players.get('100000000000000001').play();
     made.media.finish(180_000);
     await flush();
     return made;
@@ -84,18 +84,15 @@ describe('the bot answers commands', () => {
     assert.equal(await save('mix'), 'Saved "mix" (3)');
     // Spaces around a name are not part of it, there as here.
     assert.equal(await save('  Mix  '), 'Replaced "Mix" (3)');
-    assert.deepEqual(
-      store.playlists
-        .list('100000000000000001')
-        .map((playlist) => playlist.name)
-        .sort(),
-      ['Mix', 'mix'],
-    );
+    assert.deepEqual((await store.playlists.list('100000000000000001')).map((playlist) => playlist.name).sort(), [
+      'Mix',
+      'mix',
+    ]);
     // A name the database keeps otherwise than typed (half of a UTF-16 pair, kept as U+FFFD): the second save
     // replaced the first, which a comparison of the names as typed said was "Saved".
     assert.equal(await save('Mix \uD83C'), 'Saved "Mix �" (3)');
     assert.equal(await save('Mix \uD83C'), 'Replaced "Mix �" (3)');
-    assert.equal(store.playlists.list('100000000000000001').length, 3);
+    assert.equal((await store.playlists.list('100000000000000001')).length, 3);
     await bot.client.destroy();
   });
 
@@ -172,9 +169,9 @@ describe('the bot answers commands', () => {
   it('counts what /clear took out in words, one track and none too', async () => {
     const { bot, queue } = await playing();
     // The two queued after the one playing: one is taken out first, so one is left for /clear.
-    const [first] = queue.list('100000000000000001');
+    const [first] = await queue.list('100000000000000001');
     assert.ok(first);
-    queue.remove('100000000000000001', first.id);
+    await queue.remove('100000000000000001', first.id);
     const one = interaction('command', 'clear');
     await handlers(bot).onCommand(one.interaction);
     assert.equal(one.shown[0]?.text, 'Removed 1 track');
@@ -190,43 +187,43 @@ describe('the bot answers commands', () => {
 
 describe('the now-playing card in the channel', () => {
   it('is drawn again as the player changes, wherever the change came from', async () => {
-    const made = fakeBot();
-    const tracks = addTracks(made.store, 2);
-    made.queue.add(
+    const made = await fakeBot();
+    const tracks = await addTracks(made.store, 2);
+    await made.queue.add(
       '100000000000000001',
       tracks.map((track) => track.id),
       'end',
       null,
     );
-    made.players.get('100000000000000001').play();
+    await made.players.get('100000000000000001').play();
     made.media.finish(180_000);
     await flush();
     const asked = interaction('command', 'np');
     await handlers(made.bot).onCommand(asked.interaction);
     assert.match(asked.shown.at(-1)?.text ?? '', /^Playing now \| /);
     // Paused from the panel (or the API, the command line): the card in the channel says so, with Resume.
-    made.players.get('100000000000000001').pause();
+    await made.players.get('100000000000000001').pause();
     await made.clock.advance(0);
     assert.match(asked.shown.at(-1)?.text ?? '', /^Paused \| /);
     assert.match(asked.shown.at(-1)?.text ?? '', /\[Resume jukecord:resume:en\]/);
     // Skipped there too: once more, five seconds after the last edit, with the next track.
-    made.players.get('100000000000000001').resume();
-    made.players.get('100000000000000001').skip();
+    await made.players.get('100000000000000001').resume();
+    await made.players.get('100000000000000001').skip();
     await made.clock.advance(5000);
     assert.match(asked.shown.at(-1)?.text ?? '', /^Getting it ready \| \[Track 2\]/);
     await made.bot.client.destroy();
   });
 
   it('catches up with a change made while its answer was on its way to Discord', async () => {
-    const made = fakeBot();
-    const tracks = addTracks(made.store, 2);
-    made.queue.add(
+    const made = await fakeBot();
+    const tracks = await addTracks(made.store, 2);
+    await made.queue.add(
       '100000000000000001',
       tracks.map((track) => track.id),
       'end',
       null,
     );
-    made.players.get('100000000000000001').play();
+    await made.players.get('100000000000000001').play();
     made.media.finish(180_000);
     await flush();
     // /skip answers "Getting it ready"; Discord takes its time to show the answer, and meanwhile the next track (in the
@@ -260,7 +257,7 @@ describe('the now-playing card in the channel', () => {
 
 describe('the alerts channel in Discord', () => {
   it('shows it to the person alone, and lets only managers choose it', async () => {
-    const { bot } = fakeBot();
+    const { bot } = await fakeBot();
     const shown = interaction('command', 'alerts', { sub: 'show' }, { manage: true });
     await handlers(bot).onCommand(shown.interaction);
     assert.equal(shown.shown[0]?.ephemeral, true);
@@ -273,7 +270,7 @@ describe('the alerts channel in Discord', () => {
   });
 
   it("posts an alert in the server's language once Discord is there, trouble in a problem's colour", async () => {
-    const { bot } = fakeBot();
+    const { bot } = await fakeBot();
     const sent: { embeds: { toJSON(): { description?: string; color?: number } }[] }[] = [];
     const channel = { isSendable: () => true, send: async (payload: (typeof sent)[number]) => sent.push(payload) };
     (bot.client.guilds.cache as unknown as Map<string, unknown>).set('100000000000000001', {
@@ -299,7 +296,7 @@ describe('the alerts channel in Discord', () => {
   });
 
   it('waits for Discord with one listener, however many alerts wait (a full disk at the start, in every server)', async () => {
-    const { bot } = fakeBot();
+    const { bot } = await fakeBot();
     const sent: unknown[] = [];
     const channel = { isSendable: () => true, send: async (payload: unknown) => sent.push(payload) };
     const servers = Array.from({ length: 12 }, (_, index) => `1000000000000000${String(index + 10)}`);

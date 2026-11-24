@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Bus } from '../../src/core/bus.ts';
+import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
 import { QueueService } from '../../src/core/queue.ts';
 import { createLogger } from '../../src/log.ts';
@@ -10,13 +11,15 @@ import { addTracks, memoryStore } from '../support/store.ts';
 const A = '100000000000000001';
 const B = '100000000000000002';
 
-function setup() {
+async function setup() {
   const clock = new FakeClock();
-  const store = memoryStore(() => clock.now());
+  const store = await memoryStore(() => clock.now());
   const bus = new Bus();
   const media = new FakeMedia();
+  const lanes = new GuildLanes();
   const players = new Players({
-    queue: new QueueService(store.queue, bus),
+    lanes,
+    queue: new QueueService(store.queue, bus, lanes),
     media,
     history: store.history,
     state: store.playerState,
@@ -29,18 +32,18 @@ function setup() {
 }
 
 describe('Players', () => {
-  it('gives one player per server', () => {
-    const { players } = setup();
+  it('gives one player per server', async () => {
+    const { players } = await setup();
     assert.equal(players.get(A), players.get(A));
     assert.notEqual(players.get(A), players.get(B));
     assert.equal(players.all().length, 2);
   });
 
   it('restores the servers that had a track current, paused where they were', async () => {
-    const { store, media, players } = setup();
-    const [track] = addTracks(store, 1);
+    const { store, media, players } = await setup();
+    const [track] = await addTracks(store, 1);
     assert.ok(track);
-    store.playerState.save({
+    await store.playerState.save({
       guildId: A,
       trackId: track.id,
       addedBy: 'u1',
@@ -48,8 +51,15 @@ describe('Players', () => {
       positionMs: 30_000,
       repeat: 'off',
     });
-    store.playerState.save({ guildId: B, trackId: null, addedBy: null, status: 'idle', positionMs: 0, repeat: 'off' });
-    assert.equal(players.restoreAll(store.tracks, store.playerState), 1);
+    await store.playerState.save({
+      guildId: B,
+      trackId: null,
+      addedBy: null,
+      status: 'idle',
+      positionMs: 0,
+      repeat: 'off',
+    });
+    assert.equal(await players.restoreAll(store.tracks, store.playerState), 1);
     media.finish(180_000);
     await flush();
     const snapshot = players.get(A).snapshot();
