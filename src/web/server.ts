@@ -44,6 +44,7 @@ import {
   CSRF_HEADER,
   cookie,
   DiscordLoginError,
+  entryFailures,
   nameFailures,
   parseCookies,
   SESSION_COOKIE,
@@ -1029,8 +1030,19 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
       }
       let failed = false;
+      // What this try is counted under: the address and the name, and the account the name found once it is found.
+      const counted = [...keys];
       try {
-        const identity = await ldap.login(username, password);
+        const identity = await ldap.login(username, password, {
+          // Counted by the account too, before its password is sent: every name that finds it (its mail, another
+          // spelling the directory takes) is one count, so twenty guesses at it is all, under whatever names.
+          found: async (subject) => {
+            const key = entryFailures('ldap', subject);
+            if (!(await auth.limiter.enter([key]))) return false;
+            counted.push(key);
+            return true;
+          },
+        });
         const level = levelOf(identity.groups, settings.groups, sameLdapGroup);
         const principal = await auth.admit('ldap', identity, level, false);
         if (!principal) {
@@ -1050,6 +1062,10 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // The name or password the person typed is never in the log, nor in what the panel is told: only why.
         log.info('a directory login did not go through', { reason: code, detail: reasonOf(failure) });
         if (code === 'invalid') return refused(400, 'invalid', 'type your name and your password');
+        if (code === 'blocked') {
+          auth.counted('ldap', 'blocked');
+          return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+        }
         if (code === 'unavailable') {
           auth.counted('ldap', 'unavailable');
           return refused(503, 'directory-down', 'the directory did not answer; try again in a moment');
@@ -1066,7 +1082,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         if (code === 'disabled') return refused(403, 'account-disabled', 'your account is turned off or locked');
         return refused(401, 'wrong-password', 'wrong name or password');
       } finally {
-        if (!failed) await auth.limiter.forgive(keys);
+        if (!failed) await auth.limiter.forgive(counted);
       }
     },
   );

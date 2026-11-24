@@ -10,11 +10,17 @@
  */
 import type tls from 'node:tls';
 import {
+  AndFilter,
+  ApproximateFilter,
   Client,
   type ClientOptions,
   ConfidentialityRequiredError,
+  EqualityFilter,
+  type Filter,
+  FilterParser,
   InvalidCredentialsError,
   NoSuchObjectError,
+  OrFilter,
   ResultCodeError,
   SizeLimitExceededError,
   StrongAuthRequiredError,
@@ -52,9 +58,9 @@ export class LdapError extends Error {
    * invalid: an empty name or password (nothing was sent); wrong: no such person, or not their password; expired:
    * their password must be changed first (Active Directory says so); disabled: the account is turned off, expired or
    * locked; ambiguous: the filter found more than one person; unavailable: the directory did not answer, or refused
-   * jukecord's own account.
+   * jukecord's own account; blocked: the account found failed too often lately (no password was sent).
    */
-  readonly code: 'invalid' | 'wrong' | 'expired' | 'disabled' | 'ambiguous' | 'unavailable';
+  readonly code: 'invalid' | 'wrong' | 'expired' | 'disabled' | 'ambiguous' | 'unavailable' | 'blocked';
 
   constructor(code: LdapError['code'], message: string) {
     super(message);
@@ -79,6 +85,15 @@ export interface DirectoryClient {
   unbind(): Promise<void>;
 }
 
+/** What a login may be asked on its way, between finding the person and sending their password. */
+export interface LoginGuard {
+  /**
+   * The account the name found, by its lasting ID: false holds the try back there (it failed too often, under this
+   * name or another of its names), before any password is sent.
+   */
+  readonly found?: (subject: string) => Promise<boolean>;
+}
+
 export interface LdapOptions {
   readonly settings: LdapSettings;
   readonly log: Logger;
@@ -100,6 +115,58 @@ export function fillFilter(template: string, values: { username: string; dn?: st
   let filter = template.split('{username}').join(escapeFilterValue(values.username));
   if (values.dn !== undefined) filter = filter.split('{dn}').join(escapeFilterValue(values.dn));
   return filter;
+}
+
+/**
+ * A name as directories compare names (RFC 4518's string preparation, near enough): what LDAP maps to nothing taken
+ * out (a soft hyphen, a zero-width space, the other format and control characters), every other space a plain one,
+ * compatibility forms folded (fullwidth, circled and mathematical letters are the letters: NFKC), case set aside both
+ * ways (so "ß" is "ss", as "SS" is), and the spaces at the ends dropped and those inside counted as one.
+ */
+export function directoryName(name: string): string {
+  return (
+    name
+      .replace(/[\t\n\v\f\r\u0085\p{Z}]/gu, ' ')
+      // Controls and format characters (the soft hyphen and the zero-width ones among them), variation selectors, the
+      // combining grapheme joiner, the Mongolian soft hyphen and the object replacement character.
+      .replace(/\p{Cc}|\p{Cf}|\p{Variation_Selector}|\u034f|\u1806|\ufffc/gu, '')
+      .normalize('NFKC')
+      .toUpperCase()
+      .toLowerCase()
+      .trim()
+      .replace(/ {2,}/g, ' ')
+  );
+}
+
+// What stands for the typed name while the user filter is read for the attributes it compares the name with.
+const NAME_MARK = 'jukecord0name0mark';
+
+/**
+ * The attributes a user filter finds people by, in its order: those it compares the typed name with, as in
+ * (uid={username}) or (|(sAMAccountName={username})(userPrincipalName={username})). Read with ldapts' own parser; a
+ * name compared under a NOT, or inside a longer value, is no attribute of the person's own name.
+ */
+export function nameAttributes(userFilter: string): string[] {
+  const found: string[] = [];
+  const walk = (filter: Filter) => {
+    if (filter instanceof AndFilter || filter instanceof OrFilter) for (const inner of filter.filters) walk(inner);
+    else if ((filter instanceof EqualityFilter || filter instanceof ApproximateFilter) && filter.value === NAME_MARK)
+      found.push(filter.attribute);
+  };
+  try {
+    walk(FilterParser.parseString(fillFilter(userFilter, { username: NAME_MARK })));
+  } catch {
+    // A filter ldapts cannot read finds nobody either; the search says so.
+  }
+  // Each once, in the case written (attributes are compared regardless of case).
+  return found.filter((name, at) => found.findIndex((other) => other.toLowerCase() === name.toLowerCase()) === at);
+}
+
+// An attribute's values in an entry, its name compared regardless of case (a directory answers in the case its
+// schema writes, which need not be the case the settings wrote).
+function valuesOf(entry: Record<string, unknown>, attribute: string): string[] {
+  const key = Object.keys(entry).find((name) => name.toLowerCase() === attribute.toLowerCase());
+  return key === undefined ? [] : texts(entry[key]);
 }
 
 /**
@@ -241,7 +308,8 @@ export class LdapLogin {
       ({ searchEntries: entries } = await client.search(settings.baseDn, {
         scope: 'sub',
         filter: fillFilter(settings.userFilter, { username }),
-        attributes: PERSON_ATTRIBUTES,
+        // Their own name too: the attributes the filter found them by.
+        attributes: [...PERSON_ATTRIBUTES, ...nameAttributes(settings.userFilter)],
         // Two are enough to know there is more than one.
         sizeLimit: 2,
         explicitBufferAttributes: ['objectGUID'],
@@ -260,14 +328,36 @@ export class LdapLogin {
     return entry as Record<string, unknown> & { dn: string };
   }
 
+  /**
+   * The person's own name as the directory keeps it: the value of the first attribute the user filter found them by
+   * that they have (of several values, the one the typed name stands for). Null when they have none of them.
+   */
+  private ownName(entry: Record<string, unknown>, typed: string): string | null {
+    const wanted = directoryName(typed);
+    for (const attribute of nameAttributes(this.options.settings.userFilter)) {
+      const values = valuesOf(entry, attribute).filter((value) => value.trim() !== '');
+      if (values.length > 0) return values.find((value) => directoryName(value) === wanted) ?? values[0] ?? null;
+    }
+    return null;
+  }
+
   // A person's groups, by DN: from their memberOf, or a search for the groups that have them (with Active Directory's
-  // nested rule when the settings say), read with jukecord's own account before the person's bind.
-  private async groupsOf(client: DirectoryClient, entry: Record<string, unknown> & { dn: string }, username: string) {
+  // nested rule when the settings say), read with jukecord's own account before the person's bind. A group filter's
+  // {username} is the person's own name, never what was typed: memberUid is compared case and all, so "ALICE" typed
+  // for alice must not find the groups of an "ALICE".
+  private async groupsOf(client: DirectoryClient, entry: Record<string, unknown> & { dn: string }, typed: string) {
     const { settings } = this.options;
     if (settings.groupFilter === null && !settings.nestedGroups) return texts(entry.memberOf);
+    const own = this.ownName(entry, typed);
+    if (!settings.nestedGroups && settings.groupFilter?.includes('{username}') && own === null) {
+      this.options.log.warn('the person found has none of the attributes the user filter compares names with', {
+        attributes: nameAttributes(settings.userFilter).join(', ') || 'none',
+      });
+      return [];
+    }
     const filter = settings.nestedGroups
       ? `(member:${IN_CHAIN}:=${escapeFilterValue(entry.dn)})`
-      : fillFilter(settings.groupFilter ?? '', { username, dn: entry.dn });
+      : fillFilter(settings.groupFilter ?? '', { username: own ?? '', dn: entry.dn });
     try {
       const { searchEntries } = await client.search(settings.groupBaseDn ?? settings.baseDn, {
         scope: 'sub',
@@ -284,8 +374,11 @@ export class LdapLogin {
     }
   }
 
-  /** Logs a person in with their directory name and password: who they are and their groups, or LdapError. */
-  async login(username: string, password: string): Promise<LdapIdentity> {
+  /**
+   * Logs a person in with their directory name and password: who they are and their groups, or LdapError. The guard
+   * is asked about the account the name found before its password is sent.
+   */
+  async login(username: string, password: string, guard: LoginGuard = {}): Promise<LdapIdentity> {
     const name = username.trim();
     // Refused before anything is sent: an empty password is an anonymous bind, which a directory says yes to.
     if (name === '' || password === '') throw new LdapError('invalid', 'type a name and a password');
@@ -300,6 +393,10 @@ export class LdapLogin {
     try {
       await this.serviceBind(client);
       const entry = await this.find(client, name);
+      const subject = subjectOf(entry, entry.dn);
+      // Held back here when the account failed too often lately, whatever name found it this time.
+      if (guard.found && !(await guard.found(subject)))
+        throw new LdapError('blocked', 'the account found failed too often lately');
       const groups = await this.groupsOf(client, entry, name);
       // The directory checks the password, by a bind as the person: jukecord compares nothing itself.
       try {
@@ -313,9 +410,12 @@ export class LdapLogin {
         if (wantsEncryption(error)) throw new LdapError('unavailable', ENCRYPT);
         throw new LdapError('unavailable', `the directory did not answer the bind: ${said(error)}`);
       }
-      const display = [...texts(entry.displayName), ...texts(entry.cn)].find((text) => text.trim() !== '') ?? name;
+      const display =
+        [...texts(entry.displayName), ...texts(entry.cn)].find((text) => text.trim() !== '') ??
+        this.ownName(entry, name) ??
+        name;
       return {
-        subject: subjectOf(entry, entry.dn),
+        subject,
         dn: entry.dn,
         name: [...display.trim()].slice(0, DISPLAY_MAX).join(''),
         groups,

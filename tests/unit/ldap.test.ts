@@ -60,6 +60,7 @@ function directory(): FakeDirectoryServer {
       password: 'alice-password',
       attributes: {
         uid: 'alice',
+        mail: 'alice@example.org',
         cn: 'Alice Kim',
         displayName: 'Alice',
         entryUUID: 'F3A9E0B2-2C1D-4A7B-9E55-0D6C1B7E8A41',
@@ -262,6 +263,27 @@ describe('LdapLogin', () => {
     // Admins holds Staff, which holds Alice: found through the rule, as Active Directory finds it.
     assert.ok(nested.groups.includes('cn=admins,ou=groups,dc=example,dc=org'));
     assert.ok(server.log.includes(`search dc=example,dc=org (member:${IN_CHAIN}:=${ALICE_DN})`));
+  });
+
+  it("fills a group filter's name with the person's own, never with what they typed", async () => {
+    const server = directory();
+    // memberUid is compared case and all (caseExactIA5Match): a name typed otherwise must not choose the groups.
+    const ldap = login(server, {
+      groupFilter: '(memberUid={username})',
+      userFilter: '(|(uid={username})(mail={username}))',
+    });
+    server.log.length = 0;
+    await ldap.login('ALICE', 'alice-password');
+    assert.ok(server.log.includes('search dc=example,dc=org (memberUid=alice)'), server.log.join('\n'));
+    assert.ok(!server.log.some((line) => line.includes('(memberUid=ALICE)')));
+    // Found by another attribute of the filter (their mail): their uid still.
+    server.log.length = 0;
+    await ldap.login('alice@example.org', 'alice-password');
+    assert.ok(server.log.includes('search dc=example,dc=org (memberUid=alice)'), server.log.join('\n'));
+    // The settings' test looks the groups up the same way.
+    server.log.length = 0;
+    await ldap.test('Alice');
+    assert.ok(server.log.includes('search dc=example,dc=org (memberUid=alice)'), server.log.join('\n'));
   });
 
   it('tests the settings and a name without a password: the connection, the account, the base, the person, the groups', async () => {
@@ -519,5 +541,43 @@ describe('many tries at the directory form at once', () => {
     const other = await form('alice', 'alice-password', '10.7.9.9');
     assert.equal(other.statusCode, 200);
     assert.equal(await server.auth.limiter.blocked(['address:10.7.9.9']), false);
+  });
+});
+
+describe('failed logins counted by the account the name finds', () => {
+  // People may be found by their uid or their mail: two names, one account.
+  let server: TestServer;
+  const fake = directory();
+  fake.people.push({
+    dn: 'uid=gina,ou=people,dc=example,dc=org',
+    password: 'gina-password',
+    attributes: { uid: 'gina', mail: 'gina@example.org', entryUUID: '0c3a9f7e-0000-4000-8000-000000000001' },
+  });
+  const form = (username: string, address: string) =>
+    server.web.app.inject({
+      method: 'POST',
+      url: '/auth/directory',
+      remoteAddress: address,
+      headers: { origin: 'http://localhost:8795', host: 'localhost:8795' },
+      payload: { username, password: 'a guess' },
+    });
+
+  before(async () => {
+    server = await testServer({
+      ldap: { settings: { ...SETTINGS, userFilter: '(|(uid={username})(mail={username}))' }, connect: fake.connect },
+    });
+  });
+  after(() => server.close());
+
+  it('holds the account back after twenty failures under any of its names', async () => {
+    for (let i = 0; i < 10; i += 1) assert.equal((await form('gina', `10.11.0.${i}`)).statusCode, 401);
+    for (let i = 0; i < 10; i += 1) assert.equal((await form('gina@example.org', `10.11.1.${i}`)).statusCode, 401);
+    // Each name failed ten times, the account twenty: the next try by either name is refused, and no bind is made.
+    const binds = fake.log.filter((line) => line.startsWith('bind uid=gina')).length;
+    assert.equal((await form('gina', '10.11.2.1')).statusCode, 429);
+    assert.equal((await form('gina@example.org', '10.11.2.2')).statusCode, 429);
+    assert.equal(fake.log.filter((line) => line.startsWith('bind uid=gina')).length, binds);
+    // A refused try left the name and the address as they were.
+    assert.equal(await server.auth.limiter.blocked(['address:10.11.2.1']), false);
   });
 });

@@ -19,7 +19,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hostLike, type MemberPrincipal, type Principal, type Provider } from '../app/access.ts';
-import type { LdapLogin } from '../auth/ldap.ts';
+import { directoryName, type LdapLogin } from '../auth/ldap.ts';
 import type { OidcLogin } from '../auth/oidc.ts';
 import type { MemberLevel } from '../auth/settings.ts';
 import type { Cache } from '../cache/cache.ts';
@@ -168,13 +168,21 @@ export function addressFailures(address: string | undefined): string {
 }
 
 /**
- * The key a name's failed logins at the directory form are counted under: the provider and the name as the directory
- * compares it (LDAP and Active Directory match user names regardless of case), so "Alice" and "alice" are one count.
+ * The key a name's failed logins at the directory form are counted under: the provider and the name as directories
+ * compare names (src/auth/ldap.ts, directoryName), so "Alice", "ALICE" and a fullwidth "ａｌｉｃｅ" are one count.
  * At most its first 256 characters, the longest name the form takes: a key never grows with what is sent (a request
  * may carry 64 KiB), so names made up by the thousand cost the cache little each.
  */
 export function nameFailures(provider: string, name: string): string {
-  return `name:${provider}:${[...name.trim().normalize('NFC').toLowerCase()].slice(0, 256).join('')}`;
+  return `name:${provider}:${[...directoryName(name)].slice(0, 256).join('')}`;
+}
+
+/**
+ * The key the failed logins of an account the directory found are counted under, by its lasting ID: every name that
+ * finds it (its uid, its mail, a spelling the directory takes for it) counts as one.
+ */
+export function entryFailures(provider: string, subject: string): string {
+  return `entry:${provider}:${createHash('sha256').update(subject).digest('hex').slice(0, 32)}`;
 }
 
 /**

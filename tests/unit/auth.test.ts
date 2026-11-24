@@ -219,6 +219,28 @@ describe('LoginLimiter', () => {
     ]);
   });
 
+  it('counts a name as directories compare names: compatibility forms, case both ways, and spaces', () => {
+    const ada = nameFailures('ldap', 'ada');
+    // Each logged in as uid=ada on OpenLDAP: fullwidth, mathematical bold and circled letters, a soft hyphen or a
+    // zero-width space inside (both mapped to nothing by LDAP's string preparation), and spaces at the ends.
+    for (const name of [
+      'ADA',
+      'ａｄａ',
+      '\u{1d41a}\u{1d41d}\u{1d41a}',
+      'ⓐⓓⓐ',
+      'a\u00adda',
+      'a\u200bda',
+      ' ada\t',
+      'Ａda',
+    ])
+      assert.equal(nameFailures('ldap', name), ada, JSON.stringify(name));
+    // Inner spaces count as one, as a directory's insignificant-space rule has it; they are not dropped.
+    assert.equal(nameFailures('ldap', 'ada  lovelace'), nameFailures('ldap', 'Ada Lovelace'));
+    assert.notEqual(nameFailures('ldap', 'ada lovelace'), nameFailures('ldap', 'adalovelace'));
+    // Case set aside both ways: "ß" is "SS" upper-cased, so "straße" is "STRASSE".
+    assert.equal(nameFailures('ldap', 'straße'), nameFailures('ldap', 'STRASSE'));
+  });
+
   it('blocks on any of its keys: an address, or a name tried from many addresses', async () => {
     const limiter = new LoginLimiter(new MemoryCache(), { limit: 3 });
     const alice = nameFailures('ldap', 'Alice');
