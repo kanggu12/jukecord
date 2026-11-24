@@ -1,4 +1,39 @@
 {{/*
+The values of an older release, completed. `helm upgrade --reuse-values` renders the chart with the values the
+release had, which stand in for this chart's values.yaml: a group this version added is not there at all, and the
+first template to look inside it stops. When one of the groups 0.4 added is missing (the sign of values from 0.3),
+every key that is missing at any depth is filled from files/defaults.yaml, the copy of values.yaml, which is what
+--reset-then-reuse-values would give. A value that is there stays as it is, false and empty included. A fresh install
+or an upgrade with -f has every group, and nothing is filled. Every template includes this first, so the order Helm
+renders them in does not matter; after the first, nothing is missing and the rest fill nothing.
+*/}}
+{{- define "jukecord.defaults" -}}
+{{- $missing := false -}}
+{{- /* The top-level groups added in 0.4; a later version adds its own here, with a test of an upgrade from this one. */}}
+{{- range list "mode" "bus" "split" "database" "auth" "metrics" -}}
+{{- if not (hasKey $.Values .) -}}{{- $missing = true -}}{{- end -}}
+{{- end -}}
+{{- if $missing -}}
+{{- include "jukecord.fill" (list .Values (.Files.Get "files/defaults.yaml" | fromYaml)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* jukecord.defaults, one map at a time: (list <values> <defaults>), adding to the first what only the second has. */}}
+{{- define "jukecord.fill" -}}
+{{- $values := index . 0 -}}
+{{- range $key, $default := index . 1 -}}
+{{- $value := index $values $key -}}
+{{- if kindIs "invalid" $value -}}
+{{- /* Not there (or null): the default, whole. */}}
+{{- $_ := set $values $key $default -}}
+{{- else if and (kindIs "map" $value) (kindIs "map" $default) -}}
+{{- /* There as a map: its own missing keys, the same way. */}}
+{{- include "jukecord.fill" (list $value $default) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Names and labels. Every object is called by the release's full name ("jukecord" for a release called jukecord).
 */}}
 

@@ -1,0 +1,285 @@
+# A copy of values.yaml, line for line below these comment lines: the defaults templates/_helpers.tpl fills in
+# (jukecord.defaults) when an upgrade reuses an older release's values, since a chart's own values.yaml cannot be read
+# from its templates. Copy values.yaml here after every change to it; tests/packaging checks that the two are the same.
+
+# jukecord's Helm values. Every key is checked against values.schema.json, so a misspelt key fails the install
+# instead of being ignored.
+
+image:
+  # The released image, for amd64 and arm64. A copy in a registry of your own (docs/OFFLINE.md) or your own build goes
+  # here instead.
+  repository: ghcr.io/kanggu12/jukecord
+  # Empty: the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# single: one pod is all of jukecord (the default). split: one core (Discord, every server's player and queue, the
+# media and its cache: one pod, with the volume) and edges (the panel, the API, the live updates, logins: as many pods
+# as you like), which share a database server (database below: split mode needs one) and a Redis or Valkey server
+# (bus below).
+mode: single
+
+# The Redis or Valkey server the services of split mode talk through and keep their shared cache on (redis://...,
+# rediss:// for TLS; a password goes in the address), or a Secret of yours holding it under the key url.
+bus:
+  url: ""
+  existingSecret: ""
+
+split:
+  # The secret the core and its edges share: empty for one the chart makes (and keeps across upgrades), or a Secret
+  # of yours holding it under the key internalSecret (32 characters or more).
+  existingSecret: ""
+  core:
+    # As one process: yt-dlp and ffmpeg beside Node (resources below says why these numbers).
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 1536Mi
+  edge:
+    # How many edges serve the browsers (each one any browser: logins are database rows).
+    replicas: 2
+    # The panel and the API for many browsers, without the media.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 192Mi
+      limits:
+        memory: 512Mi
+    # More edges while they are busy (a HorizontalPodAutoscaler on their processor time).
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+
+discord:
+  # A Secret of yours with the key token (the pod does not start without it) and, for logging in with Discord,
+  # clientSecret (read when clientId is set). The chart refuses it together with token or clientSecret below. Either
+  # way the chart mounts them as files that jukecord reads, not as variables, which yt-dlp and ffmpeg would inherit.
+  existingSecret: ""
+  # The bot's token. Without one (and without existingSecret) jukecord runs browser-only. The release's values (helm
+  # get values) then hold it too; existingSecret keeps it in a Secret of yours.
+  token: ""
+  # The application's ID, for logging in with Discord.
+  clientId: ""
+  # The application's OAuth2 secret, for logging in to the panel with Discord.
+  clientSecret: ""
+
+database:
+  # Where jukecord keeps its data: empty for the SQLite file in the data volume (persistence below), or a database
+  # server's address as JUKECORD_DATABASE_URL takes it: postgres://user:password@host:5432/jukecord or
+  # mysql://user:password@host:3306/jukecord (MariaDB too), TLS asked for in it (?sslmode=verify-full). The chart keeps
+  # it in a Secret and gives it to jukecord as a file (it holds a password). The data volume still keeps the media
+  # cache, the logs and the backups.
+  url: ""
+  # A Secret of yours holding the address under the key url, instead of url above (the chart refuses both).
+  existingSecret: ""
+
+# Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
+publicUrl: ""
+
+# Logging in through your own identity provider (OIDC: Keycloak, Authentik, Entra ID, Okta, Google ...) and with
+# directory accounts (LDAP: OpenLDAP, FreeIPA, Active Directory), as jukecord's JUKECORD_OIDC_* and JUKECORD_LDAP_*
+# settings take them (docs/README.md, settings): each is off until its address is set. The pods that serve browsers
+# log people in (the one pod, or the edges in split mode), and `jukecord auth test-oidc|test-ldap` runs there. The
+# two secrets reach jukecord as files, from the chart's Secret (made from the values here, which `helm get values`
+# then shows) or from an existingSecret of yours under the key named below. Who may log in, and as what: admin may do
+# what the host may, control changes the music in every server, read looks and listens; a list ("*" for everyone).
+auth:
+  oidc:
+    # The issuer's address exactly as the provider names itself (https://sso.example.com/realms/home). Register
+    # jukecord as a client with the redirect <publicUrl>/auth/sso/callback (and <publicUrl>/login after logging out).
+    issuer: ""
+    clientId: ""
+    # The client's secret; empty for a public client, which PKCE alone proves.
+    clientSecret: ""
+    # A Secret of yours with the client's secret under the key oidcClientSecret (refused together with clientSecret).
+    existingSecret: ""
+    # The scopes asked for (empty: openid profile), as a list.
+    scopes: []
+    # The claim the groups or roles are in: a name, or a dotted path such as realm_access.roles (empty: groups).
+    groupsClaim: ""
+    adminGroups: []
+    controlGroups: []
+    readGroups: []
+    # The words on the login key (empty: "Log in with SSO"), and a claim with a Discord user ID, to log in as that user.
+    label: ""
+    discordClaim: ""
+  ldap:
+    # ldaps://host (encrypted), or ldap://host with startTls to upgrade; a port if not the usual.
+    url: ""
+    startTls: false
+    # The service account that finds people (a DN, or for Active Directory jukecord@corp.example.com), and its
+    # password; both empty for an anonymous search.
+    bindDn: ""
+    bindPassword: ""
+    # A Secret of yours with the bind password under the key ldapBindPassword (refused together with bindPassword).
+    existingSecret: ""
+    # Where people are looked for, and the filter that finds one (empty: (uid={username}); Active Directory's is
+    # (sAMAccountName={username})).
+    baseDn: ""
+    userFilter: ""
+    # Groups from memberOf by default; or from a search with this filter ((member={dn}), say) under groupBaseDn (empty:
+    # baseDn), or with nestedGroups from Active Directory's nested groups. The lists name groups by DN or by name.
+    groupFilter: ""
+    groupBaseDn: ""
+    nestedGroups: false
+    adminGroups: []
+    controlGroups: []
+    readGroups: []
+    # How long each request may take (empty: 10s), and the words on the directory form's key (empty: the panel's own).
+    timeout: ""
+    label: ""
+  # A private CA that signed the provider's or the directory's certificate: a Secret or a ConfigMap of yours (one of
+  # them), and the key that holds the certificates in PEM. Mounted read-only; the directory's connection checks against
+  # it (JUKECORD_LDAP_CA_FILE), and so do the requests to the provider (NODE_EXTRA_CA_CERTS, besides the system's).
+  ca:
+    secret: ""
+    configMap: ""
+    key: ca.crt
+  # Where the provider and the directory are, as NetworkPolicy egress rules (to, ports), for the pods that log people
+  # in: one on the internet needs none, one in the cluster's private ranges does (Keycloak in the cluster, a directory
+  # on your network). For a directory at 10.20.0.5:
+  #   - to:
+  #       - ipBlock:
+  #           cidr: 10.20.0.5/32
+  #     ports:
+  #       - port: 636
+  egressTo: []
+
+metrics:
+  # jukecord answers /metrics to a scraper on the cluster's network asking directly, with nothing to set. A token lets
+  # one in from anywhere else: from outside the cluster, through a proxy, or through a service mesh's sidecar (which adds
+  # forwarding headers). Prometheus sends it as Authorization: Bearer <token>; at least 16 characters (openssl rand -hex
+  # 32). The release's values (helm get values) then hold it too; existingSecret keeps it in a Secret of yours.
+  token: ""
+  # A Secret of yours with the token under the key metricsToken (the chart refuses it together with token above).
+  # Either way the pod reads it as a file, and the ServiceMonitor sends it.
+  existingSecret: ""
+  # prometheus.io/scrape, /port and /path on the pod, for a Prometheus that finds its targets by annotation. One you
+  # set in podAnnotations wins.
+  podAnnotations: false
+  serviceMonitor:
+    # A ServiceMonitor for the Prometheus Operator, made when the cluster has its CRD (monitoring.coreos.com/v1).
+    enabled: false
+    # Make it even when the cluster does not say it has the CRD: for helm template, and the tools that render charts
+    # without asking a cluster (Argo CD, Flux).
+    force: false
+    # The labels your Prometheus picks ServiceMonitors by (kube-prometheus-stack: release: <its release>).
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Settings passed to jukecord as they are (JUKECORD_*; see docs/README.md), as strings: quote numbers and IDs, which
+# YAML would otherwise turn into floats. JUKECORD_HOST, JUKECORD_PORT, JUKECORD_DATA_DIR and the two *_FILE secrets
+# are the chart's, and the token and the OAuth secret go in discord above (the schema refuses them here). Example:
+#   JUKECORD_CACHE_MAX: 4GiB
+#   JUKECORD_QUEUE_MAX: "2000"
+#   JUKECORD_LOG_LEVEL: debug
+env: {}
+
+# More variables, written as Kubernetes writes them (name with value, or valueFrom a ConfigMap), for what env cannot
+# say: NODE_OPTIONS, TZ, HTTPS_PROXY. The names refused in env are refused here too. Example:
+#   - name: TZ
+#     value: Europe/Berlin
+extraEnv: []
+
+service:
+  type: ClusterIP
+  port: 8795
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # The host name of the panel; leave empty to match every host.
+  host: ""
+  # [{ secretName: jukecord-tls, hosts: [music.example.com] }]
+  tls: []
+
+persistence:
+  # The database, the media cache and the logs. Without it they live as long as the pod.
+  enabled: true
+  # A claim of yours to use instead of the chart's.
+  existingClaim: ""
+  # Empty: the cluster's default class; "-": no class.
+  storageClass: ""
+  size: 5Gi
+  accessModes:
+    - ReadWriteOnce
+
+resources:
+  # Node with the panel open in many browsers (about 200 MB), and a yt-dlp and an ffmpeg (about 70 MB each) for a
+  # track or two being fetched beside it.
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    # Node sets its heap ceiling at about half of this; yt-dlp and ffmpeg use the rest, a pair for each track being
+    # fetched (docs/KUBERNETES.md, "Memory and CPU", says how many at once). Keep it at 768Mi or more.
+    memory: 1536Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  # The data volume's files are given to fsGroup only when its top folder is not jukecord's already, instead of
+  # Kubernetes going through every file of the media cache at each start.
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+networkPolicy:
+  # Incoming: the panel's port only. Outgoing: DNS, and the internet (Discord, its voice servers, the sites tracks
+  # come from) but not the cluster's private networks.
+  enabled: true
+  # Who may reach the panel's port, as NetworkPolicy peers (podSelector, namespaceSelector, ipBlock); empty: anyone.
+  # With the Ingress on, jukecord believes the X-Forwarded-For of one proxy in front (for its login limiter), and a pod
+  # that reaches the port directly could put any address in it; naming the Ingress controller here leaves only it.
+  # helm test's pod is let in as well. A Prometheus that reads /metrics needs a peer here too. For ingress-nginx:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: ingress-nginx
+  #     podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: ingress-nginx
+  ingressFrom: []
+  # Where the database (and in split mode the bus) is, as NetworkPolicy egress rules (to, ports): the cluster's
+  # private ranges are out of reach otherwise. Empty with a database set: any pod of the release's namespace on 5432
+  # (PostgreSQL) and 3306 (MySQL, MariaDB), and in split mode 6379 (Redis, Valkey) too. Rules given here replace that
+  # one, for every pod of the release (an identity provider's or a directory's rules go in auth.egressTo). For a
+  # database elsewhere in a private range:
+  #   - to:
+  #       - ipBlock:
+  #           cidr: 10.20.0.0/24
+  #     ports:
+  #       - port: 5432
+  egressTo: []
+  # Private ranges the pod may not reach; adjust when the cluster uses others.
+  privateRanges:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+
+podAnnotations: {}
+# Labels for the pod, besides the chart's own (which win on the same key).
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

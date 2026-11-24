@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if eq .Values.mode "split" }}
 # The edges of split mode: the panel, the API, the live updates, logins and the browsers' audio, over the core.
 {{- include "jukecord.validate" . }}

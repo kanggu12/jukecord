@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if eq .Values.mode "split" }}
 # The core of split mode: Discord's gateway and voice, every server's player and queue, the media and its cache.
 {{- include "jukecord.validate" . }}

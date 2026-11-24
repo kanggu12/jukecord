@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 # jukecord: the bot, the panel and the API in one process (mode: single; split mode is core.yaml and edge.yaml).
 {{- include "jukecord.validate" . }}
 {{- if eq .Values.mode "single" }}

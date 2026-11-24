@@ -1,3 +1,5 @@
+{{- /* Values an upgrade carried over from an older release are completed first (jukecord.defaults, _helpers.tpl). */ -}}
+{{- include "jukecord.defaults" . -}}
 {{- if .Values.ingress.enabled }}
 # The panel from outside the cluster. WebSocket (/api/v1/events) passes through common controllers as it is; give it
 # a long read timeout (the panel keeps one connection open for hours), for example with ingress-nginx:
