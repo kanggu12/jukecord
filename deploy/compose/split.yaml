@@ -6,9 +6,10 @@
 # The same image runs every jukecord service. The core is Discord, every server's player and queue, the media and its
 # cache (the one volume jukecord needs); the edges are the panel, the API, the live updates, logins and the browsers'
 # audio, which they stream from the core. Caddy spreads browsers over the edges, WebSockets included; nothing else is
-# published, and only on this machine unless JUKECORD_BIND says otherwise. The edges read jukecord's settings from the
-# .env of one process (the checkout's own, beside compose.yaml), so the settings of a jukecord that grew into services
-# stay where they were; this folder's .env holds the split's own secrets, which Compose writes into the services.
+# published, and only on this machine unless JUKECORD_BIND says otherwise. Every jukecord service reads jukecord's
+# settings from the .env of one process (the checkout's own, beside compose.yaml), so the settings of a jukecord that
+# grew into services stay where they were; this folder's .env holds the split's own secrets, which Compose writes into
+# the services.
 # docs/INSTALL.md has the rest (one process is compose.yaml and ./jukecord; this file is the split).
 name: jukecord-split
 
@@ -75,6 +76,9 @@ x-edge: &edge
     database:
       condition: service_healthy
     valkey:
+      condition: service_healthy
+    # After the core: it brings the database's schema up to date first, and an edge has nothing to answer without it.
+    core:
       condition: service_healthy
 
 services:

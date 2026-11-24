@@ -75,7 +75,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.9.0 --severity=warning /mnt/jukecord \
             /mnt/deploy/kind/check.sh /mnt/tests/ui/run.sh /mnt/deploy/bundle/ffmpeg.sh /mnt/deploy/bundle/build-ffmpeg.sh \
-            /mnt/deploy/bundle/jukecord /mnt/tests/split/run.sh
+            /mnt/deploy/bundle/jukecord /mnt/tests/split/run.sh /mnt/deploy/kind/check-split.sh
 
   image:
     name: image (${{ matrix.platform }})

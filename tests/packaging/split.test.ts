@@ -240,7 +240,9 @@ describe("the chart's split mode", { skip: !have('helm') && 'helm is not install
 
 describe('the end-to-end run', () => {
   it('is a script that can run, removes what it started, and runs in CI on both databases', () => {
-    assert.ok(fs.statSync('tests/split/run.sh').mode & 0o100, 'tests/split/run.sh is not executable');
+    for (const file of ['tests/split/run.sh', 'deploy/kind/check-split.sh'])
+      assert.ok(fs.statSync(file).mode & 0o100, `${file} is not executable`);
+    assert.match(read('.github/workflows/chart-e2e.yml'), /deploy\/kind\/check-split\.sh jukecord:e2e/);
     const script = read('tests/split/run.sh');
     assert.match(script, /trap cleanup EXIT/);
     assert.match(script, /down --volumes --remove-orphans/);

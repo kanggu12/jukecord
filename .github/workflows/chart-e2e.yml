@@ -1,5 +1,7 @@
 # The Helm chart on a throwaway kind cluster with the image built from this commit (deploy/kind/check.sh): helm test,
-# the jukecord command in the pod, data kept across a new pod, and the NetworkPolicy applied. It runs when the chart,
+# the jukecord command in the pod, data kept across a new pod, and the NetworkPolicy applied; then its split mode
+# (deploy/kind/check-split.sh): a core and two edges over a database and a bus, helm test, the core's internal port
+# kept to the edges, a new core found again. It runs when the chart,
 # the image or the code inside it changes, on main and in pull requests (before such a change is merged, not after),
 # by hand, and from release.yml before anything is published.
 name: chart-e2e
@@ -62,3 +64,5 @@ jobs:
           sudo install -m 0755 /tmp/kind /usr/local/bin/kind
       - name: Install the chart on a throwaway cluster and check it
         run: deploy/kind/check.sh jukecord:e2e
+      - name: The chart split into services (a core and two edges over PostgreSQL and Valkey), on a cluster of its own
+        run: deploy/kind/check-split.sh jukecord:e2e
