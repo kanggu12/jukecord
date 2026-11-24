@@ -230,6 +230,36 @@ describe('the host’s settings in the API', () => {
     }
   });
 
+  it('tries an address for the shared cache or the bus without saving it, each failure in one sentence', async () => {
+    const server = await testServer({ hostSettings: {} });
+    try {
+      const test = async (use: 'cache' | 'bus', url: string) =>
+        (await asked(server, { method: 'POST', url: api(`/settings/test-${use}`), payload: { url } })).json;
+      // The cache in memory: nothing to reach. The bus has no memory to be in.
+      assert.deepEqual(await test('cache', 'memory'), {
+        ok: true,
+        where: 'memory',
+        server: null,
+        roundTripMs: null,
+        problem: null,
+      });
+      assert.equal((await test('bus', 'memory')).problem, 'that is not an address (example: redis://valkey:6379)');
+      // Not a Redis address: the start's own rule, in its words.
+      const web = await test('bus', 'https://valkey.example.org');
+      assert.equal(web.problem, 'a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host');
+      // A server that is not there: the client's own words after the address, never its password, at once (tried once).
+      const started = Date.now();
+      const away = await test('cache', 'redis://:password-made-up@nowhere.invalid:6379');
+      assert.equal(away.ok, false);
+      assert.equal(away.where, 'redis://nowhere.invalid:6379');
+      assert.match(String(away.problem), /^redis:\/\/nowhere\.invalid:6379: .*ENOTFOUND/);
+      assert.ok(!JSON.stringify(away).includes('password-made-up'));
+      assert.ok(Date.now() - started < 4000, 'tried again instead of saying the first failure');
+    } finally {
+      await server.close();
+    }
+  });
+
   it('tries a database’s address without saving it, and says plainly what it found', async () => {
     const server = await testServer({ hostSettings: {} });
     try {

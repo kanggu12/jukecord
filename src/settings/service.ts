@@ -39,6 +39,7 @@ import {
 import type { DatabaseMove, DatabaseTest, MoveFailure, MoveState } from './move.ts';
 import { problemsOf, readLayers, type SettingProblem, withoutNames } from './read.ts';
 import { restartRefusal } from './restart.ts';
+import { type ServerTest, type ServerUse, testServer } from './servers.ts';
 import { sameValue, shownValue } from './values.ts';
 
 /** A change refused by the settings' rules: every problem it would bring, each with the settings it is about. */
@@ -192,6 +193,7 @@ type PortMethod =
   | 'reset'
   | 'restartNow'
   | 'testDatabase'
+  | 'testServer'
   | 'startMove'
   | 'moveState'
   | 'cancelMove'
@@ -490,6 +492,11 @@ export class HostSettings {
   /** Tries a database's address without saving or changing anything (see DatabaseMove.test). */
   testDatabase(url: string): Promise<DatabaseTest> {
     return this.mover().test(url);
+  }
+
+  /** Tries an address for the shared cache or the bus without saving or changing anything (src/settings/servers.ts). */
+  testServer(url: string, use: ServerUse): Promise<ServerTest> {
+    return testServer(url, use);
   }
 
   /**

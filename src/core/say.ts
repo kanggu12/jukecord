@@ -323,6 +323,12 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     '이 jukecord(스키마 $2)보다 오래된 스키마 $1: 먼저 그 위에서 jukecord를 한 번 시작하세요',
   ],
   ['it does not answer', '응답하지 않음'],
+  // Testing an address for the shared cache or the bus (src/settings/servers.ts).
+  [/^that is not an address \(example: (.+)\)$/, '주소가 아님(예: $1)'],
+  [
+    'a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host',
+    'Redis나 Valkey 주소는 redis:// 또는 rediss://(TLS)로 시작하고 호스트를 적어야 함',
+  ],
   [/^(.+) cannot take a new file$/, '$1 폴더에 새 파일을 만들 수 없음'],
   [
     'nothing would start jukecord again here (it runs without a supervisor, as in a terminal): stop it and start it yourself',

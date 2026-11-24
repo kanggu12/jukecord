@@ -779,6 +779,18 @@ export const DatabaseTestSchema = Type.Object(
   { title: 'DatabaseTest' },
 );
 
+/** A test of an address for the shared cache or the bus. */
+export const ServerTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'Whether jukecord reached it and it answered' }),
+    where: Type.String({ description: 'The address in words, never its user or password' }),
+    server: Nullable(Type.String({ description: 'The program and its version' })),
+    roundTripMs: Nullable(Type.Number({ description: 'A ping there and back, in milliseconds' })),
+    problem: Nullable(Type.String({ description: 'Why it cannot be used, in one sentence' })),
+  },
+  { title: 'ServerTest' },
+);
+
 /** A restart or a switch asked for: what starts jukecord again. */
 export const RestartSchema = Type.Object(
   {

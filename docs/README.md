@@ -238,9 +238,10 @@ it is, and a failure as `{"error":{"code","message"}}` on stderr.
 ## Settings
 
 Every setting has a default, so each one is optional. The host sees and changes them on the panel's **Settings** page
-(the menu's **Settings**), with `jukecord settings` (`list`, `get`, `set`, `reset`) or through the API; a value set as
-an environment variable wins over a saved one and shows as set by the environment. With Docker Compose the variables
-go in `.env`. jukecord checks every setting when it starts and when one is saved, and lists every problem at once.
+(the menu's **Settings**), with `jukecord settings` (`list`, `get`, `set`, `reset`; `test-database`, `test-cache` and
+`test-bus` try an address without saving it; `move-database` copies everything into another database and switches to
+it) and `jukecord restart`, or through the API; a value set as an environment variable wins over a saved one and shows
+as set by the environment. With Docker Compose the variables go in `.env`. jukecord checks every setting when it starts and when one is saved, and lists every problem at once.
 `jukecord doctor` shows the settings in effect, secrets only as set or not set. A setting marked "at once" takes
 effect when it is saved; the others when jukecord restarts.
 

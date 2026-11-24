@@ -191,7 +191,8 @@ function wholeOf(name: string): { readonly fallback: number; readonly min: numbe
 }
 
 // A Redis or Valkey server's address, as the bus and the cache take it (TLS with the s).
-const REDIS_SCHEMES = ['redis:', 'rediss:', 'valkey:', 'valkeys:'];
+/** The schemes of a Redis or Valkey address (the bus's, the shared cache's): TLS with the s. */
+export const REDIS_SCHEMES = ['redis:', 'rediss:', 'valkey:', 'valkeys:'];
 // The shortest internal secret taken: as long as the 32 random bytes jukecord's own secrets are, in hex.
 const SECRET_MIN = definition('JUKECORD_INTERNAL_SECRET').minLength ?? 0;
 

@@ -514,6 +514,23 @@ function showChanged(answer: unknown): string {
   return lines.join('\n');
 }
 
+/** A test of an address for the cache or the bus: what answered there, or why it cannot be used. */
+function showServerTest(answer: unknown): string {
+  const test = answer as {
+    ok: boolean;
+    where: string;
+    server: string | null;
+    roundTripMs: number | null;
+    problem: string | null;
+  };
+  // The cache in memory: nothing to reach.
+  if (test.ok && test.where === 'memory') return 'ok    memory: in jukecord’s own memory, nothing to reach';
+  const facts = [test.server, test.roundTripMs === null ? null : `${test.roundTripMs} ms there and back`]
+    .filter(Boolean)
+    .join(', ');
+  return `${test.ok ? 'ok  ' : 'FAIL'}  ${test.where}${facts ? `: ${facts}` : ''}${test.problem ? `\n      ${test.problem}` : ''}`;
+}
+
 // A database move as it stands.
 function showMove(answer: unknown): string {
   const move = answer as {
@@ -1331,6 +1348,22 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
             .join(', ');
       return `${test.ok ? 'ok  ' : 'FAIL'}  ${test.where}${facts ? `: ${facts}` : ''}${test.problem ? `\n      ${test.problem}` : ''}`;
     },
+  },
+  'settings-test-cache': {
+    name: 'settings test-cache',
+    usage: '<address>',
+    summary: 'Try an address for the shared cache without saving it (memory, or redis://...)',
+    request: (words) => ({
+      body: { url: rest(words, 'an address for the cache (memory, redis://..., rediss://...)') },
+    }),
+    show: showServerTest,
+  },
+  'settings-test-bus': {
+    name: 'settings test-bus',
+    usage: '<address>',
+    summary: 'Try an address for the bus without saving it (redis://...)',
+    request: (words) => ({ body: { url: rest(words, 'an address for the bus (redis://..., rediss://...)') } }),
+    show: showServerTest,
   },
   'database-move': {
     name: 'settings move-database',

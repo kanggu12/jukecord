@@ -309,6 +309,12 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'settings-test-database': async ({ caller, body, deps }) => ({
     ...(await hostSettings(deps, caller).testDatabase(body.url)),
   }),
+  'settings-test-cache': async ({ caller, body, deps }) => ({
+    ...(await hostSettings(deps, caller).testServer(body.url, 'cache')),
+  }),
+  'settings-test-bus': async ({ caller, body, deps }) => ({
+    ...(await hostSettings(deps, caller).testServer(body.url, 'bus')),
+  }),
   'database-move': async ({ caller, body, deps }) => ({
     ...(await hostSettings(deps, caller).startMove(body.url, body.replace ?? false)),
   }),

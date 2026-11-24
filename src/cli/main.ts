@@ -446,8 +446,10 @@ export async function run(
       const checks = (answer as { checks?: { status: string }[] }).checks ?? [];
       if (checks.some((check) => check.status === 'fail')) return 1;
     }
-    // A database's test fails the command when jukecord could not move there, as a failed check does.
-    if (operation === 'settings-test-database' && (answer as { ok?: boolean }).ok === false) return 1;
+    // A test of an address fails the command when it cannot be used (the database's when jukecord could not move
+    // there), as a failed check does, so a script can stop on it.
+    const tests = ['settings-test-database', 'settings-test-cache', 'settings-test-bus'];
+    if (tests.includes(operation) && (answer as { ok?: boolean }).ok === false) return 1;
     return 0;
   } catch (error) {
     if (error instanceof UsageError) {

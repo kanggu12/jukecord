@@ -40,6 +40,7 @@ import {
   RestartSchema,
   ScopeSchema,
   SearchSchema,
+  ServerTestSchema,
   SettingStateSchema,
   SettingsChangedSchema,
   SettingsSchema,
@@ -75,6 +76,8 @@ export const ACCOUNT_OPERATIONS = [
   'host-settings-change',
   'host-setting-reset',
   'settings-test-database',
+  'settings-test-cache',
+  'settings-test-bus',
   'database-move',
   'database-move-status',
   'database-move-switch',
@@ -139,6 +142,9 @@ const SettingName = Type.String({
 });
 // A database's address as JUKECORD_DATABASE_URL takes it.
 const DatabaseUrl = Type.String({ minLength: 1, maxLength: 4000, description: 'As JUKECORD_DATABASE_URL takes it' });
+// A Redis or Valkey server's address as the shared cache's and the bus's settings take it.
+const ServerUrl = (name: string) =>
+  Type.String({ minLength: 1, maxLength: 4000, description: `As ${name} takes it, its own password in it` });
 
 /** The API, by operation name. */
 export const API = {
@@ -643,6 +649,25 @@ export const API = {
     access: 'host',
     body: Type.Object({ url: DatabaseUrl }, strict),
     response: DatabaseTestSchema,
+  }),
+  'settings-test-cache': op({
+    method: 'POST',
+    path: '/settings/test-cache',
+    summary:
+      'Try an address for the shared cache without saving it (memory, or a Redis or Valkey server): its version and round trip',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object({ url: ServerUrl('JUKECORD_CACHE_URL') }, strict),
+    response: ServerTestSchema,
+  }),
+  'settings-test-bus': op({
+    method: 'POST',
+    path: '/settings/test-bus',
+    summary: 'Try an address for the bus without saving it (a Redis or Valkey server): its version and round trip',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object({ url: ServerUrl('JUKECORD_BUS_URL') }, strict),
+    response: ServerTestSchema,
   }),
   'database-move': op({
     method: 'POST',
