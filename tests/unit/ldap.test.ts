@@ -358,6 +358,38 @@ describe('logging in with a directory account through the server', () => {
     assert.equal(elsewhere.statusCode, 403);
   });
 
+  it('answers a right password Active Directory refuses as it answers a wrong one, and keeps the reason in the log', async () => {
+    fake.people.push(
+      {
+        dn: 'uid=old,ou=people,dc=example,dc=org',
+        password: 'old-password',
+        attributes: { uid: 'old' },
+        refuse: '773',
+      },
+      {
+        dn: 'uid=off,ou=people,dc=example,dc=org',
+        password: 'off-password',
+        attributes: { uid: 'off' },
+        refuse: '533',
+      },
+    );
+    const wrong = await form('old', 'not-it', '10.2.1.1');
+    // Said only for the right password, "expired" or "turned off" would tell a guesser the guess was right.
+    for (const [name, password] of [
+      ['old', 'old-password'],
+      ['off', 'off-password'],
+    ] as const) {
+      const right = await form(name, password, '10.2.1.1');
+      assert.equal(right.statusCode, 401, name);
+      assert.deepEqual(right.json(), wrong.json(), name);
+    }
+    assert.deepEqual(wrong.json(), { error: { code: 'wrong-password', message: 'wrong name or password' } });
+    const reasons = server.logs.records
+      .filter((record) => record.msg === 'a directory login did not go through')
+      .map((record) => record.fields.reason);
+    assert.deepEqual(reasons.slice(-3), ['wrong', 'expired', 'disabled']);
+  });
+
   it('holds back one name tried from many addresses, and one address trying many names', async () => {
     // Twenty wrong passwords for Carol's name, each from an address of its own.
     for (let i = 0; i < 20; i += 1) assert.equal((await form('carol', 'guess', `10.3.0.${i}`)).statusCode, 401);

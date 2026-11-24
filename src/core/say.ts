@@ -128,8 +128,6 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['logging in with a directory account is not set up here', '여기는 디렉터리 계정 로그인이 설정되지 않음'],
   ['type your name and your password', '이름과 암호를 입력하세요'],
   ['wrong name or password', '이름이나 암호가 틀림'],
-  ['your password has expired; change it first', '암호가 만료됨: 암호를 바꾼 뒤 로그인하세요'],
-  ['your account is turned off or locked', '계정이 꺼져 있거나 잠겨 있음'],
   ['the directory has more than one account by that name', '디렉터리에 그 이름의 계정이 둘 이상 있음'],
   ['the directory did not answer; try again in a moment', '디렉터리가 응답하지 않음: 잠시 뒤 다시 시도하세요'],
   ['your account is in none of the groups jukecord lets in', 'jukecord에 들어올 수 있는 그룹에 속해 있지 않음'],

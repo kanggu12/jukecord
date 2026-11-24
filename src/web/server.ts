@@ -1075,11 +1075,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
           return refused(409, 'ambiguous', 'the directory has more than one account by that name');
         }
         // A refused name or password stays counted against the address and the name; the try after the twentieth is
-        // refused before the directory is asked.
+        // refused before the directory is asked. One answer for a wrong password, an expired one and an account
+        // turned off: Active Directory says "expired" or "turned off" only for the right password, so telling them
+        // apart would tell whoever guesses that the guess was right. The reason is in the log (above).
         failed = true;
         auth.counted('ldap', 'failed');
-        if (code === 'expired') return refused(403, 'password-expired', 'your password has expired; change it first');
-        if (code === 'disabled') return refused(403, 'account-disabled', 'your account is turned off or locked');
         return refused(401, 'wrong-password', 'wrong name or password');
       } finally {
         if (!failed) await auth.limiter.forgive(counted);

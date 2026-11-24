@@ -506,7 +506,7 @@ export async function authMethods(): Promise<AuthMethods> {
 
 /**
  * Logs in with a directory account: where to go once in, or ApiError with the code of the refusal (wrong-password,
- * password-expired, account-disabled, no-group, too-many, directory-down, ambiguous, invalid).
+ * no-group, too-many, directory-down, ambiguous, invalid).
  */
 export async function directoryLogin(username: string, password: string, next: string): Promise<string> {
   const response = await fetch('/auth/directory', {
