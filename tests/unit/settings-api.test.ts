@@ -11,6 +11,7 @@ import { describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
 import { COMMANDS, settingName } from '../../src/cli/commands.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
+import { CSRF_HEADER, memberKey } from '../../src/web/auth.ts';
 import { asHost, sessionFor, type TestServer, testServer } from '../support/web.ts';
 
 const api = (path: string) => `${API_PREFIX}${path}`;
@@ -41,6 +42,110 @@ describe('the host’s settings in the API', () => {
       });
       assert.equal(refused.statusCode, 403);
       assert.equal(refused.json().error.message, 'this needs the host');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('keeps them from a member at the admin level: the host itself only, its token or its own session', async () => {
+    const server = await testServer({ hostSettings: {} });
+    try {
+      // A member whose groups give the admin level may do what the host may elsewhere, but not this.
+      const setCookie = await server.auth.startSession({
+        kind: 'member',
+        memberId: memberKey('oidc', 'made-up-subject-0001'),
+        provider: 'oidc',
+        level: 'admin',
+      });
+      const cookie = setCookie.split(';')[0] ?? '';
+      const caller = await server.auth.identify({ cookie });
+      const headers = { cookie, [CSRF_HEADER]: caller?.csrf ?? '' };
+      for (const [method, url, payload] of [
+        ['GET', '/settings', undefined],
+        ['GET', '/settings/JUKECORD_QUEUE_MAX', undefined],
+        ['PATCH', '/settings', { values: { JUKECORD_QUEUE_MAX: '50' } }],
+        ['POST', '/settings/test-database', { url: 'sqlite:other.db' }],
+        ['POST', '/settings/database-move', { url: 'sqlite:other.db' }],
+        ['POST', '/restart', undefined],
+      ] as const) {
+        const response = await server.web.app.inject({
+          method,
+          url: api(url),
+          headers,
+          ...(payload ? { payload } : {}),
+        });
+        assert.equal(response.statusCode, 403, `${method} ${url}`);
+        assert.equal(response.json().error.message, 'only the host itself can see and change jukecord’s settings');
+      }
+      // Nothing was changed by the refused ones.
+      assert.equal((await server.store.hostSettings.all()).length, 0);
+      // The host's own session (jukecord open's link) may.
+      const host = await server.auth.startSession({ kind: 'host' } as never);
+      const hostCookie = host.split(';')[0] ?? '';
+      const own = await server.web.app.inject({
+        method: 'GET',
+        url: api('/settings'),
+        headers: { cookie: hostCookie },
+      });
+      assert.equal(own.statusCode, 200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('sends no saved secret to a new place: the directory’s password is typed again for a new address', async () => {
+    const server = await testServer({
+      // An empty variable (Compose's VAR= for an empty line of .env) sets nothing: the page may save the address.
+      hostSettings: { env: { JUKECORD_LDAP_URL: '' } },
+    });
+    try {
+      const change = (values: Record<string, string | null>) =>
+        asked(server, { method: 'PATCH', url: api('/settings'), payload: { values } });
+      const directory = {
+        JUKECORD_LDAP_URL: 'ldaps://directory.example.org',
+        JUKECORD_LDAP_BASE_DN: 'dc=example,dc=org',
+        JUKECORD_LDAP_READ_GROUPS: '*',
+        JUKECORD_LDAP_BIND_DN: 'cn=jukecord,dc=example,dc=org',
+        JUKECORD_LDAP_BIND_PASSWORD: 'saved-password-made-up',
+      };
+      assert.equal((await change(directory)).status, 200);
+      // Another address, the password not given again: refused, the password and the address named.
+      const moved = await change({ JUKECORD_LDAP_URL: 'ldaps://elsewhere.example.org' });
+      assert.equal(moved.status, 400);
+      const problems = (moved.json.error as { problems: { names: string[] }[] }).problems;
+      assert.deepEqual(problems[0]?.names, ['JUKECORD_LDAP_BIND_PASSWORD', 'JUKECORD_LDAP_URL']);
+      // The same with another service account, and with StartTLS turned off on a plain address.
+      assert.equal((await change({ JUKECORD_LDAP_BIND_DN: 'cn=other,dc=example,dc=org' })).status, 400);
+      // Typed again (or put away): taken.
+      assert.equal(
+        (
+          await change({
+            JUKECORD_LDAP_URL: 'ldaps://elsewhere.example.org',
+            JUKECORD_LDAP_BIND_PASSWORD: 'typed-again',
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (await change({ JUKECORD_OIDC_ISSUER: null })).status,
+        200,
+        'a change of another way is not held to this one',
+      );
+      // The identity provider's client secret likewise: a new issuer needs it typed again.
+      const sso = {
+        JUKECORD_OIDC_ISSUER: 'https://sso.example.com/realms/home',
+        JUKECORD_OIDC_CLIENT_ID: 'jukecord',
+        JUKECORD_OIDC_CLIENT_SECRET: 'saved-secret-made-up',
+        JUKECORD_OIDC_READ_GROUPS: '*',
+      };
+      assert.equal((await change(sso)).status, 200);
+      assert.equal((await change({ JUKECORD_OIDC_ISSUER: 'https://sso.attacker.example/realms/x' })).status, 400);
+      assert.equal((await change({ JUKECORD_OIDC_CLIENT_ID: 'another' })).status, 400);
+      // Turned off: the secret goes nowhere, and is put away with the rest (a secret left for a way that is off is the
+      // start's own refusal).
+      const off = { JUKECORD_OIDC_ISSUER: null, JUKECORD_OIDC_CLIENT_ID: null, JUKECORD_OIDC_READ_GROUPS: null };
+      assert.equal((await change(off)).status, 400);
+      assert.equal((await change({ ...off, JUKECORD_OIDC_CLIENT_SECRET: null })).status, 200);
     } finally {
       await server.close();
     }

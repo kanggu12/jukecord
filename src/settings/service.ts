@@ -427,6 +427,10 @@ export class HostSettings {
       .map((change) => change.name)
       .filter((name) => revisions?.[name] !== undefined && (layers.file.get(name)?.revision ?? 0) !== revisions[name]);
     if (staleInFile.length > 0) throw conflict(staleInFile);
+    // A saved secret is never sent to a place the change moves its way to (another directory, another provider, the
+    // same directory unencrypted): the host types it again for the new place, or puts it away.
+    const moved = secretsMoved(layers, changes);
+    if (moved.length > 0) throw new SettingsRefused(moved);
     // The settings as they would read with the change, by the start's rules, the other settings as they are: a
     // problem the change brings refuses it (one there before, a file gone meanwhile, is not this change's).
     const candidate = withChanges(layers, fileChanges, databaseChanges);
@@ -619,6 +623,44 @@ export class HostSettings {
       release();
     }
   }
+}
+
+// The secrets that go to a place other settings name: the directory's service password goes to its address, over its
+// StartTLS, as its service account; the identity provider's client secret to its issuer, as its client.
+const DESTINATIONS: readonly { readonly secret: string; readonly to: readonly string[] }[] = [
+  {
+    secret: 'JUKECORD_LDAP_BIND_PASSWORD',
+    to: ['JUKECORD_LDAP_URL', 'JUKECORD_LDAP_STARTTLS', 'JUKECORD_LDAP_BIND_DN'],
+  },
+  { secret: 'JUKECORD_OIDC_CLIENT_SECRET', to: ['JUKECORD_OIDC_ISSUER', 'JUKECORD_OIDC_CLIENT_ID'] },
+];
+
+/**
+ * The problems of a change that would send a saved secret to a new place: one of the settings that say where the
+ * secret goes changes (and its way stays on), the secret is saved, and the change gives no new one for it.
+ */
+export function secretsMoved(
+  layers: SavedLayers,
+  changes: readonly SettingWrite[],
+): { names: string[]; message: string }[] {
+  const problems: { names: string[]; message: string }[] = [];
+  const changed = new Map(changes.map((change) => [change.name, change.value]));
+  for (const { secret, to } of DESTINATIONS) {
+    const moving = to.filter((name) => changed.has(name));
+    if (moving.length === 0) continue;
+    // The first of them is the way's address: put back to nothing, the way is off and the secret goes nowhere.
+    const address = to[0] ?? '';
+    const addressAfter = changed.has(address) ? changed.get(address) : (layers.database.get(address)?.value ?? '');
+    if (changed.has(address) && addressAfter === null) continue;
+    // Saved (in settings.json, where secrets are kept), and not given again or put away by this change.
+    const saved = layers.file.get(secret)?.value ?? null;
+    if (saved === null || changed.has(secret)) continue;
+    problems.push({
+      names: [secret, ...moving],
+      message: `${secret}: type it again for the new ${moving.join(', ')}; a saved secret is not sent to another place`,
+    });
+  }
+  return problems;
 }
 
 // The layers with a change in them.

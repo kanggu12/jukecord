@@ -330,8 +330,9 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
     edge: options.name,
     listeners: (guildId) => hub.ownListeners(guildId),
     guilds: () => hub.listenedGuilds(),
-    // What this edge is, for the core's list of its services (the host's settings show it).
-    about: async () => ({ version: VERSION, startedAt, ready: (await health.read()).ready }),
+    // What this edge is, for the core's list of its services (the host's settings show it): ready while it hears its
+    // core over a bus that is up (read here, not through the readiness check, whose answer is kept for a second).
+    about: () => ({ version: VERSION, startedAt, ready: transport.up && watch.seen }),
     log: log.child('presence'),
   });
   bus.on('listeners', ({ guildId }) => reporter.changed(guildId));

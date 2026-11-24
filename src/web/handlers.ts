@@ -291,35 +291,37 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
 
   // The host's settings: each handler hands its request to the settings service (src/settings/service.ts), which a
   // split jukecord's edge carries to its core as it carries the actions.
-  'host-settings': async ({ deps }) => plainView(await hostSettings(deps).view()),
-  'host-setting': async ({ params, deps }) => {
-    const found = (await hostSettings(deps).view()).settings.find((setting) => setting.name === params.name);
+  'host-settings': async ({ caller, deps }) => plainView(await hostSettings(deps, caller).view()),
+  'host-setting': async ({ caller, params, deps }) => {
+    const found = (await hostSettings(deps, caller).view()).settings.find((setting) => setting.name === params.name);
     if (!found) throw new ActionError('not-found', `${params.name} is not a jukecord setting`);
     return plainSetting(found);
   },
-  'host-settings-change': async ({ body, deps }) => {
-    const { changed, view } = await hostSettings(deps).change(body.values, body.revisions);
+  'host-settings-change': async ({ caller, body, deps }) => {
+    const { changed, view } = await hostSettings(deps, caller).change(body.values, body.revisions);
     return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
   },
-  'host-setting-reset': async ({ params, query, deps }) => {
+  'host-setting-reset': async ({ caller, params, query, deps }) => {
     const revisions = query.revision === undefined ? undefined : { [params.name]: query.revision };
-    const { changed, view } = await hostSettings(deps).reset([params.name], revisions);
+    const { changed, view } = await hostSettings(deps, caller).reset([params.name], revisions);
     return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
   },
-  'settings-test-database': async ({ body, deps }) => ({ ...(await hostSettings(deps).testDatabase(body.url)) }),
-  'database-move': async ({ body, deps }) => ({
-    ...(await hostSettings(deps).startMove(body.url, body.replace ?? false)),
+  'settings-test-database': async ({ caller, body, deps }) => ({
+    ...(await hostSettings(deps, caller).testDatabase(body.url)),
   }),
-  'database-move-status': async ({ deps }) => plainMove(await hostSettings(deps).moveState()),
-  'database-move-switch': async ({ deps }) => {
-    const { restarts, supervisor } = await hostSettings(deps).switchMove();
+  'database-move': async ({ caller, body, deps }) => ({
+    ...(await hostSettings(deps, caller).startMove(body.url, body.replace ?? false)),
+  }),
+  'database-move-status': async ({ caller, deps }) => plainMove(await hostSettings(deps, caller).moveState()),
+  'database-move-switch': async ({ caller, deps }) => {
+    const { restarts, supervisor } = await hostSettings(deps, caller).switchMove();
     return { supervisor, restarts };
   },
-  'database-move-cancel': async ({ deps }) => {
-    await hostSettings(deps).cancelMove();
+  'database-move-cancel': async ({ caller, deps }) => {
+    await hostSettings(deps, caller).cancelMove();
     return OK;
   },
-  restart: async ({ deps }) => ({ ...(await hostSettings(deps).restartNow()), restarts: true }),
+  restart: async ({ caller, deps }) => ({ ...(await hostSettings(deps, caller).restartNow()), restarts: true }),
 
   wrapped: async ({ context, query, deps }) =>
     deps.presenter.wrapped(await deps.actions.wrapped(context, query.period, query.tz ?? 0)),
@@ -393,8 +395,14 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   }),
 };
 
-// The settings service, where the host's settings are kept (absent: jukecord was made without them, as some tests are).
-function hostSettings(deps: HandlerDeps): HostSettingsPort {
+/**
+ * The settings service, where the host's settings are kept, for the host itself: its own token or a session of
+ * `jukecord open`, never a member at the admin level (the settings hold the secrets, and the database and the logins
+ * are the host's power). Absent: jukecord was made without them, as some tests are.
+ */
+function hostSettings(deps: HandlerDeps, caller: Caller | null): HostSettingsPort {
+  if (caller?.principal.kind !== 'host')
+    throw new ActionError('forbidden', 'only the host itself can see and change jukecord’s settings');
   if (!deps.settings) throw new ActionError('unavailable', 'the settings cannot be changed here');
   return deps.settings;
 }

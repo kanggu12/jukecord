@@ -299,6 +299,11 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   [/^changed by someone else meanwhile: (.+); read them again$/, '그사이 다른 사람이 바꿈($1): 다시 읽어 오세요'],
   ['jukecord cannot restart itself here', '여기서는 jukecord가 스스로 다시 시작할 수 없음'],
   ['the settings cannot be changed here', '여기서는 설정을 바꿀 수 없음'],
+  ['only the host itself can see and change jukecord’s settings', 'jukecord 설정은 호스트 본인만 보고 바꿀 수 있음'],
+  [
+    /^(JUKECORD_\w+): type it again for the new (.+); a saved secret is not sent to another place$/,
+    '$1: 새 $2에 맞게 다시 입력하세요. 저장된 비밀 값은 다른 곳으로 보내지 않음',
+  ],
   // Moving to another database (src/settings/move.ts).
   ['a move is under way already', '이미 옮기는 중'],
   ['the switch is under way; it cannot be stopped', '전환하는 중이라 멈출 수 없음'],

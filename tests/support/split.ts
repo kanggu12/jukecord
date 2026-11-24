@@ -19,6 +19,7 @@ import type { BusTransport } from '../../src/bus/transport.ts';
 import type { Cache } from '../../src/cache/cache.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { openCache } from '../../src/cache/open.ts';
+import { loadConfig, type Supervisor } from '../../src/config.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
@@ -33,6 +34,10 @@ import { playerMetrics } from '../../src/metrics/service.ts';
 import { type CoreServices, startCoreServices } from '../../src/roles/core.ts';
 import { type Edge, startEdge } from '../../src/roles/edge.ts';
 import { transportPart } from '../../src/roles/health.ts';
+import { announceOnBus, announceRestart, remoteSettings, takeInFromBus } from '../../src/settings/bus.ts';
+import { SettingsFile } from '../../src/settings/file.ts';
+import { SPLIT } from '../../src/settings/layers.ts';
+import { HostSettings } from '../../src/settings/service.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth } from '../../src/web/auth.ts';
 import { MediaFiles } from '../../src/web/files.ts';
@@ -49,6 +54,10 @@ export const SECRET = 'test-internal-secret-0123456789abcdef0123456789';
 /** A test core: its parts, to look at and to drive, and its end. */
 export interface TestCore {
   readonly instance: string;
+  /** The host's settings, which the core keeps (its edges' pages reach them by commands). */
+  readonly settings: HostSettings;
+  /** Every restart the settings asked of this core. */
+  readonly restarts: number[];
   readonly services: CoreServices;
   readonly actions: Actions;
   readonly players: Players;
@@ -68,6 +77,10 @@ export interface TestCore {
 /** A test edge: its web server listening, its base address, and its end. */
 export interface TestEdge {
   readonly edge: Edge;
+  /** The settings as this edge holds them (it takes in the core's changes, and applies its own at once). */
+  readonly settings: HostSettings;
+  /** Every restart the core asked of every service, as this edge heard it. */
+  readonly restarts: number[];
   /** Its connection to the bus (a test may cut it, on the memory bus). */
   readonly transport: BusTransport;
   readonly url: string;
@@ -89,6 +102,8 @@ export interface SplitOptions {
   readonly rates?: { readonly changes?: { perSecond: number; burst: number } };
   /** The edges' login settings (OIDC, LDAP), which their self-check shows in place of the core's. */
   readonly logins?: AuthSettings;
+  /** What starts the core again after a restart the settings ask for (none by default). */
+  readonly supervisor?: Supervisor;
 }
 
 /** The pieces a split test shares: one database, one bus, one shared cache, the media cache's folder. */
@@ -215,7 +230,34 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       behind: () => false,
       stopping: stopping.signal,
     });
-    const services = await startCoreServices({
+    // The host's settings, as a split's core keeps them: in the database every service reads, the ones settings.json
+    // would hold from the environment only (a split's rules), every change told to the edges over the bus.
+    const restarts: number[] = [];
+    const started = loadConfig({ JUKECORD_DATA_DIR: dataDir }, '/srv');
+    let services: CoreServices | null = null;
+    const settings: HostSettings = new HostSettings({
+      env: { JUKECORD_DATA_DIR: dataDir },
+      cwd: '/srv',
+      store,
+      file: new SettingsFile(dataDir),
+      rules: SPLIT,
+      started,
+      supervisor: options.supervisor ?? 'none',
+      log,
+      role: 'core',
+      apply: (names, next) => {
+        // The core's own parts the tests look at: the queue's limit.
+        if (names.includes('JUKECORD_QUEUE_MAX'))
+          actions.setLimits({ queueMax: next.queueMax, trackMaxMs: next.media.trackMaxMs });
+      },
+      restart: () => {
+        restarts.push(clock.now());
+        void announceRestart(transport, bus.names);
+      },
+      announce: announceOnBus(transport, bus.names, () => settings),
+      services: async () => (await services?.list()) ?? [],
+    });
+    services = await startCoreServices({
       transport,
       names: bus.names,
       beat,
@@ -224,6 +266,8 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       access,
       cache,
       files,
+      settings,
+      instance,
       backup: async () => ({ file: path.join(dataDir, 'backups', 'test.db'), bytes: 1 }),
       logs: () => [
         { time: '2026-11-11T00:00:00.000Z', level: 'info', component: 'core', msg: 'from the core', fields: {} },
@@ -247,20 +291,22 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       metricsToken: null,
       log,
     });
-    actions.setEndGuests((linkId) => services.endGuests(linkId));
-    browsers = (guildId) => services.audience.people(guildId);
+    const made = services;
+    actions.setEndGuests((linkId) => made.endGuests(linkId));
+    browsers = (guildId) => made.audience.people(guildId);
     let stopped = false;
     const stop = async () => {
       if (stopped) return;
       stopped = true;
       stopping.abort();
-      await services.stop();
+      await made.stop();
       await transport.close();
     };
     running.push(stop);
     return {
       instance,
-      services,
+      settings,
+      restarts,
       actions,
       players,
       queue,
@@ -269,8 +315,9 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       media,
       directory,
       logs,
-      internalUrl: services.internalAddress,
-      healthUrl: services.healthAddress,
+      services: made,
+      internalUrl: made.internalAddress,
+      healthUrl: made.healthAddress,
       stop,
     };
   };
@@ -283,6 +330,26 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
     const cache = await cacheFor(name);
     // Its logins: the database's rows, and the login links and failed logins on the shared cache, as a real edge's.
     const auth = new Auth({ store, hostToken: HOST_TOKEN, secureCookies: false, oauth: null, cache, log });
+    // The settings as this edge holds them: it takes in each change the core tells, from the database, and applies its
+    // own at once (its cap of live connections, here).
+    let webServer: { hub: { setTotal(total: number): void } } | null = null;
+    const settings = new HostSettings({
+      env: { JUKECORD_DATA_DIR: dataDir },
+      cwd: '/srv',
+      store,
+      file: new SettingsFile(dataDir),
+      rules: SPLIT,
+      started: loadConfig({ JUKECORD_DATA_DIR: dataDir }, '/srv'),
+      supervisor: 'none',
+      log,
+      role: 'edge',
+      apply: (names, next) => {
+        if (names.includes('JUKECORD_LIVE_MAX')) webServer?.hub.setTotal(next.liveMax);
+      },
+    });
+    const restarts: number[] = [];
+    const takingIn = await takeInFromBus(transport, bus.names, settings, log);
+    takingIn.onRestart(() => restarts.push(clock.now()));
     const made = await startEdge({
       name,
       transport,
@@ -310,21 +377,25 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
         ...(options.logins ? { loginSettings: options.logins } : {}),
         // Never behind: a busy test machine must not make changes fail at random (as tests/support/web.ts does).
         behind: () => false,
+        // The host's settings: the core's, over the bus.
+        settings: (client) => remoteSettings(client),
       },
       log,
       ...(options.coreLostAfterMs !== undefined ? { coreLostAfterMs: options.coreLostAfterMs } : {}),
     });
+    webServer = made.web;
     const url = await made.web.listen();
     let stopped = false;
     const stop = async () => {
       if (stopped) return;
       stopped = true;
       await made.web.close();
+      await takingIn.stop();
       await made.stop();
       await transport.close();
     };
     running.push(stop);
-    return { edge: made, transport, url, auth, cache, logs, stop };
+    return { edge: made, settings, restarts, transport, url, auth, cache, logs, stop };
   };
 
   return {
