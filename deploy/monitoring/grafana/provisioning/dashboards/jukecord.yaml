@@ -1,0 +1,10 @@
+# jukecord's dashboard, read from its file at start: changes belong in scripts/grafana-dashboard.ts, so it is kept
+# from being changed or deleted in Grafana.
+apiVersion: 1
+providers:
+  - name: jukecord
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

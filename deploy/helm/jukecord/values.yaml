@@ -29,6 +29,29 @@ discord:
 # Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
 publicUrl: ""
 
+metrics:
+  # jukecord answers /metrics to a scraper on the cluster's network asking directly, with nothing to set. A token lets
+  # one in from anywhere else: from outside the cluster, through a proxy, or through a service mesh's sidecar (which adds
+  # forwarding headers). Prometheus sends it as Authorization: Bearer <token>; at least 16 characters (openssl rand -hex
+  # 32). The release's values (helm get values) then hold it too; existingSecret keeps it in a Secret of yours.
+  token: ""
+  # A Secret of yours with the token under the key metricsToken (the chart refuses it together with token above).
+  # Either way the pod reads it as a file, and the ServiceMonitor sends it.
+  existingSecret: ""
+  # prometheus.io/scrape, /port and /path on the pod, for a Prometheus that finds its targets by annotation. One you
+  # set in podAnnotations wins.
+  podAnnotations: false
+  serviceMonitor:
+    # A ServiceMonitor for the Prometheus Operator, made when the cluster has its CRD (monitoring.coreos.com/v1).
+    enabled: false
+    # Make it even when the cluster does not say it has the CRD: for helm template, and the tools that render charts
+    # without asking a cluster (Argo CD, Flux).
+    force: false
+    # The labels your Prometheus picks ServiceMonitors by (kube-prometheus-stack: release: <its release>).
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+
 # Settings passed to jukecord as they are (JUKECORD_*; see docs/README.md), as strings: quote numbers and IDs, which
 # YAML would otherwise turn into floats. JUKECORD_HOST, JUKECORD_PORT, JUKECORD_DATA_DIR and the two *_FILE secrets
 # are the chart's, and the token and the OAuth secret go in discord above (the schema refuses them here). Example:

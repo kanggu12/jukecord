@@ -1,0 +1,77 @@
+# Prometheus and Grafana beside jukecord, to watch its metrics on this machine. Opt-in: jukecord runs without them.
+# Start jukecord first (./jukecord up, or docker compose up -d in the checkout), then, from this folder:
+#
+#   docker compose up -d
+#
+# Grafana opens on the jukecord dashboard at http://127.0.0.1:3000 (anyone on this machine may look; log in as admin,
+# password admin the first time, to change anything) and Prometheus is at http://127.0.0.1:9090, with jukecord's alert
+# rules loaded. Both join jukecord's Compose network and scrape it there, from a private address, so jukecord needs no
+# metrics token. A second jukecord on the same machine (its own COMPOSE_PROJECT_NAME) is reached by setting
+# JUKECORD_NETWORK to its network, <project>_default; GRAFANA_PORT and PROMETHEUS_PORT move the two ports.
+# docker compose down stops them; their data stays in two volumes until docker compose down -v.
+name: jukecord-monitoring
+
+services:
+  prometheus:
+    # Pinned by version and digest, as jukecord's own image is.
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Two weeks of numbers, enough to compare this week with the last.
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yaml:/etc/prometheus/alerts.yaml:ro
+      - prometheus-data:/prometheus
+    ports:
+      # This machine only, as jukecord's own port.
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - jukecord
+    restart: unless-stopped
+    # It writes only to its volume, and gains no privileges.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  grafana:
+    image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+    environment:
+      # The dashboard for anyone who opens it on this machine; changing anything takes the admin's login.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/jukecord.json
+      # Nothing sent to Grafana Labs, nothing fetched from it.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      # The Prometheus beside it as the data source, and jukecord's dashboard, both made at start.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana-dashboard.json:/etc/grafana/dashboards/jukecord.json:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - jukecord
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  # jukecord's own Compose network (the project "jukecord" makes jukecord_default), joined, not made here.
+  jukecord:
+    name: ${JUKECORD_NETWORK:-jukecord_default}
+    external: true
+
+volumes:
+  prometheus-data:
+  grafana-data:
