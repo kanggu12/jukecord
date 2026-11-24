@@ -159,6 +159,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       uptimeMs: Math.max(0, Math.round(status.uptimeMs)),
       login: { discord: deps.auth.discordLogin },
       lyrics: status.lyrics,
+      // Which kind of database, never where it is or who logs in to it.
+      database: deps.store.backend,
     };
   },
 

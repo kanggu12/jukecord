@@ -14,7 +14,7 @@ import type { Cache } from '../cache/cache.ts';
 import type { ToolName, ToolWatch } from '../metrics/media.ts';
 import { type Metrics, NO_METRICS } from '../metrics/registry.ts';
 import type { GATEWAY_STATES } from '../metrics/service.ts';
-import type { Store } from '../store/store.ts';
+import { backendOf, LATEST_SCHEMA, type Store } from '../store/store.ts';
 
 /** A part's state: works, does not, is on its way (Discord connecting), or not known yet (nothing has run). */
 export type PartState = 'ok' | 'down' | 'connecting' | 'unknown';
@@ -130,16 +130,21 @@ export class Health {
   }
 }
 
-/** The database: open, and answering a statement. */
+/**
+ * The database: open, answering a statement, and at this jukecord's schema. A shared database a newer jukecord moved
+ * on is down for this one, as the doctor says: its statements would meet tables it does not know.
+ */
 export function databasePart(store: Store): HealthPart {
   return {
     name: 'database',
-    kind: store.sql.dialect,
+    // The backend's name (MariaDB apart from MySQL), as /status and the doctor say it.
+    kind: backendOf(store.sql),
     required: true,
     check: async () => {
       if (!store.isOpen()) return 'down';
-      await store.sql.get('SELECT 1 AS ok');
-      return 'ok';
+      // A statement there and back and the schema it is at; health() never throws, a silent database is its answer.
+      const health = await store.health();
+      return health.ok && health.schema === LATEST_SCHEMA ? 'ok' : 'down';
     },
   };
 }

@@ -11,25 +11,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { MIGRATIONS } from '../../src/store/schema.ts';
 import { Store } from '../../src/store/store.ts';
+import { eachDatabase } from '../support/databases.ts';
 import { addTracks, memoryStore } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
 
 describe("a server's tracks in its history and playlists", () => {
-  it('says whether a server played or saved a track, each server for itself', async () => {
-    const store = await memoryStore();
-    const [played, saved, neither] = await addTracks(store, 3);
-    assert.ok(played && saved && neither);
-    await store.history.add({ guildId: GUILD, trackId: played.id, addedBy: null, playedAt: 1, playedMs: 5000 });
-    await store.playlists.save(GUILD, 'Later', [saved.id], null);
-    assert.equal(await store.history.has(GUILD, played.id), true);
-    assert.equal(await store.history.has(GUILD, saved.id), false);
-    assert.equal(await store.history.has('other', played.id), false);
-    assert.equal(await store.playlists.has(GUILD, saved.id), true);
-    assert.equal(await store.playlists.has(GUILD, neither.id), false);
-    assert.equal(await store.playlists.has('other', saved.id), false);
-  });
-
   it("asks the history through its index on the server and the track, not by walking the server's plays", async () => {
     const store = await memoryStore();
     const plan = (
@@ -69,5 +56,21 @@ describe("a server's tracks in its history and playlists", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+eachDatabase("a server's tracks, looked up", (db) => {
+  it('says whether a server played or saved a track, each server for itself', async () => {
+    const store = await db.open();
+    const [played, saved, neither] = await addTracks(store, 3);
+    assert.ok(played && saved && neither);
+    await store.history.add({ guildId: GUILD, trackId: played.id, addedBy: null, playedAt: 1, playedMs: 5000 });
+    await store.playlists.save(GUILD, 'Later', [saved.id], null);
+    assert.equal(await store.history.has(GUILD, played.id), true);
+    assert.equal(await store.history.has(GUILD, saved.id), false);
+    assert.equal(await store.history.has('other', played.id), false);
+    assert.equal(await store.playlists.has(GUILD, saved.id), true);
+    assert.equal(await store.playlists.has(GUILD, neither.id), false);
+    assert.equal(await store.playlists.has('other', saved.id), false);
   });
 });

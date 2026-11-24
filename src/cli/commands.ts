@@ -402,6 +402,14 @@ function showWrapped(answer: unknown): string {
 }
 
 /** Every command, by the operation it runs. */
+// The kinds of database /status names, as people write them.
+const DATABASE_NAMES: Readonly<Record<string, string>> = {
+  sqlite: 'SQLite',
+  postgres: 'PostgreSQL',
+  mysql: 'MySQL',
+  mariadb: 'MariaDB',
+};
+
 export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'now-playing': { name: 'np', usage: '', summary: 'What is playing', request: () => ({}), show: showPlayer },
   'play-now': {
@@ -665,7 +673,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'The version and the connection to Discord',
     request: () => ({}),
     show: (answer) => {
-      const status = answer as { version: string; mode: string; discord: boolean; uptimeMs: number };
+      const status = answer as {
+        version: string;
+        mode: string;
+        discord: boolean;
+        uptimeMs: number;
+        database?: string;
+      };
       const discord =
         status.mode === 'browser-only' ? 'browser-only (no bot)' : status.discord ? 'connected' : 'not connected';
       // Past a day, days and hours ("9 d 0 h"); a clock's hours ran to "216:00:00".
@@ -674,7 +688,9 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
         status.uptimeMs >= day
           ? `${Math.floor(status.uptimeMs / day)} d ${Math.floor((status.uptimeMs % day) / 3_600_000)} h`
           : formatDuration(status.uptimeMs);
-      return `jukecord ${status.version}\nDiscord: ${discord}\nUp for ${up}`;
+      // The kind of database, by its name (a jukecord from before 0.4 does not say it).
+      const database = status.database ? `\nDatabase: ${DATABASE_NAMES[status.database] ?? status.database}` : '';
+      return `jukecord ${status.version}\nDiscord: ${discord}${database}\nUp for ${up}`;
     },
   },
 

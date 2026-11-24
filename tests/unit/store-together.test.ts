@@ -10,16 +10,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { MIGRATIONS } from '../../src/store/schema.ts';
 import { Store } from '../../src/store/store.ts';
+import { eachDatabase, type TestDatabase } from '../support/databases.ts';
 import { addTracks, memoryStore } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
 const OTHER = '100000000000000002';
 const ALICE = '300000000000000001';
 
-// A store whose clock the test moves.
-async function clocked() {
+// A store whose clock the test moves, on the suite's database (SQLite in memory when none is given).
+async function clocked(db?: TestDatabase) {
   let now = Date.UTC(2026, 10, 11);
-  const store = await memoryStore(() => now);
+  const store = db ? await db.open({ now: () => now }) : await memoryStore(() => now);
   return { store, advance: (ms: number) => (now += ms), now: () => now };
 }
 
@@ -54,9 +55,9 @@ describe('the migration of listening together', () => {
   });
 });
 
-describe('LyricsRepository', () => {
+eachDatabase('LyricsRepository', (db) => {
   it('keeps one row per track, replaced by a later lookup, and cuts very long words at a line', async () => {
-    const { store } = await clocked();
+    const { store } = await clocked(db);
     const [track] = await addTracks(store, 1);
     assert.ok(track);
     assert.equal(await store.lyrics.get(track.id), null);
@@ -79,7 +80,7 @@ describe('LyricsRepository', () => {
   });
 
   it('reads a kind it does not know as none found', async () => {
-    const { store } = await clocked();
+    const { store } = await clocked(db);
     const [track] = await addTracks(store, 1);
     assert.ok(track);
     await store.sql.run("INSERT INTO lyrics (track_id, kind, fetched_at) VALUES (?, 'karaoke', 1)", [track.id]);
@@ -87,9 +88,9 @@ describe('LyricsRepository', () => {
   });
 });
 
-describe('MusicRepository', () => {
+eachDatabase('MusicRepository', (db) => {
   it("keeps what a site said a track is, the newest winning, names cut to a name's length", async () => {
-    const { store } = await clocked();
+    const { store } = await clocked(db);
     const [track] = await addTracks(store, 1);
     assert.ok(track);
     assert.equal(await store.music.get(track.id), null);
@@ -102,7 +103,7 @@ describe('MusicRepository', () => {
   });
 });
 
-describe('ListenLinkRepository and GuestSessionRepository', () => {
+eachDatabase('ListenLinkRepository and GuestSessionRepository', (db) => {
   const make = (
     store: Store,
     guildId = GUILD,
@@ -119,7 +120,7 @@ describe('ListenLinkRepository and GuestSessionRepository', () => {
     });
 
   it("lists a server's links, newest first, everyone's or one person's, with how many guests are in", async () => {
-    const { store } = await clocked();
+    const { store } = await clocked(db);
     const first = await make(store, GUILD, ALICE);
     const second = await make(store, GUILD, null);
     await make(store, OTHER, ALICE);
@@ -139,7 +140,7 @@ describe('ListenLinkRepository and GuestSessionRepository', () => {
   });
 
   it('forgets expired links and guests, and ends the guests of a link deleted', async () => {
-    const { store, advance } = await clocked();
+    const { store, advance } = await clocked(db);
     const link = await make(store, GUILD, ALICE, 1, 'code-hash');
     await store.guests.create({ idHash: 'g1', linkId: link.id, csrf: 'c', expiresAt: link.expiresAt });
     await store.guests.create({ idHash: 'g2', linkId: link.id, csrf: 'c', expiresAt: link.expiresAt });
@@ -161,9 +162,9 @@ describe('ListenLinkRepository and GuestSessionRepository', () => {
   });
 });
 
-describe('panel logins with a scope', () => {
+eachDatabase('panel logins with a scope', (db) => {
   it("keeps a friend's scope, never wider than control, and reads an unknown kind as a user", async () => {
-    const { store } = await clocked();
+    const { store } = await clocked(db);
     const expiresAt = Date.UTC(2030, 0, 1);
     await store.sessions.create({ idHash: 'f', kind: 'friend', userId: null, csrf: 'c', scope: 'read', expiresAt });
     assert.deepEqual(

@@ -22,6 +22,8 @@ spec:
       annotations:
         # A changed token or secret in the values restarts the pod, which reads them only when it starts.
         checksum/secret: {{ printf "%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        # And a changed database, which it opens only when it starts.
+        checksum/database: {{ printf "%s/%s" .Values.database.url .Values.database.existingSecret | sha256sum | trunc 16 }}
         {{- /* Where a Prometheus that finds its targets by annotation scrapes; one set in podAnnotations wins. */}}
         {{- if .Values.metrics.podAnnotations }}
         {{- range $key, $value := dict "prometheus.io/scrape" "true" "prometheus.io/port" "8795" "prometheus.io/path" "/metrics" }}
@@ -90,6 +92,11 @@ spec:
             - name: JUKECORD_METRICS_TOKEN_FILE
               value: {{ include "jukecord.secretDir" . }}/metricsToken
             {{- end }}
+            {{- if include "jukecord.readsDatabase" . }}
+            # The database's address as a file (it holds a password), from the Secret (the volume below).
+            - name: JUKECORD_DATABASE_URL_FILE
+              value: {{ include "jukecord.databaseDir" . }}/url
+            {{- end }}
             {{- if and .Values.ingress.enabled (not (include "jukecord.userSets" (list . "JUKECORD_TRUST_PROXY"))) }}
             # Behind the Ingress controller: one proxy whose X-Forwarded-For is believed (for the login limiter).
             - name: JUKECORD_TRUST_PROXY
@@ -149,6 +156,11 @@ spec:
               mountPath: {{ include "jukecord.secretDir" . }}
               readOnly: true
             {{- end }}
+            {{- if include "jukecord.readsDatabase" . }}
+            - name: database
+              mountPath: {{ include "jukecord.databaseDir" . }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -196,6 +208,17 @@ spec:
                       path: metricsToken
                   optional: false
               {{- end }}
+        {{- end }}
+        {{- if include "jukecord.readsDatabase" . }}
+        # The database's address as a file, readable by jukecord's group (the pod's fsGroup) only. Not optional: a
+        # Secret without it (or a misspelt name) keeps the pod from starting, with an event that names the key.
+        - name: database
+          secret:
+            secretName: {{ include "jukecord.databaseSecretName" . }}
+            defaultMode: 0440
+            items:
+              - key: url
+                path: url
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

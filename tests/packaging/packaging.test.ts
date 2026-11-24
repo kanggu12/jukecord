@@ -746,6 +746,58 @@ describe('the Helm chart', () => {
       execFileSync('kubeconform', ['-strict', '-summary', '-kubernetes-version', '1.31.0', file], { stdio: 'pipe' });
     }
   });
+
+  it('gives jukecord its database as a file, from the values or a Secret of yours, and lets the pod reach it', {
+    skip: !have('helm') && 'helm is not installed',
+  }, () => {
+    const render = (...values: string[]) =>
+      execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', ...values], { encoding: 'utf8' });
+    // Without a database: SQLite in the data volume, nothing of the database's in the pod or the policy.
+    const plain = render();
+    assert.doesNotMatch(plain, /JUKECORD_DATABASE_URL|jukecord-database|port: 5432/);
+    // An address in the values: the chart's Secret holds it, and the pod reads it as a file (it holds a password).
+    const given = render('--set', 'database.url=postgres://music:secret@db.music.svc:5432/jukecord');
+    assert.match(given, /kind: Secret\nmetadata:\n {2}name: t-jukecord-database\n/);
+    assert.match(given, /url: "postgres:\/\/music:secret@db\.music\.svc:5432\/jukecord"/);
+    assert.match(given, /- name: JUKECORD_DATABASE_URL_FILE\n {14}value: \/run\/secrets\/jukecord-database\/url\n/);
+    assert.match(given, /- name: database\n {14}mountPath: \/run\/secrets\/jukecord-database\n {14}readOnly: true\n/);
+    assert.match(given, /secretName: t-jukecord-database\n {12}defaultMode: 0440\n/);
+    // The database is in the cluster's private range: the policy lets the pod reach the namespace's 5432 and 3306.
+    assert.match(given, /- to:\n {8}- podSelector: \{\}\n {6}ports:\n {8}- port: 5432\n/);
+    assert.match(given, /checksum\/database: [0-9a-f]{16}\n/);
+    // A Secret of yours: read from it, and no Secret of the chart's for it; rules of yours instead of the default.
+    const existing = render(
+      '--set',
+      'database.existingSecret=music-db',
+      '--set',
+      'networkPolicy.egressTo[0].to[0].ipBlock.cidr=10.20.0.0/24',
+      '--set',
+      'networkPolicy.egressTo[0].ports[0].port=3306',
+    );
+    assert.match(existing, /secretName: music-db\n/);
+    assert.doesNotMatch(existing, /name: t-jukecord-database/);
+    // (as the values gave it, written out by toYaml: its keys in order, its lists not indented)
+    assert.match(existing, /- ports:\n {6}- port: 3306\n {6}to:\n {6}- ipBlock:\n {10}cidr: 10\.20\.0\.0\/24\n/);
+    assert.doesNotMatch(existing, /podSelector: \{\}/);
+    // What cannot work is refused, saying what to change.
+    const refusal = (...values: string[]) => {
+      try {
+        render(...values);
+      } catch (error) {
+        return String((error as { stderr?: Buffer }).stderr ?? error);
+      }
+      return 'rendered';
+    };
+    assert.match(refusal('--set', 'env.JUKECORD_DATABASE_URL=postgres://u:p@db/j'), /goes in database\.url/);
+    assert.match(refusal('--set', 'env.JUKECORD_DATABASE_URL_FILE=/x'), /set by the chart \(from database\.url/);
+    assert.match(refusal('--set', 'database.url=postgres://u@db/j', '--set', 'database.existingSecret=s'), /set one/);
+    assert.match(refusal('--set', 'database.url=redis://db/0'), /don't meet the specifications of the schema/);
+    if (fs.existsSync('/usr/local/bin/kubeconform') || have('kubeconform')) {
+      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-chart-')), 'database.yaml');
+      fs.writeFileSync(file, `${given}\n---\n${existing}`);
+      execFileSync('kubeconform', ['-strict', '-summary', '-kubernetes-version', '1.31.0', file], { stdio: 'pipe' });
+    }
+  });
 });
 
 describe('workflows and scripts', () => {

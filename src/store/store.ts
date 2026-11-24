@@ -2,9 +2,11 @@
  * The database: every table, reached through the repositories below; nothing else in jukecord writes SQL.
  *
  * The repositories hold their SQL text and hand it to an SQL executor (src/store/sql.ts), which runs it on the
- * database: SQLite by default (src/store/sqlite.ts, one file in the data directory). Every method answers with a
- * promise, as a network database's driver does. A repository method that writes in several steps does it in a
- * transaction (`this.store.transaction(async () => ...)`); the statements inside find it by themselves.
+ * database: SQLite by default (src/store/sqlite.ts, one file in the data directory), or PostgreSQL or MySQL/MariaDB
+ * (src/store/postgres.ts, src/store/mysql.ts). The SQL is written once, in words all three read alike; the few that
+ * differ come from the database's dialect (src/store/dialect.ts). Every method answers with a promise, as a network
+ * database's driver does. A repository method that writes in several steps does it in a transaction
+ * (`this.store.transaction(async () => ...)`); the statements inside find it by themselves.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,8 +20,24 @@ import {
   type QueueItem,
   type Track,
 } from '../core/types.ts';
-import { MIGRATIONS } from './schema.ts';
-import { type SqlExecutor, type SqlRow, StoreError } from './sql.ts';
+import { dialectOf, type SqlDialect } from './dialect.ts';
+import {
+  MIGRATIONS,
+  MYSQL_BASELINE,
+  POSTGRES_BASELINE,
+  SERVER_BASELINE_VERSION,
+  TABLES,
+  VERSION_TABLE,
+  VERSION_TABLE_SQL,
+} from './schema.ts';
+import {
+  isUniqueViolation,
+  type SqlExecutor,
+  type SqlRow,
+  type SqlValue,
+  StoreError,
+  type TransactionOptions,
+} from './sql.ts';
 import { SqliteExecutor } from './sqlite.ts';
 
 // Raised for requests the data does not allow (defined beside the executor, which raises it too).
@@ -61,6 +79,24 @@ async function one(row: Promise<Row | undefined>): Promise<Row> {
   return found;
 }
 
+// The sizes a statement over many rows is cut into: a hundred rows at a time, then tens, then ones. Each row is a round
+// trip to a network database when written alone (a thousand of them took over a second on PostgreSQL), and the few
+// sizes give a statement one of three texts, each prepared once, however many rows there are.
+function* batches<T>(items: readonly T[]): Generator<readonly T[]> {
+  let at = 0;
+  for (const size of [100, 10, 1]) {
+    while (items.length - at >= size) {
+      yield items.slice(at, at + size);
+      at += size;
+    }
+  }
+}
+
+// The `?, ?, ?` of a list of values.
+function marks(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
 // The track columns, selected with a "t_" prefix wherever a track is joined to another table, so one reader serves
 // tracks on their own and tracks inside queue items, history entries and playlists.
 const TRACK_COLUMNS = `t.id AS t_id, t.source AS t_source, t.url AS t_url, t.title AS t_title, t.uploader AS t_uploader,
@@ -82,12 +118,50 @@ function trackFrom(row: Row): Track {
 /** Options for opening the store; tests pass a fixed clock so timestamps can be compared. */
 export interface StoreOptions {
   readonly now?: () => number;
+  /**
+   * Whether the schema is brought up to date (the default). A copy's source is opened without: it must be at this
+   * jukecord's schema already, or the copy is refused (a copy reads a database, it does not change it).
+   */
+  readonly migrate?: boolean;
 }
+
+/** The kinds of database jukecord runs on, as the status and the doctor name them. */
+export type Backend = 'sqlite' | 'postgres' | 'mysql' | 'mariadb';
+
+/** How the database answers right now, for the doctor and the readiness check. */
+export interface DatabaseHealth {
+  /** Whether it answered at all. */
+  readonly ok: boolean;
+  readonly backend: Backend;
+  /** The program and its version ("PostgreSQL 18.7"). */
+  readonly server: string;
+  /** The schema version it is at (null when it did not answer). */
+  readonly schema: number | null;
+  /** How long one statement took there and back, in milliseconds (null when it did not answer). */
+  readonly roundTripMs: number | null;
+  /** Why it did not answer, when it did not. */
+  readonly error: string | null;
+}
+
+// Whole days and hours in milliseconds: the statistics cut timestamps into them (see the dialect's quotient).
+const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+
+/** A day number (whole days since 1970-01-01) as its date, "YYYY-MM-DD". */
+function dateOf(day: number): string {
+  return new Date(day * DAY_MS).toISOString().slice(0, 10);
+}
+
+// The key of the lock a server database's migration is made under: PostgreSQL's advisory locks are numbers (two of
+// them, so the pair names jukecord's schema and nothing of another program's), MySQL's are names.
+const MIGRATION_LOCK = { postgres: [8795, 1], mysql: 'jukecord.schema' } as const;
 
 /** The open database and its repositories. One per process. */
 export class Store {
   /** The SQL executor every repository runs its statements through. */
   readonly sql: SqlExecutor;
+  /** The words of SQL that differ on this database (see src/store/dialect.ts). */
+  readonly dialect: SqlDialect;
   readonly tracks: TrackRepository;
   readonly queue: QueueRepository;
   readonly history: HistoryRepository;
@@ -107,6 +181,7 @@ export class Store {
 
   private constructor(sql: SqlExecutor, now: () => number) {
     this.sql = sql;
+    this.dialect = dialectOf(sql.dialect, sql.server.product);
     this.tracks = new TrackRepository(this, now);
     this.queue = new QueueRepository(this, now);
     this.history = new HistoryRepository(this);
@@ -136,7 +211,8 @@ export class Store {
     const sql = typeof target === 'string' ? SqliteExecutor.open(target) : target;
     const store = new Store(sql, options.now ?? Date.now);
     try {
-      await store.migrate();
+      if (options.migrate === false) await store.atLatest();
+      else await store.migrate();
     } catch (error) {
       // A failed migration leaves the database untouched (it runs in a transaction); close it so the file is not held.
       await sql.close();
@@ -150,33 +226,66 @@ export class Store {
     return this.sql instanceof SqliteExecutor ? this.sql.file : null;
   }
 
+  /** Which kind of database this is (MariaDB told from MySQL by what the server says it is). */
+  get backend(): Backend {
+    return backendOf(this.sql);
+  }
+
   /** Whether statements can still run (false once closed): what the readiness check asks. */
   isOpen(): boolean {
     return this.sql.isOpen;
   }
 
-  /** The schema version the database is at (SQLite's user_version). */
-  async schemaVersion(): Promise<number> {
-    const row = await this.sql.get('PRAGMA user_version');
-    if (!row) throw new StoreError('the database says no schema version');
-    return int(row, 'user_version');
+  /** The schema version the database is at: SQLite's user_version, or a server's jukecord_schema (0: none yet). */
+  schemaVersion(): Promise<number> {
+    return schemaVersionOf(this.sql);
   }
 
   /** What SQLite's quick check says of the database: "ok", or the first damage it found (null: no answer). */
   async quickCheck(): Promise<string | null> {
+    // A server checks its own files; what can be asked of it from here is whether it answers.
+    if (this.sql.dialect !== 'sqlite') return (await this.sql.get('SELECT 1 AS ok')) ? 'ok' : null;
     const row = await this.sql.get('PRAGMA quick_check');
     return typeof row?.quick_check === 'string' ? row.quick_check : null;
   }
 
-  // Applies every migration newer than the database, each in its own transaction with its version.
-  private async migrate(): Promise<void> {
+  /**
+   * How the database answers now: whether it does, its schema version and the time of one statement there and back.
+   * Never throws: a database that does not answer is an answer.
+   */
+  health(): Promise<DatabaseHealth> {
+    return healthOf(this.sql);
+  }
+
+  /** How much room the database takes, in bytes, where it says (a SQLite file's size is read from the disk). */
+  size(): Promise<number | null> {
+    return sizeOf(this.sql);
+  }
+
+  // Whether the database has a table of this name (see hasTable).
+  private hasTable(name: string): Promise<boolean> {
+    return hasTable(this.sql, name);
+  }
+
+  // Refuses a database that is not at this jukecord's schema, older or newer, saying what to do about it.
+  private async atLatest(): Promise<void> {
     const current = await this.schemaVersion();
     const latest = MIGRATIONS.at(-1)?.version ?? 0;
-    if (current > latest) {
+    refuseNewer(current, latest);
+    if (current === 0) throw new StoreError('the database holds no jukecord data (no schema at all)');
+    if (current < latest) {
       throw new StoreError(
-        `the database is at schema ${current}, newer than this jukecord knows (${latest}); use the newer jukecord or restore a backup`,
+        `the database is at schema ${current}, older than this jukecord's (${latest}); start this jukecord on it once to bring it up to date`,
       );
     }
+  }
+
+  // Applies every migration newer than the database, each in its own transaction with its version.
+  private async migrate(): Promise<void> {
+    if (this.sql.dialect !== 'sqlite') return this.migrateServer();
+    const current = await this.schemaVersion();
+    const latest = MIGRATIONS.at(-1)?.version ?? 0;
+    refuseNewer(current, latest);
     for (const migration of MIGRATIONS) {
       if (migration.version <= current) continue;
       await this.transaction(async () => {
@@ -188,51 +297,256 @@ export class Store {
   }
 
   /**
+   * A server database's migrations: the baseline (schema 8 at once) on a database jukecord never ran on, then every
+   * migration after it, each with its version. Under a lock of the server's, so two jukecords starting at once on one
+   * database (a core and an edge) do not both make the tables: the second waits and finds them made.
+   */
+  private async migrateServer(): Promise<void> {
+    const dialect = this.sql.dialect === 'postgres' ? 'postgres' : 'mysql';
+    const latest = MIGRATIONS.at(-1)?.version ?? 0;
+    // Read before the lock as well: a database at the latest version (every start but the first) needs no lock.
+    const before = await this.schemaVersion();
+    refuseNewer(before, latest);
+    if (before === latest) return;
+    await this.transaction(
+      async () => {
+        // PostgreSQL's advisory lock ends with the transaction; MySQL's with the connection or its release below.
+        if (dialect === 'postgres') {
+          await this.sql.get('SELECT pg_advisory_xact_lock(?, ?) AS locked', [...MIGRATION_LOCK.postgres]);
+        } else {
+          const got = await this.sql.get('SELECT GET_LOCK(?, 60) AS locked', [MIGRATION_LOCK.mysql]);
+          if (!got || intOrNull(got, 'locked') !== 1) {
+            throw new StoreError('another jukecord has been bringing this database up to date for a minute; try again');
+          }
+        }
+        try {
+          // Read again under the lock: another jukecord may have done it while this one waited.
+          const current = await this.schemaVersion();
+          refuseNewer(current, latest);
+          if (current < SERVER_BASELINE_VERSION) await this.baseline(dialect, current);
+          for (const migration of MIGRATIONS) {
+            if (migration.version <= Math.max(current, SERVER_BASELINE_VERSION)) continue;
+            const sql = migration[dialect];
+            if (sql === undefined) throw new StoreError(`migration ${migration.version} has no ${dialect} statements`);
+            await this.sql.exec(sql);
+            await this.setVersion(migration.version);
+          }
+        } finally {
+          if (dialect === 'mysql') await this.sql.get('SELECT RELEASE_LOCK(?) AS released', [MIGRATION_LOCK.mysql]);
+        }
+        // Each statement sees what another jukecord made while this one waited for the lock (see TransactionOptions).
+      },
+      { latest: true },
+    );
+  }
+
+  // Makes schema 8 on a database jukecord never ran on (or finishes a MySQL baseline stopped halfway: the version
+  // table is there, empty). A database that already has tables of these names, of another program's or of a jukecord
+  // stopped before the version table was made, is refused rather than mixed with.
+  private async baseline(dialect: 'postgres' | 'mysql', current: number): Promise<void> {
+    const versioned = await this.hasTable(VERSION_TABLE);
+    if (!versioned) {
+      const taken: string[] = [];
+      for (const table of TABLES) if (await this.hasTable(table.name)) taken.push(table.name);
+      if (taken.length > 0) {
+        throw new StoreError(
+          `the database already has tables jukecord did not make (${taken.join(', ')}); give jukecord an empty database`,
+        );
+      }
+      await this.sql.exec(VERSION_TABLE_SQL[dialect]);
+    } else if (current !== 0) {
+      throw new StoreError(`the database is at schema ${current}, which no jukecord on ${dialect} wrote`);
+    }
+    await this.sql.exec(dialect === 'postgres' ? POSTGRES_BASELINE : MYSQL_BASELINE);
+    await this.setVersion(SERVER_BASELINE_VERSION);
+  }
+
+  // Records a server database's schema version (the table's one row).
+  private async setVersion(version: number): Promise<void> {
+    const changed = await this.sql.run(`UPDATE ${VERSION_TABLE} SET version = ?, updated_at = ?`, [
+      version,
+      Date.now(),
+    ]);
+    if (changed.changes === 0) {
+      await this.sql.run(`INSERT INTO ${VERSION_TABLE} (version, updated_at) VALUES (?, ?)`, [version, Date.now()]);
+    }
+  }
+
+  /**
    * Runs `fn` in a transaction: everything it writes is kept, or nothing is if it throws.
    *
    * Nested calls become savepoints, so a repository method that uses a transaction can be called from inside another.
    * The repository methods `fn` calls run their statements in it by themselves; `fn` awaits database work only (see
-   * SqlExecutor.transaction), since everyone else's statements wait for its end.
+   * SqlExecutor.transaction), since everyone else's statements wait for its end. `snapshot` is for several reads of
+   * one moment that write nothing (see TransactionOptions).
    */
-  transaction<T>(fn: () => Promise<T> | T): Promise<T> {
-    return this.sql.transaction(fn);
-  }
-
-  /** Writes a consistent copy of the database to `target` (an online backup; the bot keeps running). */
-  async backup(target: string): Promise<void> {
-    const sqlite = this.sqlite('backed up');
-    // VACUUM INTO refuses to overwrite, so a backup never replaces an older one by accident.
-    if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    await sqlite.vacuumInto(target);
+  transaction<T>(fn: () => Promise<T> | T, options?: TransactionOptions): Promise<T> {
+    return this.sql.transaction(fn, options);
   }
 
   /**
-   * backup(), written by a worker thread with a connection of its own (SqliteExecutor.vacuumIntoAside): a copy of a
-   * large database takes seconds, and the main thread goes on answering meanwhile. An in-memory database (the tests')
-   * has no file for another connection to open, and is copied here.
+   * Inserts one row and gives the id the database made for it (or, for an upsert built with `id`, the id of the row
+   * it met): RETURNING id where the database has it, the id the INSERT reports where not (MySQL).
+   */
+  async insertId(sql: string, params: readonly SqlValue[]): Promise<number> {
+    if (this.dialect.returning) {
+      return int(await one(this.sql.get(sql.endsWith(' RETURNING id') ? sql : `${sql} RETURNING id`, params)), 'id');
+    }
+    const result = await this.sql.run(sql, params);
+    if (result.lastId === null) throw new StoreError('the database did not say the id of the row it made');
+    return result.lastId;
+  }
+
+  /**
+   * Writes a consistent copy of the database to `target` (an online backup; the bot keeps running). SQLite's is its
+   * file copied (VACUUM INTO); a server database's is a SQLite file of the same kind made by the copy (see backupAside).
+   */
+  async backup(target: string): Promise<void> {
+    if (!(this.sql instanceof SqliteExecutor)) return this.backupAside(target);
+    // VACUUM INTO refuses to overwrite, so a backup never replaces an older one by accident.
+    if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    await this.sql.vacuumInto(target);
+  }
+
+  /**
+   * backup(), written beside the main thread's work: SQLite's by a worker thread with a connection of its own
+   * (SqliteExecutor.vacuumIntoAside), since a copy of a large database takes seconds; a server database's by the copy
+   * (src/store/copy.ts), which reads one moment's view of it over the network a page at a time and writes a new SQLite
+   * file (what SQLite's own backups are, so any backup goes back into any database). An in-memory database (the
+   * tests') has no file for another connection to open, and is copied here.
    */
   async backupAside(target: string): Promise<void> {
-    const sqlite = this.sqlite('backed up');
-    if (sqlite.file === ':memory:') return this.backup(target);
+    if (this.sql instanceof SqliteExecutor && this.sql.file === ':memory:') return this.backup(target);
     if (fs.existsSync(target)) throw new StoreError(`${target} already exists`);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     // Written under another name, and named a backup once whole: jukecord stopped in the middle (the worker ends with
     // it) leaves a ".partial" file, which no list takes for a backup (app/backups.ts clears it away later).
     const partial = `${target}.partial`;
-    await sqlite.vacuumIntoAside(partial);
+    if (this.sql instanceof SqliteExecutor) {
+      await this.sql.vacuumIntoAside(partial);
+    } else {
+      await this.copyInto(partial);
+    }
     fs.renameSync(partial, target);
+  }
+
+  // A server database copied into a new SQLite file (removed again when the copy fails), left as one file with no
+  // write-ahead log beside it, as VACUUM INTO leaves SQLite's backups.
+  private async copyInto(file: string): Promise<void> {
+    const { copyStore } = await import('./copy.ts');
+    const copy = await Store.open(file);
+    try {
+      await copyStore(this, copy);
+      await copy.sql.exec('PRAGMA journal_mode = DELETE');
+    } catch (error) {
+      await copy.close();
+      for (const part of ['', '-wal', '-shm', '-journal']) fs.rmSync(`${file}${part}`, { force: true });
+      throw error;
+    }
+    await copy.close();
   }
 
   /** Closes the database, once no transaction holds it; closing twice does nothing. */
   close(): Promise<void> {
     return this.sql.close();
   }
+}
 
-  // The SQLite executor under the store, for what only SQLite does here (a backup is a copy of its file).
-  private sqlite(what: string): SqliteExecutor {
-    if (this.sql instanceof SqliteExecutor) return this.sql;
-    throw new StoreError(`a ${this.sql.dialect} database is not ${what} by jukecord yet`);
+/** The schema version this jukecord writes (its last migration's). */
+export const LATEST_SCHEMA = MIGRATIONS.at(-1)?.version ?? 0;
+
+/** Which kind of database an executor reaches (MariaDB told from MySQL by what the server says it is). */
+export function backendOf(sql: SqlExecutor): Backend {
+  if (sql.dialect === 'sqlite') return 'sqlite';
+  if (sql.dialect === 'postgres') return 'postgres';
+  return sql.server.product === 'MariaDB' ? 'mariadb' : 'mysql';
+}
+
+/**
+ * Whether the database an executor reaches has a table of this name: in the schema jukecord uses (PostgreSQL's
+ * current one, MySQL's database, SQLite's file).
+ */
+export async function hasTable(sql: SqlExecutor, name: string): Promise<boolean> {
+  if (sql.dialect === 'sqlite') {
+    return (
+      (await sql.get("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?", [name])) !== undefined
+    );
+  }
+  const where = sql.dialect === 'postgres' ? 'current_schema()' : 'DATABASE()';
+  const row = await sql.get(
+    `SELECT 1 AS found FROM information_schema.tables WHERE table_schema = ${where} AND table_name = ?`,
+    [name],
+  );
+  return row !== undefined;
+}
+
+/** The schema version of the database an executor reaches, whatever it is (0: no jukecord schema yet). */
+export async function schemaVersionOf(sql: SqlExecutor): Promise<number> {
+  if (sql.dialect === 'sqlite') {
+    const row = await sql.get('PRAGMA user_version');
+    if (!row) throw new StoreError('the database says no schema version');
+    return int(row, 'user_version');
+  }
+  // A database jukecord never ran on has no version table: version 0.
+  if (!(await hasTable(sql, VERSION_TABLE))) return 0;
+  const row = await one(sql.get(`SELECT MAX(version) AS version FROM ${VERSION_TABLE}`));
+  return intOrNull(row, 'version') ?? 0;
+}
+
+/**
+ * How much room the database an executor reaches takes, in bytes: a SQLite file's size on the disk (with what its
+ * write-ahead log holds), PostgreSQL's tables of the schema jukecord uses with their indexes, MySQL's tables of its
+ * database as the server estimates them (MySQL updates the figure now and then, not at every change). Null for an
+ * in-memory database.
+ */
+export async function sizeOf(sql: SqlExecutor): Promise<number | null> {
+  if (sql instanceof SqliteExecutor) {
+    if (sql.file === ':memory:') return null;
+    let bytes = fs.statSync(sql.file).size;
+    try {
+      bytes += fs.statSync(`${sql.file}-wal`).size;
+    } catch {
+      // No log file at the moment.
+    }
+    return bytes;
+  }
+  const row =
+    sql.dialect === 'postgres'
+      ? await sql.get(
+          `SELECT COALESCE(SUM(pg_total_relation_size(c.oid)), 0) AS bytes FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.relkind = 'r'`,
+        )
+      : await sql.get(
+          `SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.tables
+             WHERE table_schema = DATABASE()`,
+        );
+  return row ? intOrNull(row, 'bytes') : null;
+}
+
+/**
+ * How the database an executor reaches answers now: whether it does, its schema version and the time of one
+ * statement there and back. Never throws: a database that does not answer is an answer.
+ */
+export async function healthOf(sql: SqlExecutor): Promise<DatabaseHealth> {
+  const server = `${sql.server.product} ${sql.server.version}`;
+  const started = performance.now();
+  try {
+    await sql.get('SELECT 1 AS ok');
+    const roundTripMs = Math.round((performance.now() - started) * 100) / 100;
+    return { ok: true, backend: backendOf(sql), server, schema: await schemaVersionOf(sql), roundTripMs, error: null };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, backend: backendOf(sql), server, schema: null, roundTripMs: null, error: reason };
+  }
+}
+
+// A database at a schema newer than this jukecord's is refused (see Store.open).
+function refuseNewer(current: number, latest: number): void {
+  if (current > latest) {
+    throw new StoreError(
+      `the database is at schema ${current}, newer than this jukecord knows (${latest}); use the newer jukecord or restore a backup`,
+    );
   }
 }
 
@@ -240,10 +554,26 @@ export class Store {
 export class TrackRepository {
   private readonly store: Store;
   private readonly now: () => number;
+  // The upsert of a track in this database's words: fields a lookup does not know keep what was known (see upsert()).
+  private readonly upsertSql: string;
 
   constructor(store: Store, now: () => number) {
     this.store = store;
     this.now = now;
+    const keep = (column: string) =>
+      [
+        column,
+        (incoming: (name: string) => string, current: (name: string) => string) =>
+          `COALESCE(${incoming(column)}, ${current(column)})`,
+      ] as const;
+    this.upsertSql = store.dialect.upsert({
+      table: 'tracks',
+      columns: ['source', 'url', 'title', 'uploader', 'duration_ms', 'thumbnail', 'created_at', 'updated_at'],
+      // The source itself on SQLite, its hash on the servers (see src/store/dialect.ts).
+      key: [store.dialect.sourceKey],
+      update: ['url', 'title', keep('uploader'), keep('duration_ms'), keep('thumbnail'), 'updated_at'],
+      id: true,
+    });
   }
 
   /**
@@ -256,22 +586,21 @@ export class TrackRepository {
     // The write and the read back in one go: an upsert of the same source meanwhile cannot come between them.
     return this.store.transaction(async () => {
       const now = this.now();
-      const row = await this.store.sql.get(
-        `INSERT INTO tracks (source, url, title, uploader, duration_ms, thumbnail, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (source) DO UPDATE SET
-             url = excluded.url,
-             title = excluded.title,
-             uploader = COALESCE(excluded.uploader, tracks.uploader),
-             duration_ms = COALESCE(excluded.duration_ms, tracks.duration_ms),
-             thumbnail = COALESCE(excluded.thumbnail, tracks.thumbnail),
-             updated_at = excluded.updated_at
-           RETURNING id`,
-        [track.source, track.url, track.title, track.uploader, track.durationMs, track.thumbnail, now, now],
-      );
-      if (!row) throw new StoreError('the track just written cannot be read back');
-      // RETURNING gives the ID whether the row was inserted or updated; read it back whole through the one reader.
-      const stored = await this.get(int(row, 'id'));
+      // A whole number of milliseconds: a site's length in seconds times 1000 can come out a hair off one, which
+      // PostgreSQL's BIGINT refuses.
+      const durationMs = track.durationMs === null ? null : Math.round(track.durationMs);
+      // The id whether the row was inserted or updated; read back whole through the one reader.
+      const id = await this.store.insertId(this.upsertSql, [
+        track.source,
+        track.url,
+        track.title,
+        track.uploader,
+        durationMs,
+        track.thumbnail,
+        now,
+        now,
+      ]);
+      const stored = await this.get(id);
       if (!stored) throw new StoreError('the track just written cannot be read back');
       return stored;
     });
@@ -285,7 +614,9 @@ export class TrackRepository {
 
   /** The track for a normalised source address, or null when it was never added. */
   async bySource(source: string): Promise<Track | null> {
-    const row = await this.store.sql.get(`SELECT ${TRACK_COLUMNS} FROM tracks t WHERE t.source = ?`, [source]);
+    // By the source's hash and the text on the servers, whose unique index is on the hash.
+    const { where, params } = this.store.dialect.bySource('t', source);
+    const row = await this.store.sql.get(`SELECT ${TRACK_COLUMNS} FROM tracks t WHERE ${where}`, params);
     return row ? trackFrom(row) : null;
   }
 
@@ -360,24 +691,25 @@ export class QueueRepository {
         at,
       ]);
       const now = this.now();
-      // One insert after the other, so the IDs follow the places.
-      const ids: number[] = [];
-      for (const [offset, trackId] of trackIds.entries()) {
-        const row = await one(
-          this.store.sql.get(
-            'INSERT INTO queue_items (guild_id, position, track_id, added_by, added_at) VALUES (?, ?, ?, ?, ?) RETURNING id',
-            [guildId, at + offset, trackId, addedBy, now],
-          ),
+      // In batches of rows, in their order, so the IDs follow the places.
+      const rows = trackIds.map((trackId, offset): SqlValue[] => [guildId, at + offset, trackId, addedBy, now]);
+      for (const batch of batches(rows)) {
+        await this.store.sql.run(
+          `INSERT INTO queue_items (guild_id, position, track_id, added_by, added_at) VALUES ${batch
+            .map(() => '(?, ?, ?, ?, ?)')
+            .join(', ')}`,
+          batch.flat(),
         );
-        ids.push(int(row, 'id'));
       }
-      // Read the rows back so callers get complete items, tracks included.
-      const items: QueueItem[] = [];
-      for (const id of ids) {
-        const item = await this.get(id);
-        if (!item) throw new StoreError('a queue item just written cannot be read back');
-        items.push(item);
-      }
+      // Read the rows back so callers get complete items, tracks included: the new items hold exactly the places
+      // at..at+n-1 now (positions are 0..n-1, and the others moved out of the way above).
+      const items = (
+        await this.store.sql.all(
+          `${QUEUE_SELECT} WHERE q.guild_id = ? AND q.position >= ? AND q.position < ? ORDER BY q.position, q.id`,
+          [guildId, at, at + trackIds.length],
+        )
+      ).map((row) => queueItemFrom(row));
+      if (items.length !== trackIds.length) throw new StoreError('a queue item just written cannot be read back');
       return items;
     });
   }
@@ -394,12 +726,21 @@ export class QueueRepository {
   /** Removes one item; false when it is not in that server's queue (already played or removed by someone else). */
   remove(guildId: string, itemId: number): Promise<boolean> {
     return this.store.transaction(async () => {
-      // RETURNING gives the place it had, so the items after it move up with one statement instead of a renumbering.
-      const row = await this.store.sql.get('DELETE FROM queue_items WHERE id = ? AND guild_id = ? RETURNING position', [
-        itemId,
-        guildId,
-      ]);
+      // The place it had, so the items after it move up with one statement instead of a renumbering: RETURNING says
+      // it where the database has it; MySQL reads it first, taking the row for this transaction (FOR UPDATE).
+      const row = this.store.dialect.returning
+        ? await this.store.sql.get('DELETE FROM queue_items WHERE id = ? AND guild_id = ? RETURNING position', [
+            itemId,
+            guildId,
+          ])
+        : await this.store.sql.get('SELECT position FROM queue_items WHERE id = ? AND guild_id = ? FOR UPDATE', [
+            itemId,
+            guildId,
+          ]);
       if (!row) return false;
+      if (!this.store.dialect.returning) {
+        await this.store.sql.run('DELETE FROM queue_items WHERE id = ? AND guild_id = ?', [itemId, guildId]);
+      }
       await this.closeGap(guildId, int(row, 'position'));
       return true;
     });
@@ -416,10 +757,14 @@ export class QueueRepository {
     if (itemIds.length === 0) return 0;
     return this.store.transaction(async () => {
       let removed = 0;
-      // Each delete is a lookup by the primary key; one already gone (played meanwhile) changes nothing.
-      for (const id of itemIds) {
-        removed += (await this.store.sql.run('DELETE FROM queue_items WHERE id = ? AND guild_id = ?', [id, guildId]))
-          .changes;
+      // In batches, each a lookup of its IDs by the primary key; one already gone (played meanwhile) changes nothing.
+      for (const batch of batches(itemIds)) {
+        removed += (
+          await this.store.sql.run(`DELETE FROM queue_items WHERE guild_id = ? AND id IN (${marks(batch.length)})`, [
+            guildId,
+            ...batch,
+          ])
+        ).changes;
       }
       // The gaps they left are closed once, for all of them.
       if (removed > 0) await this.compact(guildId);
@@ -430,7 +775,7 @@ export class QueueRepository {
   /** Moves one item to `index` (counted in the queue as it is before the move). */
   async move(guildId: string, itemId: number, index: number): Promise<void> {
     await this.store.transaction(async () => {
-      const ids = await this.ids(guildId);
+      const { ids, at } = await this.order(guildId);
       const from = ids.indexOf(itemId);
       if (from === -1) throw new StoreError(`item ${itemId} is not in the queue`);
       if (index < 0 || index >= ids.length)
@@ -438,20 +783,21 @@ export class QueueRepository {
       // Take it out and put it back at the target place.
       ids.splice(from, 1);
       ids.splice(index, 0, itemId);
-      await this.writeOrder(guildId, ids);
+      await this.writeOrder(guildId, ids, at);
     });
   }
 
   /** Puts the queue in exactly this order; `itemIds` must hold every item once (used by shuffle and drag-and-drop). */
   async reorder(guildId: string, itemIds: readonly number[]): Promise<void> {
     await this.store.transaction(async () => {
-      const current = new Set(await this.ids(guildId));
+      const { ids, at } = await this.order(guildId);
+      const current = new Set(ids);
       const wanted = new Set(itemIds);
       // The same items exactly once each: a missing, extra or repeated ID means the caller's view is out of date.
       const same =
         wanted.size === itemIds.length && wanted.size === current.size && [...wanted].every((id) => current.has(id));
       if (!same) throw new StoreError('the new order does not hold exactly the items in the queue');
-      await this.writeOrder(guildId, itemIds);
+      await this.writeOrder(guildId, itemIds, at);
     });
   }
 
@@ -476,17 +822,22 @@ export class QueueRepository {
     });
   }
 
-  // The item IDs in queue order.
-  private async ids(guildId: string): Promise<number[]> {
-    const rows = await this.store.sql.all('SELECT id FROM queue_items WHERE guild_id = ? ORDER BY position, id', [
-      guildId,
-    ]);
-    return rows.map((row) => int(row, 'id'));
+  // The item IDs in queue order, and the place each has now.
+  private async order(guildId: string): Promise<{ ids: number[]; at: Map<number, number> }> {
+    const rows = await this.store.sql.all(
+      'SELECT id, position FROM queue_items WHERE guild_id = ? ORDER BY position, id',
+      [guildId],
+    );
+    return {
+      ids: rows.map((row) => int(row, 'id')),
+      at: new Map(rows.map((row) => [int(row, 'id'), int(row, 'position')])),
+    };
   }
 
   // Rewrites positions to 0..n-1 in the current order, after a removal left a gap.
   private async compact(guildId: string): Promise<void> {
-    await this.writeOrder(guildId, await this.ids(guildId));
+    const { ids, at } = await this.order(guildId);
+    await this.writeOrder(guildId, ids, at);
   }
 
   // Closes the gap one removed item left at `position`: everything after it moves up one place, in one statement.
@@ -498,15 +849,17 @@ export class QueueRepository {
     ]);
   }
 
-  // Writes position = index for each ID; rows already in place are left alone.
-  private async writeOrder(guildId: string, ids: readonly number[]): Promise<void> {
-    for (const [index, id] of ids.entries()) {
-      await this.store.sql.run('UPDATE queue_items SET position = ? WHERE id = ? AND guild_id = ? AND position != ?', [
-        index,
-        id,
-        guildId,
-        index,
-      ]);
+  // Writes position = index for each ID; rows already in place (`at` says where each is) are left alone. The rows that
+  // move are written in batches, each one UPDATE that sets every row of it to its own place.
+  private async writeOrder(guildId: string, ids: readonly number[], at: ReadonlyMap<number, number>): Promise<void> {
+    const moves = ids.flatMap((id, index) => (at.get(id) === index ? [] : [[id, index] as const]));
+    const place = this.store.dialect.wholeNumber;
+    for (const batch of batches(moves)) {
+      await this.store.sql.run(
+        `UPDATE queue_items SET position = CASE id ${batch.map(() => `WHEN ? THEN ${place}`).join(' ')} END
+           WHERE guild_id = ? AND id IN (${marks(batch.length)})`,
+        [...batch.flat(), guildId, ...batch.map(([id]) => id)],
+      );
     }
   }
 
@@ -521,12 +874,12 @@ export class QueueRepository {
 
   /** How many items one person added to a server's queue (null: the host's, and a panel's without a login). */
   async countBy(guildId: string, addedBy: string | null): Promise<number> {
-    // IS, not =: it matches null too.
+    // A null-safe comparison, not =: it matches null too.
     const row = await one(
-      this.store.sql.get('SELECT COUNT(*) AS n FROM queue_items WHERE guild_id = ? AND added_by IS ?', [
-        guildId,
-        addedBy,
-      ]),
+      this.store.sql.get(
+        `SELECT COUNT(*) AS n FROM queue_items WHERE guild_id = ? AND ${this.store.dialect.same('added_by')}`,
+        [guildId, addedBy],
+      ),
     );
     return int(row, 'n');
   }
@@ -573,13 +926,10 @@ export class HistoryRepository {
   }): Promise<HistoryEntry> {
     // The write, the pruning and the read back in one go, as one change.
     return this.store.transaction(async () => {
-      const row = await one(
-        this.store.sql.get(
-          'INSERT INTO history (guild_id, track_id, added_by, played_at, played_ms) VALUES (?, ?, ?, ?, ?) RETURNING id',
-          [entry.guildId, entry.trackId, entry.addedBy, entry.playedAt, entry.playedMs],
-        ),
+      const id = await this.store.insertId(
+        'INSERT INTO history (guild_id, track_id, added_by, played_at, played_ms) VALUES (?, ?, ?, ?, ?)',
+        [entry.guildId, entry.trackId, entry.addedBy, entry.playedAt, entry.playedMs],
       );
-      const id = int(row, 'id');
       // Pruned every hundred plays, not every play: the delete walks a server's history.
       if (id % 100 === 0) await this.prune(entry.guildId);
       const stored = await this.get(id);
@@ -590,11 +940,18 @@ export class HistoryRepository {
 
   /** Deletes a server's oldest entries beyond `keep` and returns how many went. */
   async prune(guildId: string, keep = HISTORY_KEEP): Promise<number> {
-    const result = await this.store.sql.run(
-      `DELETE FROM history WHERE guild_id = ? AND id < (
-           SELECT id FROM history WHERE guild_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)`,
-      [guildId, guildId, keep - 1],
+    // The oldest entry kept, then everything older than it: two statements, because MySQL refuses a DELETE that reads
+    // the table it deletes from. An entry added in between is newer than the cut, so it stays either way.
+    const cut = await this.store.sql.get(
+      'SELECT id FROM history WHERE guild_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?',
+      // keep 0 keeps the newest, as the single statement this was did (SQLite reads a negative OFFSET as none).
+      [guildId, Math.max(0, keep - 1)],
     );
+    if (!cut) return 0;
+    const result = await this.store.sql.run('DELETE FROM history WHERE guild_id = ? AND id < ?', [
+      guildId,
+      int(cut, 'id'),
+    ]);
     return result.changes;
   }
 
@@ -641,67 +998,82 @@ export class HistoryRepository {
    * so "Tuesday" means the viewer's Tuesday. Only days with plays are listed; the caller fills the gaps.
    */
   async stats(guildId: string, since: number, offsetMs: number, top = 10): Promise<HistoryStats> {
-    // Every question of one moment's history (one transaction), so the totals and the lists agree.
-    return this.store.transaction(async () => {
-      const sql = this.store.sql;
-      // Autoplay is not a person: its plays count as plays, but not among the people who added (NULL is not counted).
-      const totals = await one(
-        sql.get(
-          `SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms, COUNT(DISTINCT track_id) AS tracks,
-                  COUNT(DISTINCT CASE WHEN added_by IS ? THEN NULL ELSE COALESCE(added_by, '') END) AS people
+    const d = this.store.dialect;
+    // The viewer's offset as whole milliseconds, added to each timestamp before it is cut into days and hours (in
+    // SQL, by whole-number division, the same way on every database; the dates are written here, below).
+    const offset = Math.trunc(offsetMs);
+    const day = d.quotient(`played_at + ${d.wholeNumber}`, DAY_MS);
+    const hour = d.quotient(`(played_at + ${d.wholeNumber}) % ${DAY_MS}`, HOUR_MS);
+    // Every question of one moment's history (one snapshot), so the totals and the lists agree.
+    return this.store.transaction(
+      async () => {
+        const sql = this.store.sql;
+        // Autoplay is not a person: its plays count as plays, but not among the people who added (NULL is not counted).
+        const totals = await one(
+          sql.get(
+            `SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms, COUNT(DISTINCT track_id) AS tracks,
+                  COUNT(DISTINCT CASE WHEN ${d.same('added_by')} THEN NULL ELSE COALESCE(added_by, '') END) AS people
            FROM history WHERE guild_id = ? AND played_at >= ?`,
-          [AUTOPLAY, guildId, since],
-        ),
-      );
-      // The timestamps are milliseconds; unixepoch wants seconds, and integer division keeps whole seconds.
-      const days = await sql.all(
-        `SELECT strftime('%Y-%m-%d', (played_at + ?) / 1000, 'unixepoch') AS day, COUNT(*) AS plays,
-                  SUM(played_ms) AS played_ms
+            [AUTOPLAY, guildId, since],
+          ),
+        );
+        // Each day with plays, by its number (whole days since 1970 of the viewer's time), in order.
+        const days = await sql.all(
+          `SELECT ${day} AS day, COUNT(*) AS plays, SUM(played_ms) AS played_ms
            FROM history WHERE guild_id = ? AND played_at >= ? GROUP BY day ORDER BY day`,
-        [offsetMs, guildId, since],
-      );
-      const hours = await sql.all(
-        `SELECT CAST(strftime('%H', (played_at + ?) / 1000, 'unixepoch') AS INTEGER) AS hour, COUNT(*) AS plays
-           FROM history WHERE guild_id = ? AND played_at >= ? GROUP BY hour`,
-        [offsetMs, guildId, since],
-      );
-      // Ties are broken by listening time, then by the track's ID, so the order is the same on every run.
-      const tracks = await sql.all(
-        `SELECT COUNT(*) AS plays, SUM(h.played_ms) AS played_ms, ${TRACK_COLUMNS}
-           FROM history h JOIN tracks t ON t.id = h.track_id
-           WHERE h.guild_id = ? AND h.played_at >= ?
-           GROUP BY h.track_id ORDER BY plays DESC, played_ms DESC, h.track_id LIMIT ?`,
-        [guildId, since, top],
-      );
-      // Whose picks played most (plays of what each one added): people and the host, not autoplay.
-      const people = await sql.all(
-        `SELECT added_by, COUNT(*) AS plays, SUM(played_ms) AS played_ms
-           FROM history WHERE guild_id = ? AND played_at >= ? AND added_by IS NOT ?
-           GROUP BY added_by ORDER BY plays DESC, played_ms DESC, added_by LIMIT ?`,
-        [guildId, since, AUTOPLAY, top],
-      );
-      // Twenty-four slots, zero where nothing played, so a chart can draw every hour.
-      const byHour = Array.from({ length: 24 }, () => 0);
-      for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
-      return {
-        plays: int(totals, 'plays'),
-        playedMs: int(totals, 'played_ms'),
-        tracks: int(totals, 'tracks'),
-        people: int(totals, 'people'),
-        days: days.map((row) => ({ day: text(row, 'day'), plays: int(row, 'plays'), playedMs: int(row, 'played_ms') })),
-        hours: byHour,
-        topTracks: tracks.map((row) => ({
-          track: trackFrom(row),
-          plays: int(row, 'plays'),
-          playedMs: int(row, 'played_ms'),
-        })),
-        topPeople: people.map((row) => ({
-          userId: textOrNull(row, 'added_by'),
-          plays: int(row, 'plays'),
-          playedMs: int(row, 'played_ms'),
-        })),
-      };
-    });
+          [offset, guildId, since],
+        );
+        const hours = await sql.all(
+          `SELECT ${hour} AS hour, COUNT(*) AS plays FROM history WHERE guild_id = ? AND played_at >= ? GROUP BY hour`,
+          [offset, guildId, since],
+        );
+        // Ties are broken by listening time, then by the track's ID, so the order is the same on every run. Counted
+        // per track first, then joined to the tracks: a query every database reads alike (a track's columns beside a
+        // count are not in the GROUP BY otherwise).
+        const tracks = await sql.all(
+          `SELECT c.plays, c.played_ms, ${TRACK_COLUMNS}
+           FROM (SELECT track_id, COUNT(*) AS plays, SUM(played_ms) AS played_ms FROM history
+                   WHERE guild_id = ? AND played_at >= ? GROUP BY track_id) c
+           JOIN tracks t ON t.id = c.track_id
+           ORDER BY c.plays DESC, c.played_ms DESC, c.track_id LIMIT ?`,
+          [guildId, since, top],
+        );
+        // Whose picks played most (plays of what each one added): people and the host, not autoplay. The host's null
+        // first among equals, as SQLite orders it.
+        const people = await sql.all(
+          `SELECT added_by, COUNT(*) AS plays, SUM(played_ms) AS played_ms
+           FROM history WHERE guild_id = ? AND played_at >= ? AND ${d.differs('added_by')}
+           GROUP BY added_by ORDER BY plays DESC, played_ms DESC, ${d.nullsFirst('added_by')} LIMIT ?`,
+          [guildId, since, AUTOPLAY, top],
+        );
+        // Twenty-four slots, zero where nothing played, so a chart can draw every hour.
+        const byHour = Array.from({ length: 24 }, () => 0);
+        for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
+        return {
+          plays: int(totals, 'plays'),
+          playedMs: int(totals, 'played_ms'),
+          tracks: int(totals, 'tracks'),
+          people: int(totals, 'people'),
+          days: days.map((row) => ({
+            day: dateOf(int(row, 'day')),
+            plays: int(row, 'plays'),
+            playedMs: int(row, 'played_ms'),
+          })),
+          hours: byHour,
+          topTracks: tracks.map((row) => ({
+            track: trackFrom(row),
+            plays: int(row, 'plays'),
+            playedMs: int(row, 'played_ms'),
+          })),
+          topPeople: people.map((row) => ({
+            userId: textOrNull(row, 'added_by'),
+            plays: int(row, 'plays'),
+            playedMs: int(row, 'played_ms'),
+          })),
+        };
+      },
+      { snapshot: true },
+    );
   }
 
   /**
@@ -709,118 +1081,125 @@ export class HistoryRepository {
    * and people, plays by day of the week and by hour, the longest day, the first play and the song of the time.
    *
    * Days, weekdays and hours are the viewer's, as in stats(): `offsetMs` is added to every timestamp first. A day is
-   * the whole number of days since the epoch of that sum, which SQLite's integer division gives without formatting a
-   * date for each row (the offset is cast to an integer for it: the driver binds every JavaScript number as a real,
-   * and a real's division keeps the fraction). Five questions, each one pass over the server's plays of the time by
+   * the whole number of days since the epoch of that sum, which whole-number division gives on every database without
+   * formatting a date for each row (the offset is cast to a whole number for it: node:sqlite binds every JavaScript
+   * number as a real, and a real's division keeps the fraction). Five questions, each one pass over the server's plays of the time by
    * the index on (server, time played): per track, per person, per day and per hour, and the first play; the totals,
    * the weekdays, the longest day and the song are summed from those answers here (the seven questions this took
    * before cost twice the time on a year of 10,000 plays).
    */
   async wrapped(guildId: string, since: number, until: number, offsetMs: number, top = 5): Promise<HistoryWrapped> {
-    // Every question of one moment's history (one transaction), so the totals and the lists agree.
-    return this.store.transaction(async () => {
-      const sql = this.store.sql;
-      // The plays of the time, the same three bound values in every question below.
-      const span = 'h.guild_id = ? AND h.played_at >= ? AND h.played_at < ?';
-      const within = [guildId, since, until] as const;
-      // Each track's plays, time and days with plays; its title and the rest are read for the few shown only.
-      const perTrack = (
-        await sql.all(
-          `SELECT h.track_id, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms,
-                    COUNT(DISTINCT (h.played_at + CAST(? AS INTEGER)) / 86400000) AS days
+    const d = this.store.dialect;
+    // The viewer's offset as whole milliseconds, and each timestamp's day and hour in the viewer's time.
+    const offset = Math.trunc(offsetMs);
+    const day = d.quotient(`h.played_at + ${d.wholeNumber}`, DAY_MS);
+    const hour = d.quotient(`(h.played_at + ${d.wholeNumber}) % ${DAY_MS}`, HOUR_MS);
+    // Every question of one moment's history (one snapshot), so the totals and the lists agree.
+    return this.store.transaction(
+      async () => {
+        const sql = this.store.sql;
+        // The plays of the time, the same three bound values in every question below.
+        const span = 'h.guild_id = ? AND h.played_at >= ? AND h.played_at < ?';
+        const within = [guildId, since, until] as const;
+        // Each track's plays, time and days with plays; its title and the rest are read for the few shown only.
+        const perTrack = (
+          await sql.all(
+            `SELECT h.track_id, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms, COUNT(DISTINCT ${day}) AS days
              FROM history h WHERE ${span} GROUP BY h.track_id`,
-          [offsetMs, ...within],
-        )
-      ).map((row) => ({
-        id: int(row, 'track_id'),
-        plays: int(row, 'plays'),
-        playedMs: int(row, 'played_ms'),
-        days: int(row, 'days'),
-      }));
-      // Each person's plays: people and the host, not autoplay, which is no person (as in the statistics).
-      const perPerson = (
-        await sql.all(
-          `SELECT h.added_by, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms FROM history h
-             WHERE ${span} AND h.added_by IS NOT ? GROUP BY h.added_by`,
-          [...within, AUTOPLAY],
-        )
-      ).map((row) => ({
-        userId: textOrNull(row, 'added_by'),
-        plays: int(row, 'plays'),
-        playedMs: int(row, 'played_ms'),
-      }));
-      const perDay = (
-        await sql.all(
-          `SELECT (h.played_at + CAST(? AS INTEGER)) / 86400000 AS day, COUNT(*) AS plays,
-                    SUM(h.played_ms) AS played_ms
+            [offset, ...within],
+          )
+        ).map((row) => ({
+          id: int(row, 'track_id'),
+          plays: int(row, 'plays'),
+          playedMs: int(row, 'played_ms'),
+          days: int(row, 'days'),
+        }));
+        // Each person's plays: people and the host, not autoplay, which is no person (as in the statistics).
+        const perPerson = (
+          await sql.all(
+            `SELECT h.added_by, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms FROM history h
+             WHERE ${span} AND ${d.differs('h.added_by')} GROUP BY h.added_by`,
+            [...within, AUTOPLAY],
+          )
+        ).map((row) => ({
+          userId: textOrNull(row, 'added_by'),
+          plays: int(row, 'plays'),
+          playedMs: int(row, 'played_ms'),
+        }));
+        const perDay = (
+          await sql.all(
+            `SELECT ${day} AS day, COUNT(*) AS plays, SUM(h.played_ms) AS played_ms
              FROM history h WHERE ${span} GROUP BY day`,
-          [offsetMs, ...within],
-        )
-      ).map((row) => ({ day: int(row, 'day'), plays: int(row, 'plays'), playedMs: int(row, 'played_ms') }));
-      const hours = await sql.all(
-        `SELECT ((h.played_at + CAST(? AS INTEGER)) % 86400000) / 3600000 AS hour, COUNT(*) AS plays
-           FROM history h WHERE ${span} GROUP BY hour`,
-        [offsetMs, ...within],
-      );
-      const first = await sql.get(
-        `SELECT h.id, h.guild_id, h.added_by, h.played_at, h.played_ms, ${TRACK_COLUMNS}
+            [offset, ...within],
+          )
+        ).map((row) => ({ day: int(row, 'day'), plays: int(row, 'plays'), playedMs: int(row, 'played_ms') }));
+        const hours = await sql.all(
+          `SELECT ${hour} AS hour, COUNT(*) AS plays FROM history h WHERE ${span} GROUP BY hour`,
+          [offset, ...within],
+        );
+        const first = await sql.get(
+          `SELECT h.id, h.guild_id, h.added_by, h.played_at, h.played_ms, ${TRACK_COLUMNS}
            FROM history h JOIN tracks t ON t.id = h.track_id WHERE ${span} ORDER BY h.played_at, h.id LIMIT 1`,
-        [...within],
-      );
-      // The orders, as the statistics break ties: the most plays, then the most time, then the lowest ID (a person: the
-      // host first, as SQLite sorts a null first, then by ID).
-      const byPlays = <T extends { plays: number; playedMs: number }>(a: T, b: T) =>
-        b.plays - a.plays || b.playedMs - a.playedMs;
-      const tracks = [...perTrack].sort((a, b) => byPlays(a, b) || a.id - b.id).slice(0, top);
-      // Two IDs compared as SQLite compares text (byte by byte), the host's null before any.
-      const byId = (a: string | null, b: string | null) =>
-        a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1;
-      const people = [...perPerson].sort((a, b) => byPlays(a, b) || byId(a.userId, b.userId)).slice(0, top);
-      // The song of the time: the track that came back on the most days (a song played every week all year over one
-      // played fifty times in one night), then the most plays, the most time, the lowest ID.
-      const song = [...perTrack].sort((a, b) => b.days - a.days || byPlays(a, b) || a.id - b.id)[0];
-      // The day with the most time listened; the earlier of two equal days.
-      const longest = [...perDay].sort((a, b) => b.playedMs - a.playedMs || b.plays - a.plays || a.day - b.day)[0];
-      // Seven and twenty-four slots, zero where nothing played, so a chart can draw every one. Day 0 of the epoch was a
-      // Thursday: (day + 4) % 7 is the day of the week, Sunday being 0.
-      const byWeekday = Array.from({ length: 7 }, () => 0);
-      for (const day of perDay) byWeekday[(day.day + 4) % 7] = (byWeekday[(day.day + 4) % 7] ?? 0) + day.plays;
-      const byHour = Array.from({ length: 24 }, () => 0);
-      for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
-      // A track as the database has it, for the few shown.
-      const track = async (id: number) => {
-        const found = await this.store.tracks.get(id);
-        if (!found) throw new StoreError(`track ${id} of the history cannot be read`);
-        return found;
-      };
-      // The top tracks read one after the other, in their order, then the song's.
-      const topTracks: { track: Track; plays: number; playedMs: number }[] = [];
-      for (const entry of tracks) {
-        topTracks.push({ track: await track(entry.id), plays: entry.plays, playedMs: entry.playedMs });
-      }
-      const songTrack = song ? await track(song.id) : null;
-      return {
-        plays: perTrack.reduce((sum, entry) => sum + entry.plays, 0),
-        playedMs: perTrack.reduce((sum, entry) => sum + entry.playedMs, 0),
-        tracks: perTrack.length,
-        people: perPerson.length,
-        days: perDay.length,
-        topTracks,
-        topPeople: people,
-        weekdays: byWeekday,
-        hours: byHour,
-        longestDay: longest
-          ? {
-              day: new Date(longest.day * 86_400_000).toISOString().slice(0, 10),
-              plays: longest.plays,
-              playedMs: longest.playedMs,
-            }
-          : null,
-        firstPlay: first ? historyFrom(first) : null,
-        song:
-          song && songTrack ? { track: songTrack, plays: song.plays, playedMs: song.playedMs, days: song.days } : null,
-      };
-    });
+          [...within],
+        );
+        // The orders, as the statistics break ties: the most plays, then the most time, then the lowest ID (a person: the
+        // host first, as SQLite sorts a null first, then by ID).
+        const byPlays = <T extends { plays: number; playedMs: number }>(a: T, b: T) =>
+          b.plays - a.plays || b.playedMs - a.playedMs;
+        const tracks = [...perTrack].sort((a, b) => byPlays(a, b) || a.id - b.id).slice(0, top);
+        // Two IDs compared as SQLite compares text (byte by byte), the host's null before any.
+        const byId = (a: string | null, b: string | null) =>
+          a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1;
+        const people = [...perPerson].sort((a, b) => byPlays(a, b) || byId(a.userId, b.userId)).slice(0, top);
+        // The song of the time: the track that came back on the most days (a song played every week all year over one
+        // played fifty times in one night), then the most plays, the most time, the lowest ID.
+        const song = [...perTrack].sort((a, b) => b.days - a.days || byPlays(a, b) || a.id - b.id)[0];
+        // The day with the most time listened; the earlier of two equal days.
+        const longest = [...perDay].sort((a, b) => b.playedMs - a.playedMs || b.plays - a.plays || a.day - b.day)[0];
+        // Seven and twenty-four slots, zero where nothing played, so a chart can draw every one. Day 0 of the epoch was a
+        // Thursday: (day + 4) % 7 is the day of the week, Sunday being 0.
+        const byWeekday = Array.from({ length: 7 }, () => 0);
+        for (const day of perDay) byWeekday[(day.day + 4) % 7] = (byWeekday[(day.day + 4) % 7] ?? 0) + day.plays;
+        const byHour = Array.from({ length: 24 }, () => 0);
+        for (const row of hours) byHour[int(row, 'hour')] = int(row, 'plays');
+        // A track as the database has it, for the few shown.
+        const track = async (id: number) => {
+          const found = await this.store.tracks.get(id);
+          if (!found) throw new StoreError(`track ${id} of the history cannot be read`);
+          return found;
+        };
+        // The top tracks read one after the other, in their order, then the song's.
+        const topTracks: { track: Track; plays: number; playedMs: number }[] = [];
+        for (const entry of tracks) {
+          topTracks.push({ track: await track(entry.id), plays: entry.plays, playedMs: entry.playedMs });
+        }
+        const songTrack = song ? await track(song.id) : null;
+        return {
+          plays: perTrack.reduce((sum, entry) => sum + entry.plays, 0),
+          playedMs: perTrack.reduce((sum, entry) => sum + entry.playedMs, 0),
+          tracks: perTrack.length,
+          people: perPerson.length,
+          days: perDay.length,
+          topTracks,
+          topPeople: people,
+          weekdays: byWeekday,
+          hours: byHour,
+          longestDay: longest
+            ? {
+                day: dateOf(longest.day),
+                plays: longest.plays,
+                playedMs: longest.playedMs,
+              }
+            : null,
+          firstPlay: first ? historyFrom(first) : null,
+          song:
+            song && songTrack
+              ? { track: songTrack, plays: song.plays, playedMs: song.playedMs, days: song.days }
+              : null,
+        };
+      },
+      { snapshot: true },
+    );
   }
 
   /** The newest play's ID of a server (0 when it has none): what changes whenever its history does. */
@@ -834,24 +1213,31 @@ export class HistoryRepository {
    * reaches: its oldest play, and whether it holds as many plays as it keeps (older ones were let go).
    */
   async months(guildId: string, offsetMs: number): Promise<{ months: string[]; oldest: number | null; full: boolean }> {
-    // Both questions of one moment's history (one transaction).
-    return this.store.transaction(async () => {
-      const rows = await this.store.sql.all(
-        `SELECT DISTINCT strftime('%Y-%m', (played_at + ?) / 1000, 'unixepoch') AS month FROM history
-           WHERE guild_id = ? ORDER BY month DESC`,
-        [offsetMs, guildId],
-      );
-      const reach = await one(
-        this.store.sql.get('SELECT MIN(played_at) AS oldest, COUNT(*) AS plays FROM history WHERE guild_id = ?', [
-          guildId,
-        ]),
-      );
-      return {
-        months: rows.map((row) => text(row, 'month')),
-        oldest: intOrNull(reach, 'oldest'),
-        full: int(reach, 'plays') >= HISTORY_KEEP,
-      };
-    });
+    const d = this.store.dialect;
+    // Both questions of one moment's history (one snapshot).
+    return this.store.transaction(
+      async () => {
+        // The days with plays (whole days of the viewer's time, as in stats()), made months here: a month is not a
+        // number of days, and the databases write dates each their own way.
+        const rows = await this.store.sql.all(
+          `SELECT DISTINCT ${d.quotient(`played_at + ${d.wholeNumber}`, DAY_MS)} AS day FROM history WHERE guild_id = ?`,
+          [Math.trunc(offsetMs), guildId],
+        );
+        const reach = await one(
+          this.store.sql.get('SELECT MIN(played_at) AS oldest, COUNT(*) AS plays FROM history WHERE guild_id = ?', [
+            guildId,
+          ]),
+        );
+        // Each month once, newest first ("YYYY-MM" sorts as the months do).
+        const months = [...new Set(rows.map((row) => dateOf(int(row, 'day')).slice(0, 7)))].sort().reverse();
+        return {
+          months,
+          oldest: intOrNull(reach, 'oldest'),
+          full: int(reach, 'plays') >= HISTORY_KEEP,
+        };
+      },
+      { snapshot: true },
+    );
   }
 
   /** The tracks of a server's newest `count` plays, newest first, each once. */
@@ -871,10 +1257,12 @@ export class HistoryRepository {
     guildId: string,
   ): Promise<{ trackId: number; plays: number; likes: number; durationMs: number | null }[]> {
     const rows = await this.store.sql.all(
+      // The length is grouped by as well (it is the track's own, one per track): every database then takes it
+      // beside the counts (MySQL's ONLY_FULL_GROUP_BY and PostgreSQL refuse a column the grouping does not name).
       `SELECT h.track_id, COUNT(*) AS plays, t.duration_ms,
                 (SELECT COUNT(*) FROM likes l WHERE l.track_id = h.track_id) AS likes
          FROM history h JOIN tracks t ON t.id = h.track_id
-         WHERE h.guild_id = ? GROUP BY h.track_id`,
+         WHERE h.guild_id = ? GROUP BY h.track_id, t.duration_ms`,
       [guildId],
     );
     return rows.map((row) => ({
@@ -945,10 +1333,19 @@ function historyFrom(row: Row): HistoryEntry {
 export class PlaylistRepository {
   private readonly store: Store;
   private readonly now: () => number;
+  // A playlist saved under a name: the server's list of that name kept (only its time changes), or a new one.
+  private readonly upsertSql: string;
 
   constructor(store: Store, now: () => number) {
     this.store = store;
     this.now = now;
+    this.upsertSql = store.dialect.upsert({
+      table: 'playlists',
+      columns: ['guild_id', 'name', 'created_by', 'created_at', 'updated_at'],
+      key: ['guild_id', 'name'],
+      update: ['updated_at'],
+      id: true,
+    });
   }
 
   /** Saves tracks under a name, replacing the list if the name exists (saving twice keeps the latest). */
@@ -958,23 +1355,16 @@ export class PlaylistRepository {
     if (clean.length === 0 || clean.length > 100) throw new StoreError('a playlist name is 1 to 100 characters');
     return this.store.transaction(async () => {
       const now = this.now();
-      const row = await one(
-        this.store.sql.get(
-          `INSERT INTO playlists (guild_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT (guild_id, name) DO UPDATE SET updated_at = excluded.updated_at
-           RETURNING id`,
-          [guildId, clean, createdBy, now, now],
-        ),
-      );
-      const id = int(row, 'id');
-      // Replace the items wholesale: the saved list is exactly what was passed.
+      // The id of the list, new or kept.
+      const id = await this.store.insertId(this.upsertSql, [guildId, clean, createdBy, now, now]);
+      // Replace the items wholesale: the saved list is exactly what was passed (written in batches of rows).
       await this.store.sql.run('DELETE FROM playlist_items WHERE playlist_id = ?', [id]);
-      for (const [position, trackId] of trackIds.entries()) {
-        await this.store.sql.run('INSERT INTO playlist_items (playlist_id, position, track_id) VALUES (?, ?, ?)', [
-          id,
-          position,
-          trackId,
-        ]);
+      const rows = trackIds.map((trackId, position): SqlValue[] => [id, position, trackId]);
+      for (const batch of batches(rows)) {
+        await this.store.sql.run(
+          `INSERT INTO playlist_items (playlist_id, position, track_id) VALUES ${batch.map(() => '(?, ?, ?)').join(', ')}`,
+          batch.flat(),
+        );
       }
       const saved = await this.get(id);
       if (!saved) throw new StoreError('the playlist just written cannot be read back');
@@ -1047,9 +1437,9 @@ export class PlaylistRepository {
           playlistId,
         ]);
       } catch (error) {
-        // The UNIQUE (guild_id, name) constraint is the check; turn its error into one people can read.
-        if (error instanceof Error && /UNIQUE/.test(error.message))
-          throw new StoreError(`a playlist named "${clean}" exists`);
+        // The UNIQUE (guild_id, name) constraint is the check; turn its error (each driver's own) into one people can
+        // read.
+        if (isUniqueViolation(error)) throw new StoreError(`a playlist named "${clean}" exists`);
         throw error;
       }
       const renamed = await this.get(playlistId);
@@ -1105,33 +1495,34 @@ export interface SavedPlayerState {
 export class PlayerStateRepository {
   private readonly store: Store;
   private readonly now: () => number;
+  // A server's state, replacing the one before.
+  private readonly upsertSql: string;
 
   constructor(store: Store, now: () => number) {
     this.store = store;
     this.now = now;
+    this.upsertSql = store.dialect.upsert({
+      table: 'player_state',
+      columns: ['guild_id', 'track_id', 'added_by', 'status', 'position_ms', 'repeat', 'updated_at', 'autoplay'],
+      key: ['guild_id'],
+      update: ['track_id', 'added_by', 'status', 'position_ms', 'repeat', 'updated_at', 'autoplay'],
+    });
   }
 
   // The autoplay mode may be left out (callers from before it existed): it is off then.
   async save(
     state: Omit<SavedPlayerState, 'updatedAt' | 'autoplay'> & { readonly autoplay?: AutoplayMode },
   ): Promise<void> {
-    await this.store.sql.run(
-      `INSERT INTO player_state (guild_id, track_id, added_by, status, position_ms, repeat, updated_at, autoplay)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (guild_id) DO UPDATE SET track_id = excluded.track_id, added_by = excluded.added_by,
-           status = excluded.status, position_ms = excluded.position_ms, repeat = excluded.repeat,
-           updated_at = excluded.updated_at, autoplay = excluded.autoplay`,
-      [
-        state.guildId,
-        state.trackId,
-        state.addedBy,
-        state.status,
-        Math.max(0, Math.round(state.positionMs)),
-        state.repeat,
-        this.now(),
-        state.autoplay ?? 'off',
-      ],
-    );
+    await this.store.sql.run(this.upsertSql, [
+      state.guildId,
+      state.trackId,
+      state.addedBy,
+      state.status,
+      Math.max(0, Math.round(state.positionMs)),
+      state.repeat,
+      this.now(),
+      state.autoplay ?? 'off',
+    ]);
   }
 
   async load(guildId: string): Promise<SavedPlayerState | null> {
@@ -1197,12 +1588,17 @@ export class SettingsRepository {
 
   /** Sets or clears (null) the text channel where jukecord tells the server about trouble. */
   async setAlertsChannel(guildId: string, channelId: string | null): Promise<void> {
-    await this.store.sql.run(
-      `INSERT INTO guild_settings (guild_id, alerts_channel_id, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT (guild_id) DO UPDATE SET alerts_channel_id = excluded.alerts_channel_id,
-           updated_at = excluded.updated_at`,
-      [guildId, channelId, this.now()],
-    );
+    await this.store.sql.run(this.setting('alerts_channel_id'), [guildId, channelId, this.now()]);
+  }
+
+  // The upsert of one of a server's settings (with its time), the others left as they are or at their defaults.
+  private setting(column: string): string {
+    return this.store.dialect.upsert({
+      table: 'guild_settings',
+      columns: ['guild_id', column, 'updated_at'],
+      key: ['guild_id'],
+      update: [column, 'updated_at'],
+    });
   }
 
   /** The servers that chose an alerts channel, with it. */
@@ -1215,11 +1611,7 @@ export class SettingsRepository {
 
   /** Sets or clears (null) the role that may change the queue. */
   async setDjRole(guildId: string, roleId: string | null): Promise<void> {
-    await this.store.sql.run(
-      `INSERT INTO guild_settings (guild_id, dj_role_id, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT (guild_id) DO UPDATE SET dj_role_id = excluded.dj_role_id, updated_at = excluded.updated_at`,
-      [guildId, roleId, this.now()],
-    );
+    await this.store.sql.run(this.setting('dj_role_id'), [guildId, roleId, this.now()]);
   }
 
   /** How a server's people share the music (see CommunitySettings); a server never configured gets the defaults. */
@@ -1256,9 +1648,12 @@ export class SettingsRepository {
     if (columns.length === 0) return;
     const names = columns.map(([name]) => name);
     await this.store.sql.run(
-      `INSERT INTO guild_settings (guild_id, updated_at, ${names.join(', ')}) VALUES (?, ?, ${names.map(() => '?').join(', ')})
-         ON CONFLICT (guild_id) DO UPDATE SET ${names.map((name) => `${name} = excluded.${name}`).join(', ')},
-           updated_at = excluded.updated_at`,
+      this.store.dialect.upsert({
+        table: 'guild_settings',
+        columns: ['guild_id', 'updated_at', ...names],
+        key: ['guild_id'],
+        update: [...names, 'updated_at'],
+      }),
       [guildId, this.now(), ...columns.map(([, value]) => value)],
     );
   }
@@ -1313,8 +1708,12 @@ export class DiscordRepository {
 
   async setCommandsHash(guildId: string, hash: string): Promise<void> {
     await this.store.sql.run(
-      `INSERT INTO discord_commands (guild_id, hash, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT (guild_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at`,
+      this.store.dialect.upsert({
+        table: 'discord_commands',
+        columns: ['guild_id', 'hash', 'updated_at'],
+        key: ['guild_id'],
+        update: ['hash', 'updated_at'],
+      }),
       [guildId, hash, this.now()],
     );
   }
@@ -1342,8 +1741,12 @@ export class UserRepository {
   /** Records or refreshes a person; names and avatars change, so the newest wins. */
   async upsert(person: Person): Promise<void> {
     await this.store.sql.run(
-      `INSERT INTO users (id, name, avatar, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar, updated_at = excluded.updated_at`,
+      this.store.dialect.upsert({
+        table: 'users',
+        columns: ['id', 'name', 'avatar', 'updated_at'],
+        key: ['id'],
+        update: ['name', 'avatar', 'updated_at'],
+      }),
       [person.id, person.name, person.avatar, this.now()],
     );
   }
@@ -1490,14 +1893,16 @@ export class TokenRepository {
   }): Promise<TokenRow> {
     const name = token.name.trim();
     if (name.length === 0 || name.length > 100) throw new StoreError('a token name is 1 to 100 characters');
-    const row = await one(
-      this.store.sql.get(
-        `INSERT INTO api_tokens (hash, name, kind, user_id, scope, created_at) VALUES (?, ?, ?, ?, ?, ?)
-         RETURNING id, name, kind, user_id, scope, created_at, used_at`,
+    // The write and the read back in one go (MySQL says only the new id; the row is read after it).
+    return this.store.transaction(async () => {
+      const id = await this.store.insertId(
+        'INSERT INTO api_tokens (hash, name, kind, user_id, scope, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         [token.hash, name, token.kind, token.userId, token.scope, this.now()],
-      ),
-    );
-    return tokenFrom(row);
+      );
+      const made = await this.get(id);
+      if (!made) throw new StoreError('the token just written cannot be read back');
+      return made;
+    });
   }
 
   /** The token with this hash, or null. */
@@ -1563,6 +1968,8 @@ function tokenFrom(row: Row): TokenRow {
 export class VoiceChannelRepository {
   private readonly store: Store;
   private readonly now: () => number;
+  // Each server's last write still under way, on a network database (see inTurn).
+  private readonly writing = new Map<string, Promise<unknown>>();
 
   constructor(store: Store, now: () => number) {
     this.store = store;
@@ -1571,16 +1978,43 @@ export class VoiceChannelRepository {
 
   /** Keeps the channel the bot is in now (replacing the one before). */
   async remember(guildId: string, channelId: string): Promise<void> {
-    await this.store.sql.run(
-      `INSERT INTO voice_channels (guild_id, channel_id, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id, updated_at = excluded.updated_at`,
-      [guildId, channelId, this.now()],
+    // The row of a server kept already is changed in place, so it keeps its place in the order they were first kept.
+    await this.inTurn(guildId, () =>
+      this.store.sql.run(
+        this.store.dialect.upsert({
+          table: 'voice_channels',
+          columns: ['guild_id', 'channel_id', 'updated_at'],
+          key: ['guild_id'],
+          update: ['channel_id', 'updated_at'],
+        }),
+        [guildId, channelId, this.now()],
+      ),
     );
   }
 
   /** Forgets a server's channel (the bot left it). */
   async forget(guildId: string): Promise<void> {
-    await this.store.sql.run('DELETE FROM voice_channels WHERE guild_id = ?', [guildId]);
+    await this.inTurn(guildId, () => this.store.sql.run('DELETE FROM voice_channels WHERE guild_id = ?', [guildId]));
+  }
+
+  /**
+   * One server's writes in the order they were asked for. The bot's voice events are written as they come, without
+   * waiting for each other (discord/rejoin.ts): SQLite's one connection takes such statements in turn by itself, but
+   * a network database's pool may run two at once on two connections, and a join and a move a moment later would land
+   * in either order (the channel joined first kept). There each write of a server waits for the one before it; a
+   * failed one is its caller's to report, and the next goes on all the same.
+   */
+  private inTurn<T>(guildId: string, write: () => Promise<T>): Promise<T> {
+    if (this.store.sql.dialect === 'sqlite') return write();
+    const before = this.writing.get(guildId);
+    const next = before === undefined ? write() : before.then(write, write);
+    this.writing.set(guildId, next);
+    // Let go once it is the server's last write and done (handled either way: its caller hears a failure).
+    const done = () => {
+      if (this.writing.get(guildId) === next) this.writing.delete(guildId);
+    };
+    next.then(done, done);
+    return next;
   }
 
   /** The channel kept for a server, or null when there is none. */
@@ -1591,7 +2025,9 @@ export class VoiceChannelRepository {
 
   /** Notes that the bot said in a server's channel that it came back, now. */
   async told(guildId: string): Promise<void> {
-    await this.store.sql.run('UPDATE voice_channels SET told_at = ? WHERE guild_id = ?', [this.now(), guildId]);
+    await this.inTurn(guildId, () =>
+      this.store.sql.run('UPDATE voice_channels SET told_at = ? WHERE guild_id = ?', [this.now(), guildId]),
+    );
   }
 
   /** When the bot last said in a server's channel that it came back (ms since 1970), or null for never. */
@@ -1602,7 +2038,10 @@ export class VoiceChannelRepository {
 
   /** Every channel kept, in the order they were first kept. */
   async all(): Promise<{ readonly guildId: string; readonly channelId: string }[]> {
-    const rows = await this.store.sql.all('SELECT guild_id, channel_id FROM voice_channels ORDER BY rowid');
+    // The order they were first kept in: SQLite's rowid, the servers' seq (see src/store/dialect.ts).
+    const rows = await this.store.sql.all(
+      `SELECT guild_id, channel_id FROM voice_channels ORDER BY ${this.store.dialect.insertionOrder}`,
+    );
     return rows.map((row) => ({ guildId: text(row, 'guild_id'), channelId: text(row, 'channel_id') }));
   }
 }
@@ -1653,16 +2092,21 @@ export class LyricsRepository {
 
   /** Keeps what a lookup found (or that it found nothing), replacing what was kept, and returns it as kept. */
   async save(lyrics: Omit<LyricsRow, 'fetchedAt'>): Promise<LyricsRow> {
-    const row = await one(
-      this.store.sql.get(
-        `INSERT INTO lyrics (track_id, kind, synced, plain, source_id, fetched_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (track_id) DO UPDATE SET kind = excluded.kind, synced = excluded.synced, plain = excluded.plain,
-           source_id = excluded.source_id, fetched_at = excluded.fetched_at
-         RETURNING *`,
+    // The write and the read back in one go (MySQL has no RETURNING; one statement more on the others too).
+    return this.store.transaction(async () => {
+      await this.store.sql.run(
+        this.store.dialect.upsert({
+          table: 'lyrics',
+          columns: ['track_id', 'kind', 'synced', 'plain', 'source_id', 'fetched_at'],
+          key: ['track_id'],
+          update: ['kind', 'synced', 'plain', 'source_id', 'fetched_at'],
+        }),
         [lyrics.trackId, lyrics.kind, capped(lyrics.synced), capped(lyrics.plain), lyrics.sourceId, this.now()],
-      ),
-    );
-    return lyricsFrom(row);
+      );
+      const saved = await this.get(lyrics.trackId);
+      if (!saved) throw new StoreError('the lyrics just written cannot be read back');
+      return saved;
+    });
   }
 }
 
@@ -1709,9 +2153,12 @@ export class MusicRepository {
   async set(trackId: number, music: TrackMusic): Promise<void> {
     const cut = (value: string) => value.trim().slice(0, MUSIC_NAME_MAX);
     await this.store.sql.run(
-      `INSERT INTO track_music (track_id, artist, title, album, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (track_id) DO UPDATE SET artist = excluded.artist, title = excluded.title, album = excluded.album,
-           updated_at = excluded.updated_at`,
+      this.store.dialect.upsert({
+        table: 'track_music',
+        columns: ['track_id', 'artist', 'title', 'album', 'updated_at'],
+        key: ['track_id'],
+        update: ['artist', 'title', 'album', 'updated_at'],
+      }),
       [trackId, cut(music.artist), cut(music.title), music.album === null ? null : cut(music.album), this.now()],
     );
   }
@@ -1756,14 +2203,12 @@ export class ListenLinkRepository {
     // The write and the read back in one go.
     return this.store.transaction(async () => {
       const now = this.now();
-      const row = await one(
-        this.store.sql.get(
-          `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
-           VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
-          [link.hash, link.guildId, link.createdBy, now, now + link.lastsMs, link.maxGuests],
-        ),
+      const id = await this.store.insertId(
+        `INSERT INTO listen_links (hash, guild_id, created_by, created_at, expires_at, max_guests)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        [link.hash, link.guildId, link.createdBy, now, now + link.lastsMs, link.maxGuests],
       );
-      const made = await this.get(int(row, 'id'));
+      const made = await this.get(id);
       if (!made) throw new StoreError('the listening link just written cannot be read back');
       return made;
     });
@@ -1936,11 +2381,19 @@ export class LikeRepository {
 
   /** Likes a track; false when it was liked already (liking twice changes nothing, not even when). */
   async add(owner: string, trackId: number): Promise<boolean> {
-    const result = await this.store.sql.run(
-      'INSERT OR IGNORE INTO likes (owner, track_id, created_at) VALUES (?, ?, ?)',
-      [owner, trackId, this.now()],
-    );
-    return result.changes > 0;
+    const dialect = this.store.dialect;
+    try {
+      const result = await this.store.sql.run(dialect.insertOrIgnore('likes', ['owner', 'track_id', 'created_at']), [
+        owner,
+        trackId,
+        this.now(),
+      ]);
+      return result.changes > 0;
+    } catch (error) {
+      // MySQL's INSERT refused for the like that is there already: liked before, nothing changes (see the dialect).
+      if (!dialect.ignoresDuplicates && isUniqueViolation(error)) return false;
+      throw error;
+    }
   }
 
   /** Takes a like back; false when there was none. */

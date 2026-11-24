@@ -10,6 +10,7 @@
 #   ./jukecord restart     stop and start again (a changed .env needs ./jukecord up instead)
 #   ./jukecord backup      a copy of the database, into ./backups
 #   ./jukecord restore F   put a backup back (the current database is kept beside it first)
+#   ./jukecord db ...      the database itself: db status, db copy <from> [<to>] (works while jukecord is stopped)
 #   ./jukecord down        stop (the data stays in the volume)
 #   ./jukecord <command>   anything else goes to the jukecord command: np, add, skip, queue, token create ...
 #
@@ -85,6 +86,26 @@ inside() {
   # A terminal when there is one (colours, Ctrl+C); none for scripts and pipes.
   if [ -t 0 ] && [ -t 1 ]; then tty=(-it); else tty=(-T); fi
   compose exec "${tty[@]}" -e "TZ=$(timezone)" "$service" jukecord "$@"
+}
+
+# Runs the jukecord command in a container of its own, for the db commands, which work on the database itself: in the
+# running container when there is one, else in a new one that ends with the command (jukecord need not be running).
+database_command() {
+  local tty=()
+  if running; then
+    inside "$@"
+    return
+  fi
+  # A terminal when there is one (Ctrl+C); none for scripts and pipes.
+  if ! { [ -t 0 ] && [ -t 1 ]; }; then tty=(-T); fi
+  compose run --rm --no-deps "${tty[@]}" -e "TZ=$(timezone)" "$service" jukecord "$@"
+}
+
+# Whether .env names the database (JUKECORD_DATABASE_URL, or its _FILE): a server, or a SQLite file of its own. A restore
+# then copies the backup into it (jukecord db copy); without either the database is the volume's jukecord.db file, and
+# the file is swapped.
+configured_database() {
+  [ -n "$(setting JUKECORD_DATABASE_URL)" ] || [ -n "$(setting JUKECORD_DATABASE_URL_FILE)" ]
 }
 
 # Runs the jukecord command inside with these words, and an import's file with them: its words that are not options
@@ -414,6 +435,44 @@ if (verdict !== "ok") {
     trap start_again EXIT
     # Stopped first: the database must not change while it is replaced.
     compose stop "$service"
+    if configured_database; then
+      # The database .env names: the backup goes into the volume, what the database holds now is saved beside it as a
+      # backup file (so a wrong file can be undone), and the backup is copied into the database in one transaction
+      # (jukecord db copy --replace: all of it, or nothing changed). Each step in a container of its own, as jukecord's
+      # user. A database with no jukecord data yet has nothing to save.
+      restoring="restore-$stamp.db"
+      saved="jukecord-before-restore-$stamp.db"
+      # The file goes in on stdin: a mounted file would keep this machine's owner and mode, which that user cannot read.
+      # shellcheck disable=SC2016
+      if ! compose run --rm --no-deps -T -e "FILE=$restoring" --entrypoint sh "$service" -c 'umask 077 && cat > "/data/$FILE"' <"$file"; then
+        say "the backup could not be copied into the volume (is it full?); nothing was changed"
+        exit 1
+      fi
+      # Removes the copy of the backup from the volume, whatever happened.
+      clear_restoring() { compose run --rm --no-deps -T --entrypoint rm "$service" -f "/data/$restoring" >/dev/null 2>&1 || true; }
+      if ! out=$(compose run --rm --no-deps -T "$service" jukecord db copy configured "sqlite:/data/$saved" 2>&1); then
+        if printf '%s\n' "$out" | grep -q 'holds no jukecord data'; then
+          saved=''
+        else
+          printf '%s\n' "$out" >&2
+          clear_restoring
+          say "what the database holds now could not be saved first; nothing was changed"
+          exit 1
+        fi
+      fi
+      if ! compose run --rm --no-deps -T "$service" jukecord db copy "sqlite:/data/$restoring" --replace; then
+        clear_restoring
+        say "the backup was not copied into the database (the line above says why); it holds what it held"
+        exit 1
+      fi
+      clear_restoring
+      if [ -n "$saved" ]; then
+        printf 'restored %s into the database (what it held before: %s in the volume)\n' "$file" "$saved"
+      else
+        printf 'restored %s into the database\n' "$file"
+      fi
+      exit 0
+    fi
     # Done inside the volume as jukecord's own user, with the backup on stdin: a mounted file would keep this
     # machine's owner and mode (0600), which that user cannot read. Every step must work (set -e) or nothing changes.
     # The file is checked again as it arrived, before the current one is touched. The current one is folded into one
@@ -445,6 +504,11 @@ mv jukecord.db.restoring jukecord.db'
     ;;
   version)
     inside status
+    ;;
+  db)
+    # The database itself (db status, db copy), in jukecord's container or a new one: it works while jukecord is
+    # stopped. A SQLite file named in an address is a path inside the container (/data/... is the volume).
+    database_command "$@"
     ;;
   help | -h | --help)
     # Help with a command of the jukecord command's own (./jukecord help add): that command's help, from the command

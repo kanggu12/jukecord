@@ -200,6 +200,10 @@ export function helpText(): string {
   ];
   lines.push(
     '',
+    'The database itself, from here (also while jukecord is stopped; jukecord help db says more):',
+    '  db status [<address>]             The database: kind, version, schema, size, round trip',
+    '  db copy <from> [<to>] [--replace] Every row of one database into another',
+    '',
     'Settings: JUKECORD_URL, JUKECORD_TOKEN, JUKECORD_GUILD (or the options above).',
     'Without a token, the host token in the data directory is used.',
   );
@@ -310,6 +314,15 @@ export async function run(
   if (words.flags.has('version')) {
     print(`jukecord ${VERSION}`);
     return 0;
+  }
+  // The database's own commands (jukecord db ...): run here on the database itself, not through jukecord's API, so they
+  // work while it is stopped. Their module (and the drivers) are loaded only for them.
+  if (words.args[0] === 'db' || (words.args[0] === 'help' && words.args[1] === 'db')) {
+    const { runDatabaseCommand } = await import('./db.ts');
+    const asked = words.args[0] === 'help' || words.flags.has('help');
+    const flags = new Map(words.flags);
+    flags.delete('help');
+    return runDatabaseCommand(asked ? ['help'] : words.args.slice(1), flags, env, print);
   }
   // A typing mistake found before anything is asked: as JSON under --json too (code "usage"), as the later ones are.
   const mistake = (message: string): number => {

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MemoryCache } from '../../src/cache/memory.ts';
-import { databaseReport, queryKind } from '../../src/metrics/database.ts';
+import { databaseReport } from '../../src/metrics/database.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import { busReport, sharedCacheReport } from '../../src/metrics/services.ts';
 import { SqliteExecutor } from '../../src/store/sqlite.ts';
@@ -20,19 +20,7 @@ function seriesValue(text: string, series: string): number | undefined {
 }
 
 describe('the database report', () => {
-  it("names a statement's kind by its first word, never by its text", () => {
-    assert.equal(queryKind('SELECT * FROM tracks WHERE id = ?'), 'select');
-    assert.equal(queryKind('\n   with recent AS (SELECT 1) SELECT * FROM recent'), 'select');
-    assert.equal(queryKind('INSERT INTO likes (owner, track_id) VALUES (?, ?)'), 'insert');
-    assert.equal(queryKind('REPLACE INTO x VALUES (1)'), 'insert');
-    assert.equal(queryKind('UPDATE queue_items SET position = ?'), 'update');
-    assert.equal(queryKind('DELETE FROM sessions WHERE expires_at <= ?'), 'delete');
-    assert.equal(queryKind('SAVEPOINT sp1'), 'transaction');
-    assert.equal(queryKind('PRAGMA user_version'), 'other');
-    assert.equal(queryKind('VACUUM INTO ?'), 'other');
-    assert.equal(queryKind(''), 'other');
-  });
-
+  // A statement's kind by its first word (the label, never the text) is tested with statementKind, in sql-dialect.
   it('counts each statement by kind as it ends, a transaction whole, and a failure as one', async () => {
     const registry = new MetricsRegistry();
     const store = await Store.open(SqliteExecutor.open(':memory:', { report: databaseReport(registry) }));

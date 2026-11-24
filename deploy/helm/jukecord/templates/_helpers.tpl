@@ -110,6 +110,19 @@ upgrade ask the cluster), or forced (helm template asks none, and would never ma
 {{- if and $monitor.enabled (or $monitor.force (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) -}}true{{- end -}}
 {{- end -}}
 
+{{/* Whether jukecord reads its database's address from a Secret: given in the values, or in a Secret of yours. */}}
+{{- define "jukecord.readsDatabase" -}}
+{{- if or .Values.database.url .Values.database.existingSecret -}}true{{- end -}}
+{{- end -}}
+
+{{/* The Secret holding the database's address under the key url: the user's own, or the chart's. */}}
+{{- define "jukecord.databaseSecretName" -}}
+{{- .Values.database.existingSecret | default (printf "%s-database" (include "jukecord.fullname" .) | trunc 63 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/* Where the database's address is mounted as a file; jukecord reads it through JUKECORD_DATABASE_URL_FILE. */}}
+{{- define "jukecord.databaseDir" -}}/run/secrets/jukecord-database{{- end -}}
+
 {{/* Whether env or extraEnv sets a variable, so the chart does not set it a second time: (list . "NAME"). */}}
 {{- define "jukecord.userSets" -}}
 {{- $root := index . 0 -}}
@@ -158,7 +171,7 @@ without a host or with a wildcard host, which names no single address. The Deplo
 
 {{/* Values that cannot work together, refused with a message that says what to change. */}}
 {{- define "jukecord.validate" -}}
-{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" "JUKECORD_METRICS_TOKEN_FILE" "metrics.token or metrics.existingSecret" -}}
+{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" "JUKECORD_METRICS_TOKEN_FILE" "metrics.token or metrics.existingSecret" "JUKECORD_DATABASE_URL_FILE" "database.url or database.existingSecret" -}}
 {{- $names := list -}}
 {{- range $name, $_ := (.Values.env | default dict) -}}{{- $names = append $names (list "env" $name) -}}{{- end -}}
 {{- range (.Values.extraEnv | default list) -}}{{- $names = append $names (list "extraEnv" .name) -}}{{- end -}}
@@ -171,6 +184,9 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- if eq $name "JUKECORD_METRICS_TOKEN" -}}
 {{- fail (printf "%s: JUKECORD_METRICS_TOKEN is not set here. The metrics token goes in metrics.token, or in a Secret named by metrics.existingSecret (key metricsToken); the chart gives it to jukecord as a file and to the ServiceMonitor." $where) -}}
 {{- end -}}
+{{- if eq $name "JUKECORD_DATABASE_URL" -}}
+{{- fail (printf "%s: JUKECORD_DATABASE_URL is not set here. The database's address goes in database.url, or under the key url of a Secret named by database.existingSecret; the chart gives it to jukecord as a file (it holds a password)." $where) -}}
+{{- end -}}
 {{- if hasKey $chartSets $name -}}
 {{- fail (printf "%s: %s is set by the chart (from %s); leave it out." $where $name (index $chartSets $name)) -}}
 {{- end -}}
@@ -182,6 +198,9 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- end -}}
 {{- if and .Values.discord.clientSecret (not (or .Values.discord.clientId (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID")))) -}}
 {{- fail "discord.clientSecret is set without discord.clientId. Logging in with Discord needs both: the application's ID (discord.clientId, quoted) and its OAuth2 secret; leave both empty for host logins only." -}}
+{{- end -}}
+{{- if and .Values.database.url .Values.database.existingSecret -}}
+{{- fail "database.url and database.existingSecret are both set; set one: the address in the values, or under the key url of a Secret of yours." -}}
 {{- end -}}
 {{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}
 {{- fail "discord.existingSecret is set together with discord.token or discord.clientSecret, which would be ignored. Put the token and the OAuth secret in the Secret named by existingSecret and leave those two empty, or leave existingSecret empty to have the chart make the Secret from them." -}}

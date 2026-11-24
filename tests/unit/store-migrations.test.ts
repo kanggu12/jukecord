@@ -6,7 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { MIGRATIONS } from '../../src/store/schema.ts';
 import { COMMUNITY_DEFAULTS, Store } from '../../src/store/store.ts';
-import { addTracks, memoryStore } from '../support/store.ts';
+import { eachDatabase } from '../support/databases.ts';
+import { addTracks } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
 
@@ -125,9 +126,9 @@ describe('an upgrade from the last release', () => {
   });
 });
 
-describe('history pruning', () => {
+eachDatabase('history pruning', (db) => {
   it("keeps a server's newest entries and leaves other servers alone", async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [track] = await addTracks(store, 1);
     assert.ok(track);
     for (let i = 0; i < 30; i += 1)
@@ -142,9 +143,9 @@ describe('history pruning', () => {
   });
 });
 
-describe('DiscordRepository', () => {
+eachDatabase('DiscordRepository', (db) => {
   it('remembers the fingerprint of the commands registered in each server', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     assert.equal(await store.discord.commandsHash(GUILD), null);
     await store.discord.setCommandsHash(GUILD, 'abc');
     await store.discord.setCommandsHash(GUILD, 'def');
@@ -171,9 +172,11 @@ describe('the voice channel kept for a restart, and the alerts channel', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+eachDatabase('the voice channel and the alerts channel, kept', (db) => {
   it('keeps one voice channel per server, replaced by the next and forgotten on request', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     await store.voiceChannels.remember(GUILD, '400000000000000001');
     await store.voiceChannels.remember(GUILD, '400000000000000002');
     await store.voiceChannels.remember('100000000000000002', '400000000000000009');
@@ -217,9 +220,11 @@ describe('the community settings', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+eachDatabase('the community settings, kept', (db) => {
   it('changes only what it is given, for one server, and keeps the DJ role', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     // A server never configured reads as the defaults, without a row.
     assert.deepEqual(await store.settings.community(GUILD), COMMUNITY_DEFAULTS);
     await store.settings.setCommunity(GUILD, { takeTurns: true, personLimit: 3 });
@@ -241,7 +246,7 @@ describe('the community settings', () => {
   });
 
   it('reads a preset this version does not know as the plain sound', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     await store.settings.setCommunity(GUILD, { volume: 80 });
     await store.sql.run("UPDATE guild_settings SET sound = 'nightcore' WHERE guild_id = ?", [GUILD]);
     assert.equal((await store.settings.community(GUILD)).sound, 'off');

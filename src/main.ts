@@ -51,8 +51,10 @@ import { MetricsRegistry } from './metrics/registry.ts';
 import { diskMetrics, EventLoop, runtimeMetrics } from './metrics/runtime.ts';
 import { describeService, discordMetrics, playerMetrics } from './metrics/service.ts';
 import { sharedCacheReport } from './metrics/services.ts';
-import { SqliteExecutor } from './store/sqlite.ts';
-import { Store } from './store/store.ts';
+import { describeAddress } from './store/address.ts';
+import { ConnectionError } from './store/network.ts';
+import { openStore } from './store/open.ts';
+import type { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
 import { Auth, ensureHostToken } from './web/auth.ts';
@@ -96,6 +98,8 @@ async function main(): Promise<number> {
   for (const warning of config.warnings) log.warn(warning);
   log.info(`starting jukecord ${VERSION}`, {
     data: config.dataDir,
+    // Where the database is, never with its user or password.
+    database: describeAddress(config.database.address),
     discord: config.discord.token ? 'yes' : 'browser-only',
   });
 
@@ -134,10 +138,24 @@ async function main(): Promise<number> {
     crashCheckpoint().then(exit, exit);
   });
 
-  // The database, each statement reported for the metrics.
-  const store = await Store.open(
-    SqliteExecutor.open(path.join(config.dataDir, 'jukecord.db'), { report: databaseReport(registry) }),
-  );
+  // The database JUKECORD_DATABASE_URL names (the data folder's SQLite file by default); a server is waited for while it
+  // does not answer yet, up to a minute. One that cannot be reached, or refuses jukecord, is said in its words and
+  // jukecord ends: there is nothing it can do without its database. Each statement is reported for the metrics.
+  let store: Store;
+  try {
+    store = await openStore(config.database.address, {
+      pool: config.database.pool,
+      log: log.child('database'),
+      report: databaseReport(registry),
+    });
+  } catch (error) {
+    if (!(error instanceof ConnectionError)) throw error;
+    log.error('jukecord cannot reach its database', { reason: error.message });
+    return 1;
+  }
+  if (config.database.address.kind !== 'sqlite') {
+    log.info('the database is open', { server: `${store.sql.server.product} ${store.sql.server.version}` });
+  }
   // The shared cache (src/cache): in this process's memory, all one process needs; its reads are counted.
   const sharedCache = new MemoryCache({ report: sharedCacheReport(registry) });
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
@@ -417,6 +435,8 @@ async function main(): Promise<number> {
     oidc,
     ldap,
     log: log.child('auth'),
+    // Every login counted by its way in and how it went (jukecord_logins_total).
+    metrics: registry,
   });
   const web: WebServer = await createWebServer({
     host: config.host,

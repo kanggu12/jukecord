@@ -171,4 +171,14 @@ describe('/readyz', () => {
     assert.equal(answer.statusCode, 503);
     assert.equal((answer.json() as { parts: Record<string, { state: string }> }).parts.database?.state, 'down');
   });
+
+  it('answers 503 when another jukecord moved the database to a schema this one does not know', async () => {
+    const server = await testServer({ browserOnly: true });
+    servers.push(server);
+    // What a newer jukecord sharing the database leaves behind: a schema past this one's last migration.
+    await server.store.sql.exec('PRAGMA user_version = 999');
+    const answer = await server.web.app.inject({ method: 'GET', url: '/readyz' });
+    assert.equal(answer.statusCode, 503);
+    assert.equal((answer.json() as { parts: Record<string, { state: string }> }).parts.database?.state, 'down');
+  });
 });

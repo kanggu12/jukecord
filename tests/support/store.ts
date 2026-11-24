@@ -5,9 +5,14 @@ import type { Track } from '../../src/core/types.ts';
 import type { RunResult, SqlExecutor, SqlRow, SqlValue } from '../../src/store/sql.ts';
 import { SqliteExecutor } from '../../src/store/sqlite.ts';
 import { Store } from '../../src/store/store.ts';
+import { serverExecutor, serverStore, TEST_STORE } from './databases.ts';
 
-/** An in-memory database at the latest schema; `now` fixes the timestamps it writes. */
+/**
+ * An in-memory database at the latest schema; `now` fixes the timestamps it writes. With JUKECORD_TEST_STORE set, an
+ * empty database of that server's instead (see tests/support/databases.ts), so the whole suite can run on it.
+ */
 export function memoryStore(now: () => number = () => Date.UTC(2026, 10, 11)): Promise<Store> {
+  if (TEST_STORE) return serverStore(TEST_STORE, now);
   return Store.open(':memory:', { now });
 }
 
@@ -21,8 +26,9 @@ export type Hold = (what: string) => Promise<void> | undefined;
  * An in-memory database whose every statement waits a turn of the event loop first, as a network database's answer
  * does: what interleaves at an await does interleave here, so a test sees what the server's lanes keep apart.
  */
-export function slowMemoryStore(now: () => number = () => Date.UTC(2026, 10, 11), hold?: Hold): Promise<Store> {
-  return Store.open(slowly(SqliteExecutor.open(':memory:'), hold), { now });
+export async function slowMemoryStore(now: () => number = () => Date.UTC(2026, 10, 11), hold?: Hold): Promise<Store> {
+  const sql = TEST_STORE ? await serverExecutor(TEST_STORE) : SqliteExecutor.open(':memory:');
+  return Store.open(slowly(sql, hold), { now });
 }
 
 // An executor that answers like the one it wraps, a turn of the event loop later (and after `hold`, when it says so).
@@ -33,6 +39,7 @@ function slowly(sql: SqlExecutor, hold?: Hold): SqlExecutor {
   };
   return {
     dialect: sql.dialect,
+    server: sql.server,
     get isOpen() {
       return sql.isOpen;
     },
@@ -52,9 +59,9 @@ function slowly(sql: SqlExecutor, hold?: Hold): SqlExecutor {
       await turn(text);
       return sql.exec(text);
     },
-    transaction: async (fn) => {
+    transaction: async (fn, options) => {
       await turn('BEGIN');
-      return sql.transaction(fn);
+      return sql.transaction(fn, options);
     },
     close: () => sql.close(),
   };
