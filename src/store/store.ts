@@ -1953,6 +1953,8 @@ function tokenFrom(row: Row): TokenRow {
 export class VoiceChannelRepository {
   private readonly store: Store;
   private readonly now: () => number;
+  // Each server's last write still under way, on a network database (see inTurn).
+  private readonly writing = new Map<string, Promise<unknown>>();
 
   constructor(store: Store, now: () => number) {
     this.store = store;
@@ -1962,20 +1964,42 @@ export class VoiceChannelRepository {
   /** Keeps the channel the bot is in now (replacing the one before). */
   async remember(guildId: string, channelId: string): Promise<void> {
     // The row of a server kept already is changed in place, so it keeps its place in the order they were first kept.
-    await this.store.sql.run(
-      this.store.dialect.upsert({
-        table: 'voice_channels',
-        columns: ['guild_id', 'channel_id', 'updated_at'],
-        key: ['guild_id'],
-        update: ['channel_id', 'updated_at'],
-      }),
-      [guildId, channelId, this.now()],
+    await this.inTurn(guildId, () =>
+      this.store.sql.run(
+        this.store.dialect.upsert({
+          table: 'voice_channels',
+          columns: ['guild_id', 'channel_id', 'updated_at'],
+          key: ['guild_id'],
+          update: ['channel_id', 'updated_at'],
+        }),
+        [guildId, channelId, this.now()],
+      ),
     );
   }
 
   /** Forgets a server's channel (the bot left it). */
   async forget(guildId: string): Promise<void> {
-    await this.store.sql.run('DELETE FROM voice_channels WHERE guild_id = ?', [guildId]);
+    await this.inTurn(guildId, () => this.store.sql.run('DELETE FROM voice_channels WHERE guild_id = ?', [guildId]));
+  }
+
+  /**
+   * One server's writes in the order they were asked for. The bot's voice events are written as they come, without
+   * waiting for each other (discord/rejoin.ts): SQLite's one connection takes such statements in turn by itself, but
+   * a network database's pool may run two at once on two connections, and a join and a move a moment later would land
+   * in either order (the channel joined first kept). There each write of a server waits for the one before it; a
+   * failed one is its caller's to report, and the next goes on all the same.
+   */
+  private inTurn<T>(guildId: string, write: () => Promise<T>): Promise<T> {
+    if (this.store.sql.dialect === 'sqlite') return write();
+    const before = this.writing.get(guildId);
+    const next = before === undefined ? write() : before.then(write, write);
+    this.writing.set(guildId, next);
+    // Let go once it is the server's last write and done (handled either way: its caller hears a failure).
+    const done = () => {
+      if (this.writing.get(guildId) === next) this.writing.delete(guildId);
+    };
+    next.then(done, done);
+    return next;
   }
 
   /** The channel kept for a server, or null when there is none. */
@@ -1986,7 +2010,9 @@ export class VoiceChannelRepository {
 
   /** Notes that the bot said in a server's channel that it came back, now. */
   async told(guildId: string): Promise<void> {
-    await this.store.sql.run('UPDATE voice_channels SET told_at = ? WHERE guild_id = ?', [this.now(), guildId]);
+    await this.inTurn(guildId, () =>
+      this.store.sql.run('UPDATE voice_channels SET told_at = ? WHERE guild_id = ?', [this.now(), guildId]),
+    );
   }
 
   /** When the bot last said in a server's channel that it came back (ms since 1970), or null for never. */

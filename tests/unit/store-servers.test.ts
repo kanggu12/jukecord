@@ -105,6 +105,17 @@ eachDatabase('what differs between the databases', (db) => {
     assert.equal(Number((await a.sql.get('SELECT COUNT(*) AS n FROM tracks'))?.n), 1);
   });
 
+  it('keeps a server’s voice channel writes in the order they were asked for, though nobody waits between them', async () => {
+    const store = await db.open();
+    // The bot's voice events are written as they come (discord/rejoin.ts): fifty moves at once, then a read.
+    const writes: Promise<void>[] = [];
+    for (let move = 0; move < 50; move += 1) writes.push(store.voiceChannels.remember(GUILD, `channel-${move}`));
+    writes.push(store.voiceChannels.told(GUILD));
+    await Promise.all(writes);
+    assert.equal(await store.voiceChannels.get(GUILD), 'channel-49');
+    assert.notEqual(await store.voiceChannels.toldAt(GUILD), null);
+  });
+
   it('reports each statement by its kind, each transaction whole, a failure as one, and its connections', async () => {
     const seen: string[] = [];
     let connections: (() => { busy: number; idle: number; waiting: number }) | null = null;

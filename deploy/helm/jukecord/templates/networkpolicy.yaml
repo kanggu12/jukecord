@@ -36,6 +36,21 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+    {{- if include "jukecord.readsDatabase" . }}
+    # The database, which is often in the cluster's private range (out of reach by the rule below): the rules given
+    # (networkPolicy.egressTo), or any pod of the release's namespace on PostgreSQL's and MySQL's ports.
+    {{- with .Values.networkPolicy.egressTo }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }}
+    - to:
+        - podSelector: {}
+      ports:
+        - port: 5432
+          protocol: TCP
+        - port: 3306
+          protocol: TCP
+    {{- end }}
+    {{- end }}
     # The internet, any port: Discord voice uses UDP on ports it chooses.
     - to:
         - ipBlock:

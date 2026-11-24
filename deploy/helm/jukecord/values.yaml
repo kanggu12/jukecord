@@ -26,6 +26,16 @@ discord:
   # The application's OAuth2 secret, for logging in to the panel with Discord.
   clientSecret: ""
 
+database:
+  # Where jukecord keeps its data: empty for the SQLite file in the data volume (persistence below), or a database
+  # server's address as JUKECORD_DATABASE_URL takes it: postgres://user:password@host:5432/jukecord or
+  # mysql://user:password@host:3306/jukecord (MariaDB too), TLS asked for in it (?sslmode=verify-full). The chart keeps
+  # it in a Secret and gives it to jukecord as a file (it holds a password). The data volume still keeps the media
+  # cache, the logs and the backups.
+  url: ""
+  # A Secret of yours holding the address under the key url, instead of url above (the chart refuses both).
+  existingSecret: ""
+
 # Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
 publicUrl: ""
 
@@ -111,6 +121,15 @@ networkPolicy:
   #       matchLabels:
   #         app.kubernetes.io/name: ingress-nginx
   ingressFrom: []
+  # Where the database is, as NetworkPolicy egress rules (to, ports): the cluster's private ranges are out of reach
+  # otherwise. Empty with a database set: any pod of the release's namespace on 5432 (PostgreSQL) and 3306 (MySQL,
+  # MariaDB). For a database elsewhere in a private range:
+  #   - to:
+  #       - ipBlock:
+  #           cidr: 10.20.0.0/24
+  #     ports:
+  #       - port: 5432
+  egressTo: []
   # Private ranges the pod may not reach; adjust when the cluster uses others.
   privateRanges:
     - 10.0.0.0/8

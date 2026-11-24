@@ -27,6 +27,18 @@
         "clientSecret": { "type": "string" }
       }
     },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The database's address as JUKECORD_DATABASE_URL takes it; empty for the SQLite file in the data volume",
+          "pattern": "^(|sqlite:.*|(postgres|postgresql|mysql|mariadb)://.+)$"
+        },
+        "existingSecret": { "type": "string", "description": "A Secret holding the address under the key url" }
+      }
+    },
     "publicUrl": { "type": "string", "pattern": "^(|https?://[^\\s/]+(/.*)?)$" },
     "env": {
       "type": "object",
@@ -109,6 +121,19 @@
               "podSelector": { "type": "object" },
               "namespaceSelector": { "type": "object" },
               "ipBlock": { "type": "object" }
+            }
+          }
+        },
+        "egressTo": {
+          "type": "array",
+          "description": "NetworkPolicy egress rules (to, ports) to the database; empty with a database set: the release's namespace on 5432 and 3306",
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "to": { "type": "array", "items": { "type": "object" } },
+              "ports": { "type": "array", "items": { "type": "object" } }
             }
           }
         },
