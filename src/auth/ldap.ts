@@ -8,6 +8,7 @@
  * of everybody. An empty password is refused before anything is sent: a directory takes a bind with a name and no
  * password as an anonymous bind (RFC 4513, 5.1.2) and says yes to it.
  */
+import { isIP } from 'node:net';
 import type tls from 'node:tls';
 import {
   AndFilter,
@@ -234,11 +235,13 @@ export class LdapLogin {
   // CA file when one is given (the system's otherwise), and nothing sent until the connection is encrypted.
   private async open(): Promise<DirectoryClient> {
     const { settings } = this.options;
-    const host = new URL(settings.url).hostname;
+    // The host the URL names (an address in brackets without them).
+    const host = new URL(settings.url).hostname.replace(/^\[|\]$/g, '');
     const tlsOptions: tls.ConnectionOptions = {
       ...(settings.ca ? { ca: settings.ca } : {}),
-      // The name the certificate must carry: the host the URL names (an address in brackets without them).
-      servername: host.replace(/^\[|\]$/g, ''),
+      // The name the certificate must carry: the host's name, sent too (SNI); an address is checked as an address,
+      // and never sent (SNI takes names only, and Node is to ignore an address there).
+      ...(isIP(host) === 0 ? { servername: host } : { host }),
       minVersion: 'TLSv1.2',
     };
     const options: ClientOptions = {

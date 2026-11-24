@@ -237,6 +237,38 @@ describe('LdapLogin', () => {
     }
   });
 
+  it('checks the certificate of a directory named by its address against that address, and sends no name for it', async () => {
+    for (const [url, host] of [
+      ['ldaps://192.0.2.10', '192.0.2.10'],
+      ['ldap://[2001:db8::10]', '2001:db8::10'],
+    ] as const) {
+      const seen: ClientOptions[] = [];
+      const started: unknown[] = [];
+      const fake = directory();
+      const ldap = new LdapLogin({
+        settings: { ...SETTINGS, url, startTls: url.startsWith('ldap:') },
+        log,
+        connect: (options) => {
+          seen.push(options);
+          const client = fake.connect();
+          return {
+            ...client,
+            startTLS: async (tlsOptions?: unknown) => {
+              started.push(tlsOptions);
+              return client.startTLS();
+            },
+          };
+        },
+      });
+      await ldap.login('alice', 'alice-password');
+      const given = (url.startsWith('ldaps:') ? seen[0]?.tlsOptions : started[0]) as
+        | Record<string, unknown>
+        | undefined;
+      assert.equal(given?.host, host, url);
+      assert.equal(given?.servername, undefined, url);
+    }
+  });
+
   it('refuses a filter that finds two people', async () => {
     const server = directory();
     assert.equal(
