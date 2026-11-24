@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { readAuthSettings, splitGroups } from '../../src/auth/settings.ts';
+import { describeAuth, readAuthSettings, splitGroups } from '../../src/auth/settings.ts';
 import { ConfigError, type ConfigFiles, describeConfig, loadConfig } from '../../src/config.ts';
 
 // Files as a table: what a test puts there can be read, nothing else.
@@ -264,6 +264,24 @@ describe('login settings', () => {
     // No "is not a jukecord setting" warning for any of them.
     const config = loadConfig({ ...KEYCLOAK, ...OPENLDAP }, '/srv');
     assert.deepEqual(config.warnings, []);
+  });
+
+  it("reads the scheme of the directory's address in any case: LDAPS:// is ldaps, and the doctor says so", () => {
+    const files = filesOf({ '/srv/ca.pem': '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n' });
+    for (const url of ['ldaps://dc.corp.example:636', 'LDAPS://dc.corp.example:636', 'Ldaps://dc.corp.example']) {
+      const read = readAuthSettings(
+        { ...OPENLDAP, JUKECORD_LDAP_URL: url, JUKECORD_LDAP_CA_FILE: 'ca.pem' },
+        '/srv',
+        files,
+      );
+      assert.deepEqual(read.problems, [], url);
+      if (!read.settings.ldap) throw new Error('no directory');
+      assert.equal(describeAuth(read.settings)['directory encryption'], 'ldaps', url);
+      // StartTLS on an encrypted address is refused, whatever the case of its scheme.
+      assert.deepEqual(problems({ ...OPENLDAP, JUKECORD_LDAP_URL: url, JUKECORD_LDAP_STARTTLS: 'yes' }), [
+        'JUKECORD_LDAP_STARTTLS is for ldap://; ldaps:// is encrypted already',
+      ]);
+    }
   });
 
   it('shows the settings with the secrets as set, never their value', () => {

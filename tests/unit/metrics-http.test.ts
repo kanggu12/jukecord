@@ -20,6 +20,25 @@ describe('who may read /metrics', () => {
     assert.equal(gate.verdict('10.0.0.8', { authorization: 'Bearer anything' }), 'allowed');
   });
 
+  it('takes any header a proxy adds for being proxied, not only X-Forwarded-For and Forwarded', () => {
+    const gate = new MetricsGate(null);
+    // nginx with only `proxy_set_header X-Real-IP`, a proxy that says only Via, and the rest of the usual ones.
+    for (const headers of [
+      { 'x-real-ip': '203.0.113.9' },
+      { via: '1.1 proxy.example' },
+      { 'x-forwarded-host': 'music.example.com' },
+      { 'x-forwarded-proto': 'https' },
+      { forwarded: 'proto=https' },
+    ]) {
+      assert.equal(gate.verdict('127.0.0.1', headers), 'hidden', JSON.stringify(headers));
+    }
+    // The token still lets in through any of them.
+    assert.equal(
+      new MetricsGate(TOKEN).verdict('127.0.0.1', { authorization: `Bearer ${TOKEN}`, via: '1.1 p' }),
+      'allowed',
+    );
+  });
+
   it('lets the token in from anywhere and through a proxy, and tells a wrong one so', () => {
     const gate = new MetricsGate(TOKEN);
     assert.equal(gate.hasToken, true);

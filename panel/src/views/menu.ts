@@ -2,7 +2,7 @@
  * The two sheets that hang from the top bar: the servers to switch between (left), and the menu (right) with this
  * browser's choices (theme, language, motion), the server's DJ role, API tokens, the shortcuts and logging out.
  */
-import { api, logOut, type Settings, type Token } from '../api.ts';
+import { api, logOut, type Session, type Settings, type Token } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, keepingFocus } from '../dom.ts';
 import { pickLang } from '../i18n.ts';
 import { hostLike, isPerson, keep, state, t, update } from '../state.ts';
@@ -223,6 +223,8 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   // The alerts channel, under the DJ role, for the same people.
   const alerts = h('div', { class: 'section', hidden: true });
   const tokens = h('div', { class: 'section' });
+  // Every browser logged in, for the host (and an admin member), who may end any of them.
+  const logins = h('div', { class: 'section', hidden: true });
   const end = h('div', { class: 'section' });
   // Keyboard shortcuts mean nothing on a touch screen without a keyboard; style.css hides this item there.
   const shortcuts = h(
@@ -257,7 +259,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   pages.hidden = guest;
   shortcuts.hidden = guest;
   fill(end, mayInvite() ? invite : null, shortcuts, out);
-  fill(body, who, pages, look, dj, share, alerts, tokens, end);
+  fill(body, who, pages, look, dj, share, alerts, tokens, logins, end);
   // Opened again for a new language: the focus goes back to the language chosen (after the sheet's own first focus,
   // which runs in the same turn).
   if (focusLanguage) {
@@ -269,6 +271,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   const guild = state.guild;
   if (guild?.mayManage && state.status?.mode === 'discord') void drawSettings(dj, share, alerts, guild.id);
   void drawTokens(tokens);
+  if (hostLike()) void drawLogins(logins);
 }
 
 // The server's settings, read once for all three of their sections (a failure is said once, not once per section),
@@ -553,6 +556,77 @@ async function drawTokens(box: HTMLElement): Promise<void> {
         scope = value;
       }),
     () => name,
+  );
+}
+
+// The panel's logins, each with whose it is, how it came in and when it was last used, and the key that ends it (its
+// browser is logged out at once). Drawn again after one is ended; the focus moves to the End of the login now in its
+// place, or to the section's title when none is left to end.
+async function drawLogins(box: HTMLElement): Promise<void> {
+  const words = t();
+  let list: Session[];
+  try {
+    list = await api.sessions();
+  } catch (error) {
+    problem(error);
+    return;
+  }
+  box.hidden = false;
+  const title = h('h3', { tabindex: '-1' }, words.logins);
+  const whose = (session: Session) =>
+    session.kind === 'host' ? words.host : session.kind === 'friend' ? words.friend : (session.name ?? words.friend);
+  const way = { link: words.loginLink, discord: words.discordLogin, oidc: words.ssoLogin, ldap: words.directoryLogin };
+  const level = { read: words.scopeRead, control: words.scopeControl, admin: words.scopeAdmin };
+  keepingFocus(
+    box,
+    () =>
+      fill(
+        box,
+        title,
+        h('p', { class: 'faint section-hint' }, words.loginsHint),
+        ...list.map((session) => {
+          // A member's, a linked login's and a friend's level is theirs to show; the host's and a Discord user's login
+          // may do all their login may, which is no level.
+          const shown = session.kind === 'member' || session.kind === 'friend' || session.way === 'oidc';
+          const about = [
+            way[session.way],
+            ...(shown ? [level[session.scope]] : []),
+            session.current ? words.thisBrowser : words.seenAgo(ago(session.seenAt)),
+          ].join(' · ');
+          // This browser's own login ends by logging out, below.
+          let ender: HTMLButtonElement | null = null;
+          if (!session.current) {
+            const key = h(
+              'button',
+              {
+                class: 'key sm quiet bad',
+                type: 'button',
+                dataset: { key: 'login-end' },
+                // Whose login, for screen readers: the key's word alone would not say.
+                'aria-label': `${words.endLogin}: ${whose(session)}`,
+              },
+              words.endLogin,
+            );
+            key.onclick = async () => {
+              const ok = await confirmDialog({
+                title: words.endLoginTitle(whose(session)),
+                text: words.endLoginText,
+                ok: words.endLogin,
+                danger: true,
+              });
+              if (ok && (await act(null, () => api['session-end'](session.id))) !== undefined) void drawLogins(box);
+            };
+            ender = key;
+          }
+          return h(
+            'div',
+            { class: 'line', dataset: { id: session.id } },
+            h('div', { class: 'grow' }, h('div', null, whose(session)), h('div', { class: 'faint' }, about)),
+            ender,
+          );
+        }),
+      ),
+    () => title,
   );
 }
 

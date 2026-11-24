@@ -65,6 +65,8 @@ export interface HandlerInput<S extends OperationSpec> {
   readonly deps: HandlerDeps;
   /** Aborted when the caller goes away before the answer (a search for words typed over already). */
   readonly signal: AbortSignal;
+  /** The live connections of the panel, to end those of a login that ends (on every edge of a split jukecord). */
+  readonly live: { endSession(sessionHash: string, reason?: string): void };
 }
 
 export type Handler<S extends OperationSpec> = (
@@ -82,6 +84,16 @@ function who(caller: Caller | null): Caller {
 // there).
 
 const OK = { ok: true as const };
+
+// The values a settings test brings in place of the saved ones: the host's alone. Whoever else may do what the host
+// may (an admin member) tests the settings as they are saved: values not saved yet can point a test, and what it
+// sends, anywhere.
+function unsaved(caller: Caller | null, values: Readonly<Record<string, string>> | undefined): Record<string, string> {
+  if (!values || Object.keys(values).length === 0) return {};
+  if (caller?.principal.kind !== 'host')
+    throw new ActionError('forbidden', 'only the host can test settings not saved yet');
+  return { ...values };
+}
 
 /** Every operation's handler; a missing one fails the type check. */
 export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]> } = {
@@ -234,6 +246,15 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return OK;
   },
 
+  sessions: async ({ caller, deps }) => (await deps.auth.listSessions(who(caller))).map((session) => ({ ...session })),
+  'session-end': async ({ params, deps, live }) => {
+    const ended = await deps.auth.endSessions(params.id);
+    if (ended.length === 0) throw new ActionError('not-found', 'there is no such login');
+    // Its browser's live updates end with it, and the panel there goes to the login page.
+    for (const hash of ended) live.endSession(hash, 'the host ended this login');
+    return OK;
+  },
+
   logs: async ({ query, deps }) => {
     const asked = {
       limit: query.limit ?? 200,
@@ -245,7 +266,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     const records = deps.host ? await deps.host.logs(asked) : readLogs(deps.logDir, asked, deps.logFiles);
     return records.map((record) => ({ ...record }));
   },
-  'login-link': async ({ query, deps }) => {
+  'login-link': async ({ caller, query, deps }) => {
+    // The host's own: a link makes a host's session (and from it a token that never expires) or a friend's of thirty
+    // days, either of which would outlive the level a member's groups gave them at their login.
+    if (caller?.principal.kind !== 'host') throw new ActionError('forbidden', 'only the host can make login links');
     const scope = query.scope ?? 'admin';
     const link = await deps.auth.createLink(scope);
     return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt, scope };
@@ -268,16 +292,16 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     sso: deps.auth.oidc ? { label: deps.auth.oidc.label } : null,
     directory: deps.auth.ldap ? { label: deps.auth.ldap.label } : null,
   }),
-  'auth-test-oidc': async ({ body, deps }) => {
+  'auth-test-oidc': async ({ caller, body, deps }) => {
     const checks = deps.loginChecks;
     if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
-    const answer = await checks.oidc(body.settings ?? {});
+    const answer = await checks.oidc(unsaved(caller, body.settings));
     return { ok: answer.ok, checks: answer.checks.map((check) => ({ ...check })) };
   },
-  'auth-test-ldap': async ({ body, deps }) => {
+  'auth-test-ldap': async ({ caller, body, deps }) => {
     const checks = deps.loginChecks;
     if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
-    const answer = await checks.ldap(body.username, body.settings ?? {});
+    const answer = await checks.ldap(body.username, unsaved(caller, body.settings));
     return {
       ok: answer.ok,
       checks: answer.checks.map((check) => ({ ...check })),

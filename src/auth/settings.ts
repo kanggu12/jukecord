@@ -391,6 +391,14 @@ function levelsText(groups: LevelGroups): string {
   return parts.join('; ');
 }
 
+/**
+ * Whether a directory's address is encrypted from the start (ldaps://): its scheme in any case, as a URL reads it and
+ * ldapts connects by it ("LDAPS://" is ldaps too).
+ */
+export function ldapsUrl(url: string): boolean {
+  return /^ldaps:/i.test(url.trim());
+}
+
 /** The login settings as text for the doctor and the start, the secrets as whether they are set. */
 export function describeAuth(settings: AuthSettings): Record<string, string> {
   const set = (value: string | null): string => (value === null ? 'not set' : 'set');
@@ -410,7 +418,7 @@ export function describeAuth(settings: AuthSettings): Record<string, string> {
     'directory (ldap)': ldap ? ldap.url : 'off',
     ...(ldap
       ? {
-          'directory encryption': ldap.url.startsWith('ldaps:') ? 'ldaps' : ldap.startTls ? 'starttls' : 'none',
+          'directory encryption': ldapsUrl(ldap.url) ? 'ldaps' : ldap.startTls ? 'starttls' : 'none',
           'directory certificates': ldap.ca === null ? "the system's" : 'JUKECORD_LDAP_CA_FILE',
           'directory service account': ldap.bindDn ?? 'none (anonymous search)',
           'directory service password': set(ldap.bindPassword),

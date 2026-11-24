@@ -441,6 +441,68 @@ describe('the HTTP API in browser-only mode', () => {
   });
 });
 
+describe('failed logins with Discord', () => {
+  it('does not count a state that is no login of this browser, and lets twenty failed trades at once reach Discord', async () => {
+    let trades = 0;
+    const fetcher = (async (url: string | URL) => {
+      if (String(url).endsWith('/oauth2/token')) {
+        trades += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return new Response('{"error":"invalid_grant"}', { status: 400 });
+      }
+      return new Response(null);
+    }) as typeof fetch;
+    const server = await testServer({
+      fetch: fetcher,
+      oauth: {
+        clientId: '108876543210987654',
+        clientSecret: 's',
+        redirectUri: 'http://localhost:8795/auth/callback',
+        api: 'https://discord.test/api',
+        authorize: 'https://discord.test/oauth2/authorize',
+      },
+    });
+    try {
+      const app = server.web.app;
+      // Twenty-five images on some page pointing at the way back: no state of this browser, not counted.
+      for (let i = 0; i < 25; i += 1) {
+        const image = await app.inject({
+          method: 'GET',
+          url: '/auth/callback?code=c&state=x',
+          remoteAddress: '10.6.0.1',
+        });
+        assert.equal(image.headers.location, '/login?error=expired');
+      }
+      assert.equal(trades, 0);
+      // Thirty logins started, their codes refused by Discord, all brought back at once from one address.
+      const ways = await Promise.all(
+        Array.from({ length: 30 }, async () => {
+          const start = await app.inject({ method: 'GET', url: '/auth/login', remoteAddress: '10.6.0.1' });
+          return {
+            state: new URL(String(start.headers.location)).searchParams.get('state') ?? '',
+            cookie: String(start.headers['set-cookie']).split(';')[0] ?? '',
+          };
+        }),
+      );
+      const answers = await Promise.all(
+        ways.map(({ state, cookie }) =>
+          app.inject({
+            method: 'GET',
+            url: `/auth/callback?code=bad&state=${state}`,
+            headers: { cookie },
+            remoteAddress: '10.6.0.1',
+          }),
+        ),
+      );
+      assert.equal(trades, 20);
+      assert.equal(answers.filter((answer) => answer.headers.location === '/login?error=failed').length, 20);
+      assert.equal(answers.filter((answer) => answer.headers.location === '/login?error=too-many').length, 10);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 describe('logging in with Discord through the server', () => {
   it('lets members in, sends others back with the reason, and keeps the state cookie to one login', async () => {
     const fetcher = (async (url: string | URL) => {

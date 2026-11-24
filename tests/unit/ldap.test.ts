@@ -5,14 +5,18 @@
  * server's form route with its limiter per address and per name.
  */
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
+import type { ClientOptions } from 'ldapts';
 import { bindRefusal, escapeFilterValue, fillFilter, IN_CHAIN, LdapError, LdapLogin } from '../../src/auth/ldap.ts';
-import type { LdapSettings } from '../../src/auth/settings.ts';
+import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
+import { MemoryCache } from '../../src/cache/memory.ts';
 import { createLogger } from '../../src/log.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { memberKey, SESSION_COOKIE } from '../../src/web/auth.ts';
 import { FakeDirectoryServer } from '../support/directory.ts';
+import { CLIENT_ID, CLIENT_SECRET, FakeProvider, ISSUER } from '../support/oidc.ts';
 import { type TestServer, testServer } from '../support/web.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
@@ -33,6 +37,18 @@ const SETTINGS: LdapSettings = {
   label: null,
 };
 
+// An identity provider beside the directory, for the starts of logins there.
+const OIDC: OidcSettings = {
+  issuer: ISSUER,
+  clientId: CLIENT_ID,
+  clientSecret: CLIENT_SECRET,
+  scopes: ['openid', 'profile'],
+  groupsClaim: 'groups',
+  groups: { admin: [], control: [], read: ['*'] },
+  label: null,
+  discordClaim: null,
+};
+
 const ALICE_DN = 'uid=alice,ou=people,dc=example,dc=org';
 
 // A directory with Alice (a DJ), Bob (in no group of jukecord's) and the groups; Active Directory's groups nest.
@@ -44,6 +60,7 @@ function directory(): FakeDirectoryServer {
       password: 'alice-password',
       attributes: {
         uid: 'alice',
+        mail: 'alice@example.org',
         cn: 'Alice Kim',
         displayName: 'Alice',
         entryUUID: 'F3A9E0B2-2C1D-4A7B-9E55-0D6C1B7E8A41',
@@ -198,6 +215,60 @@ describe('LdapLogin', () => {
     assert.equal((await login(server, { startTls: true }).login('alice', 'alice-password')).name, 'Alice');
   });
 
+  it('gives an LDAPS:// address in capitals its certificates and its name to check, as ldaps:// gets them', async () => {
+    for (const url of ['ldaps://ldap.example.test:636', 'LDAPS://ldap.example.test:636']) {
+      const fake = directory();
+      const seen: ClientOptions[] = [];
+      const ldap = new LdapLogin({
+        settings: { ...SETTINGS, url, ca: 'the CA file' },
+        log,
+        connect: (options) => {
+          seen.push(options);
+          return fake.connect();
+        },
+      });
+      await ldap.login('alice', 'alice-password');
+      assert.equal(seen[0]?.tlsOptions?.ca, 'the CA file', url);
+      assert.equal(seen[0]?.tlsOptions?.servername, 'ldap.example.test', url);
+      assert.equal(seen[0]?.tlsOptions?.minVersion, 'TLSv1.2', url);
+      // The settings' test says how it connected.
+      const tested = await ldap.test();
+      assert.match(tested.checks[0]?.detail ?? '', /answered, over TLS$/, url);
+    }
+  });
+
+  it('checks the certificate of a directory named by its address against that address, and sends no name for it', async () => {
+    for (const [url, host] of [
+      ['ldaps://192.0.2.10', '192.0.2.10'],
+      ['ldap://[2001:db8::10]', '2001:db8::10'],
+    ] as const) {
+      const seen: ClientOptions[] = [];
+      const started: unknown[] = [];
+      const fake = directory();
+      const ldap = new LdapLogin({
+        settings: { ...SETTINGS, url, startTls: url.startsWith('ldap:') },
+        log,
+        connect: (options) => {
+          seen.push(options);
+          const client = fake.connect();
+          return {
+            ...client,
+            startTLS: async (tlsOptions?: unknown) => {
+              started.push(tlsOptions);
+              return client.startTLS();
+            },
+          };
+        },
+      });
+      await ldap.login('alice', 'alice-password');
+      const given = (url.startsWith('ldaps:') ? seen[0]?.tlsOptions : started[0]) as
+        | Record<string, unknown>
+        | undefined;
+      assert.equal(given?.host, host, url);
+      assert.equal(given?.servername, undefined, url);
+    }
+  });
+
   it('refuses a filter that finds two people', async () => {
     const server = directory();
     assert.equal(
@@ -224,6 +295,27 @@ describe('LdapLogin', () => {
     // Admins holds Staff, which holds Alice: found through the rule, as Active Directory finds it.
     assert.ok(nested.groups.includes('cn=admins,ou=groups,dc=example,dc=org'));
     assert.ok(server.log.includes(`search dc=example,dc=org (member:${IN_CHAIN}:=${ALICE_DN})`));
+  });
+
+  it("fills a group filter's name with the person's own, never with what they typed", async () => {
+    const server = directory();
+    // memberUid is compared case and all (caseExactIA5Match): a name typed otherwise must not choose the groups.
+    const ldap = login(server, {
+      groupFilter: '(memberUid={username})',
+      userFilter: '(|(uid={username})(mail={username}))',
+    });
+    server.log.length = 0;
+    await ldap.login('ALICE', 'alice-password');
+    assert.ok(server.log.includes('search dc=example,dc=org (memberUid=alice)'), server.log.join('\n'));
+    assert.ok(!server.log.some((line) => line.includes('(memberUid=ALICE)')));
+    // Found by another attribute of the filter (their mail): their uid still.
+    server.log.length = 0;
+    await ldap.login('alice@example.org', 'alice-password');
+    assert.ok(server.log.includes('search dc=example,dc=org (memberUid=alice)'), server.log.join('\n'));
+    // The settings' test looks the groups up the same way.
+    server.log.length = 0;
+    await ldap.test('Alice');
+    assert.ok(server.log.includes('search dc=example,dc=org (memberUid=alice)'), server.log.join('\n'));
   });
 
   it('tests the settings and a name without a password: the connection, the account, the base, the person, the groups', async () => {
@@ -298,6 +390,38 @@ describe('logging in with a directory account through the server', () => {
     assert.equal(elsewhere.statusCode, 403);
   });
 
+  it('answers a right password Active Directory refuses as it answers a wrong one, and keeps the reason in the log', async () => {
+    fake.people.push(
+      {
+        dn: 'uid=old,ou=people,dc=example,dc=org',
+        password: 'old-password',
+        attributes: { uid: 'old' },
+        refuse: '773',
+      },
+      {
+        dn: 'uid=off,ou=people,dc=example,dc=org',
+        password: 'off-password',
+        attributes: { uid: 'off' },
+        refuse: '533',
+      },
+    );
+    const wrong = await form('old', 'not-it', '10.2.1.1');
+    // Said only for the right password, "expired" or "turned off" would tell a guesser the guess was right.
+    for (const [name, password] of [
+      ['old', 'old-password'],
+      ['off', 'off-password'],
+    ] as const) {
+      const right = await form(name, password, '10.2.1.1');
+      assert.equal(right.statusCode, 401, name);
+      assert.deepEqual(right.json(), wrong.json(), name);
+    }
+    assert.deepEqual(wrong.json(), { error: { code: 'wrong-password', message: 'wrong name or password' } });
+    const reasons = server.logs.records
+      .filter((record) => record.msg === 'a directory login did not go through')
+      .map((record) => record.fields.reason);
+    assert.deepEqual(reasons.slice(-3), ['wrong', 'expired', 'disabled']);
+  });
+
   it('holds back one name tried from many addresses, and one address trying many names', async () => {
     // Twenty wrong passwords for Carol's name, each from an address of its own.
     for (let i = 0; i < 20; i += 1) assert.equal((await form('carol', 'guess', `10.3.0.${i}`)).statusCode, 401);
@@ -324,5 +448,200 @@ describe('logging in with a directory account through the server', () => {
       fake.down = false;
     }
     assert.equal(await server.auth.limiter.blocked(['address:10.5.0.1']), false);
+  });
+});
+
+describe('a directory that takes StartTLS and then never finishes the handshake', () => {
+  // Answers the StartTLS request (an extended request, 0x77) with success, then leaves the TLS handshake unanswered;
+  // notes when each connection is closed.
+  const closed: number[] = [];
+  const sockets: net.Socket[] = [];
+  let opened = 0;
+  const stall = net.createServer((socket) => {
+    opened += 1;
+    sockets.push(socket);
+    let answered = false;
+    socket.on('close', () => closed.push(Date.now()));
+    socket.on('error', () => {});
+    socket.on('data', (chunk: Buffer) => {
+      if (answered || chunk[0] !== 0x30 || chunk.indexOf(0x77) < 0) return;
+      answered = true;
+      const id = chunk.subarray(4, 4 + (chunk[3] ?? 1));
+      const inner = Buffer.concat([
+        Buffer.from([0x02, id.length]),
+        id,
+        Buffer.from([0x78, 0x07, 0x0a, 0x01, 0x00, 0x04, 0x00, 0x04, 0x00]),
+      ]);
+      socket.write(Buffer.concat([Buffer.from([0x30, inner.length]), inner]));
+    });
+  });
+  let settings: LdapSettings;
+
+  before(async () => {
+    await new Promise<void>((resolve) => stall.listen(0, '127.0.0.1', resolve));
+    const { port } = stall.address() as net.AddressInfo;
+    settings = { ...SETTINGS, url: `ldap://127.0.0.1:${port}`, startTls: true, timeoutMs: 300 };
+  });
+  after(async () => {
+    // Whatever a try left open (none, once it gives up): the server closes only when its connections are gone.
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => stall.close(() => resolve()));
+  });
+  // What a promise came to, or that it was still under way after three seconds.
+  const within = <T>(promise: Promise<T>) =>
+    Promise.race([
+      promise,
+      new Promise<'still waiting'>((resolve) => setTimeout(() => resolve('still waiting'), 3000)),
+    ]);
+
+  it('gives up on it within the timeout, and lets go of the connection', async () => {
+    const started = Date.now();
+    const code = await within(refusal(new LdapLogin({ settings, log }).login('alice', 'alice-password')));
+    const took = Date.now() - started;
+    assert.equal(code, 'unavailable');
+    assert.ok(took < 1500, `it took ${took} ms`);
+    // The socket is closed, not left with the handshake under way.
+    for (let wait = 0; closed.length < opened && wait < 50; wait += 1) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(closed.length, opened);
+    // The settings' test says so in as long.
+    const before = Date.now();
+    const tested = await within(new LdapLogin({ settings, log }).test());
+    assert.ok(Date.now() - before < 1500);
+    if (tested === 'still waiting') throw new Error('the test is still waiting');
+    assert.equal(tested.checks[0]?.name, 'connection');
+    assert.equal(tested.checks[0]?.status, 'fail');
+    assert.match(tested.checks[0]?.detail ?? '', /StartTLS/);
+  });
+});
+
+describe('failed logins under a flood of logins started elsewhere', () => {
+  // A login cache of fifty entries: as a full one of 10,000 is under a flood of ten thousand starts, sooner.
+  let server: TestServer;
+  const provider = new FakeProvider();
+  const fake = directory();
+  const inject = (options: InjectOptions) => server.web.app.inject(options);
+  const form = (username: string, address: string) =>
+    inject({
+      method: 'POST',
+      url: '/auth/directory',
+      remoteAddress: address,
+      headers: { origin: 'http://localhost:8795', host: 'localhost:8795' },
+      payload: { username, password: 'a guess' },
+    });
+
+  before(async () => {
+    server = await testServer({
+      oidc: { settings: OIDC, fetch: provider.fetch },
+      ldap: { settings: SETTINGS, connect: fake.connect },
+      loginCache: new MemoryCache({ capacity: 50 }),
+    });
+  });
+  after(() => server.close());
+
+  it('keeps a blocked name blocked however many logins anyone starts at the provider', async () => {
+    for (let i = 0; i < 20; i += 1) assert.equal((await form('erin', `10.9.0.${i}`)).statusCode, 401);
+    assert.equal((await form('erin', '10.9.1.1')).statusCode, 429);
+    // A hundred starts from a hundred /56s, each a login's state kept ten minutes.
+    for (let i = 0; i < 100; i += 1) {
+      const start = await inject({ method: 'GET', url: '/auth/sso', remoteAddress: `2001:db8:${i.toString(16)}::1` });
+      assert.equal(start.statusCode, 302);
+    }
+    assert.equal((await form('erin', '10.9.1.2')).statusCode, 429);
+  });
+});
+
+describe('many tries at the directory form at once', () => {
+  // The directory takes 30 ms to answer a bind, as one over a network does: every try is under way together.
+  let server: TestServer;
+  const fake = directory();
+  for (const uid of ['dave', 'fern'])
+    fake.people.push({
+      dn: `uid=${uid},ou=people,dc=example,dc=org`,
+      password: `${uid}-password`,
+      attributes: { uid },
+    });
+  const slow = () => {
+    const client = fake.connect();
+    return {
+      ...client,
+      bind: async (dn: string, password?: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return client.bind(dn, password);
+      },
+    };
+  };
+  const form = (username: string, password: string, address: string) =>
+    server.web.app.inject({
+      method: 'POST',
+      url: '/auth/directory',
+      remoteAddress: address,
+      headers: { origin: 'http://localhost:8795', host: 'localhost:8795' },
+      payload: { username, password },
+    });
+  const binds = (uid: string) =>
+    fake.log.filter((line) => line === `bind uid=${uid},ou=people,dc=example,dc=org`).length;
+
+  before(async () => {
+    server = await testServer({ ldap: { settings: SETTINGS, connect: slow } });
+  });
+  after(() => server.close());
+
+  it('lets twenty reach the directory from one address, however many are sent together', async () => {
+    const answers = await Promise.all(Array.from({ length: 60 }, (_, i) => form('dave', `guess-${i}`, '10.8.0.1')));
+    assert.equal(binds('dave'), 20);
+    assert.equal(answers.filter((answer) => answer.statusCode === 401).length, 20);
+    assert.equal(answers.filter((answer) => answer.statusCode === 429).length, 40);
+    // The right password now is refused too: the address had its twenty.
+    assert.equal((await form('dave', 'dave-password', '10.8.0.1')).statusCode, 429);
+  });
+
+  it('lets twenty reach the directory for one name, from however many addresses at once', async () => {
+    const answers = await Promise.all(
+      Array.from({ length: 60 }, (_, i) => form('fern', `guess-${i}`, `10.7.${Math.floor(i / 200)}.${i + 1}`)),
+    );
+    assert.equal(binds('fern'), 20);
+    assert.equal(answers.filter((answer) => answer.statusCode === 429).length, 40);
+    // A try that was not a failure is not counted: a person let in leaves the count as it was.
+    const other = await form('alice', 'alice-password', '10.7.9.9');
+    assert.equal(other.statusCode, 200);
+    assert.equal(await server.auth.limiter.blocked(['address:10.7.9.9']), false);
+  });
+});
+
+describe('failed logins counted by the account the name finds', () => {
+  // People may be found by their uid or their mail: two names, one account.
+  let server: TestServer;
+  const fake = directory();
+  fake.people.push({
+    dn: 'uid=gina,ou=people,dc=example,dc=org',
+    password: 'gina-password',
+    attributes: { uid: 'gina', mail: 'gina@example.org', entryUUID: '0c3a9f7e-0000-4000-8000-000000000001' },
+  });
+  const form = (username: string, address: string) =>
+    server.web.app.inject({
+      method: 'POST',
+      url: '/auth/directory',
+      remoteAddress: address,
+      headers: { origin: 'http://localhost:8795', host: 'localhost:8795' },
+      payload: { username, password: 'a guess' },
+    });
+
+  before(async () => {
+    server = await testServer({
+      ldap: { settings: { ...SETTINGS, userFilter: '(|(uid={username})(mail={username}))' }, connect: fake.connect },
+    });
+  });
+  after(() => server.close());
+
+  it('holds the account back after twenty failures under any of its names', async () => {
+    for (let i = 0; i < 10; i += 1) assert.equal((await form('gina', `10.11.0.${i}`)).statusCode, 401);
+    for (let i = 0; i < 10; i += 1) assert.equal((await form('gina@example.org', `10.11.1.${i}`)).statusCode, 401);
+    // Each name failed ten times, the account twenty: the next try by either name is refused, and no bind is made.
+    const binds = fake.log.filter((line) => line.startsWith('bind uid=gina')).length;
+    assert.equal((await form('gina', '10.11.2.1')).statusCode, 429);
+    assert.equal((await form('gina@example.org', '10.11.2.2')).statusCode, 429);
+    assert.equal(fake.log.filter((line) => line.startsWith('bind uid=gina')).length, binds);
+    // A refused try left the name and the address as they were.
+    assert.equal(await server.auth.limiter.blocked(['address:10.11.2.1']), false);
   });
 });

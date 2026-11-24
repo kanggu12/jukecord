@@ -58,6 +58,33 @@ describe('MemoryCache', () => {
     assert.equal(await cache.increment('fail', 1000), 1);
   });
 
+  it('keeps counters apart from the entries: no number of entries pushes one out', async () => {
+    const cache = make({ capacity: 10 });
+    for (let i = 0; i < 20; i += 1) await cache.increment('auth:fail:name:ldap:alice', 600_000);
+    // A flood of entries anyone can make (a login's state at the provider, kept ten minutes).
+    for (let i = 0; i < 1000; i += 1) await cache.set(`oidc:${i}`, 'a state', 600_000);
+    assert.equal(await cache.get('auth:fail:name:ldap:alice'), '20');
+    // The entries keep their own bound.
+    assert.equal(await cache.get('oidc:0'), null);
+    assert.equal(await cache.get('oidc:999'), 'a state');
+  });
+
+  it('beyond its counters, pushes out the smallest counts first, the oldest of them first', async () => {
+    const cache = make({ counters: 10 });
+    for (let i = 0; i < 20; i += 1) await cache.increment('blocked', 600_000);
+    for (let i = 0; i < 4; i += 1) await cache.increment('four', 600_000);
+    for (let i = 0; i < 1000; i += 1) await cache.increment(`one-${i}`, 600_000);
+    // The counts of one went, the oldest first; the larger counts stayed.
+    assert.equal(await cache.get('blocked'), '20');
+    assert.equal(await cache.get('four'), '4');
+    assert.equal(await cache.get('one-0'), null);
+    assert.equal(await cache.get('one-999'), '1');
+    assert.equal(cache.size, 10);
+    // A value set under a counter's key replaces it, as on a server.
+    await cache.set('four', 'text', 600_000);
+    assert.equal(await cache.get('four'), 'text');
+  });
+
   it('drops the least recently used beyond its capacity', async () => {
     const cache = make({ capacity: 2 });
     await cache.set('a', '1', 60_000);

@@ -20,6 +20,7 @@ import type { LoginChecks } from '../../src/auth/check.ts';
 import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
 import { OidcLogin } from '../../src/auth/oidc.ts';
 import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
+import type { Cache } from '../../src/cache/cache.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
@@ -207,6 +208,14 @@ export interface TestServerOptions {
   readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
   /** The login settings' tests (none by default). */
   readonly loginChecks?: LoginChecks;
+  /** Where the logins keep what is short-lived (links, failed logins, SSO states); a memory cache of its own by default. */
+  readonly loginCache?: Cache;
+  /**
+   * Every way in set up: a provider and a directory (made up, which nobody logs in through unless a test gives its
+   * own), and Discord login. A member's login, and an SSO login linked to a Discord user, are let in only through ways
+   * that are set up.
+   */
+  readonly logins?: boolean;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -220,6 +229,47 @@ export function exampleTrack(name: string, durationMs = 180_000): NewTrack {
     thumbnail: null,
   };
 }
+
+/** A provider set up for tests of the logins it lets in (`logins`); nobody logs in through it. */
+export const TEST_OIDC: OidcSettings = {
+  issuer: 'https://sso.example.test/realms/home',
+  clientId: 'jukecord',
+  clientSecret: 'made-up-client-secret',
+  scopes: ['openid'],
+  groupsClaim: 'groups',
+  groups: { admin: [], control: [], read: ['*'] },
+  label: null,
+  discordClaim: null,
+};
+
+/** A directory set up for tests of the logins it lets in (`logins`); nobody logs in through it. */
+export const TEST_LDAP: LdapSettings = {
+  url: 'ldap://ldap.example.test',
+  startTls: false,
+  ca: null,
+  bindDn: null,
+  bindPassword: null,
+  baseDn: 'dc=example,dc=org',
+  userFilter: '(uid={username})',
+  groupFilter: null,
+  groupBaseDn: null,
+  nestedGroups: false,
+  groups: { admin: [], control: [], read: ['*'] },
+  timeoutMs: 1000,
+  label: null,
+};
+
+/** Discord login set up for tests (`logins`): its addresses are made up, and nothing is sent to them. */
+export const TEST_OAUTH: OAuthConfig = {
+  clientId: '108876543210987654',
+  clientSecret: 'made-up-oauth-secret',
+  redirectUri: 'http://localhost:8795/auth/callback',
+  api: 'https://discord.test/api',
+  authorize: 'https://discord.test/oauth2/authorize',
+};
+
+// A fetch that reaches nobody: the made-up provider is never asked.
+const NOWHERE = (async () => new Response('nobody here', { status: 503 })) as typeof fetch;
 
 /** Starts a test server. */
 export async function testServer(options: TestServerOptions = {}): Promise<TestServer> {
@@ -301,30 +351,33 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
-  const loginCache = new MemoryCache();
+  const loginCache = options.loginCache ?? new MemoryCache();
+  // The ways in a test gives, or with `logins` made-up ones that answer nobody.
+  const oidcWay = options.oidc ?? (options.logins ? { settings: TEST_OIDC, fetch: NOWHERE } : null);
+  const ldapWay = options.ldap ?? (options.logins ? { settings: TEST_LDAP, connect: undefined } : null);
   // Through the made-up provider, coming back to the address the test server says it has.
-  const oidc = options.oidc
+  const oidc = oidcWay
     ? new OidcLogin({
-        settings: options.oidc.settings,
+        settings: oidcWay.settings,
         redirectUri: 'http://localhost:8795/auth/sso/callback',
         afterLogout: 'http://localhost:8795/login',
         cache: loginCache,
         log,
-        fetch: options.oidc.fetch,
+        fetch: oidcWay.fetch,
       })
     : null;
-  const ldap = options.ldap
+  const ldap = ldapWay
     ? new LdapLogin({
-        settings: options.ldap.settings,
+        settings: ldapWay.settings,
         log,
-        ...(options.ldap.connect ? { connect: options.ldap.connect } : {}),
+        ...(ldapWay.connect ? { connect: ldapWay.connect } : {}),
       })
     : null;
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
     secureCookies: false,
-    oauth: options.oauth ?? null,
+    oauth: options.oauth ?? (options.logins ? TEST_OAUTH : null),
     // The login links and failed logins in memory, as one jukecord keeps them (each test server its own).
     cache: loginCache,
     oidc,

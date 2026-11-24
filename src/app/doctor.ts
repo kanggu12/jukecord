@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { AuthSettings } from '../auth/settings.ts';
 import { type Config, describeConfig, timeOfDay } from '../config.ts';
 import type { MediaCache } from '../media/cache.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
@@ -81,6 +82,28 @@ function newer(a: string, b: string): boolean {
     if (x !== y) return x > y;
   }
   return false;
+}
+
+/**
+ * What the doctor says of an SSO login's link to a Discord user (JUKECORD_OIDC_DISCORD_CLAIM), where the logins are:
+ * the claim links nobody without Discord login, and with it a person is linked once they have logged in with Discord
+ * as the user it names. The claim must be an attribute people cannot change themselves, or anyone could name anyone.
+ * Null when no claim is set.
+ */
+export function discordLinkCheck(auth: AuthSettings, discordLogin: boolean): Check | null {
+  const claim = auth.oidc?.discordClaim ?? null;
+  if (claim === null) return null;
+  if (!discordLogin)
+    return {
+      name: 'sso discord link',
+      status: 'warn',
+      detail: `JUKECORD_OIDC_DISCORD_CLAIM (${claim}) links nobody: Discord login is off (JUKECORD_DISCORD_CLIENT_SECRET)`,
+    };
+  return {
+    name: 'sso discord link',
+    status: 'ok',
+    detail: `an SSO login is the Discord user its ${claim} claim names once that person logs in with Discord as them; ${claim} must be an attribute people cannot change on their own account`,
+  };
 }
 
 /** Runs every check; never throws (a check that cannot run is a failed check). */
@@ -190,6 +213,9 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       ? 'with Discord, and login links from the host'
       : 'login links from the host only (Discord login needs JUKECORD_DISCORD_CLIENT_SECRET)',
   }));
+  // An SSO login's link to a Discord user, when a claim is set (a split's edges say it themselves: logins are theirs).
+  const link = discordLinkCheck(config.auth, options.discordLogin);
+  if (link) checks.push(link);
 
   await check('backups', () => {
     const backups = listBackups(path.join(config.dataDir, 'backups'));
