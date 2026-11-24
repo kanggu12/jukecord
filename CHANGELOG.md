@@ -6,6 +6,64 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+jukecord on a database server, split into services, watched from outside and logged in to with your own accounts:
+PostgreSQL and MySQL/MariaDB beside SQLite, a core and its edges over Redis or Valkey, Prometheus metrics with
+readiness by parts, and logins through OpenID Connect (Keycloak and others) and LDAP or Active Directory. A host who
+sets none of it gets jukecord as it was: one process on its SQLite file, with the same logins and the same API, fields
+added.
+
+### Changed
+
+- The store answers asynchronously, and each server's changes take turns in a lane of their own, as one step of the
+  event loop kept them apart before: the same 88 API requests and their live updates answer as 0.3.4 did.
+- The login page is a page of its own: jukecord's mark over one plate with the ways in that are set up, the host's
+  login link at its foot, and every refusal in one sentence that says what to do.
+- `/readyz` answers part by part (the database, the bus, the shared cache, Discord, ffmpeg, yt-dlp), and is ready while
+  the parts it cannot serve without work. `/status` says the kind of database; `/api/v1/me` says a member's way in and
+  level; logging out of a login through SSO answers the provider's logout address.
+- `/metrics` keeps 0.3's names. `jukecord_event_loop_delay_seconds` is now also `nodejs_eventloop_lag_p99_seconds`, the
+  usual name, and goes in 0.5.
+- Failed logins count for ten minutes from an address's first one, where 0.3 counted the last ten minutes; the limit
+  (20) and the longest wait (ten minutes) are the same.
+- The image and the programs carry the drivers of the databases, of Redis and Valkey, and of the logins; a jukecord on
+  SQLite loads none of the databases' drivers.
+
+### Upgrading
+
+- On SQLite, nothing to do: `./jukecord backup && git pull && ./jukecord update`, a newer program unpacked beside the
+  old one, or `helm upgrade`. The chart takes a 0.3 release with your values file or with `--reuse-values`: the groups
+  of values it adds take their defaults.
+- The database moves to the new schema at the first start, as before: an older jukecord refuses it afterwards, so back
+  up first.
+
+### Added
+
+- **Databases.** PostgreSQL 14 or newer, MySQL 8.0 or newer and MariaDB 10.11 or newer beside SQLite, named by
+  `JUKECORD_DATABASE_URL` (or its `_FILE`), TLS asked for in the address, connections set by `JUKECORD_DATABASE_POOL`;
+  jukecord waits up to a minute for a server at its start. `jukecord db status` says what a database holds, and
+  `jukecord db copy` copies every row of one database into another, of any kind, in one transaction. A backup of a
+  server is a SQLite file, which any kind of database takes back, and `./jukecord restore` puts one into the database
+  `.env` names. The chart takes the address as `database.url` or from a Secret. CI runs the store's tests on the oldest
+  and the newest release of each server.
+- **A split into services.** `JUKECORD_ROLE=core` (one: Discord, the players and queues, the media) and `edge` (any
+  number: the API, the panel, the live updates, the logins), from the same image, over a shared database and a Redis or
+  Valkey server that carries the bus and the shared cache. `deploy/split/compose.yaml` runs a core, two edges,
+  PostgreSQL or MySQL, Valkey and Caddy in front; the chart's `mode: split` runs a core and as many edges as you like,
+  with a HorizontalPodAutoscaler if you want one. One process may keep its cache on Redis or Valkey too
+  (`JUKECORD_CACHE_URL`).
+- **Monitoring.** `/metrics` reports far more: HTTP answers by route and their times, live connections, fetches and the
+  media programs' runs, the database's statements and connections, the shared cache, logins, Discord's gateway, the
+  bus, the disk, the process and Node.js, in Prometheus's text or OpenMetrics. `JUKECORD_METRICS_TOKEN` lets a scraper
+  in from anywhere. `JUKECORD_LOG_FORMAT=json` writes the console as JSON lines. `deploy/monitoring` has a Grafana
+  dashboard, eight alert rules and a Compose file that runs Prometheus and Grafana beside jukecord; the chart makes a
+  ServiceMonitor and scrape annotations, with the token.
+- **Logins through your own accounts.** OpenID Connect (Keycloak, Authentik, Microsoft Entra ID, Okta, Google) and LDAP
+  or Active Directory, set by `JUKECORD_OIDC_*` and `JUKECORD_LDAP_*`, or the chart's `auth` values. People log in as
+  members, at the level their groups give: admin (what the host may), control or read; an OIDC login can be a Discord
+  user's. `jukecord auth test-oidc` and `test-ldap` check the settings without logging anyone in, and
+  `GET /api/v1/auth/methods` says which ways are set up.
+<!-- The settings page (stage 3) goes here: every host setting in the panel, the API and the CLI. -->
+
 ## [0.3.4] - 2026-11-17
 
 jukecord as a program for Linux, macOS and Windows, on x64 and arm64: one folder from the release, with its own

@@ -67,7 +67,7 @@ all.
 `deploy/helm/jukecord/values.yaml` has a copy, `files/defaults.yaml`, which the templates read to fill in what an older
 release's values lack: `helm upgrade --reuse-values` hands a template the release's own values, without the groups a
 newer chart added. After any change to `values.yaml`, copy it there again; `tests/packaging/chart-upgrade.test.ts`
-fails until the two match, and upgrades a 0.3 release's values the way Helm renders them. Each value is in
+fails until the two match, and upgrades a 0.3 release's values the way Helm renders them. A new value goes in
 `values.schema.json` too, and in the chart's README.
 
 ## FFmpeg
