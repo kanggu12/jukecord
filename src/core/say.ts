@@ -78,6 +78,9 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'jukecord가 시작하거나 다시 시작하는 중: 잠시 뒤 다시 시도하세요',
   ],
   ['jukecord did not answer in time; try again in a moment', 'jukecord가 제때 답하지 않음: 잠시 뒤 다시 시도하세요'],
+  // An edge's question to the core that names no login (a mistake between services, never a person's).
+  ['no login or server named', '로그인이나 서버가 빠진 요청'],
+  ['no login named', '로그인이 빠진 요청'],
   // Why a live connection ended, which the panel shows.
   ['jukecord is restarting', 'jukecord가 다시 시작하는 중'],
   ['logged out', '로그아웃됨'],

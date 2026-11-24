@@ -174,6 +174,10 @@ for (const { name, make } of testBuses()) {
         lost: () => lost.push('first'),
         everyMs: 50,
       });
+      // Not heard before it says it answers.
+      await settle(120);
+      assert.equal(changes.length, 0);
+      first.announce();
       await eventually(() => changes.includes('found'), 'the core found');
       assert.equal(watch.facts?.discordMode, true);
       // A second core waits while the first holds the lease.
@@ -191,6 +195,7 @@ for (const { name, make } of testBuses()) {
         retryMs: 50,
       }).then((beat) => {
         second = beat;
+        beat.announce();
       });
       await settle(200);
       assert.equal(second, null, 'the second core waits');
@@ -207,6 +212,39 @@ for (const { name, make } of testBuses()) {
     });
   });
 }
+
+describe('the reports of an edge that went quiet', () => {
+  it('stop counting once a few heartbeats are missed, and the change is told', async () => {
+    const { memoryBus } = await import('../support/bus.ts');
+    const bus = memoryBus();
+    const changes: string[] = [];
+    const presence = await Presence.start({
+      transport: await bus.connect(),
+      names: bus.names,
+      changed: (guild) => changes.push(guild),
+      log: testLog().log,
+      expiresMs: 300,
+    });
+    const transport = await bus.connect();
+    // One report, as an edge that is then cut off without a goodbye leaves it.
+    await transport.publish(
+      bus.names.presence,
+      JSON.stringify({
+        v: 1,
+        type: 'listeners',
+        from: 'edge-x',
+        full: true,
+        guilds: { g1: { count: 3, shown: [], people: ['u1'] } },
+      }),
+    );
+    await eventually(() => presence.count('g1') === 3, 'the report counted');
+    await eventually(() => presence.count('g1') === 0, 'the report expired', 2000);
+    assert.equal(presence.edgeCount, 0);
+    assert.deepEqual(changes, ['g1', 'g1']);
+    await presence.stop();
+    await bus.close();
+  });
+});
 
 describe('a core replaced without a goodbye', () => {
   it('is told as replaced: a new instance heartbeat while the old one was still counted', async () => {

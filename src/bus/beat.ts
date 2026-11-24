@@ -2,9 +2,10 @@
  * The core's heartbeat, and its lease on the bus.
  *
  * Exactly one core may run: two would both take every command (each add made twice) and both log in to Discord with
- * one token. So a core first takes a lease on the bus, renews it while it runs and gives it back when it stops; a
- * second core waits until the lease is free (the first one stopped, or crashed and its lease ran out), and a core that
- * finds its lease taken by another stops.
+ * one token. So a core first takes a lease on the bus, before it touches anything (the players, Discord), renews it
+ * while it runs and gives it back when it stops; a second core waits until the lease is free (the first one stopped,
+ * or crashed and its lease ran out), and a core that finds its lease taken by another stops. Its heartbeats begin
+ * once it answers commands (announce), so an edge that hears a core can use it.
  *
  * While it runs, the core says so every second, with which instance it is (a restarted core is another one: its
  * players and versions start afresh) and the facts the edges show without asking (whether Discord is set up and
@@ -51,23 +52,23 @@ export interface CoreBeatOptions {
   readonly signal?: AbortSignal;
 }
 
-/** The core's side: takes the lease, then beats and renews it until stopped. */
+/** The core's side: takes the lease and renews it until stopped, and beats once it is announced. */
 export class CoreBeat {
   private readonly options: CoreBeatOptions;
   private readonly timer: NodeJS.Timeout;
   private readonly startedAt = Date.now();
   private stopped = false;
-  private beats = 0;
+  private announced = false;
+  private ticks = 0;
   private renewing = false;
 
   private constructor(options: CoreBeatOptions) {
     this.options = options;
-    this.timer = setInterval(() => this.beat(), options.everyMs ?? BEAT_EVERY_MS);
+    this.timer = setInterval(() => this.tick(), options.everyMs ?? BEAT_EVERY_MS);
     this.timer.unref();
-    this.beat();
   }
 
-  /** Waits for the lease (as long as another core holds it), then starts beating. */
+  /** Waits for the lease (as long as another core holds it), then keeps it; beats begin with announce(). */
   static async start(options: CoreBeatOptions): Promise<CoreBeat> {
     const ttl = options.leaseMs ?? LEASE_MS;
     let toldAt = Number.NEGATIVE_INFINITY;
@@ -92,6 +93,12 @@ export class CoreBeat {
     return new CoreBeat(options);
   }
 
+  /** The core answers commands now: its heartbeats begin, and the edges take it for there. */
+  announce(): void {
+    this.announced = true;
+    this.beat();
+  }
+
   /** Stops beating, says goodbye (the edges stop waiting at once) and gives the lease back. */
   async stop(): Promise<void> {
     if (this.stopped) return;
@@ -106,6 +113,16 @@ export class CoreBeat {
     }
   }
 
+  // Every second: a heartbeat once announced, and the lease renewed every few seconds, well within its time.
+  private tick(): void {
+    if (this.stopped) return;
+    if (this.announced) this.beat();
+    this.ticks += 1;
+    const ttl = this.options.leaseMs ?? LEASE_MS;
+    const every = Math.max(1, Math.floor(ttl / 3 / (this.options.everyMs ?? BEAT_EVERY_MS)));
+    if (this.ticks % every === 0) void this.renew(ttl);
+  }
+
   private beat(): void {
     if (this.stopped) return;
     const { transport, names, instance, version } = this.options;
@@ -113,11 +130,6 @@ export class CoreBeat {
     transport.publish(names.beat, message).catch(() => {
       // The bus is down: the edges notice the silence; the beats go on when it is back.
     });
-    // The lease is renewed every few beats, well within its time.
-    this.beats += 1;
-    const ttl = this.options.leaseMs ?? LEASE_MS;
-    const every = Math.max(1, Math.floor(ttl / 3 / (this.options.everyMs ?? BEAT_EVERY_MS)));
-    if (this.beats % every === 0) void this.renew(ttl);
   }
 
   // Renews the lease; another core holding it now means this one must stop (it lost the bus while it was down).

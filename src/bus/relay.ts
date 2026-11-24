@@ -43,7 +43,10 @@ function counter(metrics: Metrics | undefined): Counter {
   ]);
 }
 
-/** The core's side: every event of its own bus that edges need goes out on the network bus. */
+/**
+ * The core's side: every event of its own bus that edges need goes out on the network bus. An edge makes one without
+ * a bus (null), for the endings it sends alone: its own bus carries the core's events, which must not go out again.
+ */
 export class EventSender {
   private readonly options: RelayOptions;
   private readonly events: Counter;
@@ -52,9 +55,10 @@ export class EventSender {
   private lost = 0;
   private lostToldAt = Number.NEGATIVE_INFINITY;
 
-  constructor(bus: Bus, options: RelayOptions) {
+  constructor(bus: Bus | null, options: RelayOptions) {
     this.options = options;
     this.events = counter(options.metrics);
+    if (!bus) return;
     for (const name of RELAYED) {
       const listener = (payload: BusEvents[Relayed][0]) => this.send({ type: 'event', name, payload }, name);
       bus.on(name, listener);
