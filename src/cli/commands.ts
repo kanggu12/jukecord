@@ -401,6 +401,141 @@ function showWrapped(answer: unknown): string {
   return lines.join('\n');
 }
 
+// The host's settings as the CLI reads them (the API's shapes, only the fields the text uses).
+interface SettingJson {
+  name: string;
+  group: string;
+  part: string | null;
+  label: { en: string };
+  help: { en: string };
+  value: string | null;
+  set: boolean;
+  shown: string | null;
+  secret: boolean;
+  source: 'environment' | 'saved' | 'default';
+  variable: string | null;
+  applies: 'now' | 'restart';
+  pending: boolean;
+  running: string | null;
+  refused: string | null;
+  defaultNote: { en: string } | null;
+}
+interface SettingsJson {
+  groups: { id: string; label: { en: string }; parts?: { id: string; label: { en: string } }[] }[];
+  settings: SettingJson[];
+  restart: { pending: string[]; supervisor: string; refusal: string | null };
+}
+
+/**
+ * A setting's name as the API takes it, from what people type: JUKECORD_LOG_LEVEL, log_level or log-level (the
+ * prefix is added, the case and the dashes fixed).
+ */
+export function settingName(text: string | undefined): string {
+  if (!text) throw new UsageError('say which setting (jukecord settings list shows them)');
+  const upper = text.trim().toUpperCase().replaceAll('-', '_');
+  const name = upper.startsWith('JUKECORD_') ? upper : `JUKECORD_${upper}`;
+  if (!/^JUKECORD_[A-Z0-9_]+$/.test(name)) throw new UsageError(`"${text}" is not a setting's name`);
+  return name;
+}
+
+// A setting's value in words: a secret only as set or not, the database's address without its password.
+function settingValue(setting: SettingJson): string {
+  if (setting.secret) return setting.shown ?? (setting.set ? 'set' : 'not set');
+  if (setting.value === null || setting.value === '')
+    return setting.defaultNote ? `(${setting.defaultNote.en})` : '(none)';
+  return setting.value;
+}
+
+// Where a setting's value comes from, and whether it waits for a restart.
+function settingSource(setting: SettingJson): string {
+  const from =
+    setting.source === 'environment'
+      ? `environment (${setting.variable})`
+      : setting.source === 'saved'
+        ? 'saved'
+        : 'default';
+  const waits = setting.pending
+    ? `, after a restart${setting.running !== null ? ` (now ${setting.running})` : ''}`
+    : '';
+  const refused = setting.refused ? `, the saved value was refused: ${setting.refused}` : '';
+  return `${from}${waits}${refused}`;
+}
+
+// Every setting, group by group: its name, its value and where that comes from; what waits for a restart at the end.
+function showHostSettings(answer: unknown): string {
+  const view = answer as SettingsJson;
+  const width = Math.min(40, Math.max(...view.settings.map((setting) => setting.name.length)));
+  const lines: string[] = [];
+  for (const group of view.groups) {
+    const settings = view.settings.filter((setting) => setting.group === group.id);
+    if (settings.length === 0) continue;
+    if (lines.length > 0) lines.push('');
+    lines.push(group.label.en);
+    for (const setting of settings) {
+      lines.push(`  ${setting.name.padEnd(width)}  ${settingValue(setting)}  [${settingSource(setting)}]`);
+    }
+  }
+  lines.push(...restartLines(view));
+  return lines.join('\n');
+}
+
+// What waits for a restart, and how to restart (or why it cannot be asked for here).
+function restartLines(view: SettingsJson): string[] {
+  if (view.restart.pending.length === 0) return [];
+  const how = view.restart.refusal ? view.restart.refusal : 'jukecord restart';
+  return ['', `Waiting for a restart: ${view.restart.pending.join(', ')} (${how})`];
+}
+
+// One setting whole: what it is, its value, where that comes from.
+function showHostSetting(answer: unknown): string {
+  const setting = answer as SettingJson;
+  return [
+    `${setting.name}: ${setting.label.en}`,
+    `  ${setting.help.en}`,
+    `  Value: ${settingValue(setting)}`,
+    `  From: ${settingSource(setting)}`,
+    `  Applies: ${setting.applies === 'now' ? 'at once' : 'after a restart'}`,
+  ].join('\n');
+}
+
+// What a change did: each setting it touched, and what waits for a restart.
+function showChanged(answer: unknown): string {
+  const result = answer as {
+    changed: { name: string; from: string | null; to: string | null; applies: string }[];
+    view: SettingsJson;
+  };
+  if (result.changed.length === 0) return 'Nothing changed: the settings already were so';
+  const lines = result.changed.map((entry) => {
+    const values =
+      entry.from === null && entry.to === null ? '' : `: ${entry.from ?? '(none)'} -> ${entry.to ?? '(none)'}`;
+    return `${entry.name}${values}${entry.applies === 'now' ? ', applied' : ', after a restart'}`;
+  });
+  lines.push(...restartLines(result.view));
+  return lines.join('\n');
+}
+
+// A database move as it stands.
+function showMove(answer: unknown): string {
+  const move = answer as {
+    phase: string;
+    where: string;
+    rows: number;
+    total: number;
+    ms: number | null;
+    error: string | null;
+  } | null;
+  if (!move) return 'No database move';
+  const phase =
+    move.phase === 'copying'
+      ? `copying, ${move.rows} of ${move.total} rows`
+      : move.phase === 'copied'
+        ? `copied ${move.rows} rows in ${((move.ms ?? 0) / 1000).toFixed(1)} s (switch with: jukecord settings move-switch)`
+        : move.phase === 'failed'
+          ? `failed: ${move.error}`
+          : 'switching';
+  return `To ${move.where}: ${phase}`;
+}
+
 /** Every command, by the operation it runs. */
 // The kinds of database /status names, as people write them.
 const DATABASE_NAMES: Readonly<Record<string, string>> = {
@@ -1124,6 +1259,124 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       const left = result.leftOut > 0 ? `, ${result.leftOut} left out` : '';
       return `Imported ${result.playlist.name}: ${result.tracks} tracks${left}`;
     },
+  },
+
+  // The host's settings.
+  'host-settings': {
+    name: 'settings list',
+    usage: '',
+    summary: 'Every jukecord setting by group, its value and where it is from',
+    request: () => ({}),
+    show: showHostSettings,
+  },
+  'host-setting': {
+    name: 'settings get',
+    usage: '<name>',
+    summary: 'One jukecord setting: what it is, its value, where it is from',
+    request: (words) => ({ params: { name: settingName(words.args[0]) } }),
+    show: showHostSetting,
+  },
+  'host-settings-change': {
+    name: 'settings set',
+    usage: '<name> <value> [<name> <value> ...]',
+    summary: 'Change jukecord settings, all or nothing (-: a value from stdin)',
+    request: (words) => {
+      if (words.args.length === 0 || words.args.length % 2 !== 0)
+        throw new UsageError('say each setting and its value');
+      const values: Record<string, string> = {};
+      for (let index = 0; index < words.args.length; index += 2) {
+        const value = words.args[index + 1] ?? '';
+        // A secret typed on the line stays in the shell's history: "-" takes it from the standard input instead.
+        values[settingName(words.args[index])] = value === '-' ? readImport('-').replace(/\r?\n$/, '') : value;
+      }
+      return { body: { values } };
+    },
+    show: showChanged,
+  },
+  'host-setting-reset': {
+    name: 'settings reset',
+    usage: '<name>',
+    summary: 'Put a jukecord setting back to its default',
+    request: (words) => ({ params: { name: settingName(words.args[0]) } }),
+    show: showChanged,
+  },
+  'settings-test-database': {
+    name: 'settings test-database',
+    usage: '<address>',
+    summary: 'Try a database’s address without saving it',
+    request: (words) => ({
+      body: { url: rest(words, 'a database’s address (postgres://..., mysql://..., sqlite:...)') },
+    }),
+    show: (answer) => {
+      const test = answer as {
+        ok: boolean;
+        where: string;
+        server: string | null;
+        roundTripMs: number | null;
+        schema: number | null;
+        latest: number;
+        rows: number | null;
+        newFile: boolean;
+        problem: string | null;
+      };
+      const facts = test.newFile
+        ? 'a new file, made by the move'
+        : [
+            test.server,
+            test.roundTripMs === null ? null : `${test.roundTripMs} ms there and back`,
+            test.schema === null ? null : test.schema === 0 ? 'no jukecord data' : `schema ${test.schema}`,
+            test.rows === null || test.schema === 0 ? null : `${test.rows} rows`,
+          ]
+            .filter(Boolean)
+            .join(', ');
+      return `${test.ok ? 'ok  ' : 'FAIL'}  ${test.where}${facts ? `: ${facts}` : ''}${test.problem ? `\n      ${test.problem}` : ''}`;
+    },
+  },
+  'database-move': {
+    name: 'settings move-database',
+    usage: '<address> [--replace]',
+    summary: 'Copy every row into another database while jukecord runs',
+    request: (words) => ({
+      body: { url: rest(words, 'a database’s address'), ...(words.flags.has('replace') ? { replace: true } : {}) },
+    }),
+    show: showMove,
+  },
+  'database-move-status': {
+    name: 'settings move-status',
+    usage: '',
+    summary: 'The database move as it stands',
+    request: () => ({}),
+    show: (answer) => {
+      const status = answer as { state: unknown; lastFailure: { where: string; reason: string } | null };
+      const failed = status.lastFailure
+        ? `\nThe last switch, to ${status.lastFailure.where}, did not finish: ${status.lastFailure.reason}`
+        : '';
+      return `${showMove(status.state)}${failed}`;
+    },
+  },
+  'database-move-switch': {
+    name: 'settings move-switch',
+    usage: '',
+    summary: 'Switch to the database copied into, and start again on it',
+    request: () => ({}),
+    show: (answer) =>
+      (answer as { restarts: boolean }).restarts
+        ? 'Switching: jukecord stops, copies the last changes and starts again on the new database'
+        : 'Switching: jukecord stops after the last copy; start it again to use the new database',
+  },
+  'database-move-cancel': {
+    name: 'settings move-cancel',
+    usage: '',
+    summary: 'Stop the database move (the target keeps what it held)',
+    request: () => ({}),
+    show: () => 'The database move was stopped',
+  },
+  restart: {
+    name: 'restart',
+    usage: '',
+    summary: 'Restart jukecord (what runs it starts it again)',
+    request: () => ({}),
+    show: (answer) => `Restarting: ${(answer as { supervisor: string }).supervisor} starts jukecord again`,
   },
 
   search: {

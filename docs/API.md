@@ -204,6 +204,16 @@ playlist) so a program does not need to ask again.
 | `doctor` Check the parts jukecord needs and show the settings (secrets as set or not set) | `GET /api/v1/doctor` | the host | `jukecord doctor` |  |
 | `auth-test-oidc` Test logging in through the identity provider (OIDC) without logging anyone in: its document, its keys, the client and its secret; with settings not saved yet, or the ones in use | `POST /api/v1/auth/test-oidc` | the host | `jukecord auth test-oidc` |  |
 | `auth-test-ldap` Test logging in with a directory account (LDAP) without logging anyone in: the connection, the service account, the base DN, and with a name the person, their groups and their level (no password) | `POST /api/v1/auth/test-ldap` | the host | `jukecord auth test-ldap` |  |
+| `host-settings` Every jukecord setting: what it is, its value (a secret's only whether it is set), where it comes from, whether it waits for a restart | `GET /api/v1/settings` | the host | `jukecord settings list` |  |
+| `host-setting` One jukecord setting, by its environment name | `GET /api/v1/settings/{name}` | the host | `jukecord settings get` |  |
+| `host-settings-change` Change settings, checked by the rules of the start, all or nothing; with revisions, refused when one changed meanwhile | `PATCH /api/v1/settings` | the host | `jukecord settings set` |  |
+| `host-setting-reset` Put a setting back to its default (the environment’s value, when it has one, applies again) | `DELETE /api/v1/settings/{name}` | the host | `jukecord settings reset` |  |
+| `settings-test-database` Try a database’s address without saving it: whether it answers, its version and round trip, its schema and rows | `POST /api/v1/settings/test-database` | the host | `jukecord settings test-database` |  |
+| `database-move` Start moving to another database: every row copied into it while jukecord runs (replace empties one that holds data) | `POST /api/v1/settings/database-move` | the host | `jukecord settings move-database` |  |
+| `database-move-status` The database move as it stands, and the last switch that did not finish | `GET /api/v1/settings/database-move` | the host | `jukecord settings move-status` |  |
+| `database-move-switch` Switch to the database a finished copy went into: jukecord stops, copies once more, saves the address and starts again on it | `POST /api/v1/settings/database-move/switch` | the host | `jukecord settings move-switch` |  |
+| `database-move-cancel` Stop a database move’s copy (the target keeps what it held) and forget the move | `DELETE /api/v1/settings/database-move` | the host | `jukecord settings move-cancel` |  |
+| `restart` Restart jukecord: it stops as on SIGTERM for what runs it to start it again (refused where nothing would) | `POST /api/v1/restart` | the host | `jukecord restart` |  |
 
 <!-- operations:end -->
 

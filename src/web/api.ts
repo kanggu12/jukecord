@@ -12,6 +12,7 @@ import type { ActionName } from '../app/actions.ts';
 import {
   AddResultSchema,
   AuthMethodsSchema,
+  DatabaseTestSchema,
   DoctorSchema,
   GuildId,
   GuildSchema,
@@ -26,6 +27,8 @@ import {
   LyricsSchema,
   MeSchema,
   MovedSchema,
+  MoveSchema,
+  MoveStateSchema,
   Nullable,
   OidcTestSchema,
   OkSchema,
@@ -34,9 +37,13 @@ import {
   PlaylistSchema,
   QueueSchema,
   RemovedSchema,
+  RestartSchema,
   ScopeSchema,
   SearchSchema,
+  SettingStateSchema,
+  SettingsChangedSchema,
   SettingsSchema,
+  SettingsViewSchema,
   SkipSchema,
   Snowflake,
   SoundPresetSchema,
@@ -63,6 +70,16 @@ export const ACCOUNT_OPERATIONS = [
   'auth-methods',
   'auth-test-oidc',
   'auth-test-ldap',
+  'host-settings',
+  'host-setting',
+  'host-settings-change',
+  'host-setting-reset',
+  'settings-test-database',
+  'database-move',
+  'database-move-status',
+  'database-move-switch',
+  'database-move-cancel',
+  'restart',
 ] as const;
 
 export type AccountOperation = (typeof ACCOUNT_OPERATIONS)[number];
@@ -113,6 +130,15 @@ const At = Type.Union([Type.Literal('end'), Type.Literal('next')], { description
 
 // Request bodies refuse fields they do not know (removed silently by the validator), so a typo cannot pass as set.
 const strict = { additionalProperties: false } as const;
+
+// A host setting's name: its environment variable.
+const SettingName = Type.String({
+  pattern: '^JUKECORD_[A-Z0-9_]+$',
+  maxLength: 64,
+  description: 'A setting by its environment name',
+});
+// A database's address as JUKECORD_DATABASE_URL takes it.
+const DatabaseUrl = Type.String({ minLength: 1, maxLength: 4000, description: 'As JUKECORD_DATABASE_URL takes it' });
 
 /** The API, by operation name. */
 export const API = {
@@ -550,6 +576,117 @@ export const API = {
       strict,
     ),
     response: LdapTestSchema,
+  }),
+
+  // The host's settings (src/settings): every one, with its source and state; changing, putting back, a database's
+  // test, the database move, and the restart that a change may wait for.
+  'host-settings': op({
+    method: 'GET',
+    path: '/settings',
+    summary:
+      "Every jukecord setting: what it is, its value (a secret's only whether it is set), where it comes from, whether it waits for a restart",
+    tag: 'host',
+    access: 'host',
+    response: SettingsViewSchema,
+  }),
+  'host-setting': op({
+    method: 'GET',
+    path: '/settings/{name}',
+    summary: 'One jukecord setting, by its environment name',
+    tag: 'host',
+    access: 'host',
+    params: Type.Object({ name: SettingName }),
+    response: SettingStateSchema,
+  }),
+  'host-settings-change': op({
+    method: 'PATCH',
+    path: '/settings',
+    summary:
+      'Change settings, checked by the rules of the start, all or nothing; with revisions, refused when one changed meanwhile',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object(
+      {
+        values: Type.Record(SettingName, Nullable(Type.String({ maxLength: 4000 })), {
+          maxProperties: 80,
+          description: 'Each setting by its environment name: its new text, or null for its default',
+        }),
+        revisions: Type.Optional(
+          Type.Record(SettingName, Type.Integer({ minimum: 0 }), {
+            maxProperties: 80,
+            description: 'The revision each was read at; a setting changed since is a conflict',
+          }),
+        ),
+      },
+      strict,
+    ),
+    response: SettingsChangedSchema,
+  }),
+  'host-setting-reset': op({
+    method: 'DELETE',
+    path: '/settings/{name}',
+    summary: 'Put a setting back to its default (the environment’s value, when it has one, applies again)',
+    tag: 'host',
+    access: 'host',
+    params: Type.Object({ name: SettingName }),
+    query: Type.Object({
+      revision: Type.Optional(Type.Integer({ minimum: 0, description: 'The revision it was read at' })),
+    }),
+    response: SettingsChangedSchema,
+  }),
+  'settings-test-database': op({
+    method: 'POST',
+    path: '/settings/test-database',
+    summary:
+      'Try a database’s address without saving it: whether it answers, its version and round trip, its schema and rows',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object({ url: DatabaseUrl }, strict),
+    response: DatabaseTestSchema,
+  }),
+  'database-move': op({
+    method: 'POST',
+    path: '/settings/database-move',
+    summary:
+      'Start moving to another database: every row copied into it while jukecord runs (replace empties one that holds data)',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object({ url: DatabaseUrl, replace: Type.Optional(Type.Boolean()) }, strict),
+    response: MoveSchema,
+  }),
+  'database-move-status': op({
+    method: 'GET',
+    path: '/settings/database-move',
+    summary: 'The database move as it stands, and the last switch that did not finish',
+    tag: 'host',
+    access: 'host',
+    response: MoveStateSchema,
+  }),
+  'database-move-switch': op({
+    method: 'POST',
+    path: '/settings/database-move/switch',
+    summary:
+      'Switch to the database a finished copy went into: jukecord stops, copies once more, saves the address and starts again on it',
+    tag: 'host',
+    access: 'host',
+    response: RestartSchema,
+  }),
+  'database-move-cancel': op({
+    method: 'DELETE',
+    path: '/settings/database-move',
+    summary: 'Stop a database move’s copy (the target keeps what it held) and forget the move',
+    tag: 'host',
+    access: 'host',
+    response: OkSchema,
+  }),
+  restart: op({
+    method: 'POST',
+    path: '/restart',
+    summary:
+      'Restart jukecord: it stops as on SIGTERM for what runs it to start it again (refused where nothing would)',
+    tag: 'host',
+    access: 'host',
+    response: RestartSchema,
   }),
 
   // Wrapped.

@@ -495,6 +495,12 @@ export const ErrorSchema = Type.Object(
         description: 'invalid, unauthorized, forbidden, not-found, conflict, too-many, unavailable',
       }),
       message: Type.String(),
+      // A refused change of the host's settings says each problem with the settings it is about.
+      problems: Type.Optional(
+        Type.Array(Type.Object({ names: Type.Array(Type.String()), message: Type.String() }), {
+          description: 'A refused change of settings: each problem and the settings it is about',
+        }),
+      ),
     }),
   },
   { title: 'Error' },
@@ -613,4 +619,157 @@ export const ImportResultSchema = Type.Object(
     leftOut: Type.Integer({ description: 'Entries left out: not found, not an address, or past the limits' }),
   },
   { title: 'ImportResult' },
+);
+
+// Words in each language the panel speaks (the settings' labels and lines).
+const WordsSchema = Type.Object({ en: Type.String(), ko: Type.String() });
+
+/** One host setting as the settings page shows it: what it is, its value, where that comes from, and its state. */
+export const SettingStateSchema = Type.Object(
+  {
+    name: Type.String({ description: 'Its environment variable, which is its name everywhere' }),
+    group: Type.String({ description: 'The group of the settings page it is in' }),
+    part: Nullable(Type.String({ description: 'The part of its group (the ways of logging in), if any' })),
+    kind: Type.Union([
+      Type.Literal('text'),
+      Type.Literal('secret'),
+      Type.Literal('url'),
+      Type.Literal('integer'),
+      Type.Literal('duration'),
+      Type.Literal('size'),
+      Type.Literal('boolean'),
+      Type.Literal('choice'),
+      Type.Literal('time'),
+      Type.Literal('list'),
+    ]),
+    label: WordsSchema,
+    help: WordsSchema,
+    default: Nullable(Type.String({ description: 'The default as the environment would hold it' })),
+    defaultNote: Nullable(WordsSchema),
+    min: Nullable(Type.String()),
+    max: Nullable(Type.String()),
+    choices: Nullable(Type.Array(Type.String())),
+    separator: Nullable(Type.String({ description: 'What a list’s items are written apart with' })),
+    off: Nullable(Type.String({ description: 'The word that turns it off' })),
+    words: Nullable(Type.Array(Type.String(), { description: 'Yes and no as it writes them' })),
+    maxLength: Nullable(Type.Integer()),
+    applies: Type.Union([Type.Literal('now'), Type.Literal('restart')]),
+    bootstrap: Type.Boolean({ description: 'Needed before the database opens (kept in settings.json)' }),
+    secret: Type.Boolean({ description: 'Never shown: only whether it is set' }),
+    roles: Type.Array(Type.String(), { description: 'The services of a split jukecord it changes something in' }),
+    value: Nullable(Type.String({ description: 'Its text as it reads after a restart; null when unset or a secret' })),
+    set: Type.Boolean(),
+    shown: Nullable(Type.String({ description: 'The database’s address in words, without its user or password' })),
+    source: Type.Union([Type.Literal('environment'), Type.Literal('saved'), Type.Literal('default')]),
+    variable: Nullable(Type.String({ description: 'The variable that sets it, when the environment does' })),
+    editable: Type.Boolean(),
+    locked: Nullable(Type.Union([Type.Literal('environment'), Type.Literal('split'), Type.Literal('start')])),
+    revision: Type.Integer({ description: 'Its saved revision (0: never saved), for a change to say what it read' }),
+    pending: Type.Boolean({ description: 'Its value waits for a restart' }),
+    running: Nullable(Type.String({ description: 'The value in use while one waits for a restart' })),
+    refused: Nullable(Type.String({ description: 'Why its saved value was refused when jukecord started' })),
+  },
+  { title: 'Setting' },
+);
+
+/** A database move as it stands. */
+export const MoveSchema = Type.Object(
+  {
+    phase: Type.Union([
+      Type.Literal('copying'),
+      Type.Literal('copied'),
+      Type.Literal('failed'),
+      Type.Literal('switching'),
+    ]),
+    where: Type.String({ description: 'The target in words, never its user or password' }),
+    kind: Nullable(Type.String()),
+    replace: Type.Boolean(),
+    startedAt: Type.Integer(),
+    finishedAt: Nullable(Type.Integer()),
+    rows: Type.Integer({ description: 'Rows copied so far' }),
+    total: Type.Integer({ description: 'Rows there are to copy' }),
+    table: Nullable(Type.String({ description: 'The table being copied' })),
+    ms: Nullable(Type.Integer({ description: 'How long the copy took' })),
+    error: Nullable(Type.String()),
+  },
+  { title: 'DatabaseMove' },
+);
+
+/** The move under way or done, and the last switch that did not finish. */
+export const MoveStateSchema = Type.Object(
+  {
+    state: Nullable(MoveSchema),
+    lastFailure: Nullable(
+      Type.Object({ at: Type.Integer(), where: Type.String(), reason: Type.String() }, { title: 'MoveFailure' }),
+    ),
+  },
+  { title: 'DatabaseMoveState' },
+);
+
+/** Every host setting, the restart that waits, and the database move. */
+export const SettingsViewSchema = Type.Object(
+  {
+    groups: Type.Array(
+      Type.Object({
+        id: Type.String(),
+        label: WordsSchema,
+        parts: Type.Optional(Type.Array(Type.Object({ id: Type.String(), label: WordsSchema }))),
+      }),
+    ),
+    settings: Type.Array(SettingStateSchema),
+    restart: Type.Object({
+      pending: Type.Array(Type.String(), { description: 'The settings whose change waits for a restart' }),
+      supervisor: Type.String({
+        description: 'What starts jukecord again: docker, kubernetes, systemd, launcher, none',
+      }),
+      refusal: Nullable(Type.String({ description: 'Why a restart cannot be asked for here' })),
+    }),
+    role: Type.Union([Type.Literal('all'), Type.Literal('core'), Type.Literal('edge')]),
+    strays: Type.Array(Type.String(), { description: 'Saved names that are no setting kept where they are' }),
+    move: MoveStateSchema,
+  },
+  { title: 'HostSettings' },
+);
+
+/** What a change did: each setting it touched (a secret's values never), and every setting after it. */
+export const SettingsChangedSchema = Type.Object(
+  {
+    changed: Type.Array(
+      Type.Object({
+        name: Type.String(),
+        from: Nullable(Type.String()),
+        to: Nullable(Type.String()),
+        applies: Type.Union([Type.Literal('now'), Type.Literal('restart')]),
+      }),
+    ),
+    view: SettingsViewSchema,
+  },
+  { title: 'SettingsChanged' },
+);
+
+/** What a test of a database's address found. */
+export const DatabaseTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'Whether jukecord can move there' }),
+    where: Type.String({ description: 'The address in words, never its user or password' }),
+    kind: Nullable(Type.String()),
+    server: Nullable(Type.String({ description: 'The program and its version' })),
+    roundTripMs: Nullable(Type.Number()),
+    schema: Nullable(Type.Integer({ description: 'The jukecord schema it holds (0: none)' })),
+    latest: Type.Integer({ description: "This jukecord's schema" }),
+    rows: Nullable(Type.Integer({ description: "The rows of jukecord's tables there" })),
+    inUse: Type.Boolean({ description: 'It is the database jukecord uses now' }),
+    newFile: Type.Boolean({ description: 'A SQLite file that is not there yet (the move makes it)' }),
+    problem: Nullable(Type.String({ description: 'Why it cannot be moved to, in one sentence' })),
+  },
+  { title: 'DatabaseTest' },
+);
+
+/** A restart or a switch asked for: what starts jukecord again. */
+export const RestartSchema = Type.Object(
+  {
+    supervisor: Type.String({ description: 'What starts jukecord again' }),
+    restarts: Type.Boolean({ description: 'Whether it is started again (false: it stays stopped)' }),
+  },
+  { title: 'Restart' },
 );

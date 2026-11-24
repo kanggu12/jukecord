@@ -17,6 +17,9 @@ if not defined LOCALAPPDATA set "LOCALAPPDATA=%USERPROFILE%\AppData\Local"
 call :default JUKECORD_DATA_DIR "%LOCALAPPDATA%\jukecord"
 call :default JUKECORD_FFMPEG "%here%\lib\ffmpeg\ffmpeg.exe"
 call :default JUKECORD_YTDLP "%here%\lib\yt-dlp\@YTDLP@"
+rem What starts jukecord again when it restarts itself (the panel's Restart, a database move's switch): this script,
+rem below, so jukecord offers the restart.
+call :default JUKECORD_SUPERVISOR launcher
 set "NODE_ENV=production"
 set "node=%here%\lib\node\node.exe"
 set "app=%here%\lib\app"
@@ -36,7 +39,9 @@ if /i "%~1"=="--help" goto help
 exit /b %errorlevel%
 
 :start
+rem Started again when it ends with 75, its restart; any other end is this script's end too, with its code.
 "%node%" %envfile% %quiet% "%app%\src\main.js"
+if "%errorlevel%"=="75" goto start
 exit /b %errorlevel%
 
 :open

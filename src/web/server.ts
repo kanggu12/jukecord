@@ -32,6 +32,7 @@ import type { CoverFile, Covers, Pictured } from '../media/covers.ts';
 import { MetricsGate, negotiate } from '../metrics/http.ts';
 import { MetricsRegistry } from '../metrics/registry.ts';
 import { httpMetrics, methodLabel, routeLabel, statusClass } from '../metrics/web.ts';
+import { SettingsRefused } from '../settings/service.ts';
 import { StoreError } from '../store/store.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
 import {
@@ -240,9 +241,14 @@ function reasonOf(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
 }
 
-// The answer for an error, in the one shape every API error has.
-function failure(reply: FastifyReply, code: string, message: string): FastifyReply {
-  return reply.code(STATUS[code] ?? 500).send({ error: { code, message } });
+// The answer for an error, in the one shape every API error has (a refused change of settings adds its problems).
+function failure(
+  reply: FastifyReply,
+  code: string,
+  message: string,
+  problems?: readonly { readonly names: readonly string[]; readonly message: string }[],
+): FastifyReply {
+  return reply.code(STATUS[code] ?? 500).send({ error: { code, message, ...(problems ? { problems } : {}) } });
 }
 
 // A refusal that says when to try again (Retry-After, in whole seconds).
@@ -546,6 +552,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     // A refusal of a busy moment says when to ask again (Retry-After), as the server's own busy answers do.
     if (error instanceof ActionError) {
       if (error.retryAfterMs !== null) return later(reply, error.code, error.message, error.retryAfterMs);
+      // A change of the host's settings that their rules refuse: every problem, with the settings it is about.
+      if (error instanceof SettingsRefused) return failure(reply, error.code, error.message, error.problems);
       return failure(reply, error.code, error.message);
     }
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);

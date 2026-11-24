@@ -41,6 +41,9 @@ case $(uname -s) in
 esac
 default JUKECORD_FFMPEG "$here/lib/ffmpeg/ffmpeg"
 default JUKECORD_YTDLP "$here/lib/yt-dlp/@YTDLP@"
+# What starts jukecord again when it restarts itself (the panel's Restart, a database move's switch): this script,
+# below, so jukecord offers the restart.
+default JUKECORD_SUPERVISOR launcher
 export NODE_ENV=production
 # Node.js's Linux builds load libatomic, which a bare system may not have: the copy in lib/node/lib (macOS has none).
 if [ -d "$here/lib/node/lib" ]; then
@@ -69,7 +72,24 @@ run() {
 case ${1:-} in
   start)
     shift
-    run "$app/src/main.js" "$@"
+    # jukecord runs beside this script, which hands it the signals it gets (Ctrl+C, a service manager's SIGTERM) and
+    # starts it again when it ends with 75, its restart; any other end is this script's end too, with its code.
+    child=''
+    trap '[ -z "$child" ] || kill -TERM "$child" 2>/dev/null' TERM
+    trap '[ -z "$child" ] || kill -INT "$child" 2>/dev/null' INT
+    while :; do
+      nodejs "$app/src/main.js" "$@" &
+      child=$!
+      code=0
+      wait "$child" || code=$?
+      # A signal ends the wait, not jukecord: waited for again until it has stopped, for its own exit code.
+      while kill -0 "$child" 2>/dev/null; do
+        code=0
+        wait "$child" || code=$?
+      done
+      child=''
+      [ "$code" -eq 75 ] || exit "$code"
+    done
     ;;
   open)
     # The link alone on its line (a failure, jukecord not running say, ends here with the command's own words).

@@ -36,6 +36,7 @@ import {
   sourceOf,
   strays,
 } from './layers.ts';
+import type { DatabaseMove, DatabaseTest, MoveFailure, MoveState } from './move.ts';
 import { problemsOf, readLayers, type SettingProblem, withoutNames } from './read.ts';
 import { restartRefusal } from './restart.ts';
 import { sameValue, shownValue } from './values.ts';
@@ -99,8 +100,15 @@ export interface SettingState {
   readonly refused: string | null;
 }
 
+/** How a restart ends: its exit code, what runs before the database closes, and how long it all may take. */
+export interface RestartOptions {
+  readonly code?: number;
+  readonly last?: () => Promise<void>;
+  readonly withinMs?: number;
+}
+
 /** Everything the settings page shows. */
-export interface SettingsView {
+export interface HostSettingsView {
   readonly groups: readonly GroupDefinition[];
   readonly settings: readonly SettingState[];
   readonly restart: {
@@ -115,6 +123,8 @@ export interface SettingsView {
   readonly role: 'all' | 'core' | 'edge';
   /** Saved names that are no setting kept where they are (a newer jukecord's, a hand edit); left unused. */
   readonly strays: readonly string[];
+  /** The database move under way or done, and the last switch that did not finish (from the run before). */
+  readonly move: { readonly state: MoveState | null; readonly lastFailure: MoveFailure | null };
 }
 
 /** One setting a change touched, as the change's summary shows it (a secret's values never). */
@@ -143,8 +153,14 @@ export interface HostSettingsOptions {
   readonly refused?: ReadonlyMap<string, { readonly revision: number; readonly why: string }>;
   /** Applies the settings that changed and apply at once, as the next Config has them. */
   readonly apply: (names: readonly string[], next: Config) => void;
-  /** Restarts jukecord (stops it for its supervisor to start it again); absent where it cannot (tests). */
-  readonly restart?: () => void;
+  /**
+   * Restarts jukecord (stops it as on SIGTERM and exits with `code`, for its supervisor to start it again), running
+   * `last` once every part that writes has stopped and before the database closes, within `withinMs` in all; absent
+   * where it cannot (tests).
+   */
+  readonly restart?: (options?: RestartOptions) => void;
+  /** The database move (src/settings/move.ts); absent where none can be made (tests of the rest). */
+  readonly move?: DatabaseMove;
   /** Tells every service that settings changed (in one process: this service's own take-in). */
   readonly announce?: (names: readonly string[]) => Promise<void>;
   readonly log: Pick<Logger, 'info' | 'warn' | 'error'>;
@@ -152,7 +168,19 @@ export interface HostSettingsOptions {
 }
 
 /** What the web layer asks of the settings (a split's edge carries it to its core as it carries the actions). */
-export type HostSettingsPort = Pick<HostSettings, 'view' | 'change' | 'reset' | 'restartNow'>;
+export type HostSettingsPort = Pick<
+  HostSettings,
+  | 'view'
+  | 'change'
+  | 'reset'
+  | 'restartNow'
+  | 'testDatabase'
+  | 'startMove'
+  | 'moveState'
+  | 'cancelMove'
+  | 'switchMove'
+  | 'supervisor'
+>;
 
 export class HostSettings {
   private readonly options: HostSettingsOptions;
@@ -170,6 +198,11 @@ export class HostSettings {
   /** The settings in use now (the start's, with the changes that apply at once). */
   get config(): Config {
     return this.current;
+  }
+
+  /** What starts jukecord again after a restart. */
+  get supervisor(): Supervisor {
+    return this.options.supervisor;
   }
 
   /** The saved values: settings.json's, and the database's (which may not answer: a ConnectionError). */
@@ -213,7 +246,7 @@ export class HostSettings {
   }
 
   /** Every setting with its value, where it comes from, and its state. */
-  async view(): Promise<SettingsView> {
+  async view(): Promise<HostSettingsView> {
     let layers: SavedLayers;
     try {
       layers = await this.layers();
@@ -226,7 +259,7 @@ export class HostSettings {
   }
 
   // The view over layers already read.
-  private viewOf(layers: SavedLayers): SettingsView {
+  private viewOf(layers: SavedLayers): HostSettingsView {
     const { env, rules, started } = this.options;
     const usable = this.usable(layers);
     // As it would read after a restart; when that cannot be read (a saved value refused meanwhile), what runs.
@@ -300,6 +333,7 @@ export class HostSettings {
       },
       role: this.options.role ?? 'all',
       strays: strays(layers),
+      move: { state: this.options.move?.current ?? null, lastFailure: this.options.move?.lastFailure() ?? null },
     };
   }
 
@@ -312,7 +346,7 @@ export class HostSettings {
   async change(
     values: Readonly<Record<string, string | null>>,
     revisions?: Readonly<Record<string, number>>,
-  ): Promise<{ changed: ChangedSetting[]; view: SettingsView }> {
+  ): Promise<{ changed: ChangedSetting[]; view: HostSettingsView }> {
     const release = await this.changing.acquire();
     let changed: ChangedSetting[];
     try {
@@ -336,20 +370,10 @@ export class HostSettings {
     values: Readonly<Record<string, string | null>>,
     revisions?: Readonly<Record<string, number>>,
   ): Promise<ChangedSetting[]> {
-    const { env, rules } = this.options;
     const entries = Object.entries(values);
     if (entries.length === 0) throw new ActionError('invalid', 'say which settings to change');
     // Each name a setting this page can change.
-    for (const [name] of entries) {
-      const setting = findDefinition(name);
-      if (!setting || setting.panel === false) throw new ActionError('invalid', `${name} is not a jukecord setting`);
-      if (setting.layer === 'environment')
-        throw new ActionError('conflict', `${name} is set where jukecord starts, not here`);
-      const variable = environmentVariable(setting, env);
-      if (variable !== null) throw new ActionError('conflict', `${name} is set by the environment (${variable})`);
-      if (rules.environmentOnly(setting))
-        throw new ActionError('conflict', `${name} comes from each service's environment in a split jukecord`);
-    }
+    for (const [name] of entries) this.changeable(name);
     let layers: SavedLayers;
     try {
       layers = await this.layers();
@@ -430,6 +454,94 @@ export class HostSettings {
         error,
       });
     }
+  }
+
+  /** Tries a database's address without saving or changing anything (see DatabaseMove.test). */
+  testDatabase(url: string): Promise<DatabaseTest> {
+    return this.mover().test(url);
+  }
+
+  /**
+   * Starts moving to another database: refused where the database's address is not this page's to change (set by
+   * the environment, or a split's); the copy runs on, its state in moveState().
+   */
+  async startMove(url: string, replace: boolean): Promise<MoveState> {
+    this.changeable('JUKECORD_DATABASE_URL');
+    const move = this.mover();
+    const state = await move.start(url, replace);
+    // A new move: the last one's failure is no news any more.
+    move.clearFailure();
+    this.options.log.info('moving to another database: copying', { to: state.where, replace });
+    return state;
+  }
+
+  /** The move under way or done, and the last switch that did not finish. */
+  moveState(): { readonly state: MoveState | null; readonly lastFailure: MoveFailure | null } {
+    const move = this.mover();
+    return { state: move.current, lastFailure: move.lastFailure() };
+  }
+
+  /** Stops a move's copy under way (the target keeps what it held) and forgets the move. */
+  async cancelMove(): Promise<void> {
+    await this.mover().cancel();
+    this.options.log.info('the database move was cancelled');
+  }
+
+  /**
+   * Switches to the database a finished copy went into: jukecord stops as for a restart, copies once more after every
+   * part that writes has stopped, writes the new address to settings.json, and starts again on it (where nothing
+   * would start it again, it stays stopped and uses the new database when started). A failure of that last copy
+   * writes nothing: jukecord starts again on the database it used, and the page says why.
+   */
+  switchMove(): { readonly where: string; readonly restarts: boolean } {
+    this.changeable('JUKECORD_DATABASE_URL');
+    const move = this.mover();
+    const restart = this.options.restart;
+    if (!restart) throw new ActionError('unavailable', 'jukecord cannot restart itself here');
+    const { where } = move.switching();
+    const restarts = restartRefusal(this.options.supervisor) === null;
+    // The last copy may take as long as the first did, and then some: the stop waits for it.
+    const copyMs = move.current?.ms ?? 0;
+    const last = async () => {
+      try {
+        const url = await move.finalCopy();
+        await this.options.file.write([{ name: 'JUKECORD_DATABASE_URL', value: url }]);
+        move.clearFailure();
+        this.options.log.info('moved to another database; jukecord starts on it now', { to: where });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        move.recordFailure(reason);
+        this.options.log.error('the move to another database did not finish; the database in use stays', {
+          to: where,
+          reason,
+        });
+      }
+    };
+    const withinMs = 10_000 + 3 * copyMs + 30_000;
+    // Started again (the restart's own code), or stopped for good where nothing starts it again (0: a clean stop).
+    setTimeout(() => restart(restarts ? { last, withinMs } : { code: 0, last, withinMs }), 200);
+    this.options.log.info('switching to another database', { to: where, restarts });
+    return { where, restarts };
+  }
+
+  // The move, where one can be made.
+  private mover(): DatabaseMove {
+    const move = this.options.move;
+    if (!move) throw new ActionError('unavailable', 'the database cannot be moved from here');
+    return move;
+  }
+
+  // Refuses a setting this page cannot change here (the environment's, the data folder, a split's), saying why.
+  private changeable(name: string): void {
+    const { env, rules } = this.options;
+    const setting = findDefinition(name);
+    if (!setting || setting.panel === false) throw new ActionError('invalid', `${name} is not a jukecord setting`);
+    if (setting.layer === 'environment')
+      throw new ActionError('conflict', `${name} is set where jukecord starts, not here`);
+    const variable = environmentVariable(setting, env);
+    if (variable !== null) throw new ActionError('conflict', `${name} is set by the environment (${variable})`);
+    if (rules.environmentOnly(setting))
+      throw new ActionError('conflict', `${name} comes from each service's environment in a split jukecord`);
   }
 
   /**

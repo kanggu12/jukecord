@@ -1,0 +1,291 @@
+/**
+ * The host's settings through the HTTP API and the jukecord command: the host alone may read and change them, a change
+ * refused says each problem by its setting, a setting the environment sets cannot be changed, a secret never comes
+ * back, a database's address is tried without saving it, and a restart is refused where nothing would start jukecord
+ * again.
+ */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, it } from 'node:test';
+import type { InjectOptions } from 'fastify';
+import { COMMANDS, settingName } from '../../src/cli/commands.ts';
+import { API_PREFIX } from '../../src/web/api.ts';
+import { asHost, sessionFor, type TestServer, testServer } from '../support/web.ts';
+
+const api = (path: string) => `${API_PREFIX}${path}`;
+// A made-up Discord token, to look for in every answer (put together: a whole one in the source is what scanners stop).
+const TOKEN = ['MTA4ODc2NTQzMjEwOTg3NjU0Mw', 'GaBcDe', 'abcdefghijklmnopqrstuvwxyz0123456789AB'].join('.');
+
+// A request as the host, its answer as JSON.
+async function asked(server: TestServer, options: InjectOptions) {
+  const response = await server.web.app.inject({ ...options, headers: { ...asHost, ...(options.headers ?? {}) } });
+  return { status: response.statusCode, json: response.json() as Record<string, unknown> };
+}
+
+describe('the host’s settings in the API', () => {
+  it('shows every setting to the host alone', async () => {
+    const server = await testServer({ hostSettings: {} });
+    try {
+      const view = await asked(server, { method: 'GET', url: api('/settings') });
+      assert.equal(view.status, 200);
+      const settings = view.json.settings as { name: string; source: string }[];
+      assert.ok(settings.some((setting) => setting.name === 'JUKECORD_QUEUE_MAX'));
+      assert.deepEqual((view.json.restart as { pending: string[] }).pending, []);
+      // A Discord login, even one that manages the server, is not the host.
+      const alice = await sessionFor(server, '300000000000000001');
+      const refused = await server.web.app.inject({
+        method: 'GET',
+        url: api('/settings'),
+        headers: { cookie: alice.cookie },
+      });
+      assert.equal(refused.statusCode, 403);
+      assert.equal(refused.json().error.message, 'this needs the host');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('changes settings all or nothing, says each problem by its setting, and puts one back', async () => {
+    const server = await testServer({ hostSettings: {} });
+    try {
+      const refused = await asked(server, {
+        method: 'PATCH',
+        url: api('/settings'),
+        payload: { values: { JUKECORD_QUEUE_MAX: '5', JUKECORD_LOG_LEVEL: 'debug' } },
+      });
+      assert.equal(refused.status, 400);
+      const error = refused.json.error as { code: string; problems: { names: string[]; message: string }[] };
+      assert.equal(error.code, 'invalid');
+      assert.deepEqual(error.problems, [
+        { names: ['JUKECORD_QUEUE_MAX'], message: 'JUKECORD_QUEUE_MAX: 5 is outside 10-100000' },
+      ]);
+      const taken = await asked(server, {
+        method: 'PATCH',
+        url: api('/settings'),
+        payload: { values: { JUKECORD_QUEUE_MAX: '50', JUKECORD_LOG_LEVEL: 'debug' } },
+      });
+      assert.equal(taken.status, 200);
+      assert.deepEqual(taken.json.changed, [
+        { name: 'JUKECORD_QUEUE_MAX', from: '1000', to: '50', applies: 'now' },
+        { name: 'JUKECORD_LOG_LEVEL', from: 'info', to: 'debug', applies: 'now' },
+      ]);
+      // Applied at once, both.
+      assert.deepEqual(server.applied, [['JUKECORD_QUEUE_MAX', 'JUKECORD_LOG_LEVEL']]);
+      const one = await asked(server, { method: 'GET', url: api('/settings/JUKECORD_QUEUE_MAX') });
+      assert.deepEqual([one.json.value, one.json.source, one.json.revision], ['50', 'saved', 1]);
+      // A page that read revision 0 cannot write over it.
+      const stale = await asked(server, { method: 'DELETE', url: api('/settings/JUKECORD_QUEUE_MAX?revision=0') });
+      assert.equal(stale.status, 409);
+      const reset = await asked(server, { method: 'DELETE', url: api('/settings/JUKECORD_QUEUE_MAX?revision=1') });
+      assert.equal(reset.status, 200);
+      const again = await asked(server, { method: 'GET', url: api('/settings/JUKECORD_QUEUE_MAX') });
+      assert.deepEqual([again.json.value, again.json.source], ['1000', 'default']);
+      // No such setting.
+      assert.equal((await asked(server, { method: 'GET', url: api('/settings/JUKECORD_NO_SUCH') })).status, 404);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('refuses a setting the environment sets, naming its variable', async () => {
+    const server = await testServer({ hostSettings: { env: { JUKECORD_LOG_LEVEL: 'warn' } } });
+    try {
+      const refused = await asked(server, {
+        method: 'PATCH',
+        url: api('/settings'),
+        payload: { values: { JUKECORD_LOG_LEVEL: 'debug' } },
+      });
+      assert.equal(refused.status, 409);
+      assert.equal(
+        (refused.json.error as { message: string }).message,
+        'JUKECORD_LOG_LEVEL is set by the environment (JUKECORD_LOG_LEVEL)',
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('never sends a secret back: only whether it is set', async () => {
+    const server = await testServer({ hostSettings: {} });
+    try {
+      const changed = await asked(server, {
+        method: 'PATCH',
+        url: api('/settings'),
+        payload: { values: { JUKECORD_DISCORD_TOKEN: TOKEN } },
+      });
+      const one = await asked(server, { method: 'GET', url: api('/settings/JUKECORD_DISCORD_TOKEN') });
+      const all = await asked(server, { method: 'GET', url: api('/settings') });
+      for (const answer of [changed, one, all]) assert.ok(!JSON.stringify(answer.json).includes(TOKEN));
+      assert.deepEqual([one.json.value, one.json.set, one.json.pending], [null, true, true]);
+      // Nor in the log.
+      assert.ok(!JSON.stringify(server.logs.records).includes(TOKEN));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('tries a database’s address without saving it, and says plainly what it found', async () => {
+    const server = await testServer({ hostSettings: {} });
+    try {
+      // A SQLite file not there yet: the move would make it.
+      const file = await asked(server, {
+        method: 'POST',
+        url: api('/settings/test-database'),
+        payload: { url: 'sqlite:other.db' },
+      });
+      assert.deepEqual([file.json.ok, file.json.newFile, file.json.kind], [true, true, 'sqlite']);
+      assert.equal(fs.existsSync(path.join(server.dataDir, 'other.db')), false, 'the test made the file');
+      // An address that is none: the setting's own problem.
+      const wrong = await asked(server, {
+        method: 'POST',
+        url: api('/settings/test-database'),
+        payload: { url: 'redis://cache.example' },
+      });
+      assert.equal(wrong.status, 400);
+      assert.match((wrong.json.error as { message: string }).message, /^JUKECORD_DATABASE_URL starts with redis:\/\//);
+      // A server that does not answer: why, in one sentence, never the password.
+      const away = await asked(server, {
+        method: 'POST',
+        url: api('/settings/test-database'),
+        payload: { url: 'postgres://jukecord:pass-made-up@127.0.0.1:9/jukecord?connect_timeout=1' },
+      });
+      assert.equal(away.status, 200);
+      assert.equal(away.json.ok, false);
+      assert.match(String(away.json.problem), /PostgreSQL \(127\.0\.0\.1:9, database jukecord, without TLS\)/);
+      assert.ok(!JSON.stringify(away.json).includes('pass-made-up'));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('refuses a restart where nothing would start jukecord again, and asks for one where something would', async () => {
+    const alone = await testServer({ hostSettings: { supervisor: 'none' } });
+    try {
+      const refused = await asked(alone, { method: 'POST', url: api('/restart') });
+      assert.equal(refused.status, 409);
+      assert.match((refused.json.error as { message: string }).message, /^nothing would start jukecord again here/);
+    } finally {
+      await alone.close();
+    }
+    let restarted = 0;
+    const docker = await testServer({ hostSettings: { supervisor: 'docker', restart: () => restarted++ } });
+    try {
+      const asking = await asked(docker, { method: 'POST', url: api('/restart') });
+      assert.deepEqual([asking.status, asking.json], [200, { supervisor: 'docker', restarts: true }]);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(restarted, 1);
+    } finally {
+      await docker.close();
+    }
+  });
+
+  it('has no move until one is started, and no switch without a finished copy', async () => {
+    const server = await testServer({ hostSettings: { supervisor: 'docker', restart: () => {} } });
+    try {
+      const status = await asked(server, { method: 'GET', url: api('/settings/database-move') });
+      assert.deepEqual(status.json, { state: null, lastFailure: null });
+      const switching = await asked(server, { method: 'POST', url: api('/settings/database-move/switch') });
+      assert.equal(switching.status, 409);
+      // Moving onto the database in use is refused before anything is copied.
+      const same = await asked(server, {
+        method: 'POST',
+        url: api('/settings/database-move'),
+        payload: { url: 'sqlite:' },
+      });
+      assert.equal(same.status, 400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('refuses the settings where jukecord keeps none (a server made without them)', async () => {
+    const server = await testServer();
+    try {
+      const refused = await asked(server, { method: 'GET', url: api('/settings') });
+      assert.equal(refused.status, 503);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe('the host’s settings in the jukecord command', () => {
+  it('takes a setting’s name with or without its prefix, in any case, with dashes', () => {
+    assert.equal(settingName('JUKECORD_LOG_LEVEL'), 'JUKECORD_LOG_LEVEL');
+    assert.equal(settingName('log-level'), 'JUKECORD_LOG_LEVEL');
+    assert.equal(settingName('queue_max'), 'JUKECORD_QUEUE_MAX');
+    assert.throws(() => settingName('no such!'), /is not a setting's name/);
+    assert.throws(() => settingName(undefined), /say which setting/);
+  });
+
+  it('builds each request from the words typed', async () => {
+    const words = (args: string[], flags: [string, string | true][] = []) => ({ args, flags: new Map(flags) });
+    const lookups = {} as never;
+    assert.deepEqual(
+      await COMMANDS['host-settings-change'].request(words(['log-level', 'debug', 'QUEUE_MAX', '50']), lookups),
+      { body: { values: { JUKECORD_LOG_LEVEL: 'debug', JUKECORD_QUEUE_MAX: '50' } } },
+    );
+    assert.throws(
+      () => COMMANDS['host-settings-change'].request(words(['log-level']), lookups),
+      /each setting and its value/,
+    );
+    assert.deepEqual(await COMMANDS['host-setting-reset'].request(words(['prefetch']), lookups), {
+      params: { name: 'JUKECORD_PREFETCH' },
+    });
+    assert.deepEqual(
+      await COMMANDS['database-move'].request(words(['postgres://u@db/j'], [['replace', true]]), lookups),
+      { body: { url: 'postgres://u@db/j', replace: true } },
+    );
+  });
+
+  it('lists the settings by group, a secret as set, what waits for a restart at the end', () => {
+    const shown = COMMANDS['host-settings'].show({
+      groups: [
+        { id: 'server', label: { en: 'Server and network' } },
+        { id: 'discord', label: { en: 'Discord' } },
+      ],
+      settings: [
+        {
+          name: 'JUKECORD_PORT',
+          group: 'server',
+          value: '8796',
+          secret: false,
+          source: 'saved',
+          variable: null,
+          pending: true,
+          running: '8795',
+          refused: null,
+          defaultNote: null,
+        },
+        {
+          name: 'JUKECORD_DISCORD_TOKEN',
+          group: 'discord',
+          value: null,
+          set: true,
+          shown: null,
+          secret: true,
+          source: 'environment',
+          variable: 'JUKECORD_DISCORD_TOKEN_FILE',
+          pending: false,
+          running: null,
+          refused: null,
+          defaultNote: null,
+        },
+      ],
+      restart: { pending: ['JUKECORD_PORT'], supervisor: 'docker', refusal: null },
+    });
+    assert.equal(
+      shown,
+      [
+        'Server and network',
+        '  JUKECORD_PORT           8796  [saved, after a restart (now 8795)]',
+        '',
+        'Discord',
+        '  JUKECORD_DISCORD_TOKEN  set  [environment (JUKECORD_DISCORD_TOKEN_FILE)]',
+        '',
+        'Waiting for a restart: JUKECORD_PORT (jukecord restart)',
+      ].join('\n'),
+    );
+  });
+});

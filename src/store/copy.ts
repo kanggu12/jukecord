@@ -20,6 +20,13 @@ export interface CopyOptions {
   readonly replace?: boolean;
   /** Rows read from the source at a time (500 by default). */
   readonly page?: number;
+  /**
+   * Hears how far the copy is after each page written: the rows copied of all there are (counted in the source's one
+   * moment first), and the table being copied.
+   */
+  readonly progress?: (done: { readonly rows: number; readonly total: number; readonly table: string }) => void;
+  /** Ends the copy between two pages: the target's transaction is rolled back, so it holds what it held. */
+  readonly signal?: AbortSignal;
 }
 
 /** What a copy did. */
@@ -56,9 +63,21 @@ export async function copyStore(from: Store, to: Store, options: CopyOptions = {
     () =>
       to.transaction(async () => {
         await clear(to, options.replace === true);
+        // Every row there is to copy, counted in the same moment's view, when someone follows the copy.
+        let total = 0;
+        if (options.progress) {
+          for (const table of TABLES)
+            total += Number((await from.sql.get(`SELECT COUNT(*) AS n FROM ${table.name}`))?.n);
+        }
+        let done = 0;
         const copied: { name: string; rows: number }[] = [];
         for (const table of TABLES) {
-          const rows = await copyTable(from, to, table, page);
+          const rows = await copyTable(from, to, table, page, (written) => {
+            done += written;
+            options.progress?.({ rows: done, total, table: table.name });
+            // Stopped between pages: thrown inside both transactions, which roll back.
+            options.signal?.throwIfAborted();
+          });
           copied.push({ name: table.name, rows });
         }
         // Every row read is in the target, table by table, before anything is kept.
@@ -105,8 +124,14 @@ function orderOf(store: Store, table: Table): { readonly columns: readonly strin
   return { columns: table.key.map((column) => store.dialect.column(column)), extra: '' };
 }
 
-// Copies one table, a page at a time, and says how many rows it had.
-async function copyTable(from: Store, to: Store, table: Table, page: number): Promise<number> {
+// Copies one table, a page at a time, and says how many rows it had; `wrote` hears each page's rows once written.
+async function copyTable(
+  from: Store,
+  to: Store,
+  table: Table,
+  page: number,
+  wrote: (rows: number) => void = () => {},
+): Promise<number> {
   const order = orderOf(from, table);
   const columns = table.columns.map((column) => from.dialect.column(column)).join(', ');
   const select = `SELECT ${columns}${order.extra} FROM ${table.name}`;
@@ -125,6 +150,7 @@ async function copyTable(from: Store, to: Store, table: Table, page: number): Pr
     if (rows.length === 0) break;
     await insertRows(to, table, rows);
     total += rows.length;
+    wrote(rows.length);
     if (rows.length < page) break;
     const last = rows.at(-1) ?? {};
     after = table.ordered ? [last[ORDER] ?? null] : table.key.map((column) => last[column] ?? null);

@@ -23,6 +23,9 @@ services:
       JUKECORD_DATA_DIR: /data
       # The port outside the container, for links and the Discord login when there is no public address.
       JUKECORD_PUBLISHED_PORT: "${JUKECORD_PORT:-8795}"
+      # What starts jukecord again when it restarts itself (the panel's Restart, a database move): Docker, by the restart
+      # policy below.
+      JUKECORD_SUPERVISOR: docker
       # The host's time zone (the front door sets it from this machine, or TZ in .env): "today" in the statistics and
       # the time of day of scheduled backups are the host's. UTC when nothing says.
       TZ: "${TZ:-UTC}"

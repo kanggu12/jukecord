@@ -54,6 +54,7 @@ import { sharedCacheReport } from './metrics/services.ts';
 import { applyLive } from './settings/apply.ts';
 import { readSettingsFile, SettingsFile, SettingsFileError } from './settings/file.ts';
 import { ONE_PROCESS } from './settings/layers.ts';
+import { DatabaseMove } from './settings/move.ts';
 import { RESTART_EXIT_CODE, supervisorOf } from './settings/restart.ts';
 import { HostSettings } from './settings/service.ts';
 import { allSettings, dataFolderOf, firstSettings } from './settings/start.ts';
@@ -496,8 +497,11 @@ async function main(): Promise<number> {
     supervisor: supervisorOf(config.supervisor, env),
     refused: new Map([...first.refused, ...all.refused]),
     log: log.child('settings'),
-    // Restarting is stopping as on SIGTERM, with the code that has jukecord's supervisor start it again.
-    restart: () => stop('restart', RESTART_EXIT_CODE),
+    // Restarting is stopping as on SIGTERM, with the code that has jukecord's supervisor start it again (a database
+    // move's switch adds its last copy, made once nothing writes any more).
+    restart: (options) => stop('restart', options?.code ?? RESTART_EXIT_CODE, options),
+    // Moving to another database: tried, copied from a connection of its own, switched at a restart.
+    move: new DatabaseMove({ dataDir: config.dataDir, current: config.database.address, pool: config.database.pool }),
     apply: (names, next) =>
       applyLive(names, next, {
         log: {
@@ -639,15 +643,22 @@ async function main(): Promise<number> {
   // and Discord start, so a stop during a slow Discord login still saves the positions.
   let stopping = false;
   // `code` is what the process exits with once stopped: 0, or a restart's (for what runs jukecord to start it again).
-  const stop = (signal: string, code = 0): void => {
+  // `last` runs once every part that writes has stopped, before the database closes (a database move's last copy).
+  const stop = (
+    signal: string,
+    code = 0,
+    after: { readonly last?: () => Promise<void>; readonly withinMs?: number } = {},
+  ): void => {
     if (stopping) return;
     stopping = true;
     log.info(code === RESTART_EXIT_CODE ? 'restarting' : 'stopping', { signal });
-    // Ten seconds to stop cleanly; a stuck network call must not keep a container from restarting.
+    // Ten seconds to stop cleanly (more for a last copy); a stuck network call must not keep a container from
+    // restarting.
+    const withinMs = after.withinMs ?? 10_000;
     setTimeout(() => {
-      log.error('stopping took longer than 10 s; exiting anyway');
+      log.error(`stopping took longer than ${Math.round(withinMs / 1000)} s; exiting anyway`);
       process.exit(1);
-    }, 10_000).unref();
+    }, withinMs).unref();
     prefetcher.stop();
     // Covers being fetched stop with jukecord (each would end by its own time limit otherwise).
     covers.stop();
@@ -668,6 +679,8 @@ async function main(): Promise<number> {
           // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
           .then(() => schedule?.idle())
           .then(() => sharedCache.close())
+          // The last of a database move, with nothing writing any more (its failure is its own to say).
+          .then(() => after.last?.())
           .finally(() => {
             // Closed once no transaction holds it, then out.
             void store.close().finally(() => process.exit(code));

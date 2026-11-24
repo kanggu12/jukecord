@@ -21,6 +21,7 @@ import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
 import { OidcLogin } from '../../src/auth/oidc.ts';
 import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
+import { loadConfig, type Supervisor } from '../../src/config.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
@@ -35,6 +36,10 @@ import type { Resolver } from '../../src/media/resolver.ts';
 import { type Search, searchWords } from '../../src/media/search.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import { describeService, discordMetrics, playerMetrics } from '../../src/metrics/service.ts';
+import { SettingsFile } from '../../src/settings/file.ts';
+import { ONE_PROCESS } from '../../src/settings/layers.ts';
+import { DatabaseMove } from '../../src/settings/move.ts';
+import { HostSettings, type HostSettingsOptions } from '../../src/settings/service.ts';
 import type { Store } from '../../src/store/store.ts';
 import { VERSION } from '../../src/version.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
@@ -132,6 +137,10 @@ export class FakeVoice implements VoiceControl {
 }
 
 export interface TestServer {
+  /** The host's settings, when asked for (see TestServerOptions.hostSettings). */
+  readonly settings: HostSettings | null;
+  /** The names each change of them applied at once, in order. */
+  readonly applied: string[][];
   readonly web: WebServer;
   readonly store: Store;
   readonly bus: Bus;
@@ -207,6 +216,15 @@ export interface TestServerOptions {
   readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
   /** The login settings' tests (none by default). */
   readonly loginChecks?: LoginChecks;
+  /**
+   * The host's settings (src/settings) over the test's database and data folder, started from this environment, with
+   * what restarts it (none by default) and a restart of its own; absent: the settings operations are refused.
+   */
+  readonly hostSettings?: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly supervisor?: Supervisor;
+    readonly restart?: HostSettingsOptions['restart'];
+  };
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -378,6 +396,26 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       return picture;
     },
   });
+  // The host's settings, as main.ts makes them, over this test's database and data folder.
+  const applied: string[][] = [];
+  let settings: HostSettings | null = null;
+  if (options.hostSettings) {
+    const env = { JUKECORD_DATA_DIR: dataDir, ...(options.hostSettings.env ?? {}) };
+    const started = loadConfig(env, '/srv');
+    settings = new HostSettings({
+      env,
+      cwd: '/srv',
+      store,
+      file: new SettingsFile(dataDir),
+      rules: ONE_PROCESS,
+      started,
+      supervisor: options.hostSettings.supervisor ?? 'none',
+      log: log.child('settings'),
+      apply: (names) => void applied.push([...names]),
+      ...(options.hostSettings.restart ? { restart: options.hostSettings.restart } : {}),
+      move: new DatabaseMove({ dataDir, current: started.database.address, pool: 2 }),
+    });
+  }
   const web = await createWebServer({
     host: '127.0.0.1',
     port: 0,
@@ -414,6 +452,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       loginSettings: { oidc: options.oidc?.settings ?? null, ldap: options.ldap?.settings ?? null },
       loginChecks: options.loginChecks ?? null,
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
+      ...(settings ? { settings } : {}),
     },
   });
   // As main.ts does: a revoked listening link ends its guests' live connections.
@@ -427,6 +466,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   let url = '';
   if (options.listen) url = await web.listen();
   return {
+    settings,
+    applied,
     web,
     store,
     bus,

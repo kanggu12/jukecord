@@ -14,7 +14,7 @@ import type { LoginChecks } from '../auth/check.ts';
 import type { AuthSettings } from '../auth/settings.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import { searchWords } from '../media/search.ts';
-import type { HostSettingsPort } from '../settings/service.ts';
+import type { HostSettingsPort, HostSettingsView, SettingState } from '../settings/service.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
@@ -283,6 +283,39 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     };
   },
 
+  // The host's settings: each handler hands its request to the settings service (src/settings/service.ts), which a
+  // split jukecord's edge carries to its core as it carries the actions.
+  'host-settings': async ({ deps }) => plainView(await hostSettings(deps).view()),
+  'host-setting': async ({ params, deps }) => {
+    const found = (await hostSettings(deps).view()).settings.find((setting) => setting.name === params.name);
+    if (!found) throw new ActionError('not-found', `${params.name} is not a jukecord setting`);
+    return plainSetting(found);
+  },
+  'host-settings-change': async ({ body, deps }) => {
+    const { changed, view } = await hostSettings(deps).change(body.values, body.revisions);
+    return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
+  },
+  'host-setting-reset': async ({ params, query, deps }) => {
+    const revisions = query.revision === undefined ? undefined : { [params.name]: query.revision };
+    const { changed, view } = await hostSettings(deps).reset([params.name], revisions);
+    return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
+  },
+  'settings-test-database': async ({ body, deps }) => ({ ...(await hostSettings(deps).testDatabase(body.url)) }),
+  'database-move': async ({ body, deps }) => ({
+    ...(await hostSettings(deps).startMove(body.url, body.replace ?? false)),
+  }),
+  'database-move-status': ({ deps }) => plainMove(hostSettings(deps).moveState()),
+  'database-move-switch': ({ deps }) => {
+    const settings = hostSettings(deps);
+    const { restarts } = settings.switchMove();
+    return { supervisor: settings.supervisor, restarts };
+  },
+  'database-move-cancel': async ({ deps }) => {
+    await hostSettings(deps).cancelMove();
+    return OK;
+  },
+  restart: ({ deps }) => ({ ...hostSettings(deps).restartNow(), restarts: true }),
+
   wrapped: async ({ context, query, deps }) =>
     deps.presenter.wrapped(await deps.actions.wrapped(context, query.period, query.tz ?? 0)),
   'alerts-channel': async ({ context, body, deps }) =>
@@ -354,6 +387,46 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     })),
   }),
 };
+
+// The settings service, where the host's settings are kept (absent: jukecord was made without them, as some tests are).
+function hostSettings(deps: HandlerDeps): HostSettingsPort {
+  if (!deps.settings) throw new ActionError('unavailable', 'the settings cannot be changed here');
+  return deps.settings;
+}
+
+// A setting as the API sends it (the schema's lists are mutable).
+function plainSetting(setting: SettingState) {
+  return {
+    ...setting,
+    choices: setting.choices ? [...setting.choices] : null,
+    words: setting.words ? [...setting.words] : null,
+    roles: [...setting.roles],
+  };
+}
+
+// The settings page's view as the API sends it.
+function plainView(view: HostSettingsView) {
+  return {
+    ...view,
+    groups: view.groups.map((group) => ({
+      id: group.id,
+      label: group.label,
+      ...(group.parts ? { parts: group.parts.map((part) => ({ ...part })) } : {}),
+    })),
+    settings: view.settings.map(plainSetting),
+    restart: { ...view.restart, pending: [...view.restart.pending] },
+    strays: [...view.strays],
+    move: plainMove(view.move),
+  };
+}
+
+// The move's state as the API sends it.
+function plainMove(move: HostSettingsView['move']) {
+  return {
+    state: move.state ? { ...move.state } : null,
+    lastFailure: move.lastFailure ? { ...move.lastFailure } : null,
+  };
+}
 
 // A server's settings as the API sends them: every setting (the DJ role, the alerts channel, how people share the
 // music and how the voice channel sounds), with the lists as arrays of their own (the schema's arrays are mutable).

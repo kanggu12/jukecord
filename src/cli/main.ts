@@ -52,7 +52,7 @@ const VALUED = new Set([
   'month',
   'format',
 ]);
-const SWITCHES = new Set(['json', 'help', 'version', 'next', 'last', 'synced', 'after-track']);
+const SWITCHES = new Set(['json', 'help', 'version', 'next', 'last', 'synced', 'after-track', 'replace']);
 
 // What people type from Discord's names, to the command it means here.
 const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [
@@ -172,7 +172,9 @@ function noWords(operation: OperationName, rest: readonly string[]): UsageError 
       ? ' (to stop when this track ends: jukecord stop-after)'
       : operation === 'skip' && /^\d+$/.test(rest[0] ?? '')
         ? ` (to play number ${rest[0]} now: jukecord jump ${rest[0]})`
-        : '';
+        : operation === 'settings'
+          ? ' (jukecord settings shows the server’s; the host’s are jukecord settings list, get, set and reset)'
+          : '';
   return new UsageError(`takes nothing after it${hint}`);
 }
 
@@ -199,6 +201,8 @@ export function helpText(): string {
     ...listing(OPERATIONS),
   ];
   lines.push(
+    '',
+    'A setting is named by its variable (JUKECORD_LOG_LEVEL), or without the prefix (log-level).',
     '',
     'The database itself, from here (also while jukecord is stopped; jukecord help db says more):',
     '  db status [<address>]             The database: kind, version, schema, size, round trip',
@@ -337,13 +341,16 @@ export async function run(
   if (asked.length > 0) {
     const found = findCommand(asked);
     // A group's name alone ("help playlist"): its commands, which "there is no command" hid.
-    const group = found ? [] : groupOf(asked);
-    if (group.length > 0) {
+    const group = groupOf(asked);
+    if (!found && group.length > 0) {
       print(groupHelp(asked, group));
       return 0;
     }
     if (!found) return mistake(`there is no command "${asked.join(' ')}" (see jukecord --help)`);
-    print(commandHelp(found.command));
+    // A command that is also a group's name ("help settings": the server's, and the host's settings list ...): its
+    // own help, then its group's.
+    const both = found.rest.length === 0 && group.length > 0;
+    print(both ? `${commandHelp(found.command)}\n\n${groupHelp(asked, group)}` : commandHelp(found.command));
     return 0;
   }
   if (words.flags.has('help') || words.args.length === 0 || words.args[0] === 'help') {
@@ -439,6 +446,8 @@ export async function run(
       const checks = (answer as { checks?: { status: string }[] }).checks ?? [];
       if (checks.some((check) => check.status === 'fail')) return 1;
     }
+    // A database's test fails the command when jukecord could not move there, as a failed check does.
+    if (operation === 'settings-test-database' && (answer as { ok?: boolean }).ok === false) return 1;
     return 0;
   } catch (error) {
     if (error instanceof UsageError) {

@@ -284,6 +284,27 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['settings.json could not be written; nothing was saved', 'settings.json에 쓰지 못함: 아무것도 저장하지 않음'],
   [/^changed by someone else meanwhile: (.+); read them again$/, '그사이 다른 사람이 바꿈($1): 다시 읽어 오세요'],
   ['jukecord cannot restart itself here', '여기서는 jukecord가 스스로 다시 시작할 수 없음'],
+  ['the settings cannot be changed here', '여기서는 설정을 바꿀 수 없음'],
+  // Moving to another database (src/settings/move.ts).
+  ['a move is under way already', '이미 옮기는 중'],
+  ['the switch is under way; it cannot be stopped', '전환하는 중이라 멈출 수 없음'],
+  ['there is no finished copy to switch to; copy the data first', '전환할 복사본이 없음: 먼저 데이터를 복사하세요'],
+  ['that is the database jukecord uses now', 'jukecord가 지금 쓰는 데이터베이스'],
+  ['the database cannot be moved from here', '여기서는 데이터베이스를 옮길 수 없음'],
+  [/^the database cannot be moved to: (.+)$/, '옮길 수 없는 데이터베이스: $1'],
+  [
+    'the database holds jukecord’s data already; move with replace to empty it first',
+    '이미 jukecord 데이터가 있는 데이터베이스: 비우고 옮기려면 바꾸기를 고르세요',
+  ],
+  ['the move was cancelled', '옮기기를 멈춤'],
+  ['it is the database jukecord uses now', 'jukecord가 지금 쓰는 데이터베이스'],
+  [/^it is at schema (\d+), newer than this jukecord's \((\d+)\)$/, '이 jukecord(스키마 $2)보다 새로운 스키마 $1'],
+  [
+    /^it is at schema (\d+), older than this jukecord's \((\d+)\); start a jukecord on it first$/,
+    '이 jukecord(스키마 $2)보다 오래된 스키마 $1: 먼저 그 위에서 jukecord를 한 번 시작하세요',
+  ],
+  ['it does not answer', '응답하지 않음'],
+  [/^(.+) cannot take a new file$/, '$1 폴더에 새 파일을 만들 수 없음'],
   [
     'nothing would start jukecord again here (it runs without a supervisor, as in a terminal): stop it and start it yourself',
     '여기서는 jukecord를 다시 띄워 줄 것이 없음(터미널처럼 감독 프로그램 없이 실행 중): 직접 멈추고 다시 시작하세요',
