@@ -56,7 +56,8 @@ describe('documents', () => {
   });
 
   it('lists in .env.example only settings jukecord knows', () => {
-    const config = read('src/config.ts');
+    // The settings of logging in through OIDC and LDAP are read in their own module.
+    const config = read('src/config.ts') + read('src/auth/settings.ts');
     for (const name of read('.env.example').match(/^JUKECORD_[A-Z_]+(?==)/gm) ?? []) {
       assert.ok(config.includes(`'${name}'`), `${name} in .env.example is not a setting`);
     }

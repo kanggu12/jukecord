@@ -121,7 +121,8 @@ describe('the programs', () => {
   });
 
   it("carry a settings example with the settings of Compose's but the ones only Compose reads, and how to run there", () => {
-    const config = read('src/config.ts');
+    // The settings of logging in through OIDC and LDAP are read in their own module.
+    const config = read('src/config.ts') + read('src/auth/settings.ts');
     const names = (file: string): string[] => [...(read(file).match(/^JUKECORD_[A-Z_]+(?==)/gm) ?? [])];
     const bundle = names('deploy/bundle/env.example');
     for (const name of bundle)

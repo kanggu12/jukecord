@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { AUTH_VARIABLES, type AuthSettings, describeAuth, readAuthSettings } from './auth/settings.ts';
 import { LINK_SERVICES, type LinkService } from './media/links.ts';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
@@ -89,6 +90,8 @@ export interface Config {
     /** The host's own Spotify app, for Spotify albums and playlists; null without one. */
     readonly spotify: { readonly clientId: string; readonly clientSecret: string } | null;
   };
+  /** Logging in through the host's identity provider (OIDC) and directory (LDAP, Active Directory); each null when off. */
+  readonly auth: AuthSettings;
 }
 
 /** Settings that cannot be used; `problems` lists every one, each naming the variable. */
@@ -146,6 +149,8 @@ const KNOWN = new Set([
   'JUKECORD_SPOTIFY_CLIENT_ID',
   'JUKECORD_SPOTIFY_CLIENT_SECRET',
   'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
+  // Logging in through OIDC and LDAP (src/auth/settings.ts reads them).
+  ...AUTH_VARIABLES,
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
@@ -408,6 +413,10 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     spotify: spotifyId && spotifySecret ? { clientId: spotifyId, clientSecret: spotifySecret } : null,
   };
 
+  // Logging in through the host's identity provider and directory: off unless their addresses are set.
+  const auth = readAuthSettings(env, cwd, files);
+  problems.push(...auth.problems);
+
   // Unknown JUKECORD_ variables are not fatal, but they are almost always a misspelt setting that silently does nothing.
   for (const name of Object.keys(env).sort()) {
     if (name.startsWith('JUKECORD_') && !KNOWN.has(name)) warnings.push(`${name} is not a jukecord setting`);
@@ -434,6 +443,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     log,
     warnings,
     links,
+    auth: auth.settings,
   };
 }
 
@@ -472,6 +482,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'links read': config.links.services.size > 0 ? [...config.links.services].join(', ') : 'none',
     'spotify app': config.links.spotify?.clientId ?? 'not set',
     'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
+    ...describeAuth(config.auth),
   };
 }
 
