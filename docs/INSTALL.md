@@ -363,8 +363,9 @@ that differ only by case or accent kept apart, serializable transactions), whate
   | `verify-ca`             | `VERIFY_CA`       | encrypted, the certificate signed by an authority jukecord trusts |
   | `verify-full`           | `VERIFY_IDENTITY` | that, and made out to the host name in the address                |
 
-  `sslrootcert=/path/to/ca.crt` (or `ssl-ca=`) names the authority of a certificate no public authority signed; without
-  it the authorities Node.js trusts are the ones checked. `sslcert=` and `sslkey=` give jukecord a certificate of its own,
+  `sslrootcert=/path/to/ca.crt` (or `ssl-ca=`) names the authority of a certificate no public authority signed, a file
+  in the volume with Compose (`sslrootcert=/data/db-ca.pem`); without it the authorities Node.js trusts are the ones
+  checked. `sslcert=` and `sslkey=` give jukecord a certificate of its own,
   for a server that asks for one. A mode that may fall back to no encryption (`prefer`, `allow`) is refused: the address
   says whether it wants TLS.
 - `connect_timeout=` (seconds, 10 by default), `schema=` (PostgreSQL), `host=` for PostgreSQL's socket folder
@@ -609,7 +610,7 @@ JUKECORD_LDAP_CONTROL_GROUPS=DJs
 JUKECORD_LDAP_READ_GROUPS=*
 ```
 
-- A domain controller that requires LDAP signing (Samba always does) takes passwords over an encrypted connection
+- A domain controller that requires LDAP signing (Samba does by default) takes passwords over an encrypted connection
   only: `ldaps://`, or `ldap://` with `JUKECORD_LDAP_STARTTLS=yes`. Its certificate is usually signed by the domain's
   own authority, whose certificate `JUKECORD_LDAP_CA_FILE` names; with Compose it goes into the volume, readable:
   `chmod 644 corp-ca.pem && docker compose cp corp-ca.pem jukecord:/data/corp-ca.pem`.
@@ -617,8 +618,9 @@ JUKECORD_LDAP_READ_GROUPS=*
   locked.
 - `JUKECORD_LDAP_NESTED_GROUPS` is Active Directory's rule; OpenLDAP answers it with no groups at all.
 
-`./jukecord auth test-ldap` connects, binds as the service account and reads the base DN; `./jukecord auth test-ldap
-mina` also finds that person and says their groups and the level those give, without their password.
+`./jukecord auth test-ldap` connects, binds as the service account and reads the base DN;
+`./jukecord auth test-ldap mina` also finds that person and says their groups and the level those give, without their
+password.
 
 ## Split into services
 
@@ -696,8 +698,9 @@ $split run --rm --no-deps --entrypoint rm core /data/restore.db
 $split up -d
 ```
 
-A backup still in the core's `/data/backups` goes back without the second step. On Kubernetes, the chart's
-`mode: split` runs the same ([Kubernetes](KUBERNETES.md#split-into-services)).
+A backup still in the core's `/data/backups` needs no copying in or removing: the copy takes it from there
+(`sqlite:/data/backups/<file>`). On Kubernetes, the chart's `mode: split` runs the same
+([Kubernetes](KUBERNETES.md#split-into-services)).
 
 ## Monitoring
 

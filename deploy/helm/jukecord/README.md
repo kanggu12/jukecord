@@ -23,7 +23,8 @@ like (a HorizontalPodAutoscaler when asked), with a Service for the core and a S
 and its edges share.
 
 The pod runs as user 10001 with a read-only root filesystem, no capabilities and no Kubernetes API token. The bot's
-token, the OAuth secret and the chart's other secrets reach jukecord as mounted files, not as environment variables.
+token, the OAuth secret and the chart's other secrets reach jukecord as mounted files, out of the environment that
+yt-dlp and ffmpeg start with.
 
 ## Install
 
