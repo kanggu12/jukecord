@@ -1,0 +1,148 @@
+{{- if eq .Values.mode "split" }}
+# The core of split mode: Discord's gateway and voice, every server's player and queue, the media and its cache.
+{{- include "jukecord.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jukecord.coreName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "core") | nindent 4 }}
+spec:
+  # One: Discord allows one gateway session per bot token, every server's player has one owner, and the cache volume is
+  # ReadWriteOnce. Recreate stops the old pod (it gives its lease on the bus back) before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "jukecord.partSelector" (list . "core") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jukecord.partPodLabels" (list . "core") | nindent 8 }}
+      annotations:
+        # A changed secret in the values restarts the pod, which reads them only when it starts.
+        checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.database.url .Values.bus.url .Values.split.existingSecret | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Nothing in the pod talks to the Kubernetes API, and no Service variables (JUKECORD_PORT=tcp://... otherwise).
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Time to save where every server was, leave voice and say goodbye to the edges (jukecord takes at most 10 s).
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: jukecord
+          image: {{ include "jukecord.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            # Its own port: health and figures only.
+            - name: http
+              containerPort: 8795
+              protocol: TCP
+            # The audio and the covers, for the edges (with the internal secret).
+            - name: internal
+              containerPort: 8796
+              protocol: TCP
+          env:
+            - name: JUKECORD_ROLE
+              value: core
+            - name: JUKECORD_INTERNAL_PORT
+              value: "8796"
+            {{- if include "jukecord.readsToken" . }}
+            - name: JUKECORD_DISCORD_TOKEN_FILE
+              value: {{ include "jukecord.secretDir" . }}/token
+            {{- end }}
+            {{- include "jukecord.splitEnv" . | nindent 12 }}
+          # Started: its ports answer (a first start migrates the database; a minute is plenty).
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Ready: it has its database and its bus.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.split.core.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            - name: split
+              mountPath: {{ include "jukecord.splitDir" . }}
+              readOnly: true
+            {{- if include "jukecord.readsToken" . }}
+            - name: discord
+              mountPath: {{ include "jukecord.secretDir" . }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        # The media cache, the logs and the backups, on the volume one process keeps its data on (the same claim).
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "jukecord.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        {{- include "jukecord.splitSecrets" . | nindent 8 }}
+        {{- if include "jukecord.readsToken" . }}
+        # The bot's token as a file, readable by jukecord's group only (not optional: see deployment.yaml).
+        - name: discord
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ include "jukecord.secretName" . }}
+                  items:
+                    - key: token
+                      path: token
+                  optional: false
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

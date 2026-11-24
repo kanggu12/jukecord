@@ -67,6 +67,13 @@ The last line prints a one-time login link for the host. Without a bot token juk
 | `resources`                                                                                  |              250m, 512Mi; limit 1536Mi              | requests and limits                                       |
 | `service.type`, `.port`                                                                      |                 `ClusterIP`, `8795`                 | the Service                                               |
 | `podLabels`, `podAnnotations`, `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets` |                                                     | the usual pod settings                                    |
+| `mode`                                                                                       |                      `single`                       | `single`: one pod; `split`: one core and edges            |
+| `database.url`, `database.existingSecret`                                                    |                                                     | the database every service shares (split)                 |
+| `bus.url`, `bus.existingSecret`                                                              |                                                     | the Redis or Valkey server of the services (split)        |
+| `split.existingSecret`                                                                       |                    made and kept                    | the internal secret the core and edges share              |
+| `split.edge.replicas`, `.autoscaling.*`                                                      |                       2, off                        | how many edges, or a HorizontalPodAutoscaler              |
+| `split.core.resources`, `split.edge.resources`                                               |             as `resources`; 100m, 192Mi             | the core's and the edges' requests and limits             |
+| `networkPolicy.egressTo`                                                                     |          the namespace's 5432, 3306, 6379           | where the database and the bus are (split)                |
 
 - The pod does not start without the Secret's `token`; its `clientSecret` is read when a client ID is set.
   `existingSecret` and the values' secrets are refused together.
@@ -77,6 +84,9 @@ The last line prints a one-time login link for the host. Without a bot token juk
 - helm test's pod follows the pull secrets, the node selector and the tolerations.
 - Every value is checked against the chart's schema, so a misspelt key fails the install. The settings jukecord reads
   are listed in [Using jukecord](https://github.com/kanggu12/jukecord/blob/main/docs/README.md#settings).
+- `mode: split` runs a core (one pod, `Recreate`, the volume) and edges (no volume) from the same image, over the
+  database and the bus the values name; the Service and the Ingress reach the edges, the core's Service its internal
+  port (edges only, by the NetworkPolicy). The jukecord command runs in an edge: `exec deploy/<release>-edge`.
 
 ## Upgrade and uninstall
 

@@ -1,0 +1,162 @@
+# jukecord split into services with Docker Compose: one core, two edges, PostgreSQL, Valkey, and Caddy in front.
+#
+#   cp deploy/compose/split.env.example deploy/compose/.env     (and fill in the two secrets)
+#   docker compose -f deploy/compose/split.yaml up -d --build
+#
+# The same image runs every jukecord service. The core is Discord, every server's player and queue, the media and its
+# cache (the one volume jukecord needs); the edges are the panel, the API, the live updates, logins and the browsers'
+# audio, which they stream from the core. Caddy spreads browsers over the edges, WebSockets included; nothing else is
+# published, and only on this machine unless JUKECORD_BIND says otherwise. The edges read jukecord's settings from the
+# .env of one process (the checkout's own, beside compose.yaml), so the settings of a jukecord that grew into services
+# stay where they were; this folder's .env holds the split's own secrets, which Compose writes into the services.
+# docs/INSTALL.md has the rest (one process is compose.yaml and ./jukecord; this file is the split).
+name: jukecord-split
+
+# What every jukecord service shares: the image, the settings of one process, and the same locks as compose.yaml. The
+# image is a local build by default; set JUKECORD_IMAGE to a released image (ghcr.io/<owner>/jukecord:<version>) to
+# pull one.
+x-jukecord: &jukecord
+  image: ${JUKECORD_IMAGE:-jukecord:local}
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile
+  env_file:
+    # jukecord's own settings (JUKECORD_*), the same file one process reads; the values below win over it.
+    - path: ../../.env
+      required: false
+  restart: unless-stopped
+  # The image writes only to /data and /tmp; everything else is read-only, and the process gains no privileges.
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  # jukecord stops within 10 s of SIGTERM (the core saves every server's place first).
+  stop_grace_period: 15s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+# The settings every service needs: where the database and the bus are, and the secret the core and edges share.
+x-services: &services
+  JUKECORD_HOST: 0.0.0.0
+  JUKECORD_PORT: "8795"
+  JUKECORD_DATA_DIR: /data
+  JUKECORD_DATABASE_URL: postgres://jukecord:${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/compose/.env}@database:5432/jukecord
+  JUKECORD_BUS_URL: redis://valkey:6379
+  JUKECORD_INTERNAL_SECRET: ${JUKECORD_INTERNAL_SECRET:?set JUKECORD_INTERNAL_SECRET in deploy/compose/.env (openssl rand -hex 32)}
+  # The host's time zone: "today" in the statistics and the time of day of scheduled backups.
+  TZ: ${TZ:-UTC}
+
+# An edge: no volume of its own (logins are database rows), behind Caddy.
+x-edge: &edge
+  <<: *jukecord
+  environment:
+    <<: *services
+    JUKECORD_ROLE: edge
+    JUKECORD_CORE_URL: http://core:8796
+    # Behind Caddy: one proxy, whose X-Forwarded-For says which browser asks (the rates and the login limits count by
+    # it).
+    JUKECORD_TRUST_PROXY: "1"
+    # The port outside, for links and the Discord login when there is no public address.
+    JUKECORD_PUBLISHED_PORT: "${JUKECORD_PORT:-8795}"
+  tmpfs:
+    # Its data folder lasts as long as the container: its host token (for the jukecord command run inside it) and its
+    # log, which the console shows too.
+    - /data:uid=10001,gid=10001,mode=0700,size=64m
+    - /tmp:size=64m
+  # The panel and the API for many browsers, without the media's yt-dlp and ffmpeg.
+  mem_limit: 512m
+  memswap_limit: 512m
+  pids_limit: 256
+  depends_on:
+    database:
+      condition: service_healthy
+    valkey:
+      condition: service_healthy
+
+services:
+  # The database every service shares.
+  database:
+    image: postgres:18-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
+    environment:
+      POSTGRES_USER: jukecord
+      POSTGRES_DB: jukecord
+      POSTGRES_PASSWORD: ${JUKECORD_DB_PASSWORD:?set JUKECORD_DB_PASSWORD in deploy/compose/.env}
+    volumes:
+      - database-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U jukecord -d jukecord]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+  # The bus and the shared cache: what the services say to each other, and the rates the edges count together. Nothing
+  # in it outlives a restart that matters (the database has it all), so it keeps nothing on disk, and its memory is
+  # bounded: past it, the least recently used of the cache goes.
+  valkey:
+    image: valkey/valkey:8-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
+    command: [valkey-server, --save, "", --appendonly, "no", --maxmemory, 256mb, --maxmemory-policy, allkeys-lru]
+    healthcheck:
+      test: [CMD, valkey-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Exactly one: Discord's gateway, every server's player and queue, the media and its cache.
+  core:
+    <<: *jukecord
+    environment:
+      <<: *services
+      JUKECORD_ROLE: core
+      JUKECORD_INTERNAL_PORT: "8796"
+    volumes:
+      - core-data:/data
+    tmpfs:
+      # Scratch space for yt-dlp and ffmpeg, bounded as in compose.yaml.
+      - /tmp:size=256m
+    # As one process: yt-dlp and ffmpeg beside Node (compose.yaml says why these numbers).
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 1024
+    depends_on:
+      database:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  edge1: *edge
+  edge2: *edge
+
+  # The front: browsers spread over the edges, each request to an edge that answers (WebSockets pass through as they
+  # are). Plain HTTP on this machine; put a TLS front of your own before it, or give Caddy a domain (Caddyfile).
+  front:
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${JUKECORD_BIND:-127.0.0.1}:${JUKECORD_PORT:-8795}:80"
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+    cap_drop:
+      - ALL
+    cap_add:
+      # Port 80 inside the container.
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    depends_on:
+      - edge1
+      - edge2
+
+volumes:
+  database-data:
+  core-data:

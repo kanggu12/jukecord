@@ -1,0 +1,173 @@
+{{- if eq .Values.mode "split" }}
+# The edges of split mode: the panel, the API, the live updates, logins and the browsers' audio, over the core.
+{{- include "jukecord.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jukecord.edgeName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "edge") | nindent 4 }}
+spec:
+  {{- if not .Values.split.edge.autoscaling.enabled }}
+  # Any number: an edge keeps nothing a browser needs from it again (logins are database rows, the rates are counted on
+  # the bus's server), so a browser may reach any of them, and one going away costs a reconnect.
+  replicas: {{ .Values.split.edge.replicas }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "jukecord.partSelector" (list . "edge") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jukecord.partPodLabels" (list . "edge") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ printf "%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.database.url .Values.bus.url .Values.split.existingSecret | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Its panels are told to reconnect (to another edge) as it stops.
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: jukecord
+          image: {{ include "jukecord.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8795
+              protocol: TCP
+          env:
+            - name: JUKECORD_ROLE
+              value: edge
+            # The core's internal port, by its Service.
+            - name: JUKECORD_CORE_URL
+              value: http://{{ include "jukecord.coreName" . }}:8796
+            {{- if include "jukecord.readsClientSecret" . }}
+            - name: JUKECORD_DISCORD_CLIENT_SECRET_FILE
+              value: {{ include "jukecord.secretDir" . }}/clientSecret
+            {{- end }}
+            {{- if and .Values.ingress.enabled (not (include "jukecord.userSets" (list . "JUKECORD_TRUST_PROXY"))) }}
+            # Behind the Ingress controller: one proxy whose X-Forwarded-For is believed.
+            - name: JUKECORD_TRUST_PROXY
+              value: "1"
+            {{- end }}
+            {{- include "jukecord.splitEnv" . | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Ready: its database, its bus, and a core heard lately (/readyz names the part missing). A minute of misses
+          # before the Service stops sending browsers here, as in single mode: the core's own restart (Recreate) takes
+          # seconds, and the panel reconnects meanwhile rather than finding no edge at all.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.split.edge.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            # No volume of its own: its host token (for the jukecord command run in it) and its log last as long as it.
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            - name: split
+              mountPath: {{ include "jukecord.splitDir" . }}
+              readOnly: true
+            {{- if include "jukecord.readsClientSecret" . }}
+            - name: discord
+              mountPath: {{ include "jukecord.secretDir" . }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- include "jukecord.splitSecrets" . | nindent 8 }}
+        {{- if include "jukecord.readsClientSecret" . }}
+        # The OAuth secret as a file, for logging in with Discord (an edge does the login).
+        - name: discord
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ include "jukecord.secretName" . }}
+                  items:
+                    - key: clientSecret
+                      path: clientSecret
+                  optional: true
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if .Values.split.edge.autoscaling.enabled }}
+---
+# More edges while they are busy, fewer when they are not.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "jukecord.edgeName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "edge") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "jukecord.edgeName" . }}
+  minReplicas: {{ .Values.split.edge.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.split.edge.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.split.edge.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

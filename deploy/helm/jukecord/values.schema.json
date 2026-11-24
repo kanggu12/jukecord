@@ -17,6 +17,58 @@
     "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },
+    "mode": {
+      "enum": ["single", "split"],
+      "description": "single: one pod is all of jukecord; split: one core and edges, over a shared database and a Redis or Valkey bus"
+    },
+    "database": {
+      "type": "object",
+      "description": "The database the services share in split mode: its address, or a Secret holding it under url",
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "pattern": "^(|(postgres|postgresql|mysql|mariadb)://.+)$" },
+        "existingSecret": { "type": "string" }
+      }
+    },
+    "bus": {
+      "type": "object",
+      "description": "The Redis or Valkey server of split mode: its address, or a Secret holding it under url",
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "pattern": "^(|(redis|rediss|valkey|valkeys)://.+)$" },
+        "existingSecret": { "type": "string" }
+      }
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "core": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "resources": { "type": "object" } }
+        },
+        "edge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "replicas": { "type": "integer", "minimum": 1 },
+            "resources": { "type": "object" },
+            "autoscaling": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "minReplicas": { "type": "integer", "minimum": 1 },
+                "maxReplicas": { "type": "integer", "minimum": 1 },
+                "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 }
+              }
+            }
+          }
+        }
+      }
+    },
     "discord": {
       "type": "object",
       "additionalProperties": false,
@@ -109,6 +161,18 @@
               "podSelector": { "type": "object" },
               "namespaceSelector": { "type": "object" },
               "ipBlock": { "type": "object" }
+            }
+          }
+        },
+        "egressTo": {
+          "type": "array",
+          "description": "NetworkPolicy egress rules (to, ports) for the database and the bus of split mode; empty: the release's namespace on 5432, 3306 and 6379",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "to": { "type": "array", "items": { "type": "object" } },
+              "ports": { "type": "array", "items": { "type": "object" } }
             }
           }
         },

@@ -1,0 +1,48 @@
+{{- if eq .Values.mode "split" }}
+# The core's Service: its internal port, which the edges stream the audio and covers from (with the internal secret),
+# and its own port, health and figures (a Prometheus in the cluster scrapes /metrics there).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "jukecord.coreName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "core") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "jukecord.partSelector" (list . "core") | nindent 4 }}
+  ports:
+    - name: internal
+      port: 8796
+      targetPort: internal
+      protocol: TCP
+    - name: http
+      port: 8795
+      targetPort: http
+      protocol: TCP
+{{- $name := include "jukecord.splitSecretName" . }}
+{{- $kept := lookup "v1" "Secret" .Release.Namespace $name | default dict }}
+{{- if or .Values.database.url .Values.bus.url (not .Values.split.existingSecret) }}
+---
+# What split mode needs the chart to keep: the database's and the bus's addresses when the values give them, and the
+# internal secret when no Secret of yours holds one. The internal secret is made at the first install and kept on
+# every upgrade (helm template, which sees no cluster, shows a new one each time).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "jukecord.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{- with .Values.database.url }}
+  database-url: {{ . | b64enc | quote }}
+  {{- end }}
+  {{- with .Values.bus.url }}
+  bus-url: {{ . | b64enc | quote }}
+  {{- end }}
+  {{- if not .Values.split.existingSecret }}
+  internal-secret: {{ dig "data" "internal-secret" (randAlphaNum 48 | b64enc) $kept | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

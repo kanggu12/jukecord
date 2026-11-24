@@ -1,5 +1,6 @@
-# jukecord: the bot, the panel and the API in one process.
+# jukecord: the bot, the panel and the API in one process (mode: single; split mode is core.yaml and edge.yaml).
 {{- include "jukecord.validate" . }}
+{{- if eq .Values.mode "single" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -186,3 +187,4 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}

@@ -1,0 +1,42 @@
+# What tests/split/run.sh adds to deploy/compose/split.yaml: each edge and the core's own port published on this
+# machine, so a test can talk to one edge in particular; a file server in place of the sites tracks come from, with
+# private addresses allowed so the core may fetch from it; and nothing of the checkout's .env, so no Discord at all.
+services:
+  core:
+    env_file: !reset []
+    environment:
+      JUKECORD_DISCORD_TOKEN: ""
+      JUKECORD_ALLOW_PRIVATE_ADDRESSES: "true"
+      JUKECORD_LYRICS: "off"
+      JUKECORD_LINK_SERVICES: none
+    ports:
+      - "127.0.0.1:${JUKECORD_E2E_CORE_PORT:-18798}:8795"
+  edge1:
+    env_file: !reset []
+    environment:
+      JUKECORD_DISCORD_TOKEN: ""
+    ports:
+      - "127.0.0.1:${JUKECORD_E2E_EDGE1_PORT:-18796}:8795"
+  edge2:
+    env_file: !reset []
+    environment:
+      JUKECORD_DISCORD_TOKEN: ""
+    ports:
+      - "127.0.0.1:${JUKECORD_E2E_EDGE2_PORT:-18797}:8795"
+  front:
+    ports: !override
+      - "127.0.0.1:${JUKECORD_E2E_FRONT_PORT:-18795}:80"
+  # The "site" a track is added from: a file server with one short Ogg file, which yt-dlp fetches as a direct link.
+  media:
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    command: [caddy, file-server, --root, /srv, --listen, ":80"]
+    volumes:
+      - ${JUKECORD_E2E_MEDIA:?the folder with the test track}:/srv:ro
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE

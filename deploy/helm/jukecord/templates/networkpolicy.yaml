@@ -1,4 +1,4 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- if and .Values.networkPolicy.enabled (eq .Values.mode "single") }}
 # In: the panel's port only. Out: DNS, and the internet (Discord's gateway and its voice servers over UDP, the sites
 # tracks come from) but none of the cluster's private networks, so a compromised jukecord cannot reach other services.
 apiVersion: networking.k8s.io/v1
@@ -47,4 +47,78 @@ spec:
             except:
               - fc00::/7
               - fe80::/10
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (eq .Values.mode "split") }}
+---
+# The core: its own port (health and figures) as the panel's port is in single mode; its internal port from the edges
+# only. Out as below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "jukecord.coreName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "core") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "jukecord.partSelector" (list . "core") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8795
+          protocol: TCP
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    # The audio and the covers: for this release's edges and nobody else.
+    - ports:
+        - port: 8796
+          protocol: TCP
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "jukecord.partSelector" (list . "edge") | nindent 14 }}
+  egress:
+    {{- include "jukecord.splitEgress" . | nindent 4 }}
+---
+# The edges: the panel's port, as in single mode. Out: as the core, and the core's internal port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "jukecord.edgeName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "edge") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "jukecord.partSelector" (list . "edge") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8795
+          protocol: TCP
+      {{- with .Values.networkPolicy.ingressFrom }}
+      # Only from these (networkPolicy.ingressFrom), and helm test's pod.
+      from:
+        {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+              app.kubernetes.io/component: test
+      {{- end }}
+  egress:
+    {{- include "jukecord.splitEgress" . | nindent 4 }}
+    # The core's internal port, in the cluster (its private range is out of reach otherwise).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "jukecord.partSelector" (list . "core") | nindent 14 }}
+      ports:
+        - port: 8796
+          protocol: TCP
 {{- end }}
