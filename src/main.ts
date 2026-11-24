@@ -107,8 +107,13 @@ async function main(): Promise<number> {
 
   const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
   // The shared cache: what the rate limits count, and what the searches and the links of other services found (see
-  // src/cache/), in this process's memory.
-  const shared = await openCache({ url: 'memory', prefix: 'jukecord', log: log.child('cache'), service: 'all' });
+  // src/cache/): in this process's memory unless JUKECORD_CACHE_URL names a Redis or Valkey server.
+  const shared = await openCache({
+    url: config.cacheUrl,
+    prefix: config.bus.prefix,
+    log: log.child('cache'),
+    service: config.role,
+  });
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
   const lanes = new GuildLanes();
   // Trouble said in the log and in each server's alerts channel (app/alerts.ts); the bot posts them once it exists.

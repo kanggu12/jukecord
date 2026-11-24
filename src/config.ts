@@ -12,6 +12,18 @@ import { parseDuration, parseSize, UnitError } from './util/units.ts';
 /** How much the logger writes; each level includes the ones after it. */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/**
+ * Which part of jukecord a process is (JUKECORD_ROLE): all of it (one process, the default), the core (Discord, the
+ * players, the media; exactly one) or an edge (the panel, the API, the live updates, logins; any number of them).
+ */
+export type Role = 'all' | 'core' | 'edge';
+
+/** The roles, for checking the setting and for messages. */
+export const ROLES: readonly Role[] = ['all', 'core', 'edge'];
+
+/** The core's port for its edges unless JUKECORD_INTERNAL_PORT says otherwise. */
+export const DEFAULT_INTERNAL_PORT = 8796;
+
 /** The settings the rest of jukecord reads. Built once by loadConfig and not changed afterwards. */
 export interface Config {
   /** Where the database, the media cache and the logs live (an absolute path). */
@@ -82,6 +94,29 @@ export interface Config {
   };
   /** Settings that were read but look wrong without being fatal (an unknown JUKECORD_ variable, mostly typos). */
   readonly warnings: readonly string[];
+  /** Which part of jukecord this process is (JUKECORD_ROLE); `all` unless split into services. */
+  readonly role: Role;
+  /** How the services of a split jukecord talk: a Redis or Valkey server, and the prefix of what jukecord puts there. */
+  readonly bus: {
+    /** The server's address (JUKECORD_BUS_URL); null in one process, which carries its events in memory. */
+    readonly url: string | null;
+    /** What every key and channel goes under (JUKECORD_KEY_PREFIX), so several jukecords can share one server. */
+    readonly prefix: string;
+  };
+  /**
+   * The shared cache (JUKECORD_CACHE_URL): "memory", or a Redis or Valkey address. One process keeps it in memory unless
+   * told otherwise; the services of a split jukecord use the bus's server unless told otherwise.
+   */
+  readonly cacheUrl: string;
+  /** How edges reach the core in a split jukecord. */
+  readonly internal: {
+    /** The core's port for its edges (JUKECORD_INTERNAL_PORT): the audio and the covers, for edges only. */
+    readonly port: number;
+    /** The secret the core and its edges share (JUKECORD_INTERNAL_SECRET); null in one process. */
+    readonly secret: string | null;
+    /** Where an edge reaches that port (JUKECORD_CORE_URL, http://core:8796); null for anything but an edge. */
+    readonly coreUrl: string | null;
+  };
   /** Links of other music services jukecord reads (and finds on YouTube). */
   readonly links: {
     /** The services read (JUKECORD_LINK_SERVICES); a link of another is refused. */
@@ -146,7 +181,23 @@ const KNOWN = new Set([
   'JUKECORD_SPOTIFY_CLIENT_ID',
   'JUKECORD_SPOTIFY_CLIENT_SECRET',
   'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
+  // Services: the role, the bus and the shared cache (a Redis or Valkey server), and the core's port for edges.
+  'JUKECORD_ROLE',
+  'JUKECORD_BUS_URL',
+  'JUKECORD_BUS_URL_FILE',
+  'JUKECORD_CACHE_URL',
+  'JUKECORD_CACHE_URL_FILE',
+  'JUKECORD_KEY_PREFIX',
+  'JUKECORD_INTERNAL_PORT',
+  'JUKECORD_INTERNAL_SECRET',
+  'JUKECORD_INTERNAL_SECRET_FILE',
+  'JUKECORD_CORE_URL',
 ]);
+
+// A Redis or Valkey server's address, as the bus and the cache take it (TLS with the s).
+const REDIS_SCHEMES = ['redis:', 'rediss:', 'valkey:', 'valkeys:'];
+// The shortest internal secret taken: as long as the 32 random bytes jukecord's own secrets are, in hex.
+const SECRET_MIN = 32;
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
 export interface ConfigFiles {
@@ -408,6 +459,105 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     spotify: spotifyId && spotifySecret ? { clientId: spotifyId, clientSecret: spotifySecret } : null,
   };
 
+  // The role, and what the services of a split jukecord need: a database they all reach (stage 2a's setting; only its
+  // kind is looked at here), a bus, the internal secret, and for an edge, where the core is.
+  const role = read('JUKECORD_ROLE', 'all' as Role, (text) => {
+    const value = text.toLowerCase();
+    if (!ROLES.includes(value as Role)) throw new Error(`"${text}" is not one of ${ROLES.join(', ')}`);
+    return value as Role;
+  });
+  // A Redis or Valkey address: a URL with a host, by one of their schemes.
+  const redisUrl = (name: string, text: string | null): string | null => {
+    if (text === null) return null;
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      problems.push(`${name}: that is not an address (example: redis://valkey:6379)`);
+      return null;
+    }
+    if (!REDIS_SCHEMES.includes(url.protocol) || !url.hostname) {
+      problems.push(`${name}: a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host`);
+      return null;
+    }
+    return text;
+  };
+  const busUrl = redisUrl('JUKECORD_BUS_URL', secret('JUKECORD_BUS_URL'));
+  const cacheText = secret('JUKECORD_CACHE_URL');
+  const cacheUrl =
+    cacheText !== null && cacheText.toLowerCase() === 'memory'
+      ? 'memory'
+      : (redisUrl('JUKECORD_CACHE_URL', cacheText) ?? (role === 'all' ? 'memory' : (busUrl ?? 'memory')));
+  const prefix = read('JUKECORD_KEY_PREFIX', 'jukecord', (text) => {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(text)) {
+      throw new Error('a prefix is up to 64 letters, digits and . _ : - (starting with a letter or digit)');
+    }
+    return text;
+  });
+  const internalPort = read('JUKECORD_INTERNAL_PORT', DEFAULT_INTERNAL_PORT, integer(1, 65535));
+  const internalSecret = secret('JUKECORD_INTERNAL_SECRET');
+  if (internalSecret !== null && internalSecret.length < SECRET_MIN) {
+    problems.push(
+      `JUKECORD_INTERNAL_SECRET is too short: at least ${SECRET_MIN} characters (openssl rand -hex 32 makes one)`,
+    );
+  }
+  const coreUrl = read('JUKECORD_CORE_URL', null as string | null, (text) => {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      throw new Error(`"${text}" is not an address (example: http://core:${DEFAULT_INTERNAL_PORT})`);
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(`"${text}" must start with http(s)://`);
+    return url.href.replace(/\/+$/, '');
+  });
+  if (role !== 'all') {
+    const as = `JUKECORD_ROLE=${role}`;
+    // The database's kind, from its address (stage 2a reads and checks the rest of it): a SQLite file is one
+    // process's, so services need a database server. An address in a file that cannot be read is said by its own
+    // check.
+    const databaseFile = get('JUKECORD_DATABASE_URL_FILE');
+    const databaseFull = databaseFile ? path.resolve(cwd, databaseFile) : null;
+    const databaseText =
+      get('JUKECORD_DATABASE_URL') ??
+      (databaseFull && files.readable(databaseFull) ? files.read(databaseFull).trim() : null);
+    const unread = databaseFull !== null && !files.readable(databaseFull) && get('JUKECORD_DATABASE_URL') === null;
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(databaseText ?? '')?.[1]?.toLowerCase() ?? null;
+    if (!unread && (scheme === null || scheme === 'sqlite')) {
+      problems.push(
+        scheme === 'sqlite'
+          ? `${as} needs a database every service reaches, and a SQLite file is one process's: set JUKECORD_DATABASE_URL to a postgres:// or mysql:// address`
+          : `${as} needs JUKECORD_DATABASE_URL: the PostgreSQL or MySQL/MariaDB database every service shares (postgres://... or mysql://...)`,
+      );
+    }
+    if (busUrl === null && get('JUKECORD_BUS_URL') === null && get('JUKECORD_BUS_URL_FILE') === null) {
+      problems.push(`${as} needs JUKECORD_BUS_URL: the Redis or Valkey server the services talk through (redis://...)`);
+    }
+    if (internalSecret === null && get('JUKECORD_INTERNAL_SECRET_FILE') === null) {
+      problems.push(
+        `${as} needs JUKECORD_INTERNAL_SECRET (or _FILE): the secret the core and its edges share, ${SECRET_MIN} characters or more`,
+      );
+    }
+    if (role === 'edge' && coreUrl === null && get('JUKECORD_CORE_URL') === null) {
+      problems.push(
+        `${as} needs JUKECORD_CORE_URL: where the core's internal port is (http://core:${DEFAULT_INTERNAL_PORT})`,
+      );
+    }
+    if (role === 'core' && internalPort === port) {
+      problems.push(`JUKECORD_INTERNAL_PORT is the panel's port (${port}): the core needs two ports`);
+    }
+  } else {
+    // In one process these do nothing: said once, in case JUKECORD_ROLE was meant to be set too.
+    const unused = ['JUKECORD_BUS_URL', 'JUKECORD_CORE_URL', 'JUKECORD_INTERNAL_SECRET'].filter(
+      (name) => get(name) !== null || get(`${name}_FILE`) !== null,
+    );
+    if (unused.length > 0) {
+      warnings.push(
+        `${unused.join(', ')} ${unused.length === 1 ? 'is' : 'are'} read only when JUKECORD_ROLE is core or edge; this one process carries its events in memory`,
+      );
+    }
+  }
+
   // Unknown JUKECORD_ variables are not fatal, but they are almost always a misspelt setting that silently does nothing.
   for (const name of Object.keys(env).sort()) {
     if (name.startsWith('JUKECORD_') && !KNOWN.has(name)) warnings.push(`${name} is not a jukecord setting`);
@@ -434,6 +584,14 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     log,
     warnings,
     links,
+    role,
+    bus: { url: role === 'all' ? null : busUrl, prefix },
+    cacheUrl,
+    internal: {
+      port: internalPort,
+      secret: role === 'all' ? null : internalSecret,
+      coreUrl: role === 'edge' ? coreUrl : null,
+    },
   };
 }
 
@@ -472,7 +630,27 @@ export function describeConfig(config: Config): Record<string, string> {
     'links read': config.links.services.size > 0 ? [...config.links.services].join(', ') : 'none',
     'spotify app': config.links.spotify?.clientId ?? 'not set',
     'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
+    role: config.role,
+    // The servers without their passwords (an address may carry one).
+    bus: config.bus.url ? shownServer(config.bus.url) : 'in memory (one process)',
+    'shared cache': config.cacheUrl === 'memory' ? 'in memory' : shownServer(config.cacheUrl),
+    'key prefix': config.bus.prefix,
+    ...(config.role === 'core' ? { 'internal port': String(config.internal.port) } : {}),
+    ...(config.role === 'edge' ? { 'core address': config.internal.coreUrl ?? 'not set' } : {}),
+    ...(config.role !== 'all' ? { 'internal secret': secret(config.internal.secret) } : {}),
   };
+}
+
+// A server's address with its user name and password left out.
+function shownServer(address: string): string {
+  try {
+    const url = new URL(address);
+    url.username = '';
+    url.password = '';
+    return url.href.replace(/\/$/, '');
+  } catch {
+    return 'set';
+  }
 }
 
 /** A time of day as people write it: "04:30". */

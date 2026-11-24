@@ -278,5 +278,13 @@ set or not set.
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             |    `5MiB`, `5`     | the log file's size, and how many are kept                                                          |
 | `JUKECORD_BACKUP_AT`                                                 |       `off`        | a database backup every day at this time (`04:30`, in jukecord's time zone)                         |
 | `JUKECORD_BACKUP_KEEP`                                               |        `7`         | how many backups the backups folder keeps                                                           |
+| **Services** (a core and its edges)                                  |                    |                                                                                                     |
+| `JUKECORD_ROLE`                                                      |       `all`        | `all` (one process), `core` (Discord, players, media: one) or `edge` (panel, API: any number)       |
+| `JUKECORD_BUS_URL`, `JUKECORD_BUS_URL_FILE`                          |                    | the Redis or Valkey server the services talk through (`redis://`, `rediss://`)                      |
+| `JUKECORD_CACHE_URL`, `JUKECORD_CACHE_URL_FILE`                      |      `memory`      | the shared cache: `memory`, or a Redis or Valkey address (services: the bus's server)               |
+| `JUKECORD_KEY_PREFIX`                                                |     `jukecord`     | what jukecord's keys and channels go under on that server                                           |
+| `JUKECORD_INTERNAL_SECRET`, `JUKECORD_INTERNAL_SECRET_FILE`          |                    | the secret the core and its edges share (32 characters or more)                                     |
+| `JUKECORD_INTERNAL_PORT`                                             |       `8796`       | the core's port for its edges (the audio and the covers)                                            |
+| `JUKECORD_CORE_URL`                                                  |                    | where an edge reaches the core's port (`http://core:8796`)                                          |
 
 Docker Compose also reads `JUKECORD_BIND` and `JUKECORD_IMAGE` ([installing](INSTALL.md#docker-compose)).
