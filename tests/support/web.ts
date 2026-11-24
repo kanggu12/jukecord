@@ -20,6 +20,7 @@ import type { LoginChecks } from '../../src/auth/check.ts';
 import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
 import { OidcLogin } from '../../src/auth/oidc.ts';
 import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
+import type { Cache } from '../../src/cache/cache.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
@@ -207,6 +208,8 @@ export interface TestServerOptions {
   readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
   /** The login settings' tests (none by default). */
   readonly loginChecks?: LoginChecks;
+  /** Where the logins keep what is short-lived (links, failed logins, SSO states); a memory cache of its own by default. */
+  readonly loginCache?: Cache;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -301,7 +304,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
-  const loginCache = new MemoryCache();
+  const loginCache = options.loginCache ?? new MemoryCache();
   // Through the made-up provider, coming back to the address the test server says it has.
   const oidc = options.oidc
     ? new OidcLogin({

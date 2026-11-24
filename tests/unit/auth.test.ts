@@ -300,14 +300,14 @@ describe('addressKey and the limiter under a scan', () => {
     assert.equal(await limiter.blocked([addressFailures('2001:db8:1:100::1')]), false);
   });
 
-  it('keeps at most what the cache holds, forgetting the addresses that failed longest ago', async () => {
-    const limiter = new LoginLimiter(new MemoryCache({ capacity: 3 }), { limit: 2 });
+  it('keeps at most what the cache holds, a blocked address the last to go', async () => {
+    const limiter = new LoginLimiter(new MemoryCache({ capacity: 3, counters: 3 }), { limit: 2 });
     await limiter.fail([addressFailures('10.0.0.1')]);
     await limiter.fail([addressFailures('10.0.0.1')]);
     assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), true);
-    for (const address of ['10.0.0.2', '10.0.0.3', '10.0.0.4']) await limiter.fail([addressFailures(address)]);
-    // The first address was pushed out by three newer ones.
-    assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), false);
+    for (let i = 2; i < 100; i += 1) await limiter.fail([addressFailures(`10.0.0.${i}`)]);
+    // Ninety-eight single failures elsewhere pushed out one another, never the address that is blocked.
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), true);
   });
 
   it('keeps one counter for an address however often it fails', async () => {

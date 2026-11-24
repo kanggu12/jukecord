@@ -10,11 +10,13 @@ import { after, before, describe, it } from 'node:test';
 import type { InjectOptions } from 'fastify';
 import type { ClientOptions } from 'ldapts';
 import { bindRefusal, escapeFilterValue, fillFilter, IN_CHAIN, LdapError, LdapLogin } from '../../src/auth/ldap.ts';
-import type { LdapSettings } from '../../src/auth/settings.ts';
+import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
+import { MemoryCache } from '../../src/cache/memory.ts';
 import { createLogger } from '../../src/log.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { memberKey, SESSION_COOKIE } from '../../src/web/auth.ts';
 import { FakeDirectoryServer } from '../support/directory.ts';
+import { CLIENT_ID, CLIENT_SECRET, FakeProvider, ISSUER } from '../support/oidc.ts';
 import { type TestServer, testServer } from '../support/web.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
@@ -33,6 +35,18 @@ const SETTINGS: LdapSettings = {
   groups: { admin: ['admins'], control: ['cn=djs,ou=groups,dc=example,dc=org'], read: ['listeners'] },
   timeoutMs: 5000,
   label: null,
+};
+
+// An identity provider beside the directory, for the starts of logins there.
+const OIDC: OidcSettings = {
+  issuer: ISSUER,
+  clientId: CLIENT_ID,
+  clientSecret: CLIENT_SECRET,
+  scopes: ['openid', 'profile'],
+  groupsClaim: 'groups',
+  groups: { admin: [], control: [], read: ['*'] },
+  label: null,
+  discordClaim: null,
 };
 
 const ALICE_DN = 'uid=alice,ou=people,dc=example,dc=org';
@@ -411,5 +425,41 @@ describe('a directory that takes StartTLS and then never finishes the handshake'
     assert.equal(tested.checks[0]?.name, 'connection');
     assert.equal(tested.checks[0]?.status, 'fail');
     assert.match(tested.checks[0]?.detail ?? '', /StartTLS/);
+  });
+});
+
+describe('failed logins under a flood of logins started elsewhere', () => {
+  // A login cache of fifty entries: as a full one of 10,000 is under a flood of ten thousand starts, sooner.
+  let server: TestServer;
+  const provider = new FakeProvider();
+  const fake = directory();
+  const inject = (options: InjectOptions) => server.web.app.inject(options);
+  const form = (username: string, address: string) =>
+    inject({
+      method: 'POST',
+      url: '/auth/directory',
+      remoteAddress: address,
+      headers: { origin: 'http://localhost:8795', host: 'localhost:8795' },
+      payload: { username, password: 'a guess' },
+    });
+
+  before(async () => {
+    server = await testServer({
+      oidc: { settings: OIDC, fetch: provider.fetch },
+      ldap: { settings: SETTINGS, connect: fake.connect },
+      loginCache: new MemoryCache({ capacity: 50 }),
+    });
+  });
+  after(() => server.close());
+
+  it('keeps a blocked name blocked however many logins anyone starts at the provider', async () => {
+    for (let i = 0; i < 20; i += 1) assert.equal((await form('erin', `10.9.0.${i}`)).statusCode, 401);
+    assert.equal((await form('erin', '10.9.1.1')).statusCode, 429);
+    // A hundred starts from a hundred /56s, each a login's state kept ten minutes.
+    for (let i = 0; i < 100; i += 1) {
+      const start = await inject({ method: 'GET', url: '/auth/sso', remoteAddress: `2001:db8:${i.toString(16)}::1` });
+      assert.equal(start.statusCode, 302);
+    }
+    assert.equal((await form('erin', '10.9.1.2')).statusCode, 429);
   });
 });
