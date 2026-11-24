@@ -79,6 +79,8 @@ for (const { name, make } of testBuses()) {
       pieces = await split(make(), {
         found: { 'two tracks': [exampleTrack('a'), exampleTrack('b')], 'one track': [exampleTrack('c')] },
         coreLostAfterMs: 1500,
+        // A burst of two changes and hardly any more, so a third from the same login is refused wherever it comes in.
+        rates: { changes: { perSecond: 0.01, burst: 2 } },
       });
       core = await pieces.core();
       one = await pieces.edge(core);
@@ -200,6 +202,35 @@ for (const { name, make } of testBuses()) {
       });
       assert.equal(out.status, 204);
       assert.equal(await away.closed, 4401);
+    });
+
+    it("ends a revoked listening link's guests on every edge, whichever edge revoked it", async () => {
+      const made = await ask(one, 'POST', `/guilds/${GUILD}/listen-links`, { days: 1 });
+      assert.equal(made.status, 200);
+      const code = String(made.body.url).split('#')[1] ?? '';
+      // The guest comes in through the other edge, as a browser behind the front may.
+      const entered = await fetch(`${two.url}/auth/listen`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      assert.equal(entered.status, 200);
+      const cookie = (entered.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+      const guest = new Live(two, GUILD, { cookie });
+      await eventually(() => guest.of('state').length === 1, "the guest's state");
+      const id = (made.body.link as { id: number }).id;
+      assert.equal((await ask(one, 'DELETE', `/guilds/${GUILD}/listen-links/${id}`)).status, 200);
+      assert.equal(await guest.closed, 4401);
+    });
+
+    it("counts a login's changes together on every edge (the rates are in the shared cache)", async () => {
+      const alice = await sessionHeaders(one, ALICE);
+      // Two changes at once and one more a second: the third through the other edge is the one too many.
+      const statuses: number[] = [];
+      for (const edge of [one, one, two]) {
+        statuses.push((await ask(edge, 'POST', `/guilds/${GUILD}/queue/shuffle`, undefined, alice)).status);
+      }
+      assert.deepEqual(statuses, [200, 200, 429]);
     });
 
     it('asks the core for the host jobs: its log, its self-check, its backup', async () => {
