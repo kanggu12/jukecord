@@ -1,0 +1,87 @@
+# Prometheus alert rules for jukecord. Load them with rule_files (prometheus.yml beside this file does), or put the
+# group in a PrometheusRule for the Prometheus Operator. Every rule but the first reads jukecord's own metrics, so the
+# scrape job's name does not matter to them; JukecordDown finds jukecord's targets by a job named like jukecord (a
+# ServiceMonitor's job is its Service's name): change the selector if yours is called otherwise.
+#
+# Checked with promtool: promtool check rules alerts.yaml, and promtool test rules alerts.test.yaml.
+groups:
+  - name: jukecord
+    rules:
+      - alert: JukecordDown
+        # A target that does not answer its scrape, or no jukecord target at all (the scrape's configuration lost it).
+        expr: up{job=~".*jukecord.*"} == 0 or absent(up{job=~".*jukecord.*"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: jukecord does not answer
+          description: >-
+            Prometheus has not scraped jukecord{{ with $labels.instance }} ({{ . }}){{ end }} for five minutes: the
+            process is down or restarting, or something stops the scrape (a NetworkPolicy, a proxy, a wrong metrics
+            token, a scrape configuration that lost it).
+
+      - alert: JukecordNotReady
+        # /readyz answers 503: a part jukecord cannot serve without does not work.
+        expr: jukecord_ready == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: jukecord is not ready
+          description: >-
+            {{ $labels.instance }} has answered /readyz with 503 for five minutes: its database, bus or shared cache
+            does not work. jukecord_part_up and /readyz say which.
+
+      - alert: JukecordDiscordDisconnected
+        # Only where there is a bot: the gateway's series are absent when jukecord runs browser-only.
+        expr: max by (job, instance) (jukecord_discord_gateway_state{state="ready"}) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: the bot is not connected to Discord
+          description: >-
+            The bot of {{ $labels.instance }} has not been connected to Discord for ten minutes, so it plays in no
+            voice channel; the panel still works. Its log says why (jukecord logs --component discord).
+
+      - alert: JukecordFetchFailuresClimbing
+        # Most of the last half hour's fetches failed, and at least five did: a quiet server's one failure is no trend.
+        expr: >-
+          (
+            sum by (job, instance) (increase(jukecord_fetches_total{outcome="failed"}[30m]))
+            / sum by (job, instance) (increase(jukecord_fetches_total{outcome=~"ok|failed"}[30m]))
+          ) > 0.5
+          and sum by (job, instance) (increase(jukecord_fetches_total{outcome="failed"}[30m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: most tracks fail to download
+          description: >-
+            More than half of the tracks {{ $labels.instance }} fetched in the last half hour failed.
+            jukecord_fetch_failures_total says why: bot-check is YouTube refusing this server (give jukecord a cookies
+            file, JUKECORD_YTDLP_COOKIES), offline is no way to the internet, http-4xx a site refusing.
+
+      - alert: JukecordCacheFull
+        # Over its limit (what is playing and fetched ahead alone fills it), or a disk with no room for new tracks.
+        expr: jukecord_cache_bytes > jukecord_cache_limit_bytes or jukecord_disk_free_bytes < 1073741824
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: the media cache has no room
+          description: >-
+            {{ $labels.instance }} cannot keep new tracks: the media cache is over its limit (JUKECORD_CACHE_MAX), or
+            the disk holding the data folder has less than 1 GiB free. Raise the limit or the volume, or free the disk.
+
+      - alert: JukecordEventLoopStalling
+        # Behind (the event loop's 99th percentile delay over 0.2 s) for a quarter of the last five minutes.
+        expr: rate(jukecord_event_loop_behind_seconds_total[5m]) > 0.25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: jukecord is falling behind
+          description: >-
+            {{ $labels.instance }} has been behind for over a quarter of the time for five minutes: its event loop is
+            too busy, so it turns away changes and audio for browsers. Give it more processor, or fewer panels.

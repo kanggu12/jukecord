@@ -53,5 +53,11 @@ jukecord believes the X-Forwarded-For of what reaches its port (one proxy in fro
 networkPolicy.ingressFrom empty any pod of the cluster may reach that port.
 {{- end }}
 
+{{- if and .Values.metrics.serviceMonitor.enabled (not (include "jukecord.serviceMonitor" .)) }}
+
+metrics.serviceMonitor.enabled is set, but this cluster has no ServiceMonitor CRD (monitoring.coreos.com/v1), so no
+ServiceMonitor was made. Install the Prometheus Operator first, or set metrics.serviceMonitor.force=true to make it.
+{{- end }}
+
 Check every part it needs:
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "jukecord.fullname" . }} -- jukecord doctor

@@ -318,7 +318,16 @@ describe('the HTTP API', () => {
 
   it('answers health, readiness and metrics', async () => {
     assert.equal((await inject({ method: 'GET', url: '/healthz' })).body, 'ok\n');
-    assert.deepEqual((await inject({ method: 'GET', url: '/readyz' })).json(), { ready: true, discord: true });
+    assert.deepEqual((await inject({ method: 'GET', url: '/readyz' })).json(), {
+      ready: true,
+      discord: true,
+      parts: {
+        database: { state: 'ok', required: true, kind: 'sqlite' },
+        bus: { state: 'ok', required: true, kind: 'in-process' },
+        cache: { state: 'ok', required: true, kind: 'memory' },
+        discord: { state: 'ok', required: false },
+      },
+    });
     const metrics = (await inject({ method: 'GET', url: '/metrics' })).body;
     assert.match(metrics, /^jukecord_info\{version="\d+\.\d+\.\d+.*"\} 1$/m);
     assert.match(metrics, /^jukecord_players\{status="loading"\} 1$/m);

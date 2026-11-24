@@ -9,22 +9,26 @@
 import fs from 'node:fs';
 import type { Socket } from 'node:net';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import zlib from 'node:zlib';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { ActionError, likesOwner } from '../app/actions.ts';
+import type { Health } from '../app/health.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
-import { isPrivateAddress } from '../media/address.ts';
 import { BusyError } from '../media/busy.ts';
 import { MediaCache } from '../media/cache.ts';
 import type { CoverFile, Covers, Pictured } from '../media/covers.ts';
+import { MetricsGate, negotiate } from '../metrics/http.ts';
+import { MetricsRegistry } from '../metrics/registry.ts';
+import { httpMetrics, methodLabel, routeLabel, statusClass } from '../metrics/web.ts';
 import { StoreError } from '../store/store.ts';
-import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
 import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
@@ -54,14 +58,17 @@ export interface WebServerOptions {
   readonly log: Logger;
   /** How many live connections there may be (in all, per login, per address); tests and the settings change it. */
   readonly live?: Partial<LiveLimits>;
-  /** Whether jukecord can serve requests (for /readyz). */
-  readonly ready: () => boolean;
+  /** Whether jukecord can serve, part by part (for /readyz, src/app/health.ts). */
+  readonly health: Health;
+  /** Where every number of jukecord is kept, for /metrics; a server made on its own (a test's) makes its own. */
+  readonly metrics?: MetricsRegistry;
+  /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN); none: the address rule. */
+  readonly metricsToken?: string | null;
   /**
    * Hears, at most once a minute per cap, that connections were turned away at one: every connection's, one
    * address's, or the live connections' (for app/alerts.ts).
    */
   readonly turnedAway?: (cap: TurnedAway) => void;
-  readonly discordReady: () => boolean;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
   readonly rates?: {
     readonly changes?: Rate;
@@ -145,6 +152,10 @@ const TOO_MANY_READS = 'too many requests at once; try again in a moment';
 // What an audio request is told while the MP3 copy it asked for is still being made.
 const MAKING_MP3 = 'jukecord is making the MP3 copy of this track; try again in a moment';
 const TOO_MANY_SEARCHES = 'too many searches at once; try again in a moment';
+
+// The metrics' text, compressed off the main thread for a scraper that takes gzip (Prometheus always does): a few tens
+// of kilobytes become a few.
+const gzipped = promisify(zlib.gzip);
 
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
 // do; undici with pipelining and benchmark tools do. A client that sends many in one go and reads nothing had each one
@@ -258,6 +269,10 @@ function permission(access: Permission, caller: Caller | null): 'ok' | 'unauthor
 export async function createWebServer(options: WebServerOptions): Promise<WebServer> {
   const { deps, log } = options;
   const { auth } = deps;
+  // Every number for /metrics, and who may read them.
+  const registry = options.metrics ?? new MetricsRegistry();
+  const gate = new MetricsGate(options.metricsToken ?? null);
+  const http = httpMetrics(registry);
   // A hop count becomes "trust the nearest n proxies"; Fastify's types take that only as a function.
   const hops = options.trustProxy;
   const trustProxy =
@@ -363,6 +378,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     presenter: deps.presenter,
     users: deps.store.users,
     log: log.child('events'),
+    metrics: registry,
     // The queue's change counter, read without the queue: the hub keeps each server's queue message per version.
     queueVersion: (guildId) => options.queue.version(guildId),
     stillValid: (caller) => auth.stillValid(caller),
@@ -446,11 +462,20 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     });
   });
 
-  // Responses by status class, for /metrics.
-  const responses = new Map<string, number>();
-  app.addHook('onResponse', async (_request, reply) => {
-    const group = `${Math.floor(reply.statusCode / 100)}xx`;
-    responses.set(group, (responses.get(group) ?? 0) + 1);
+  // Every answer counted by its status class, and timed by its method, route and class. The live connection is left
+  // out of the times: its "answer" lasts as long as the panel stays open.
+  const live = `${API_PREFIX}/events`;
+  app.addHook('onResponse', async (request, reply) => {
+    const status = reply.statusCode;
+    const group = statusClass(status);
+    http.responses.inc({ class: group });
+    const template = request.routeOptions.url;
+    if (template === live) return;
+    http.duration.observe(reply.elapsedTime / 1000, {
+      method: methodLabel(request.method),
+      route: routeLabel(template, status),
+      class: group,
+    });
   });
 
   // Security headers on everything; the content security policy on pages.
@@ -942,23 +967,33 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       .send();
   });
 
-  // Health: alive (the process answers), ready (it can serve), and the figures for Prometheus.
+  // Health: alive (the process answers, nothing checked: a liveness probe must not fail for a database that is down),
+  // ready (it can serve: each part's state, kept for a second), and the figures for Prometheus.
   app.get('/healthz', async (_request, reply) => reply.type('text/plain').send('ok\n'));
   app.get('/readyz', async (_request, reply) => {
-    const ready = options.ready();
-    return reply.code(ready ? 200 : 503).send({ ready, discord: options.discordReady() });
+    const readiness = await options.health.read();
+    return reply
+      .code(readiness.ready ? 200 : 503)
+      .header('cache-control', 'no-store')
+      .send(readiness);
   });
-  // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), not for the
-  // internet: a request that came through the reverse proxy (it carries X-Forwarded-For, or the standard Forwarded)
-  // or from a public address gets the 404 any unknown path gets, so the version and the counts are not handed to
-  // everyone.
+  // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), or one that shows
+  // the metrics token, not for the internet: a request that came through the reverse proxy (it carries
+  // X-Forwarded-For, or the standard Forwarded) or from a public address, without the token, gets the 404 any unknown
+  // path gets, so the version and the counts are not handed to everyone (src/metrics/http.ts). The connection's own
+  // address decides, not a forwarded one.
   app.get('/metrics', async (request, reply) => {
-    const peer = request.socket.remoteAddress ?? '';
-    const forwarded = request.headers['x-forwarded-for'] !== undefined || request.headers.forwarded !== undefined;
-    if (forwarded || !isPrivateAddress(peer)) {
-      return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
+    const verdict = gate.verdict(request.socket.remoteAddress ?? '', request.headers);
+    if (verdict === 'hidden') return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
+    if (verdict === 'wrong-token') {
+      return failure(reply.header('www-authenticate', 'Bearer'), 'unauthorized', 'the metrics token is not right');
     }
-    return reply.type('text/plain; version=0.0.4').send(await metrics(options, hub, responses, pressure));
+    // Prometheus asks for OpenMetrics first; anything else gets the text format.
+    const exposition = negotiate(request.headers.accept);
+    const text = await registry.scrape(exposition.format);
+    reply.type(exposition.contentType).header('cache-control', 'no-store').header('vary', 'accept, accept-encoding');
+    if (!/\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''))) return reply.send(text);
+    return reply.header('content-encoding', 'gzip').send(await gzipped(text));
   });
 
   // Anything else: the panel's page for a browser asking for a page (the panel draws /stats, /login ... itself), a
@@ -1003,61 +1038,6 @@ function sameOrigin(request: FastifyRequest, publicUrl: string): boolean {
   if (!origin) return true;
   const here = `${request.protocol}://${request.headers.host ?? ''}`;
   return origin === here || origin === new URL(publicUrl).origin;
-}
-
-// The Prometheus text: what is playing, queues, the cache, the panels, and the answers given.
-async function metrics(
-  options: WebServerOptions,
-  hub: EventHub,
-  responses: Map<string, number>,
-  pressure: Pressure | null,
-): Promise<string> {
-  const lines: string[] = [];
-  const gauge = (name: string, help: string, values: [string, number][]) => {
-    lines.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`);
-    for (const [labels, value] of values) lines.push(`${name}${labels} ${value}`);
-  };
-  const players = options.players.all();
-  const byStatus = new Map<string, number>([
-    ['idle', 0],
-    ['loading', 0],
-    ['playing', 0],
-    ['paused', 0],
-  ]);
-  let queued = 0;
-  for (const player of players) {
-    const status = player.snapshot().status;
-    byStatus.set(status, (byStatus.get(status) ?? 0) + 1);
-    queued += await options.queue.size(player.guildId);
-  }
-  const counts = hub.counts();
-  gauge('jukecord_info', 'The running version.', [[`{version="${VERSION}"}`, 1]]);
-  gauge('jukecord_discord_connected', 'Whether the bot is connected to Discord.', [
-    ['', options.discordReady() ? 1 : 0],
-  ]);
-  gauge(
-    'jukecord_players',
-    'Players by state.',
-    [...byStatus.entries()].map(([status, count]) => [`{status="${status}"}`, count]),
-  );
-  gauge('jukecord_queue_tracks', 'Tracks waiting in all queues.', [['', queued]]);
-  gauge('jukecord_cache_bytes', 'Bytes in the media cache.', [['', options.cache.size()]]);
-  gauge('jukecord_cache_tracks', 'Tracks in the media cache.', [['', options.cache.count()]]);
-  gauge('jukecord_cache_covers', "Tracks' covers in the media cache.", [['', options.cache.coverCount()]]);
-  gauge('jukecord_panel_connections', 'Open live connections from panels.', [['', counts.connections]]);
-  gauge('jukecord_browser_listeners', 'Browsers playing along.', [['', counts.listening]]);
-  // How far behind the event loop is: above 0.2 s, audio (for everyone) and changes from anyone but the host are
-  // turned away.
-  if (pressure) {
-    gauge('jukecord_event_loop_delay_seconds', "The 99th percentile of the event loop's delay over the last second.", [
-      ['', Math.round(pressure.delayMs) / 1000],
-    ]);
-  }
-  lines.push('# HELP jukecord_http_responses_total Answers given, by status class.');
-  lines.push('# TYPE jukecord_http_responses_total counter');
-  for (const [group, count] of [...responses.entries()].sort())
-    lines.push(`jukecord_http_responses_total{class="${group}"} ${count}`);
-  return `${lines.join('\n')}\n`;
 }
 
 /** The operation names the server answers (for tests). */

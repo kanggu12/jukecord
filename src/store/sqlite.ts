@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
+import { type DatabaseReport, type QueryKind, queryKind } from '../metrics/database.ts';
 import { Lock } from '../util/lock.ts';
 import { type RunResult, type SqlExecutor, type SqlRow, type SqlValue, StoreError } from './sql.ts';
 
@@ -54,14 +55,27 @@ export class SqliteExecutor implements SqlExecutor {
   // Prepared statements by their text, oldest first: preparing is most of what a simple statement costs (a thousand
   // rows written in a reorder took six times as long, prepared one by one), and the repositories' texts repeat.
   private readonly statements = new Map<string, StatementSync>();
+  // Where each statement and transaction is reported (src/metrics/database.ts), or nowhere.
+  private readonly report: DatabaseReport | null;
 
-  private constructor(db: DatabaseSync, file: string) {
+  private constructor(db: DatabaseSync, file: string, report: DatabaseReport | null) {
     this.db = db;
     this.file = file;
+    this.report = report;
+    // One connection: busy while a transaction holds it (a statement outside one runs to its end at once, so no scrape
+    // ever finds it busy), idle otherwise, and none once closed; the waiting are those in line for the lock.
+    report?.connections(() => {
+      const open = this.db.isOpen;
+      const busy = open && this.lock.locked ? 1 : 0;
+      return { busy, idle: open ? 1 - busy : 0, waiting: this.lock.queued };
+    });
   }
 
-  /** Opens (creating if needed) a database file, with the settings jukecord runs it with. */
-  static open(file: string): SqliteExecutor {
+  /**
+   * Opens (creating if needed) a database file, with the settings jukecord runs it with; `report` hears every statement
+   * (the metrics).
+   */
+  static open(file: string, options: { readonly report?: DatabaseReport } = {}): SqliteExecutor {
     // The data directory may be new; SQLite does not create parent folders.
     if (file !== ':memory:') {
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -89,7 +103,7 @@ export class SqliteExecutor implements SqlExecutor {
       db.close();
       throw error;
     }
-    return new SqliteExecutor(db, file);
+    return new SqliteExecutor(db, file, options.report ?? null);
   }
 
   get isOpen(): boolean {
@@ -98,15 +112,15 @@ export class SqliteExecutor implements SqlExecutor {
 
   all(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
     // The driver's rows are plain objects of its own value types, every one of which is an SqlValue.
-    return this.use(() => this.prepared(sql).all(...params) as SqlRow[]);
+    return this.use(sql, () => this.prepared(sql).all(...params) as SqlRow[]);
   }
 
   get(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow | undefined> {
-    return this.use(() => this.prepared(sql).get(...params) as SqlRow | undefined);
+    return this.use(sql, () => this.prepared(sql).get(...params) as SqlRow | undefined);
   }
 
   run(sql: string, params: readonly SqlValue[] = []): Promise<RunResult> {
-    return this.use(() => {
+    return this.use(sql, () => {
       const result = this.prepared(sql).run(...params);
       // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
       return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
@@ -114,7 +128,7 @@ export class SqliteExecutor implements SqlExecutor {
   }
 
   exec(sql: string): Promise<void> {
-    return this.use(() => {
+    return this.use(sql, () => {
       this.db.exec(sql);
     });
   }
@@ -123,6 +137,9 @@ export class SqliteExecutor implements SqlExecutor {
     // Inside a transaction still open: a savepoint of it.
     const parent = this.current.getStore();
     if (parent?.open) return this.savepoint(parent, fn);
+    // A transaction is reported whole, from the moment it was asked for (its wait for the connection included).
+    const asked = performance.now();
+    let failed = true;
     // Otherwise the whole connection, for as long as `fn` runs: everyone else waits until the end.
     const release = await this.lock.acquire();
     const transaction: Transaction = { depth: 1, open: true, savepoints: new Lock() };
@@ -159,11 +176,13 @@ export class SqliteExecutor implements SqlExecutor {
         }
         throw error;
       }
+      failed = false;
       return result;
     } finally {
       // Whatever happened, the transaction is over and the connection is the next one's.
       transaction.open = false;
       release();
+      this.report?.query('transaction', (performance.now() - asked) / 1000, failed);
     }
   }
 
@@ -265,7 +284,10 @@ export class SqliteExecutor implements SqlExecutor {
   }
 
   // Runs one statement: at once inside the caller's open transaction, otherwise once the connection is free.
-  private use<T>(work: () => T): Promise<T> {
+  private use<T>(sql: string, statement: () => T): Promise<T> {
+    // Reported, when there is a report, by its kind and the time from now to its end (a wait in line included); timed
+    // around the work itself, so reporting adds no turn of the event loop to any statement.
+    const work = this.report === null ? statement : this.measured(queryKind(sql), statement);
     // Inside a transaction still open: it holds the connection, and its own statements run on it.
     if (this.inside()) return settled(work);
     // Free: the statement runs to its end now (the driver is synchronous), so nothing can come between.
@@ -278,6 +300,22 @@ export class SqliteExecutor implements SqlExecutor {
         release();
       }
     });
+  }
+
+  // A statement's work, reporting when it ends how long it took since now and whether it threw.
+  private measured<T>(kind: QueryKind, statement: () => T): () => T {
+    const report = this.report;
+    const asked = performance.now();
+    return () => {
+      let failed = true;
+      try {
+        const result = statement();
+        failed = false;
+        return result;
+      } finally {
+        report?.query(kind, (performance.now() - asked) / 1000, failed);
+      }
+    };
   }
 }
 

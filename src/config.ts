@@ -12,6 +12,9 @@ import { parseDuration, parseSize, UnitError } from './util/units.ts';
 /** How much the logger writes; each level includes the ones after it. */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/** How the console's lines are written: readable text, or one JSON object per line (for a log shipper). */
+export type LogFormat = 'text' | 'json';
+
 /** The settings the rest of jukecord reads. Built once by loadConfig and not changed afterwards. */
 export interface Config {
   /** Where the database, the media cache and the logs live (an absolute path). */
@@ -75,6 +78,8 @@ export interface Config {
   readonly lyrics: boolean;
   readonly log: {
     readonly level: LogLevel;
+    /** text (readable lines) or json (one object per line, the log file's own form) on the console. */
+    readonly format: LogFormat;
     /** The size at which the log file is rotated, in bytes. */
     readonly maxBytes: number;
     /** How many log files are kept, the current one included. */
@@ -82,6 +87,13 @@ export interface Config {
   };
   /** Settings that were read but look wrong without being fatal (an unknown JUKECORD_ variable, mostly typos). */
   readonly warnings: readonly string[];
+  readonly metrics: {
+    /**
+     * The token a scraper shows (Authorization: Bearer) to read /metrics from outside the private network or through
+     * a proxy; null: only a scraper on this machine or its network, asking directly.
+     */
+    readonly token: string | null;
+  };
   /** Links of other music services jukecord reads (and finds on YouTube). */
   readonly links: {
     /** The services read (JUKECORD_LINK_SERVICES); a link of another is refused. */
@@ -121,6 +133,7 @@ const KNOWN = new Set([
   'JUKECORD_FETCH_TIMEOUT',
   'JUKECORD_PREFETCH',
   'JUKECORD_LOG_LEVEL',
+  'JUKECORD_LOG_FORMAT',
   'JUKECORD_LOG_MAX',
   'JUKECORD_LOG_FILES',
   'JUKECORD_DISCORD_TOKEN_FILE',
@@ -146,6 +159,8 @@ const KNOWN = new Set([
   'JUKECORD_SPOTIFY_CLIENT_ID',
   'JUKECORD_SPOTIFY_CLIENT_SECRET',
   'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
+  'JUKECORD_METRICS_TOKEN',
+  'JUKECORD_METRICS_TOKEN_FILE',
 ]);
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
@@ -373,6 +388,12 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
       if (!LOG_LEVELS.includes(level as LogLevel)) throw new Error(`"${text}" is not one of ${LOG_LEVELS.join(', ')}`);
       return level as LogLevel;
     }),
+    // Readable lines by default; JSON for a log shipper (Loki, Elasticsearch, CloudWatch) reading the console.
+    format: read('JUKECORD_LOG_FORMAT', 'text' as LogFormat, (text) => {
+      const format = text.toLowerCase();
+      if (format !== 'text' && format !== 'json') throw new Error(`"${text}" is not text or json`);
+      return format;
+    }),
     maxBytes: read('JUKECORD_LOG_MAX', 5 * 1024 ** 2, (text) => {
       const bytes = parseSize(text);
       // A tiny limit would rotate on every line and lose the history that the log page shows.
@@ -408,6 +429,14 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     spotify: spotifyId && spotifySecret ? { clientId: spotifyId, clientSecret: spotifySecret } : null,
   };
 
+  // The metrics token: a secret like the others (or its file), long enough that guessing it is hopeless, and one word,
+  // as a bearer token is.
+  const metricsToken = secret('JUKECORD_METRICS_TOKEN');
+  if (metricsToken !== null && !/^\S{16,}$/.test(metricsToken)) {
+    problems.push('JUKECORD_METRICS_TOKEN: at least 16 characters and no spaces (openssl rand -hex 32 makes one)');
+  }
+  const metrics = { token: metricsToken };
+
   // Unknown JUKECORD_ variables are not fatal, but they are almost always a misspelt setting that silently does nothing.
   for (const name of Object.keys(env).sort()) {
     if (name.startsWith('JUKECORD_') && !KNOWN.has(name)) warnings.push(`${name} is not a jukecord setting`);
@@ -433,6 +462,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     lyrics,
     log,
     warnings,
+    metrics,
     links,
   };
 }
@@ -459,6 +489,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'fetch timeout': `${config.media.fetchTimeoutMs} ms`,
     prefetch: String(config.media.prefetch),
     'log level': config.log.level,
+    'log format': config.log.format,
     'log rotation': `${config.log.files} files of ${config.log.maxBytes} bytes`,
     'longest track': `${config.media.trackMaxMs} ms`,
     'yt-dlp cookies': config.media.cookies ?? 'not set',
@@ -472,6 +503,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'links read': config.links.services.size > 0 ? [...config.links.services].join(', ') : 'none',
     'spotify app': config.links.spotify?.clientId ?? 'not set',
     'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
+    'metrics token': secret(config.metrics.token),
   };
 }
 

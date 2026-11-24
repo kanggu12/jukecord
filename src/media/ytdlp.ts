@@ -10,6 +10,7 @@ import fs from 'node:fs';
 // YouTube's bot check is shared with the reasons people are shown (core/reasons.ts).
 import { BOT_CHECK } from '../core/reasons.ts';
 import type { NewTrack } from '../core/types.ts';
+import type { ToolMeter, ToolTask, ToolWatch } from '../metrics/media.ts';
 import { childEnv, lastLines, ProcessError, type RunOptions, type RunResult, run, watch } from './process.ts';
 import { canonicalSource, type Input, isPlaylistAddress, youtubeVideoId } from './source.ts';
 
@@ -36,6 +37,8 @@ export interface YtDlpOptions {
   readonly cacheDir?: string | null;
   /** The proxy every connection of yt-dlp goes through (the address guard, egress.ts), or null for none. */
   readonly proxy?: string | null;
+  /** Counts the runs (the metrics, and whether yt-dlp is there at all); none in tests that do not look. */
+  readonly tools?: ToolWatch;
 }
 
 // Titles YouTube gives entries that cannot be played; they are left out of an added playlist.
@@ -169,6 +172,17 @@ export class YtDlp {
     this.options = options;
   }
 
+  /** The meter of one run for `task`, started now (for a run that another part watches: the download into ffmpeg). */
+  meter(task: ToolTask): ToolMeter | undefined {
+    return this.options.tools?.start('yt-dlp', task);
+  }
+
+  // The options of one run: its time limit and cancellation, and its meter.
+  private runOptions(task: ToolTask, timeoutMs: number, signal?: AbortSignal): RunOptions {
+    const meter = this.meter(task);
+    return { timeoutMs, ...(signal ? { signal } : {}), ...(meter ? { meter } : {}) };
+  }
+
   // Arguments every run shares: no config files, no warnings in the output we parse, Node as the JS runtime.
   private common(): string[] {
     const args = ['--ignore-config', '--no-warnings', '--js-runtimes', this.options.jsRuntime];
@@ -182,7 +196,7 @@ export class YtDlp {
 
   /** The installed yt-dlp version, for the doctor command and the update check. */
   async version(signal?: AbortSignal): Promise<string> {
-    const result = await run(this.options.binary, ['--version'], { timeoutMs: 15_000, ...(signal ? { signal } : {}) });
+    const result = await run(this.options.binary, ['--version'], this.runOptions('version', 15_000, signal));
     return result.stdout.trim();
   }
 
@@ -200,10 +214,11 @@ export class YtDlp {
       if (!isPlaylistAddress(input.url)) args.push('--no-playlist');
       args.push(input.url.href);
     }
-    const result = await runExplained(this.options.binary, args, {
-      timeoutMs: this.options.timeoutMs,
-      ...(signal ? { signal } : {}),
-    });
+    const result = await runExplained(
+      this.options.binary,
+      args,
+      this.runOptions('lookup', this.options.timeoutMs, signal),
+    );
     let info: unknown;
     try {
       info = JSON.parse(result.stdout);
@@ -254,7 +269,7 @@ export class YtDlp {
       detached: true,
       env: childEnv(),
     });
-    const watching = watch(child, 'yt-dlp', { signal, timeoutMs });
+    const watching = watch(child, 'yt-dlp', this.runOptions('download-file', timeoutMs, signal));
     // Progress lines come on stdout when the audio goes to a file; both streams are read, line by line.
     if (onProgress) {
       for (const stream of [child.stdout, child.stderr]) {
@@ -318,7 +333,7 @@ export class YtDlp {
       String(count),
       `ytsearch${count}:${words}`,
     ];
-    return this.listing(args, count, signal);
+    return this.listing('search', args, count, signal);
   }
 
   /**
@@ -331,15 +346,17 @@ export class YtDlp {
     // lists the playlist rather than the one video.
     const page = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&list=RD${encodeURIComponent(videoId)}`;
     const args = [...this.common(), '-J', '--flat-playlist', '--playlist-end', String(count), page];
-    return this.listing(args, count, signal);
+    return this.listing('mix', args, count, signal);
   }
 
-  // Runs one -J listing and reads its entries into tracks (none is an empty list).
-  private async listing(args: readonly string[], count: number, signal?: AbortSignal): Promise<NewTrack[]> {
-    const result = await runExplained(this.options.binary, args, {
-      timeoutMs: this.options.timeoutMs,
-      ...(signal ? { signal } : {}),
-    });
+  // Runs one -J listing (a search, a mix) and reads its entries into tracks (none is an empty list).
+  private async listing(
+    task: ToolTask,
+    args: readonly string[],
+    count: number,
+    signal?: AbortSignal,
+  ): Promise<NewTrack[]> {
+    const result = await runExplained(this.options.binary, args, this.runOptions(task, this.options.timeoutMs, signal));
     let info: unknown;
     try {
       info = JSON.parse(result.stdout);

@@ -79,6 +79,37 @@ an ID it is not read at all (a file that is not there would stop jukecord at sta
 {{- end -}}
 {{- end -}}
 
+{{/* Whether jukecord reads a metrics token: given in the values, or in an existing Secret (which must hold it). */}}
+{{- define "jukecord.readsMetricsToken" -}}
+{{- if or .Values.metrics.existingSecret .Values.metrics.token -}}true{{- end -}}
+{{- end -}}
+
+{{/* The Secret holding the metrics token: the user's own, or the chart's. */}}
+{{- define "jukecord.metricsSecretName" -}}
+{{- .Values.metrics.existingSecret | default (include "jukecord.fullname" .) -}}
+{{- end -}}
+
+{{/* Whether the chart makes a Secret: for the Discord secrets or the metrics token given in the values. */}}
+{{- define "jukecord.makesSecret" -}}
+{{- if and (not .Values.discord.existingSecret) (or .Values.discord.token .Values.discord.clientSecret) -}}true
+{{- else if and (not .Values.metrics.existingSecret) .Values.metrics.token -}}true
+{{- end -}}
+{{- end -}}
+
+{{/* Whether there is a file to mount from a Secret at all. */}}
+{{- define "jukecord.mountsSecrets" -}}
+{{- if or (include "jukecord.readsToken" .) (include "jukecord.readsClientSecret" .) (include "jukecord.readsMetricsToken" .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Whether to make the ServiceMonitor: asked for, and the cluster has the Prometheus Operator's CRD (helm install and
+upgrade ask the cluster), or forced (helm template asks none, and would never make it).
+*/}}
+{{- define "jukecord.serviceMonitor" -}}
+{{- $monitor := .Values.metrics.serviceMonitor -}}
+{{- if and $monitor.enabled (or $monitor.force (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) -}}true{{- end -}}
+{{- end -}}
+
 {{/* Whether env or extraEnv sets a variable, so the chart does not set it a second time: (list . "NAME"). */}}
 {{- define "jukecord.userSets" -}}
 {{- $root := index . 0 -}}
@@ -127,7 +158,7 @@ without a host or with a wildcard host, which names no single address. The Deplo
 
 {{/* Values that cannot work together, refused with a message that says what to change. */}}
 {{- define "jukecord.validate" -}}
-{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" -}}
+{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" "JUKECORD_METRICS_TOKEN_FILE" "metrics.token or metrics.existingSecret" -}}
 {{- $names := list -}}
 {{- range $name, $_ := (.Values.env | default dict) -}}{{- $names = append $names (list "env" $name) -}}{{- end -}}
 {{- range (.Values.extraEnv | default list) -}}{{- $names = append $names (list "extraEnv" .name) -}}{{- end -}}
@@ -136,6 +167,9 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- $name := index . 1 -}}
 {{- if has $name (list "JUKECORD_DISCORD_TOKEN" "JUKECORD_DISCORD_CLIENT_SECRET") -}}
 {{- fail (printf "%s: %s is not set here. The bot's token goes in discord.token and the OAuth secret in discord.clientSecret, or both in a Secret named by discord.existingSecret; the chart gives them to jukecord as files." $where $name) -}}
+{{- end -}}
+{{- if eq $name "JUKECORD_METRICS_TOKEN" -}}
+{{- fail (printf "%s: JUKECORD_METRICS_TOKEN is not set here. The metrics token goes in metrics.token, or in a Secret named by metrics.existingSecret (key metricsToken); the chart gives it to jukecord as a file and to the ServiceMonitor." $where) -}}
 {{- end -}}
 {{- if hasKey $chartSets $name -}}
 {{- fail (printf "%s: %s is set by the chart (from %s); leave it out." $where $name (index $chartSets $name)) -}}
@@ -151,5 +185,8 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- end -}}
 {{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}
 {{- fail "discord.existingSecret is set together with discord.token or discord.clientSecret, which would be ignored. Put the token and the OAuth secret in the Secret named by existingSecret and leave those two empty, or leave existingSecret empty to have the chart make the Secret from them." -}}
+{{- end -}}
+{{- if and .Values.metrics.existingSecret .Values.metrics.token -}}
+{{- fail "metrics.existingSecret is set together with metrics.token, which would be ignored. Put the token in the Secret named by existingSecret (key metricsToken) and leave metrics.token empty, or leave existingSecret empty to have the chart make the Secret from it." -}}
 {{- end -}}
 {{- end -}}

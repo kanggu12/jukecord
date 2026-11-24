@@ -21,7 +21,15 @@ spec:
         {{- include "jukecord.podLabels" . | nindent 8 }}
       annotations:
         # A changed token or secret in the values restarts the pod, which reads them only when it starts.
-        checksum/secret: {{ printf "%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret | sha256sum | trunc 16 }}
+        checksum/secret: {{ printf "%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        {{- /* Where a Prometheus that finds its targets by annotation scrapes; one set in podAnnotations wins. */}}
+        {{- if .Values.metrics.podAnnotations }}
+        {{- range $key, $value := dict "prometheus.io/scrape" "true" "prometheus.io/port" "8795" "prometheus.io/path" "/metrics" }}
+        {{- if not (hasKey ($.Values.podAnnotations | default dict) $key) }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -77,6 +85,11 @@ spec:
             - name: JUKECORD_DISCORD_CLIENT_SECRET_FILE
               value: {{ include "jukecord.secretDir" . }}/clientSecret
             {{- end }}
+            {{- if include "jukecord.readsMetricsToken" . }}
+            # The token a scraper from outside the cluster's network shows for /metrics (metrics.token).
+            - name: JUKECORD_METRICS_TOKEN_FILE
+              value: {{ include "jukecord.secretDir" . }}/metricsToken
+            {{- end }}
             {{- if and .Values.ingress.enabled (not (include "jukecord.userSets" (list . "JUKECORD_TRUST_PROXY"))) }}
             # Behind the Ingress controller: one proxy whose X-Forwarded-For is believed (for the login limiter).
             - name: JUKECORD_TRUST_PROXY
@@ -131,7 +144,7 @@ spec:
             # The root filesystem is read-only; yt-dlp and ffmpeg write their scratch files here.
             - name: tmp
               mountPath: /tmp
-            {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsClientSecret" .) }}
+            {{- if include "jukecord.mountsSecrets" . }}
             - name: discord
               mountPath: {{ include "jukecord.secretDir" . }}
               readOnly: true
@@ -147,8 +160,9 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 1Gi
-        {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsClientSecret" .) }}
-        # The token and the OAuth secret as files, readable by jukecord's group (the pod's fsGroup) only.
+        {{- if include "jukecord.mountsSecrets" . }}
+        # The token, the OAuth secret and the metrics token as files, readable by jukecord's group (the pod's fsGroup)
+        # only.
         - name: discord
           projected:
             defaultMode: 0440
@@ -172,6 +186,15 @@ spec:
                     - key: clientSecret
                       path: clientSecret
                   optional: true
+              {{- end }}
+              {{- if include "jukecord.readsMetricsToken" . }}
+              # Not optional: a token asked for and not there keeps the pod from starting, with an event that names it.
+              - secret:
+                  name: {{ include "jukecord.metricsSecretName" . }}
+                  items:
+                    - key: metricsToken
+                      path: metricsToken
+                  optional: false
               {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}

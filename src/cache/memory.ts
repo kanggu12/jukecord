@@ -6,6 +6,7 @@
  * Expired entries leave when they are next looked at, and a sweep once a minute takes the ones nobody looks at again.
  */
 import { steadyNow } from '../core/clock.ts';
+import type { SharedCacheReport } from '../metrics/services.ts';
 import type { Cache, TokenRate } from './cache.ts';
 
 /** A stored value and the moment it stops counting (on the steady clock). */
@@ -27,6 +28,8 @@ export interface MemoryCacheOptions {
   readonly buckets?: number;
   /** The clock, for tests; the steady one by default, so a system clock set back expires nothing early. */
   readonly now?: () => number;
+  /** Where its reads and its size are reported (the metrics); nowhere by default. */
+  readonly report?: SharedCacheReport;
 }
 
 export class MemoryCache implements Cache {
@@ -40,6 +43,7 @@ export class MemoryCache implements Cache {
   // The minute's sweep; unref'd, so an idle cache never keeps the process alive.
   private readonly sweeper: NodeJS.Timeout;
   private closed = false;
+  private readonly report: SharedCacheReport | null;
 
   constructor(options: MemoryCacheOptions = {}) {
     this.capacity = options.capacity ?? 10_000;
@@ -47,11 +51,15 @@ export class MemoryCache implements Cache {
     this.now = options.now ?? steadyNow;
     this.sweeper = setInterval(() => this.sweep(), 60_000);
     this.sweeper.unref();
+    this.report = options.report ?? null;
+    // Its size, read when the metrics are written.
+    this.report?.entries(() => this.entries.size);
   }
 
   async get(key: string): Promise<string | null> {
     this.open();
     const entry = this.live(key);
+    this.report?.lookup(entry !== null);
     if (entry === null) return null;
     // Used now: moved to the end, the last to be evicted.
     this.entries.delete(key);
@@ -75,6 +83,7 @@ export class MemoryCache implements Cache {
   async take(key: string): Promise<string | null> {
     this.open();
     const entry = this.live(key);
+    this.report?.lookup(entry !== null);
     this.entries.delete(key);
     return entry?.value ?? null;
   }

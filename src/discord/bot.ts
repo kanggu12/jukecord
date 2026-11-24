@@ -21,6 +21,7 @@ import {
   MessageFlags,
   type NewsChannel,
   PermissionFlagsBits,
+  Status,
   type TextChannel,
 } from 'discord.js';
 import {
@@ -42,6 +43,7 @@ import type { Players } from '../core/players.ts';
 import type { Logger } from '../log.ts';
 import type { PublicFetch } from '../media/fetch.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
+import type { GATEWAY_STATES } from '../metrics/service.ts';
 import type { DiscordRepository, SettingsRepository, UserRepository, VoiceChannelRepository } from '../store/store.ts';
 import { parseTimestamp } from '../util/time.ts';
 import {
@@ -100,6 +102,19 @@ export interface BotOptions {
   /** How a file attached to /playlist import is fetched (public addresses only); without it, that is refused. */
   readonly fetch?: PublicFetch;
 }
+
+// discord.js's gateway states, by the names the metrics give them.
+const GATEWAY_STATE: Readonly<Record<Status, (typeof GATEWAY_STATES)[number]>> = {
+  [Status.Ready]: 'ready',
+  [Status.Connecting]: 'connecting',
+  [Status.Reconnecting]: 'reconnecting',
+  [Status.Idle]: 'idle',
+  [Status.Nearly]: 'nearly',
+  [Status.Disconnected]: 'disconnected',
+  [Status.WaitingForGuilds]: 'waiting-for-guilds',
+  [Status.Identifying]: 'identifying',
+  [Status.Resuming]: 'resuming',
+};
 
 export class Bot implements Directory, AlertSink {
   readonly client: Client;
@@ -261,6 +276,11 @@ export class Bot implements Directory, AlertSink {
   /** Whether the bot is logged in and receiving events. */
   ready(): boolean {
     return this.client.isReady();
+  }
+
+  /** The gateway's state as the metrics name it, and its last heartbeat's round trip (-1 before one). */
+  gateway(): { state: (typeof GATEWAY_STATES)[number]; pingMs: number } {
+    return { state: GATEWAY_STATE[this.client.ws.status] ?? 'idle', pingMs: this.client.ws.ping };
   }
 
   /** A server's text channels the bot may post in (and embed in), in Discord's order: where alerts can go. */

@@ -275,8 +275,12 @@ set or not set.
 | **Data, logs and backups**                                           |                    |                                                                                                     |
 | `JUKECORD_DATA_DIR`                                                  |      `./data`      | the database, the media cache and the logs (`/data` in the image)                                   |
 | `JUKECORD_LOG_LEVEL`                                                 |       `info`       | `debug`, `info`, `warn` or `error`                                                                  |
+| `JUKECORD_LOG_FORMAT`                                                |       `text`       | `json`: the console writes the log file's JSON lines, one object per line                           |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             |    `5MiB`, `5`     | the log file's size, and how many are kept                                                          |
 | `JUKECORD_BACKUP_AT`                                                 |       `off`        | a database backup every day at this time (`04:30`, in jukecord's time zone)                         |
 | `JUKECORD_BACKUP_KEEP`                                               |        `7`         | how many backups the backups folder keeps                                                           |
+| **Monitoring**                                                       |                    |                                                                                                     |
+| `JUKECORD_METRICS_TOKEN`                                             |                    | a token that lets a scraper read `/metrics` from anywhere (`Authorization: Bearer`)                 |
+| `JUKECORD_METRICS_TOKEN_FILE`                                        |                    | the metrics token, read from a file                                                                 |
 
 Docker Compose also reads `JUKECORD_BIND` and `JUKECORD_IMAGE` ([installing](INSTALL.md#docker-compose)).

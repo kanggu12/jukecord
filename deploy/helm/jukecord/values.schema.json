@@ -28,6 +28,43 @@
       }
     },
     "publicUrl": { "type": "string", "pattern": "^(|https?://[^\\s/]+(/.*)?)$" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "The token a scraper shows for /metrics (Authorization: Bearer): empty, or one word of at least 16 characters",
+          "pattern": "^(|\\S{16,})$"
+        },
+        "existingSecret": { "type": "string" },
+        "podAnnotations": { "type": "boolean" },
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "force": { "type": "boolean" },
+            "labels": {
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])?$"
+              }
+            },
+            "interval": {
+              "type": "string",
+              "description": "A Prometheus duration: 30s, 1m, 1m30s",
+              "pattern": "^([0-9]+(ms|s|m|h))+$"
+            },
+            "scrapeTimeout": { "type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$" }
+          }
+        }
+      }
+    },
     "env": {
       "type": "object",
       "description": "JUKECORD_* settings passed as they are, as strings (quote numbers and IDs); the port, the listening address, the data directory and the secret files belong to the chart, and the token and the OAuth secret go in discord",
