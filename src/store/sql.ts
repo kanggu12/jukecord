@@ -13,7 +13,6 @@
  * AsyncLocalStorage). A transaction opened inside another becomes a savepoint of it, which rolls back alone.
  */
 import type { Logger } from '../log.ts';
-import type { Metrics } from '../metrics/registry.ts';
 
 /** Raised for requests the data does not allow: an unknown queue item, a playlist name already taken. */
 export class StoreError extends Error {
@@ -56,10 +55,33 @@ export interface TransactionOptions {
 
 /** What every executor may be given when it is opened. */
 export interface ExecutorOptions {
-  /** Where statement durations, failures and the pool's use are reported (nothing kept when absent). */
-  readonly metrics?: Metrics;
+  /** Where each statement, each transaction and the connections are reported (nothing reported when absent). */
+  readonly report?: ExecutorReport;
   /** Where a connection lost while idle, or a transaction tried again, is said (nothing said when absent). */
   readonly log?: Pick<Logger, 'info' | 'warn' | 'error'>;
+}
+
+/** What a statement does, by its first word (a label of a metric: never a statement's text). */
+export type StatementKind = 'select' | 'insert' | 'update' | 'delete' | 'transaction' | 'other';
+
+/** How an executor's connections stand: lent to a statement or a transaction, idle, and callers waiting for one. */
+export interface ConnectionUse {
+  readonly busy: number;
+  readonly idle: number;
+  readonly waiting: number;
+}
+
+/**
+ * Where an executor reports (the metrics make one into their families): each statement as it ends, timed from the
+ * call (the wait for a connection included: what the caller waited), each transaction whole, from the moment it was
+ * asked for to its commit or rollback, as `transaction` (a try the database refused, run again, is a failed one), and
+ * how its connections stand, read when the metrics are written.
+ */
+export interface ExecutorReport {
+  /** A statement (or a whole transaction) ended, `seconds` after it was asked for; `failed` when it threw. */
+  query(kind: StatementKind, seconds: number, failed: boolean): void;
+  /** Reads how the connections stand each time the metrics are written (called once, when the executor opens). */
+  connections(read: () => ConnectionUse): void;
 }
 
 export interface SqlExecutor {
@@ -108,84 +130,34 @@ export function isUniqueViolation(error: unknown): boolean {
   return fields.errno === 1062;
 }
 
-/** The kinds of statement a duration or a failure is counted under: a word from a short list, never the text. */
-export type StatementKind = 'select' | 'insert' | 'update' | 'delete' | 'transaction' | 'other';
-
-/** The kind of a statement, by its first word. */
+/** The kind of a statement, by its first word: WITH reads, REPLACE inserts, a transaction's own words are its. */
 export function statementKind(sql: string): StatementKind {
   // The first word after any spaces and comments a statement may start with.
   const word = /^(?:\s|--[^\n]*\n)*([a-z]+)/i.exec(sql)?.[1]?.toLowerCase();
-  if (word === 'select' || word === 'with') return 'select';
-  if (word === 'insert') return 'insert';
-  if (word === 'update') return 'update';
-  if (word === 'delete') return 'delete';
-  return 'other';
+  switch (word) {
+    case 'select':
+    case 'with':
+      return 'select';
+    case 'insert':
+    case 'replace':
+      return 'insert';
+    case 'update':
+      return 'update';
+    case 'delete':
+      return 'delete';
+    case 'begin':
+    case 'start':
+    case 'commit':
+    case 'rollback':
+    case 'savepoint':
+    case 'release':
+      return 'transaction';
+    default:
+      return 'other';
+  }
 }
 
-/** What an executor counts in the metrics: each statement's duration and failure, and what its pool is doing. */
-export interface ExecutorMetrics {
-  /** Starts timing one statement of a kind; the function it gives ends the timing, a failure counted when given. */
-  statement(kind: StatementKind): (failed?: boolean) => void;
-  /** A transaction run again after the database refused it in the middle (a serialization failure, a deadlock). */
-  retried(): void;
-}
-
-/** What a pool of connections is doing at one moment. */
-export interface PoolUse {
-  /** Connections running a statement or holding a transaction. */
-  readonly busy: number;
-  /** Connections open and free. */
-  readonly idle: number;
-  /** Statements and transactions waiting for a connection. */
-  readonly waiting: number;
-}
-
-/** Reports a pool's use each time the metrics are read (nothing when there are no metrics). */
-export function poolMetrics(metrics: Metrics | undefined, read: () => PoolUse): void {
-  if (!metrics) return;
-  const connections = metrics.gauge(
-    'jukecord_db_pool_connections',
-    'Connections of the database pool, by state (busy: in use; idle: open and free).',
-    ['state'],
-  );
-  const waiting = metrics.gauge(
-    'jukecord_db_pool_waiting',
-    'Statements and transactions waiting for a connection of the database pool.',
-  );
-  metrics.collect(() => {
-    const use = read();
-    connections.set(use.busy, { state: 'busy' });
-    connections.set(use.idle, { state: 'idle' });
-    waiting.set(use.waiting);
-  });
-}
-
-/** The metrics every executor reports, declared once (each executor may add its pool's gauges with `collect`). */
-export function executorMetrics(metrics: Metrics | undefined): ExecutorMetrics {
-  // No registry: nothing counted, and no timer started for each statement.
-  if (!metrics) return { statement: () => () => {}, retried: () => {} };
-  const duration = metrics.histogram(
-    'jukecord_db_query_duration_seconds',
-    'How long database statements took, by kind (select, insert, update, delete, transaction, other).',
-    ['operation'],
-  );
-  const errors = metrics.counter(
-    'jukecord_db_query_errors_total',
-    'Database statements that failed, by kind (a constraint refused, the server unreachable, a timeout).',
-    ['operation'],
-  );
-  const retries = metrics.counter(
-    'jukecord_db_transaction_retries_total',
-    'Transactions run again because the database refused them halfway (a serialization failure or a deadlock).',
-  );
-  return {
-    statement: (kind) => {
-      const done = duration.time({ operation: kind });
-      return (failed = false) => {
-        done();
-        if (failed) errors.inc({ operation: kind });
-      };
-    },
-    retried: () => retries.inc(),
-  };
+/** Seconds since `started` (a performance.now() reading), for a report. */
+export function since(started: number): number {
+  return (performance.now() - started) / 1000;
 }

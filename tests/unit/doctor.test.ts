@@ -9,6 +9,9 @@ import { createLogger } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import type { Ffmpeg } from '../../src/media/ffmpeg.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
+import { VERSION_TABLE } from '../../src/store/schema.ts';
+import type { Store } from '../../src/store/store.ts';
+import { eachDatabase } from '../support/databases.ts';
 import { memoryStore } from '../support/store.ts';
 import { FakeDirectory } from '../support/web.ts';
 
@@ -21,6 +24,8 @@ function setup(options: {
   env?: Record<string, string>;
   /** The daily backup's last failure, as the schedule keeps it. */
   failure?: { at: number; reason: string };
+  /** The database to check (an in-memory SQLite one when none is given). */
+  store?: Store;
 }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-doctor-'));
   const config = loadConfig(
@@ -43,7 +48,7 @@ function setup(options: {
     run: async () =>
       runDoctor({
         config,
-        store: await memoryStore(),
+        store: options.store ?? (await memoryStore()),
         cache,
         ytdlp,
         ffmpeg,
@@ -205,6 +210,42 @@ describe('runDoctor', () => {
       assert.equal(check?.status, 'ok');
     } finally {
       fs.rmSync(since.dir, { recursive: true, force: true });
+    }
+  });
+});
+
+eachDatabase('the doctor on a database', (db) => {
+  it('checks that the database answers, at this jukecord’s schema, and how far it is', async () => {
+    const { dir, run } = setup({ store: await db.open() });
+    try {
+      const check = (await run()).checks.find((entry) => entry.name === 'database');
+      assert.equal(check?.status, 'ok', check?.detail);
+      // SQLite's says its file, as before; a server's its version, its size and the time of a round trip.
+      if (db.kind === 'sqlite') assert.match(check?.detail ?? '', /^schema 8, /);
+      else assert.match(check?.detail ?? '', /^(PostgreSQL|MySQL|MariaDB) [\d.]+, schema 8, .* ms there and back$/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a database another jukecord moved to its schema, and one that does not answer', async () => {
+    const store = await db.open();
+    const { dir, run } = setup({ store });
+    try {
+      // A newer jukecord beside this one brought the database to schema 9.
+      if (db.kind === 'sqlite') await store.sql.exec('PRAGMA user_version = 9');
+      else await store.sql.run(`UPDATE ${VERSION_TABLE} SET version = 9`);
+      const moved = (await run()).checks.find((entry) => entry.name === 'database');
+      assert.deepEqual(
+        [moved?.status, moved?.detail],
+        ['fail', 'the database is at schema 9, this jukecord at 8 (run the jukecord that wrote it)'],
+      );
+      await store.close();
+      const gone = (await run()).checks.find((entry) => entry.name === 'database');
+      assert.equal(gone?.status, 'fail');
+      assert.match(gone?.detail ?? '', /does not answer: /);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

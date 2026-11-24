@@ -19,7 +19,7 @@ import {
   type PoolOptions,
   STATEMENT_TIMEOUT_MS,
 } from './pooled.ts';
-import { type DatabaseServer, poolMetrics, type SqlRow, type SqlValue } from './sql.ts';
+import type { DatabaseServer, SqlRow, SqlValue } from './sql.ts';
 
 // How long a transaction may sit idle on its connection before the server ends it: no transaction of jukecord's waits
 // for anything but the database, so one that does is stuck (and holds rows others need).
@@ -93,7 +93,7 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
     super(address, server, options);
     this.pool = pool;
     // The pool's use, read when the metrics are: busy, idle, and how many wait for a connection.
-    poolMetrics(options.metrics, () => ({
+    options.report?.connections(() => ({
       busy: pool.totalCount - pool.idleCount,
       idle: pool.idleCount,
       waiting: pool.waitingCount,

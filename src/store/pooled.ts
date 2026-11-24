@@ -1,7 +1,7 @@
 /**
  * What the executors of the network databases share (src/store/postgres.ts, src/store/mysql.ts): a pool of
  * connections, transactions that follow the caller, savepoints, serializable transactions run again when the
- * database refuses them halfway, and the metrics. Each driver's executor says only how to take a connection, run a
+ * database refuses them halfway, and the report of each statement. Each driver's executor says only how to take a connection, run a
  * statement on it and begin a transaction.
  *
  * A transaction holds one connection of the pool from its BEGIN to its COMMIT; the code inside finds it through
@@ -19,13 +19,13 @@ import { ConnectionError, connectionFailure, pause } from './network.ts';
 import {
   type DatabaseServer,
   type Dialect,
-  type ExecutorMetrics,
   type ExecutorOptions,
-  executorMetrics,
+  type ExecutorReport,
   type RunResult,
   type SqlExecutor,
   type SqlRow,
   type SqlValue,
+  since,
   statementKind,
   type TransactionOptions,
 } from './sql.ts';
@@ -95,8 +95,8 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
   readonly server: DatabaseServer;
   /** Where the database is (for messages: never with the password). */
   protected readonly address: ServerAddress;
-  private readonly metrics: ExecutorMetrics;
-  private readonly measuring: boolean;
+  // Where each statement and transaction is reported (see ExecutorReport), or nowhere.
+  protected readonly report: ExecutorReport | null;
   // The transaction the code running now is inside, if any.
   private readonly current = new AsyncLocalStorage<Transaction<C>>();
   // Set by close(): no statement starts outside a transaction after it (closing), and once the transactions that held
@@ -110,8 +110,7 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
   protected constructor(address: ServerAddress, server: DatabaseServer, options: ExecutorOptions) {
     this.address = address;
     this.server = server;
-    this.metrics = executorMetrics(options.metrics);
-    this.measuring = options.metrics !== undefined;
+    this.report = options.report ?? null;
   }
 
   /** Takes a connection of the pool for a transaction. */
@@ -163,7 +162,6 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
       if (outcome.ok) return outcome.value;
       // Refused for another transaction's sake: run again from the start, after a pause, a few times.
       if (outcome.again && attempt < ATTEMPTS) {
-        this.metrics.retried();
         await pause(backoff(attempt));
         continue;
       }
@@ -190,6 +188,22 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
   // One try of a transaction on a connection of its own.
   private async attempt<T>(fn: () => Promise<T> | T, options: TransactionOptions): Promise<Attempt<T>> {
     if (this.closing || this.closed) throw closedError();
+    // The try reported whole, from now (its wait for a connection included) to its commit or rollback; a try the
+    // database refused is a failed one.
+    const asked = performance.now();
+    let outcome: Attempt<T>;
+    try {
+      outcome = await this.tried(fn, options);
+    } catch (error) {
+      this.report?.query('transaction', since(asked), true);
+      throw error;
+    }
+    this.report?.query('transaction', since(asked), !outcome.ok);
+    return outcome;
+  }
+
+  // One try of a transaction (see attempt()).
+  private async tried<T>(fn: () => Promise<T> | T, options: TransactionOptions): Promise<Attempt<T>> {
     let connection: C;
     try {
       connection = await this.acquire();
@@ -199,7 +213,6 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     const root: Root<C> = { connection, doomed: null, broken: false };
     const transaction: Transaction<C> = { depth: 1, open: true, savepoints: new Lock(), root };
     this.holding += 1;
-    const timed = this.measuring ? this.metrics.statement('transaction') : null;
     try {
       for (const statement of this.begin(options.snapshot === true)) await this.on(root, statement, undefined);
       let value: T;
@@ -210,7 +223,6 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
         // else): run again. Any other error is the transaction's own, passed on.
         transaction.open = false;
         await this.rollback(root);
-        timed?.(true);
         const again = root.doomed !== null;
         return { ok: false, error: again ? root.doomed : error, again };
       }
@@ -218,7 +230,6 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
       // Refused halfway, though the function went on: nothing of it is kept, and it is run again.
       if (root.doomed) {
         await this.rollback(root);
-        timed?.(true);
         return { ok: false, error: root.doomed, again: true };
       }
       try {
@@ -227,14 +238,11 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
         // A serialization failure can come at the commit; a lost connection there leaves the outcome unknown, which
         // is said, not tried again (it may have been kept).
         await this.rollback(root);
-        timed?.(true);
         return { ok: false, error, again: root.doomed !== null };
       }
-      timed?.();
       return { ok: true, value };
     } catch (error) {
       // BEGIN itself failed (the connection lost on the way).
-      timed?.(true);
       return { ok: false, error, again: root.doomed !== null };
     } finally {
       transaction.open = false;
@@ -306,15 +314,15 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     if (transaction?.open) return this.on(transaction.root, sql, params);
     if (this.closing || this.closed) throw closedError();
     for (let attempt = 1; ; attempt += 1) {
-      const timed = this.measuring ? this.metrics.statement(statementKind(sql)) : null;
+      // Reported from the call, the wait for a connection of the pool included.
+      const asked = performance.now();
       try {
         const answer = await this.execute(null, sql, params);
-        timed?.();
+        this.report?.query(statementKind(sql), since(asked), false);
         return answer;
       } catch (error) {
-        timed?.(true);
+        this.report?.query(statementKind(sql), since(asked), true);
         if (this.refused(error) && attempt < ATTEMPTS) {
-          this.metrics.retried();
           await pause(backoff(attempt));
           continue;
         }
@@ -329,13 +337,16 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     if (root.doomed) throw root.doomed;
     if (root.broken) throw new ConnectionError('the connection of this transaction was lost', false);
     if (this.closed && sql !== 'ROLLBACK') throw closedError();
-    const timed = this.measuring ? this.metrics.statement(statementKind(sql)) : null;
+    // A statement of the transaction's own (BEGIN, SAVEPOINT, COMMIT) is part of the transaction's report, not one of
+    // its own.
+    const kind = statementKind(sql);
+    const asked = performance.now();
     try {
       const answer = await this.execute(root.connection, sql, params);
-      timed?.();
+      if (kind !== 'transaction') this.report?.query(kind, since(asked), false);
       return answer;
     } catch (error) {
-      timed?.(true);
+      if (kind !== 'transaction') this.report?.query(kind, since(asked), true);
       if (this.refused(error)) root.doomed = error instanceof Error ? error : new Error(String(error));
       if (this.lost(error)) {
         root.broken = true;

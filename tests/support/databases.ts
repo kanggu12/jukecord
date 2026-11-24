@@ -17,7 +17,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, describe } from 'node:test';
-import type { Metrics } from '../../src/metrics/registry.ts';
 import {
   type DatabaseAddress,
   parseDatabaseAddress,
@@ -27,14 +26,15 @@ import {
 import { MysqlExecutor } from '../../src/store/mysql.ts';
 import { PostgresExecutor } from '../../src/store/postgres.ts';
 import { MIGRATIONS, TABLES, VERSION_TABLE } from '../../src/store/schema.ts';
-import type { SqlExecutor } from '../../src/store/sql.ts';
+import type { ExecutorReport, SqlExecutor } from '../../src/store/sql.ts';
 import { SqliteExecutor } from '../../src/store/sqlite.ts';
 import { Store } from '../../src/store/store.ts';
 
 /** How a test opens a store. */
 export interface OpenOptions {
   readonly now?: () => number;
-  readonly metrics?: Metrics;
+  /** Where the executor reports its statements (see ExecutorReport). */
+  readonly report?: ExecutorReport;
 }
 
 /** One database the tests run on. */
@@ -77,10 +77,10 @@ after(async () => {
 
 // An executor for an address (the one the store would open), with the pool the tests use.
 async function executorFor(address: DatabaseAddress, options: OpenOptions): Promise<SqlExecutor> {
-  const metrics = options.metrics ? { metrics: options.metrics } : {};
-  if (address.kind === 'sqlite') return SqliteExecutor.open(address.file, metrics);
+  const report = options.report ? { report: options.report } : {};
+  if (address.kind === 'sqlite') return SqliteExecutor.open(address.file, report);
   // A few connections: a test runs one thing at a time, or a handful at once in the tests of concurrency.
-  const pool = { pool: 4, ...metrics };
+  const pool = { pool: 4, ...report };
   return address.kind === 'postgres' ? PostgresExecutor.open(address, pool) : MysqlExecutor.open(address, pool);
 }
 

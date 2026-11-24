@@ -105,6 +105,30 @@ eachDatabase('what differs between the databases', (db) => {
     assert.equal(Number((await a.sql.get('SELECT COUNT(*) AS n FROM tracks'))?.n), 1);
   });
 
+  it('reports each statement by its kind, each transaction whole, a failure as one, and its connections', async () => {
+    const seen: string[] = [];
+    let connections: (() => { busy: number; idle: number; waiting: number }) | null = null;
+    const report = {
+      query: (kind: string, seconds: number, failed: boolean) => {
+        assert.ok(seconds >= 0 && seconds < 30, `${kind} took ${seconds} s`);
+        seen.push(failed ? `${kind} failed` : kind);
+      },
+      connections: (read: () => { busy: number; idle: number; waiting: number }) => {
+        connections = read;
+      },
+    };
+    const store = await db.open({ report });
+    // What opening it ran (the schema's version, the migrations) is no part of this.
+    seen.length = 0;
+    await store.tracks.get(1);
+    // A transaction's own words (BEGIN, COMMIT) are in its report, not apart.
+    await store.transaction(() => store.sql.run('UPDATE tracks SET title = title WHERE id = 0'));
+    await store.sql.get('SELECT nothing FROM nowhere').catch(() => {});
+    assert.deepEqual(seen, ['select', 'update', 'transaction', 'select failed']);
+    const use = (connections as (() => { busy: number; idle: number; waiting: number }) | null)?.();
+    assert.ok(use && use.busy === 0 && use.waiting === 0 && use.idle >= 0, JSON.stringify(use));
+  });
+
   it('has exactly the columns a copy reads in every table (and only the servers’ own beside them)', async () => {
     const store = await db.open();
     for (const table of TABLES) {

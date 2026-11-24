@@ -40,7 +40,7 @@ function delay(attempt: number): number {
  */
 export async function openExecutor(address: DatabaseAddress, options: OpenOptions = {}): Promise<SqlExecutor> {
   const executor = {
-    ...(options.metrics ? { metrics: options.metrics } : {}),
+    ...(options.report ? { report: options.report } : {}),
     ...(options.log ? { log: options.log } : {}),
   };
   if (address.kind === 'sqlite') return SqliteExecutor.open(address.file, executor);

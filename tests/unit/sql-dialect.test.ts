@@ -175,9 +175,12 @@ describe('the drivers’ errors', () => {
         'DELETE FROM t',
         'WITH x AS (SELECT 1) SELECT 1',
         'BEGIN',
+        'SAVEPOINT sp1',
+        'REPLACE INTO t VALUES (1)',
+        'PRAGMA user_version',
         '-- a\nSELECT 1',
       ].map(statementKind),
-      ['select', 'insert', 'update', 'delete', 'select', 'other', 'select'],
+      ['select', 'insert', 'update', 'delete', 'select', 'transaction', 'transaction', 'insert', 'other', 'select'],
     );
   });
 });

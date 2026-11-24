@@ -20,14 +20,14 @@ import { Worker } from 'node:worker_threads';
 import { Lock } from '../util/lock.ts';
 import {
   type DatabaseServer,
-  type ExecutorMetrics,
   type ExecutorOptions,
-  executorMetrics,
+  type ExecutorReport,
   type RunResult,
   type SqlExecutor,
   type SqlRow,
   type SqlValue,
   StoreError,
+  since,
   statementKind,
   type TransactionOptions,
 } from './sql.ts';
@@ -61,10 +61,9 @@ export class SqliteExecutor implements SqlExecutor {
   readonly server: DatabaseServer;
   // The driver's connection; named for tests, which make its COMMIT fail to see the rollback.
   private readonly db: DatabaseSync;
-  // Where each statement's time and failure are counted, and whether they are (only when the executor was given
-  // metrics: telling a statement's kind and timing it cost a little on every one).
-  private readonly metrics: ExecutorMetrics;
-  private readonly measuring: boolean;
+  // Where each statement and transaction is reported (see ExecutorReport), or nowhere: telling a statement's kind and
+  // timing it cost a little on every one, so nothing is done for them without a report.
+  private readonly report: ExecutorReport | null;
   // The connection itself: held by a transaction from BEGIN to COMMIT, and waited for by everyone else meanwhile.
   private readonly lock = new Lock();
   // The transaction the code running now is inside, if any.
@@ -76,8 +75,13 @@ export class SqliteExecutor implements SqlExecutor {
   private constructor(db: DatabaseSync, file: string, options: ExecutorOptions) {
     this.db = db;
     this.file = file;
-    this.metrics = executorMetrics(options.metrics);
-    this.measuring = options.metrics !== undefined;
+    this.report = options.report ?? null;
+    // One connection: busy while a transaction or a statement holds it, with those waiting for it in line.
+    this.report?.connections(() => ({
+      busy: this.lock.locked ? 1 : 0,
+      idle: this.lock.locked || !this.db.isOpen ? 0 : 1,
+      waiting: this.lock.queued,
+    }));
     // The library's own version, asked once: it is the one inside this Node, the same for every database it opens.
     const version = db.prepare('SELECT sqlite_version() AS version').get()?.version;
     this.server = { product: 'SQLite', version: typeof version === 'string' ? version : 'unknown' };
@@ -121,50 +125,61 @@ export class SqliteExecutor implements SqlExecutor {
 
   all(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
     // The driver's rows are plain objects of its own value types, every one of which is an SqlValue.
-    return this.use(() => this.timed(sql, () => this.prepared(sql).all(...params) as SqlRow[]));
+    return this.use(sql, () => this.prepared(sql).all(...params) as SqlRow[]);
   }
 
   get(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow | undefined> {
-    return this.use(() => this.timed(sql, () => this.prepared(sql).get(...params) as SqlRow | undefined));
+    return this.use(sql, () => this.prepared(sql).get(...params) as SqlRow | undefined);
   }
 
   run(sql: string, params: readonly SqlValue[] = []): Promise<RunResult> {
-    return this.use(() =>
-      this.timed(sql, () => {
-        const result = this.prepared(sql).run(...params);
-        // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
-        return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
-      }),
-    );
+    return this.use(sql, () => {
+      const result = this.prepared(sql).run(...params);
+      // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
+      return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
+    });
   }
 
   exec(sql: string): Promise<void> {
-    return this.use(() =>
-      this.timed(sql, () => {
-        this.db.exec(sql);
-      }),
-    );
+    return this.use(sql, () => {
+      this.db.exec(sql);
+    });
   }
 
-  // Runs one statement's work, its time and any failure counted under its kind when there are metrics to count in.
-  private timed<T>(sql: string, work: () => T): T {
-    if (!this.measuring) return work();
-    const done = this.metrics.statement(statementKind(sql));
+  // A statement's work, reported when it ends (its kind, the seconds since `asked`, whether it threw) when there is a
+  // report: timed around the work itself, so reporting adds no turn of the event loop to any statement.
+  private reported<T>(sql: string, asked: number, work: () => T): T {
+    const report = this.report;
+    if (report === null) return work();
     try {
       const result = work();
-      done();
+      report.query(statementKind(sql), since(asked), false);
       return result;
     } catch (error) {
-      done(true);
+      report.query(statementKind(sql), since(asked), true);
       throw error;
     }
   }
 
   async transaction<T>(fn: () => Promise<T> | T, options: TransactionOptions = {}): Promise<T> {
-    // Inside a transaction still open: a savepoint of it.
+    // Inside a transaction still open: a savepoint of it (reported as part of the whole).
     const parent = this.current.getStore();
     if (parent?.open) return this.savepoint(parent, fn);
-    // Otherwise the whole connection, for as long as `fn` runs: everyone else waits until the end.
+    // Reported whole, from the moment it was asked for (its wait for the connection included).
+    const asked = performance.now();
+    let failed = true;
+    try {
+      const result = await this.outermost(fn, options);
+      failed = false;
+      return result;
+    } finally {
+      this.report?.query('transaction', since(asked), failed);
+    }
+  }
+
+  // The outermost level of a transaction (see transaction()).
+  private async outermost<T>(fn: () => Promise<T> | T, options: TransactionOptions): Promise<T> {
+    // The whole connection, for as long as `fn` runs: everyone else waits until the end.
     const release = await this.lock.acquire();
     const transaction: Transaction = { depth: 1, open: true, savepoints: new Lock() };
     try {
@@ -308,15 +323,18 @@ export class SqliteExecutor implements SqlExecutor {
   }
 
   // Runs one statement: at once inside the caller's open transaction, otherwise once the connection is free.
-  private use<T>(work: () => T): Promise<T> {
+  private use<T>(sql: string, work: () => T): Promise<T> {
+    // When it was asked for: its report counts from here, a wait in line included.
+    const asked = this.report === null ? 0 : performance.now();
+    const statement = () => this.reported(sql, asked, work);
     // Inside a transaction still open: it holds the connection, and its own statements run on it.
-    if (this.inside()) return settled(work);
+    if (this.inside()) return settled(statement);
     // Free: the statement runs to its end now (the driver is synchronous), so nothing can come between.
-    if (!this.lock.locked) return settled(work);
+    if (!this.lock.locked) return settled(statement);
     // Held by a transaction, or wanted by ones waiting already: in line behind them, in the order asked.
     return this.lock.acquire().then((release) => {
       try {
-        return work();
+        return statement();
       } finally {
         release();
       }

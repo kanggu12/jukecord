@@ -25,7 +25,7 @@ import {
   type PoolOptions,
   STATEMENT_TIMEOUT_MS,
 } from './pooled.ts';
-import { type DatabaseServer, poolMetrics, type SqlRow, type SqlValue } from './sql.ts';
+import type { DatabaseServer, SqlRow, SqlValue } from './sql.ts';
 
 // The sql_mode of every connection (see the module comment).
 const SQL_MODE = [
@@ -118,7 +118,7 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
     const size = options.pool ?? DEFAULT_POOL;
     // The pool's use: busy and waiting as counted here; idle from the pool's list of free connections when it has one
     // (a field of mysql2's own, read only for the metrics), else what is left of the pool's size.
-    poolMetrics(options.metrics, () => {
+    options.report?.connections(() => {
       const free = (pool.pool as unknown as { _freeConnections?: { length?: number } })._freeConnections?.length;
       return {
         busy: this.busy,
