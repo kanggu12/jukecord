@@ -6,7 +6,8 @@
  */
 import { spawn } from 'node:child_process';
 import { PRESET_STAGES, type Sound } from '../core/sound.ts';
-import { childEnv, lastLines, ProcessError, run, watch } from './process.ts';
+import type { ToolJob, ToolMeter, ToolWatch } from '../metrics/media.ts';
+import { childEnv, lastLines, ProcessError, type RunOptions, run, watch } from './process.ts';
 import { parseProgress, type YtDlp, ytdlpFailure } from './ytdlp.ts';
 
 // The sound of every cached file: loudness -14 LUFS (streaming services' level) with true peaks under -1 dB and a
@@ -76,15 +77,32 @@ export function measuredLoudness(stderr: string): number | null {
 
 export class Ffmpeg {
   private readonly binary: string;
+  // Counts the runs (the metrics, and whether ffmpeg is there at all); none in tests that do not look.
+  private readonly tools: ToolWatch | null;
 
-  constructor(binary: string) {
+  constructor(binary: string, tools: ToolWatch | null = null) {
     this.binary = binary;
+    this.tools = tools;
+  }
+
+  /** The meter of one run for `job`, started now (for a run that another part starts: a voice channel's stream). */
+  meter(job: ToolJob): ToolMeter | undefined {
+    return this.tools?.start('ffmpeg', job);
+  }
+
+  // The options of one run: its time limit, cancellation and meter.
+  private runOptions(job: ToolJob, timeoutMs: number, signal?: AbortSignal): RunOptions {
+    const meter = this.meter(job);
+    return { timeoutMs, ...(signal ? { signal } : {}), ...(meter ? { meter } : {}) };
   }
 
   /** The installed ffmpeg's version line and whether it has the two encoders jukecord uses (for the doctor command). */
   async about(): Promise<{ version: string; opus: boolean; mp3: boolean }> {
-    const version = await run(this.binary, ['-hide_banner', '-version'], { timeoutMs: 15_000 });
-    const encoders = await run(this.binary, ['-hide_banner', '-encoders'], { timeoutMs: 15_000, maxStdout: 1024 ** 2 });
+    const version = await run(this.binary, ['-hide_banner', '-version'], this.runOptions('about', 15_000));
+    const encoders = await run(this.binary, ['-hide_banner', '-encoders'], {
+      ...this.runOptions('about', 15_000),
+      maxStdout: 1024 ** 2,
+    });
     return {
       // "ffmpeg version 7.1.5 Copyright ..." -> the part before "Copyright".
       version: (version.stdout.split('\n')[0] ?? '').replace(/\s+Copyright.*$/, '').trim(),
@@ -134,10 +152,10 @@ export class Ffmpeg {
     encode.stdin?.on('error', () => {});
     download.stdout?.on('error', () => {});
     if (download.stdout && encode.stdin) download.stdout.pipe(encode.stdin);
-    const options = { signal, timeoutMs };
+    const fetched = ytdlp.meter('download');
     const [downloaded, encoded] = await Promise.allSettled([
-      watch(download, 'yt-dlp', options),
-      watch(encode, 'ffmpeg', options),
+      watch(download, 'yt-dlp', { signal, timeoutMs, ...(fetched ? { meter: fetched } : {}) }),
+      watch(encode, 'ffmpeg', this.runOptions('encode', timeoutMs, signal)),
     ]);
     // Cancelled or timed out: either rejection carries the reason.
     if (downloaded.status === 'rejected') throw downloaded.reason;
@@ -164,7 +182,7 @@ export class Ffmpeg {
         env: childEnv(),
       },
     );
-    const result = await watch(encode, 'ffmpeg', { signal, timeoutMs });
+    const result = await watch(encode, 'ffmpeg', this.runOptions('encode-file', timeoutMs, signal));
     if (result.code !== 0)
       throw new ProcessError(`ffmpeg failed: ${lastLines(result.stderr) || `exit ${result.code}`}`, result);
     return { loudness: measuredLoudness(result.stderr) };
@@ -269,7 +287,7 @@ export class Ffmpeg {
       ],
       { stdio: ['ignore', 'ignore', 'pipe'], env: childEnv() },
     );
-    const result = await watch(convert, 'ffmpeg', { signal, timeoutMs });
+    const result = await watch(convert, 'ffmpeg', this.runOptions('mp3', timeoutMs, signal));
     if (result.code !== 0)
       throw new ProcessError(`ffmpeg failed: ${lastLines(result.stderr) || `exit ${result.code}`}`, result);
   }

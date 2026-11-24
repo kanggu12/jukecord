@@ -68,6 +68,14 @@ export class Slots {
     return this.waitingNow.length + this.waitingAhead.length;
   }
 
+  /** Fetches running and waiting, by whether somebody waits for them now or they are ahead (for the metrics). */
+  counts(): { running: { now: number; ahead: number }; waiting: { now: number; ahead: number } } {
+    return {
+      running: { now: this.runningNow, ahead: this.running - this.runningNow },
+      waiting: { now: this.waitingNow.length, ahead: this.waitingAhead.length },
+    };
+  }
+
   /** A place for one fetch; `signal` ends the wait for it. */
   request(priority: Priority, signal: AbortSignal): Ticket {
     let state: 'waiting' | 'running' | 'done' = 'waiting';

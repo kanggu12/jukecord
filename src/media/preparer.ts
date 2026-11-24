@@ -17,6 +17,8 @@ import { steadyNow } from '../core/clock.ts';
 import { fetchLimitMs, type MediaPreparer, type PreparedMedia } from '../core/player.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
+import { type FetchMetrics, failureKind, fetchMetrics } from '../metrics/media.ts';
+import { type Metrics, NO_METRICS } from '../metrics/registry.ts';
 import type { TrackRepository } from '../store/store.ts';
 import { BusyError } from './busy.ts';
 import { MediaCache } from './cache.ts';
@@ -37,7 +39,16 @@ export interface MediaOptions {
   readonly fetchLimit?: number;
   /** Hears how each fetch from a site went (for YouTube's check for bots, see app/alerts.ts). */
   readonly watch?: FetchWatch;
+  /** Where the fetches and the cache's hits are counted; nowhere in tests that do not look. */
+  readonly metrics?: Metrics;
 }
+
+// The labels the preparer counts under, made once (they are counted for every play and every fetch).
+const HIT = { result: 'hit' } as const;
+const MISS = { result: 'miss' } as const;
+const FETCHED = { outcome: 'ok' } as const;
+const FAILED = { outcome: 'failed' } as const;
+const CANCELLED = { outcome: 'cancelled' } as const;
 
 // A download in progress, shared by everyone waiting for the same track.
 interface Job {
@@ -98,10 +109,24 @@ export class Media implements MediaPreparer {
   // MP3 copies that failed lately, by key: when (on the steady clock) and the error, given again until MP3_RETRY_MS.
   private readonly mp3Failed = new Map<string, { readonly at: number; readonly error: unknown }>();
   private readonly slots: Slots;
+  private readonly counted: FetchMetrics;
 
   constructor(options: MediaOptions) {
     this.options = options;
     this.slots = new Slots(options.fetchLimit ?? defaultLimit(os.availableParallelism()));
+    const metrics = options.metrics ?? NO_METRICS;
+    this.counted = fetchMetrics(metrics);
+    // Every outcome and both results named from the start, at zero, so a rate() of each starts with the first scrape.
+    for (const labels of [FETCHED, FAILED, CANCELLED]) this.counted.outcomes.inc(labels, 0);
+    for (const labels of [HIT, MISS]) this.counted.lookups.inc(labels, 0);
+    // The fetches under way and in line, read from the slots when the metrics are written.
+    const fetches = this.counted.fetches;
+    metrics.collect(() => {
+      const counts = this.slots.counts();
+      for (const state of ['running', 'waiting'] as const) {
+        for (const priority of ['now', 'ahead'] as const) fetches.set(counts[state][priority], { state, priority });
+      }
+    });
   }
 
   /** The cache this preparer fills (the web layer serves files from it). */
@@ -118,6 +143,9 @@ export class Media implements MediaPreparer {
   ): Promise<PreparedMedia> {
     const key = MediaCache.keyOf(track.source);
     const cached = this.options.cache.get(key);
+    // A play's lookup is a hit or a miss of the cache; the prefetcher asks only for what is missing, so its asks are
+    // not counted (every one would be a miss, and say nothing of how well the cache keeps what is played).
+    if (priority === 'now') this.counted.lookups.inc(cached ? HIT : MISS);
     // From the cache: nothing was asked of the site (the player tells the two apart, see PreparedMedia.fromCache).
     if (cached) return { file: this.options.cache.opusPath(key), durationMs: cached.durationMs, fromCache: true };
     let job = this.jobs.get(key);
@@ -269,13 +297,23 @@ export class Media implements MediaPreparer {
           seconds: Math.round(durationMs / 1000),
           took: `${((steadyNow() - started) / 1000).toFixed(1)} s`,
         });
+        // Counted once everything of it is done: a failure of the last step (the loudness kept) is a failed fetch.
+        this.counted.outcomes.inc(FETCHED);
+        this.counted.duration.observe((steadyNow() - started) / 1000);
         return { file: cache.opusPath(key), durationMs };
       } catch (error) {
         // A half-written file is useless and counts against the disk; remove it whatever went wrong.
         fs.rmSync(tmp, { force: true });
-        // Given up by everyone who wanted it is no answer from the site.
-        if (!abort.signal.aborted)
-          this.options.watch?.failed(track.url, error instanceof Error ? error.message : String(error));
+        // Given up by everyone who wanted it (while it waited for its turn, or while it ran) is no answer from the
+        // site: cancelled, not failed.
+        if (abort.signal.aborted) {
+          this.counted.outcomes.inc(CANCELLED);
+        } else {
+          const message = error instanceof Error ? error.message : String(error);
+          this.counted.outcomes.inc(FAILED);
+          this.counted.failures.inc({ reason: failureKind(message) });
+          this.options.watch?.failed(track.url, message);
+        }
         throw error;
       } finally {
         // Its place goes to the next fetch waiting, if any.

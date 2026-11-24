@@ -83,6 +83,11 @@ describe('MetricsRegistry', () => {
     assert.throws(() => registry.gauge('jukecord_test_value', 'x', ['__name']), /not a label name/);
     assert.throws(() => registry.gauge('jukecord_test_value', 'x', ['kind', 'kind']), /named twice/);
     assert.throws(() => registry.gauge('jukecord_test_value', 'x', ['a-b']), /not a label name/);
+    // A counter x_total and a gauge x are one family in OpenMetrics, whichever is declared first.
+    registry.counter('jukecord_test_fetches_total', 'x');
+    assert.throws(() => registry.gauge('jukecord_test_fetches', 'x'), /one family in OpenMetrics/);
+    registry.gauge('jukecord_test_jobs', 'x');
+    assert.throws(() => registry.counter('jukecord_test_jobs_total', 'x'), /one family in OpenMetrics/);
   });
 
   it('escapes label values and runs its collectors before writing', () => {

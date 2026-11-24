@@ -6,6 +6,7 @@
  * stderr are kept, which is where the result and the error are).
  */
 import { type ChildProcess, spawn } from 'node:child_process';
+import type { ToolMeter } from '../metrics/media.ts';
 
 /** How a program ended and what it printed. */
 export interface RunResult {
@@ -35,6 +36,8 @@ export interface RunOptions {
   readonly maxStdout?: number;
   /** The most stderr kept (its end), in bytes. */
   readonly maxStderr?: number;
+  /** Hears how the run ended, for the metrics and for whether the program is there at all (src/metrics/media.ts). */
+  readonly meter?: ToolMeter;
 }
 
 // Keeps the first `limit` bytes of a stream (stdout carries the JSON we parse; its start is what matters).
@@ -126,7 +129,10 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
     };
     child.once('error', (error: NodeJS.ErrnoException) => {
       cleanup();
-      // ENOENT is the common one: the program is not installed or JUKECORD_YTDLP/FFMPEG points nowhere.
+      // ENOENT is the common one: the program is not installed or JUKECORD_YTDLP/FFMPEG points nowhere. A program that
+      // cannot be run at all (no such file, not executable) is missing; anything else (no memory, no processes left)
+      // is a failure of the moment.
+      options.meter?.(error.code === 'ENOENT' || error.code === 'EACCES' ? 'missing' : 'failed');
       const why = error.code === 'ENOENT' ? `${name} was not found` : `${name} could not start: ${error.message}`;
       reject(new ProcessError(why, null));
     });
@@ -136,9 +142,13 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
       cleanup();
       const result: RunResult = { code, signal, stdout: stdout.text(), stderr: stderr.text() };
       if (killedFor !== null) {
+        // Stopped by jukecord: at its time limit, or because nobody wanted the result any more.
+        options.meter?.(killedFor === 'cancelled' ? 'cancelled' : 'timeout');
         reject(new ProcessError(`${name} ${killedFor}`, result));
         return;
       }
+      // Ended by itself: well when it says so (a non-zero exit is the caller's to explain).
+      options.meter?.(code === 0 ? 'ok' : 'failed');
       resolve(result);
     };
     child.once('close', (code, signal) => settle(code, signal));
@@ -153,6 +163,18 @@ export function watch(child: ChildProcess, name: string, options: RunOptions = {
       grace.unref();
     });
   });
+}
+
+/**
+ * Says how a program ended that is not watched here (a voice channel's stream, which plays as long as its track): it
+ * could not start, ended well, was stopped by jukecord (a signal), or failed.
+ */
+export function meterChild(child: ChildProcess, meter: ToolMeter | undefined): void {
+  if (!meter) return;
+  child.once('error', (error: NodeJS.ErrnoException) =>
+    meter(error.code === 'ENOENT' || error.code === 'EACCES' ? 'missing' : 'failed'),
+  );
+  child.once('exit', (code, signal) => meter(code === 0 ? 'ok' : signal !== null ? 'cancelled' : 'failed'));
 }
 
 /**

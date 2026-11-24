@@ -27,7 +27,10 @@ import { Covers, type Picture } from '../../src/media/covers.ts';
 import type { LyricsSource } from '../../src/media/lyrics.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
 import { type Search, searchWords } from '../../src/media/search.ts';
+import { MetricsRegistry } from '../../src/metrics/registry.ts';
+import { describeService, discordMetrics, playerMetrics } from '../../src/metrics/service.ts';
 import type { Store } from '../../src/store/store.ts';
+import { VERSION } from '../../src/version.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
 import type { Rate } from '../../src/web/limits.ts';
@@ -137,6 +140,8 @@ export interface TestServer {
   readonly lanes: GuildLanes;
   readonly cache: MediaCache;
   readonly covers: Covers;
+  /** Every number the server reports at /metrics, composed as main.ts composes it. */
+  readonly metrics: MetricsRegistry;
   /** The pictures asked of the made-up image hosts, by address, in order. */
   readonly pictureRequests: string[];
   readonly logs: MemorySink;
@@ -186,6 +191,8 @@ export interface TestServerOptions {
   readonly lyrics?: LyricsSource;
   /** What a search finds for some words (anything else finds nothing). */
   readonly searched?: Record<string, NewTrack[]>;
+  /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN). */
+  readonly metricsToken?: string;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -290,7 +297,23 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-web-'));
-  const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log });
+  // The metrics as main.ts composes them, from the parts a test server has (no event loop watch, no media tools).
+  const metrics = new MetricsRegistry();
+  describeService(metrics, {
+    version: VERSION,
+    role: 'all',
+    database: store.sql.dialect,
+    bus: 'in-process',
+    cache: 'memory',
+  });
+  playerMetrics(metrics, { players, queue });
+  discordMetrics(metrics, {
+    connected: () => !options.browserOnly,
+    gateway: () => (options.browserOnly ? null : { state: 'ready', pingMs: 42 }),
+    guilds: () => (options.browserOnly ? 0 : directory.guildList.length),
+    voice: () => new Map(options.browserOnly ? [] : [['ready', voice.current.size]]),
+  });
+  const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log, metrics });
   cache.init();
   // Covers come from a table instead of the internet; every picture asked for is noted.
   const pictureRequests: string[] = [];
@@ -325,6 +348,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     ...(options.timeouts ? { timeouts: options.timeouts } : {}),
     ready: () => true,
     discordReady: () => !options.browserOnly,
+    metrics,
+    ...(options.metricsToken ? { metricsToken: options.metricsToken } : {}),
     deps: {
       actions,
       access,
@@ -364,6 +389,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     lanes,
     cache,
     covers,
+    metrics,
     pictureRequests,
     logs,
     dataDir,

@@ -292,8 +292,18 @@ export class MetricsRegistry implements Metrics {
       }
       return known;
     }
+    // OpenMetrics names a counter's family without _total: a counter x_total and anything named x would be one family
+    // there, which a scraper refuses.
+    const familyName = kind === 'counter' ? name.slice(0, -'_total'.length) : name;
+    const clash = kind === 'counter' ? this.families.get(familyName) : this.families.get(`${name}_total`);
+    if (clash !== undefined && (kind === 'counter' || clash.kind === 'counter')) {
+      throw new Error(`${name} and ${clash.name} would be one family in OpenMetrics (${familyName})`);
+    }
     const family: Family = { name, help, kind, labelNames: [...labelNames], buckets, series: new Map() };
     this.families.set(name, family);
+    // A metric without labels has its one series from the start, at zero, as Prometheus's own clients write it: a
+    // rate() over it then starts with the first scrape, not with the first thing counted.
+    if (labelNames.length === 0) this.seriesOf(family, {});
     return family;
   }
 

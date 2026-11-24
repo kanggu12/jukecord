@@ -40,6 +40,10 @@ import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
 import { Search } from './media/search.ts';
 import { YtDlp } from './media/ytdlp.ts';
+import { ToolWatch } from './metrics/media.ts';
+import { MetricsRegistry } from './metrics/registry.ts';
+import { diskMetrics, EventLoop, runtimeMetrics } from './metrics/runtime.ts';
+import { describeService, discordMetrics, playerMetrics } from './metrics/service.ts';
 import { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
@@ -86,6 +90,23 @@ async function main(): Promise<number> {
     discord: config.discord.token ? 'yes' : 'browser-only',
   });
 
+  // Every number jukecord reports, for /metrics. A number that cannot be read is said in the log once per reason (a
+  // scrape every fifteen seconds would repeat it all day); the others are written all the same.
+  const unreadable = new Set<string>();
+  const registry = new MetricsRegistry({
+    onError: (error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (unreadable.has(reason)) return;
+      unreadable.add(reason);
+      log.warn('could not read a number for the metrics', { error });
+    },
+  });
+  // The event loop, watched once: for the metrics, and for the web server, which turns away what can wait while
+  // jukecord is behind.
+  const loop = new EventLoop();
+  runtimeMetrics(registry, loop);
+  diskMetrics(registry, config.dataDir);
+
   // A crash anywhere is logged with its stack before the process goes down; a stray rejected promise is logged and the
   // music goes on (each part already handles its own failures; this catches what slipped through).
   process.on('unhandledRejection', (reason) =>
@@ -131,6 +152,7 @@ async function main(): Promise<number> {
     dir: path.join(config.dataDir, 'cache'),
     maxBytes: config.media.cacheMaxBytes,
     log: log.child('cache'),
+    metrics: registry,
   });
   cache.init();
   // yt-dlp writes cookies back to the file it was given; it gets a private copy, so a read-only mounted secret works.
@@ -142,6 +164,8 @@ async function main(): Promise<number> {
   }
   // Every connection yt-dlp makes goes through the address guard, unless private addresses are allowed (egress.ts).
   const egress = config.media.allowPrivate ? null : await startEgressGuard({ log: log.child('egress') });
+  // Every run of yt-dlp and ffmpeg is counted, and tells whether the program is there (/readyz says so).
+  const tools = new ToolWatch(registry);
   // yt-dlp runs YouTube's scripts with this very Node binary (the image has no other JavaScript runtime).
   const ytdlp = new YtDlp({
     proxy: egress?.url ?? null,
@@ -151,8 +175,9 @@ async function main(): Promise<number> {
     timeoutMs: config.media.fetchTimeoutMs,
     maxPlaylist: MAX_PLAYLIST,
     cacheDir: path.join(config.dataDir, 'yt-dlp'),
+    tools,
   });
-  const ffmpeg = new Ffmpeg(config.media.ffmpeg);
+  const ffmpeg = new Ffmpeg(config.media.ffmpeg, tools);
   const media = new Media({
     cache,
     ytdlp,
@@ -162,6 +187,7 @@ async function main(): Promise<number> {
     timeoutMs: config.media.fetchTimeoutMs,
     // How fetches go tells whether YouTube refuses this jukecord (its check for bots).
     watch: alerts,
+    metrics: registry,
   });
   const players = new Players({
     queue,
@@ -176,6 +202,8 @@ async function main(): Promise<number> {
     // A track taken out of a looping queue is told to its server's alerts channel too.
     onLeftLoop: (guildId, track, reason) => void alerts.raise(leftLoopAlert(guildId, track.title, track.id, reason)),
   });
+  // The servers' players by state and their queues' lengths.
+  playerMetrics(registry, { players, queue });
   const prefetcher = new Prefetcher({
     bus,
     players,
@@ -307,6 +335,21 @@ async function main(): Promise<number> {
     : null;
   const directory = (): Directory | null => bot;
   if (bot) actions.setVoice(bot.voice, () => bot.ready(), bot);
+  // Discord's gateway and the voice connections; without a bot, only that it is not connected.
+  discordMetrics(registry, {
+    connected: () => bot?.ready() ?? false,
+    gateway: () => bot?.gateway() ?? null,
+    guilds: () => bot?.guilds().length ?? 0,
+    voice: () => bot?.voice.states() ?? new Map(),
+  });
+  // What runs: the version, this process's role (one process does it all) and its backends.
+  describeService(registry, {
+    version: VERSION,
+    role: 'all',
+    database: store.sql.dialect,
+    bus: 'in-process',
+    cache: 'memory',
+  });
   // The bot posts the alerts (it waits for Discord after a start); browser-only, the log alone says them.
   alertSink = bot;
   // The watchdog's restart, read at the start: raised now that the bot is there to post it (raised before, it found no
@@ -344,6 +387,10 @@ async function main(): Promise<number> {
     log: log.child('web'),
     // Open panels at once (JUKECORD_LIVE_MAX); the caps per login and per address stay at their defaults.
     live: { total: config.liveMax },
+    // Behind when the event loop is (the one watch above), so the web server keeps no watch of its own.
+    behind: () => loop.behind,
+    metrics: registry,
+    metricsToken: config.metrics.token,
     ready: () => store.isOpen(),
     discordReady: () => bot?.ready() ?? false,
     // Connections turned away at a cap are jukecord's trouble, told to the alerts channels.

@@ -29,6 +29,8 @@ import { steadyNow } from '../core/clock.ts';
 import { GuildLanes, throwFromTimer } from '../core/lanes.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Logger } from '../log.ts';
+import { type Metrics, NO_METRICS } from '../metrics/registry.ts';
+import { type LiveMetrics, liveMetrics } from '../metrics/web.ts';
 import type { UserRepository } from '../store/store.ts';
 import { addressKey, type Caller } from './auth.ts';
 import { compressStart, gzip, gzipJoined, type Start } from './gzip.ts';
@@ -172,7 +174,13 @@ export interface EventHubOptions {
   readonly listenersEveryMs?: number;
   /** Hears, when the log says so, that connections were refused at the cap of every live connection, and how many. */
   readonly refused?: (count: number, limit: number) => void;
+  /** Where the connections and what is sent on them are counted; nowhere in tests that do not look. */
+  readonly metrics?: Metrics;
 }
+
+// The labels of the two kinds of frame, made once (every message to every panel is counted).
+const TEXT_FRAME = { frame: 'text' } as const;
+const BINARY_FRAME = { frame: 'binary' } as const;
 
 /** What a new connection asks for, where it comes from, and what its browser can take. */
 export interface AttachOptions {
@@ -256,9 +264,21 @@ export class EventHub {
   // What goes to each server's panels, one message (or one panel's state) at a time, in the order it happened: a
   // message waits for the database while it is made, and must not overtake the one before it.
   private readonly outbox = new GuildLanes();
+  // The messages and bytes sent, and the connections, for the metrics.
+  private readonly sent: LiveMetrics;
 
   constructor(options: EventHubOptions) {
     this.options = options;
+    const metrics = options.metrics ?? NO_METRICS;
+    this.sent = liveMetrics(metrics);
+    // Both kinds of frame named from the start, at zero.
+    for (const labels of [TEXT_FRAME, BINARY_FRAME]) this.sent.messages.inc(labels, 0);
+    // How many are connected, and how many of those play along, read when the metrics are written.
+    metrics.collect(() => {
+      const counts = this.counts();
+      this.sent.connections.set(counts.connections);
+      this.sent.listeners.set(counts.listening);
+    });
     this.now = options.now ?? Date.now;
     this.limits = options.limits ?? DEFAULT_LIVE_LIMITS;
     this.queueEveryMs = options.queueEveryMs ?? QUEUE_EVERY_MS;
@@ -822,6 +842,8 @@ export class EventHub {
     }
     // The same bytes go to every connection (a Buffer is not copied per socket); nothing is compressed here.
     client.socket.send(frame.data, { binary: frame.binary, compress: false });
+    this.sent.messages.inc(frame.binary ? BINARY_FRAME : TEXT_FRAME);
+    this.sent.bytes.inc(undefined, frame.data.length);
   }
 
   // Pings every connection and closes the ones that did not answer the last ping. The login behind each connection is
