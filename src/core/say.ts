@@ -340,8 +340,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // Testing an address for the shared cache or the bus (src/settings/servers.ts).
   [/^that is not an address \(example: (.+)\)$/, '주소가 아님(예: $1)'],
   [
-    'a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host',
-    'Redis나 Valkey 주소는 redis:// 또는 rediss://(TLS)로 시작하고 호스트를 적어야 함',
+    'a Redis or Valkey address starts with redis://, rediss:// (TLS), valkey:// or valkeys:// (TLS), and names a host',
+    'Redis나 Valkey 주소는 redis://, rediss://(TLS), valkey://, valkeys://(TLS) 중 하나로 시작하고 호스트를 적어야 함',
   ],
   [/^(.+) cannot take a new file$/, '$1 폴더에 새 파일을 만들 수 없음'],
   [
@@ -441,8 +441,8 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   // A split jukecord's settings (src/config.ts): the role's needs, the bus's and the cache's addresses, the secret.
   [/^(JUKECORD_\w+): that is not an address \(example: (.+)\)$/, '$1: 주소가 아님(예: $2)'],
   [
-    /^(JUKECORD_\w+): a Redis or Valkey address starts with redis:\/\/ or rediss:\/\/ \(TLS\), and names a host$/,
-    '$1: Redis나 Valkey 주소는 redis:// 또는 rediss://(TLS)로 시작하고 호스트를 적어야 함',
+    /^(JUKECORD_\w+): a Redis or Valkey address starts with redis:\/\/, rediss:\/\/ \(TLS\), valkey:\/\/ or valkeys:\/\/ \(TLS\), and names a host$/,
+    '$1: Redis나 Valkey 주소는 redis://, rediss://(TLS), valkey://, valkeys://(TLS) 중 하나로 시작하고 호스트를 적어야 함',
   ],
   [
     /^(JUKECORD_\w+): a prefix is up to 64 letters, digits and \. _ : - \(starting with a letter or digit\)$/,

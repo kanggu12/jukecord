@@ -45,7 +45,7 @@ export async function testServer(url: string, use: ServerUse): Promise<ServerTes
   }
   if (!REDIS_SCHEMES.includes(parsed.protocol) || !parsed.hostname)
     return refused(
-      'a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host',
+      'a Redis or Valkey address starts with redis://, rediss:// (TLS), valkey:// or valkeys:// (TLS), and names a host',
       shownAddress(text),
     );
   const where = shownAddress(text);

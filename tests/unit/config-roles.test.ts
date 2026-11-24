@@ -86,7 +86,12 @@ describe('the role settings', () => {
   });
 
   it('refuses addresses, prefixes, secrets and ports that cannot work', () => {
-    assert.match(problems({ ...SPLIT, JUKECORD_ROLE: 'core', JUKECORD_BUS_URL: 'http://valkey' }).join(), /redis:\/\//);
+    // The refusal names every scheme taken, Valkey's own among them; a valkeys:// address is taken.
+    assert.match(
+      problems({ ...SPLIT, JUKECORD_ROLE: 'core', JUKECORD_BUS_URL: 'http://valkey' }).join(),
+      /redis:\/\/, rediss:\/\/ \(TLS\), valkey:\/\/ or valkeys:\/\/ \(TLS\)/,
+    );
+    assert.deepEqual(problems({ ...SPLIT, JUKECORD_ROLE: 'core', JUKECORD_BUS_URL: 'valkeys://valkey:6380' }), []);
     assert.match(
       problems({ JUKECORD_CACHE_URL: 'not an address' }).join(),
       /JUKECORD_CACHE_URL: that is not an address/,

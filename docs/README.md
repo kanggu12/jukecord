@@ -1,7 +1,7 @@
 # Using jukecord
 
-For people who use a running jukecord: the panel, who may do what, each server's settings, the slash commands, the
-`jukecord` command and every setting. [Installing](INSTALL.md) gets it running.
+For people who use a running jukecord: the panel, logging in and who may do what, each server's settings, the slash
+commands, the `jukecord` command and every setting. [Installing](INSTALL.md) gets it running.
 
 jukecord keeps one queue per Discord server and plays it in that server's voice channel. Anyone who presses **Listen
 here** hears it in their browser too, at the same place in the track. The panel, the slash commands, the `jukecord`
@@ -10,7 +10,8 @@ command and the [HTTP API](API.md) all do the same things.
 ## The panel
 
 On the machine running jukecord, `./jukecord open` makes a login link and opens it. Everyone else opens the panel's
-address ([who may do what](#who-may-do-what)).
+address, whose login page offers the ways the host set up: Discord, the host's own sign-in (SSO), a directory account
+with a name and a password, or a login link from the host ([who may do what](#who-may-do-what)).
 
 ### Playing
 
@@ -69,7 +70,9 @@ search words. A link pasted anywhere on the page, or dropped on it, is added too
 - **Invite** (in the voice card and the menu) makes a listening link for guests and, for the host, a login link for
   a friend, each with a QR code ([friends and guests](#friends-and-guests)).
 - **The menu** (your name, top right) has the theme, language, motion, API tokens and keyboard shortcuts, and for
-  people who can manage the server, its settings.
+  people who can manage the server, its settings. The host's menu has **Settings** too: every setting of jukecord
+  itself ([settings](#settings)). A member's name says how they logged in: **SSO login** or
+  **Directory account**.
 - **Log** (the host only) is jukecord's log, filtered by level and part.
 - **As an app**: where the browser offers it (Chrome's or Edge's install button, Safari's **Add to Home Screen**), the
   panel installs and opens in its own window, also when jukecord cannot be reached, saying so. On Android it is then
@@ -83,9 +86,30 @@ the list of shortcuts.
 
 - **The host** may do everything: the machine jukecord runs on, its `jukecord` command and the login links it makes.
 - **Anyone who logs in with Discord** opens the servers they share with the bot.
+- **Members** log in through the host's identity provider (SSO) or directory, at the level their groups give
+  ([below](#members)).
 - **A DJ role**, when a server sets one, lets only its members and the people who can manage the server change the
   music; everyone else looks and listens. A DJ role deleted in Discord counts as none.
 - **Friends and guests** come in with links, without Discord ([below](#friends-and-guests)).
+
+### Members
+
+A host can let people log in through the host's own identity provider (OpenID Connect: Keycloak, Authentik, Entra ID,
+Okta, Google) or with an account of the host's directory (LDAP, Active Directory)
+([setting it up](INSTALL.md#logging-in-through-your-own-accounts)). Their groups give them a level at each login:
+
+| Level   | May                                                                                |
+| :------ | :--------------------------------------------------------------------------------- |
+| admin   | what the host may: every server and its settings, the log, login links and backups |
+| control | change the music in every server, never settings or tokens                         |
+| read    | look and listen                                                                    |
+
+- Someone in none of the host's groups is refused, and the login page says to ask the host.
+- What a member adds, likes and saves shows their name.
+- Members make no API tokens. A level changes at the person's next login.
+- A login through SSO that names the person's Discord account is that Discord user, with their roles in each server,
+  and the level where it gives more.
+- Logging out of jukecord logs out of the host's sign-in too, when it offers that.
 
 ### Voting to skip
 
@@ -235,15 +259,39 @@ it is, and a failure as `{"error":{"code","message"}}` on stderr.
 |         3 | jukecord did not answer                                        |
 |         4 | jukecord said to try again later (a rate limit, a busy moment) |
 
+`jukecord db` works on the database itself, from where it runs, so it also works while jukecord is stopped
+([the database](INSTALL.md#the-database)); `jukecord auth` says how people may log in here, and checks the settings of
+the host's own sign-in and directory without logging anyone in
+([your own accounts](INSTALL.md#logging-in-through-your-own-accounts)):
+
+```bash
+./jukecord db status                          # the database jukecord uses: kind, version, schema, size, rows
+./jukecord db copy sqlite:/data/jukecord.db   # every row of that file into the database jukecord uses
+./jukecord auth methods
+./jukecord auth test-oidc
+./jukecord auth test-ldap mina                # also looks a person up: their groups and level, no password
+```
+
+## Health and metrics
+
+For a monitoring system, without a login: `/healthz` answers while jukecord runs, `/readyz` says part by part
+whether it can serve (the database, the bus and cache, Discord, ffmpeg and yt-dlp), and `/metrics` has its figures
+for Prometheus, for a scraper on jukecord's own network or one that shows the metrics token
+([monitoring](INSTALL.md#monitoring), [the answers](API.md#health-and-metrics)).
+
 ## Settings
 
 Every setting has a default, so each one is optional. The host sees and changes them on the panel's **Settings** page
 (the menu's **Settings**), with `jukecord settings` (`list`, `get`, `set`, `reset`; `test-database`, `test-cache` and
 `test-bus` try an address without saving it; `move-database` copies everything into another database and switches to
 it) and `jukecord restart`, or through the API; a value set as an environment variable wins over a saved one and shows
-as set by the environment. With Docker Compose the variables go in `.env`. jukecord checks every setting when it starts and when one is saved, and lists every problem at once.
-`jukecord doctor` shows the settings in effect, secrets only as set or not set. A setting marked "at once" takes
-effect when it is saved; the others when jukecord restarts.
+as set by the environment. With Docker Compose the variables go in `.env`. jukecord checks every setting when it
+starts and when one is saved, and lists every problem at once. `jukecord doctor` shows the settings in effect, secrets
+only as set or not set. A setting marked "at once" takes effect when it is saved; the others when jukecord restarts.
+
+Installing explains the groups that take more than a line: [the database](INSTALL.md#the-database),
+[logins through your own accounts](INSTALL.md#logging-in-through-your-own-accounts),
+[a split into services](INSTALL.md#split-into-services) and [monitoring](INSTALL.md#monitoring).
 
 <!-- settings:start -->
 

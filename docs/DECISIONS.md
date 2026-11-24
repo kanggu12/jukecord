@@ -15,11 +15,75 @@ line and column of a `.js` file is the same place in its `.ts` file, and a stack
 the source. A bundle, as the panel has, would have put the server into one file with other line numbers. Type checking is TypeScript 7; linting and formatting are Biome (typescript-eslint did not yet
 support TypeScript 7). The panel is bundled with esbuild, since browsers need JavaScript.
 
-## Node's own SQLite
+## SQLite by default, Node's own
 
 `node:sqlite` needs no native add-on, so nothing is compiled when the image is built for arm64 and nothing breaks when
-Node is upgraded. It is still marked experimental in Node 24, so every query lives in one file (`src/store/store.ts`):
-if its interface changes, that file changes.
+Node is upgraded. It is still marked experimental in Node 24, so every query lives in the store's files
+(`src/store/`): if its interface changes, those change. SQLite stays the default whatever else jukecord can use: a
+group of friends needs no database server, nothing is set up before the first start, and a backup is one file.
+
+## PostgreSQL and MySQL beside it, tested alike
+
+A host who already runs a database server, or wants jukecord's data where the rest of theirs is backed up, can point
+jukecord at PostgreSQL or MySQL/MariaDB; the services of a split need a database they all reach. A database tested less
+than the others breaks quietly, so the store's tests run on SQLite and on the oldest and the newest supported release
+of each server on every change (`eachDatabase`, and six service containers in CI), and a migration past the servers'
+baseline fails its test until it is written for all three.
+
+## SQL by hand, with a dialect layer
+
+No ORM and no query builder: the repositories keep their SQL, which reads as what it does, and storage depends on
+`node:sqlite` and two small pure-JavaScript drivers alone. What differs between the three databases is a short list,
+kept in one file (`src/store/dialect.ts`): placeholders (`?`, numbered for PostgreSQL by its executor), upserts
+(`ON CONFLICT`, MySQL's `ON DUPLICATE KEY UPDATE` with a row alias, MariaDB's `VALUES()`), the id of a row just made
+(`RETURNING`, MySQL's `LAST_INSERT_ID`), null-safe comparisons, whole-number division, and a source address too long for
+an index, which the servers key by its SHA-256 in a stored column. Each MySQL connection is set to `ANSI_QUOTES` and
+`PIPES_AS_CONCAT`, so the shared SQL quotes names and joins text the same way everywhere. Time arithmetic left SQL: the
+repositories cut timestamps into whole days and hours by division and name the dates in TypeScript, so every database
+counts days alike.
+
+## Serializable transactions, run again when refused
+
+On SQLite one writer at a time made a check and the change after it (a login's thousand likes, a listening link's last
+place for a guest) safe inside a transaction. A server at its usual isolation would let two such transactions both
+pass the check. So every transaction on a server is serializable, and one the server refuses for another's sake
+(PostgreSQL's 40001 and 40P01, MySQL's 1213, MariaDB's 1020) runs again from the start, up to six times, 10 to 160 ms
+apart; a transaction a refusal doomed runs nothing more, even when its code caught the error. Transactions that only
+read several things (statistics, Wrapped, a copy) are snapshots instead, which never wait and are never refused. A
+test holds two transactions at a limit until both have read: one passes, on every database, and it fails with the
+servers' usual isolation.
+
+## The servers start at schema 8
+
+SQLite runs its migrations 1 to 8 as they were released, since a migration already run is never edited. A server
+database is new in 0.4, and replaying SQLite's history there would be work with nothing to keep: PostgreSQL and MySQL
+start at a baseline that makes schema 8 in one step, and every migration after it is written for the three together.
+MySQL commits each `CREATE TABLE` on its own, so its baseline makes only the tables that are missing and is done only
+once every table is there: a start stopped halfway is finished by the next. Two jukecords starting on a new database
+at once (a core and its edges) take a lock of the server's first and then read at `READ COMMITTED`, so the second
+finds what the first made; with a serializable view taken while it waited for the lock, it failed five times in ten.
+
+## The drivers load only for their address
+
+`pg` and `mysql2` are pure JavaScript, so the release's programs need no native build of them for each system. They
+are imported when an address of their kind is opened: a jukecord on SQLite loads none of their modules.
+
+## Any backup goes into any database
+
+A backup is a SQLite file, whatever the database: SQLite's own `VACUUM INTO`, or a server's rows copied into a new file
+as one moment's view. One restore serves every kind, and a backup can carry a host from one kind to another. The same
+copy (`src/store/copy.ts`: tables in the order of their foreign keys, pages by key, the target in one transaction, the
+rows counted before the commit, PostgreSQL's ids set past the copied ones) is `jukecord db copy`, in the same release
+that brought the servers, so no host is held to the database they began with.
+
+## An asynchronous store, a lane per server
+
+A network database answers later, so every store method returns a promise. In 0.3 a server's change ran to its end in
+one step of the event loop, and two changes never met halfway. Lanes keep that: each server's changes (actions, the
+player's transitions, autoplay, votes) take their turns, other servers' run beside them, and reads need no turn. A
+player does its database work before it changes its state, in one step, so nobody sees a player half changed. The
+tests run the races 0.3 could not have (an add and a skip at once, over a store that answers a turn later), and they
+fail with the lanes taken out.
 
 ## Ogg Opus through to Discord
 
@@ -59,18 +123,68 @@ runs the three commands on each architecture's image and fails an image over 500
 longer reach FFmpeg by themselves: a weekly check (`.github/workflows/ffmpeg-release.yml`) fails when a newer release of
 the pinned line is out, and a patch release of jukecord brings it.
 
-## One process, one replica
+## One process by default, a core and edges when asked
 
-A bot token allows one gateway session, and the data is one SQLite file, so the chart runs exactly one pod with the
-Recreate strategy. Scaling out would need a shared database and one bot process elected among many; a music bot for a
-group of friends does not need it.
+A bot token allows one gateway session, so whatever plays the music is one process: the players, the voice and the
+media live in the core, with the volume, and the chart runs it as one pod replaced with `Recreate`. What grows with the
+number of people (the panels, the API, the live connections, the logins) runs in edges, as many as wanted, which ask
+the core over the bus. One process stays the default: a group of friends needs neither a database server nor Redis,
+and the split is the same image with a role, so a host moves to it without installing anything else of jukecord's.
 
-## Logins without passwords
+## A lease for the core, and no waiting on one that is gone
 
-There is no password to set or leak. The host proves itself by being able to read the host token in the data
-directory (its command line does that) and hands browsers one-time links. Everyone else logs in with Discord, asking
-only for their identity; membership and roles come through the bot. Every secret jukecord makes is 32 random bytes
-stored as a SHA-256 hash.
+The core takes a lease on the bus's server (20 seconds, renewed every four) before it opens anything, so two cores never
+play at once: a second waits, and takes over when the first lets go. A core that could not renew its lease for 15
+seconds steps down. Commands are published, and Redis says how many heard: none means no core, refused at once with
+503. An edge that hears no heartbeat for five seconds refuses every command still waiting and closes its panels'
+connections (1012), which reconnect and take the new core's state; a command that reaches the core after its caller
+gave up is not run. A lost core is a short refusal, never a request that hangs.
+
+## Redis or Valkey, through one small client
+
+The bus and the shared cache use one server: Redis (6.2 or newer, for `GETDEL`) or Valkey, which speaks the same
+protocol. The client is `@redis/client`, node-redis's core with no dependencies of its own; the `redis` package around
+it adds four module clients jukecord never calls. A call fails at once while the server is away instead of waiting in
+a queue, each has a two-second limit, and jukecord pings every three seconds: a connection the server left without
+closing it kept a call written to it waiting for ever.
+
+## Rates that fail open
+
+When the shared cache does not answer, the rate limits let requests through and say so in the log once a minute.
+Turning everyone away while the cache is down would be what the limits are there to prevent.
+
+## Logins with no password kept
+
+jukecord keeps no password. The host proves itself by being able to read the host token in the data directory (its
+command line does that) and hands browsers one-time links. Everyone else logs in with Discord, asking only for their
+identity (membership and roles come through the bot), or through the host's own identity provider or directory, which
+checks who they are. Every secret jukecord makes is 32 random bytes stored as a SHA-256 hash.
+
+## The host's identity provider, through OpenID Connect
+
+`openid-client`, a certified implementation in plain JavaScript: discovery, the authorization code flow with PKCE, state
+and nonce, and the ID token's signature checked against the issuer's keys. What a login needs while the browser is at
+the provider waits in the shared cache under the state's hash, for ten minutes and one use, so the browser may come
+back to any edge; a cookie ties it to the browser that left. Nothing of the provider's (no token, no claim) is kept once
+the person is in. SAML is not built in: a broker such as Keycloak signs people in with a SAML provider and hands them
+on over OpenID Connect.
+
+## Directory accounts: found by the service, checked by a bind
+
+`ldapts`, in TypeScript with no native parts. The service account finds the person, the typed name escaped into the
+filter, and reads their groups; a bind as the person then checks the password, so jukecord never reads a password hash.
+An empty password, which many directories take for an anonymous bind, is refused before the directory is asked.
+Active Directory's nested groups are a choice of the host's, since OpenLDAP answers that rule with nothing. A directory
+that takes passwords over an encrypted connection only refuses a plain bind, and jukecord says to use `ldaps://` or
+StartTLS instead of calling the directory unreachable.
+
+## Members are people of the data, by their groups
+
+A member has a key of their own in jukecord's data (`oidc:` or `ldap:` and 15 hex digits of a SHA-256 over the provider
+and the subject), never a Discord ID, so what they add, like and make shows their name, and the subject itself is not
+kept. Groups decide every login through a provider, the ones linked to a Discord account too: someone in none of the
+lists is refused, and a host who wants everyone in writes `*`. Members make no API tokens, since a token would outlast
+what the groups say at the next login.
 
 ## The queue is the server's, not the voice channel's
 
@@ -133,6 +247,30 @@ the measure is the event loop's delay rather than the processor's use: a busy pr
 up, and the loop's delay is what the voice of every server and every panel feel. Work that can be asked for again in
 a moment (audio, changes) is then turned away at once with 503, which costs almost nothing, instead of being queued
 behind work nobody can see.
+
+## Metrics in Prometheus's format, without a library
+
+The format is small, and `prom-client` would have meant a second registry beside the one the store, the bus and the
+cache report into. Names follow Prometheus's rules, checked when a family is declared: a counter ends in `_total` and
+nothing else does, no label comes twice, and no label is one a scrape adds itself (a `job` label arrived as
+`exported_job`, so the media programs' runs are labelled by `task`). 0.3's names stay; the one renamed keeps its old
+name beside the new until 0.5. A gauge has no series until it is set, so a jukecord without a bot reports no gateway
+latency of 0.
+
+## /metrics for the scraper beside jukecord, or one with the token
+
+The figures need no login, so by default only a scraper on jukecord's own machine or network reads them: a request
+through a proxy, or from a public address, gets the 404 of an unknown path, which tells the internet nothing. A
+Prometheus elsewhere shows a token, compared by its digest in constant time. A wrong token is told so (401), since
+whoever sent one meant to be let in and is better off knowing why they were not.
+
+## Readiness by parts
+
+`/readyz` names each part and its state, so a probe and a person see which part is down. The database, the bus and
+the shared cache decide it, and for an edge its core: without them nothing can be served. Discord and the media
+programs are reported without deciding it, as in 0.3: the panel still serves without them and says what is wrong,
+where a pod taken out of its Service would show nothing at all. An answer is kept for a second, so a storm of probes
+costs one check a second.
 
 ## Covers through jukecord
 

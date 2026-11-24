@@ -542,7 +542,9 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
       return null;
     }
     if (!REDIS_SCHEMES.includes(url.protocol) || !url.hostname) {
-      problems.push(`${name}: a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host`);
+      problems.push(
+        `${name}: a Redis or Valkey address starts with redis://, rediss:// (TLS), valkey:// or valkeys:// (TLS), and names a host`,
+      );
       return null;
     }
     return text;

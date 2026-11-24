@@ -246,7 +246,10 @@ describe('the host’s settings in the API', () => {
       assert.equal((await test('bus', 'memory')).problem, 'that is not an address (example: redis://valkey:6379)');
       // Not a Redis address: the start's own rule, in its words.
       const web = await test('bus', 'https://valkey.example.org');
-      assert.equal(web.problem, 'a Redis or Valkey address starts with redis:// or rediss:// (TLS), and names a host');
+      assert.equal(
+        web.problem,
+        'a Redis or Valkey address starts with redis://, rediss:// (TLS), valkey:// or valkeys:// (TLS), and names a host',
+      );
       // A server that is not there: the client's own words after the address, never its password, at once (tried once).
       const started = Date.now();
       const away = await test('cache', 'redis://:password-made-up@nowhere.invalid:6379');

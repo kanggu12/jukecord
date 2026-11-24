@@ -103,7 +103,11 @@ Discord account.
 - **Fair in a crowd:** votes to skip, people taking turns and a limit per person.
 - **Autoplay, likes and playlists** as files, and links from Deezer, Spotify and Apple Music.
 - **Wrapped:** a server's year in music, saved as a picture for a story or a post.
-- **Steady and small:** one process and one SQLite file, tracks fetched once with their loudness evened out.
+- **Small, and bigger when asked:** one process and one SQLite file by default, tracks fetched once with their loudness
+  evened out; PostgreSQL or MySQL/MariaDB, and a core with any number of edges over Redis or Valkey, when a host wants
+  them.
+- **Your own accounts, watched from outside:** logins through Keycloak or another OpenID Connect provider, or LDAP and
+  Active Directory, at three levels by group; Prometheus metrics, readiness by parts and a Grafana dashboard.
 
 ## How it works
 
@@ -117,12 +121,14 @@ Discord account.
 Each Discord server has one queue and one player, and the player is the clock that the voice channel and every browser
 follow ([architecture](docs/ARCHITECTURE.md)). On two cores with a year of use in it, jukecord rests at about 85 MiB
 of memory, and a thousand open panels see each change within about a tenth of a second
-([measured](docs/TESTING.md#measurements)).
+([measured](docs/TESTING.md#measurements)). Past that, the same image runs as one core, which plays the music, and any
+number of edges in front of it ([a split into services](docs/INSTALL.md#split-into-services)).
 
 ### Your data
 
-Everything stays in jukecord's data folder: one SQLite file and the tracks it fetched. Logins and tokens are kept as
-hashes, and nothing is sent as telemetry ([what leaves your computer](docs/FAQ.md#privacy)).
+Everything stays in jukecord's data folder: a SQLite file and the tracks it fetched. A host may keep the database on a
+PostgreSQL or MySQL/MariaDB server of their own instead ([the database](docs/INSTALL.md#the-database)). Logins and
+tokens are kept as hashes, and nothing is sent as telemetry ([what leaves your computer](docs/FAQ.md#privacy)).
 
 ## What it runs on
 
@@ -133,12 +139,14 @@ hashes, and nothing is sent as telemetry ([what leaves your computer](docs/FAQ.m
 | **Kubernetes**     | The Helm chart on amd64 or arm64 nodes, k3s included, with a 5 GiB volume                                                                                      |
 | **Without Docker** | Linux with glibc 2.28 or newer, macOS 13.5 or newer or Windows 10 or newer, on x64 or arm64: the [release's folder](docs/INSTALL.md#without-docker) for it     |
 | **From source**    | Node 24.11 or newer, ffmpeg with libopus, and yt-dlp                                                                                                           |
+| **Beside it**      | Optional: a PostgreSQL 14, MySQL 8.0 or MariaDB 10.11 server or newer; for a split, also Redis 6.2 or newer, or Valkey                                         |
 | **Listening**      | A current browser on a computer or a phone                                                                                                                     |
 
 ## Guides
 
 - [Using jukecord](docs/README.md): the panel, the slash commands, the `jukecord` command, who may do what, the settings
-- [Installing](docs/INSTALL.md), [Kubernetes](docs/KUBERNETES.md) and [without internet](docs/OFFLINE.md), for hosts
+- [Installing](docs/INSTALL.md) (databases, your own logins, a split, monitoring), [Kubernetes](docs/KUBERNETES.md)
+  and [without internet](docs/OFFLINE.md), for hosts
 - [Questions and answers](docs/FAQ.md) and [troubleshooting](docs/TROUBLESHOOTING.md)
 - [The API](docs/API.md), [architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md) and
   [testing](docs/TESTING.md)

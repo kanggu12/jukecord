@@ -31,6 +31,16 @@ The ones [yt-dlp](https://github.com/yt-dlp/yt-dlp) reads: YouTube, SoundCloud a
 its tracks, and search words search YouTube. YouTube sometimes asks servers to sign in;
 [troubleshooting](TROUBLESHOOTING.md#sign-in-to-confirm-youre-not-a-bot) has the way round it.
 
+**Can it keep its data in PostgreSQL or MySQL?**
+Yes: PostgreSQL 14 or newer, MySQL 8.0 or newer or MariaDB 10.11 or newer, named in `JUKECORD_DATABASE_URL`. SQLite, a
+file in the data folder, stays the default and needs nothing set up. `jukecord db copy` moves the data from one to
+another ([the database](INSTALL.md#the-database)).
+
+**Can people log in with the accounts we already have?**
+Yes, through an OpenID Connect provider (Keycloak, Authentik, Microsoft Entra ID, Okta, Google) or an LDAP directory
+or Active Directory. Their groups decide who may come in, and as what: everything the host may, changing the music, or
+looking and listening ([your own accounts](INSTALL.md#logging-in-through-your-own-accounts)).
+
 **Can one jukecord play in several Discord servers?**
 Yes. Each server has its own queue, player, history, playlists and DJ role, and sees only its own. Tracks fetched ahead
 take turns across the servers, and a track somebody is waiting for always starts at once.
@@ -46,6 +56,9 @@ are there for accidents, and past one the panel says so and tries again by itsel
 | open panels from one address             |      20 |
 | changes a second for one login           |      10 |
 | skips a second for one login             |       2 |
+
+Past what one process serves, several edges can take the panels in front of one core, which plays the music
+([a split into services](INSTALL.md#split-into-services)).
 
 **Does the computer have to stay on?**
 Only while people listen. jukecord keeps each queue and the place in the track, and after a restart every server comes
@@ -96,10 +109,22 @@ jukecord sends no telemetry. It talks to Discord and to the sites the tracks com
   playing; its "history" mode asks nobody.
 - **Deezer, Spotify or Apple Music**, for their links: the link is read from that service, and its tracks searched on
   YouTube by artist and title. `JUKECORD_LINK_SERVICES` turns each service off.
+- **Your identity provider or directory**, when people log in through them: jukecord asks who they are and which groups
+  they are in. An SSO password never reaches jukecord; a directory password goes from the login page to the directory
+  and nowhere else, and is never logged or kept.
 
 Every request jukecord makes goes to public addresses only. Each track's picture is fetched once and served by
 jukecord; search results show YouTube's pictures, and people's pictures come from Discord.
 [Your data](../README.md#your-data) says what it keeps, and where.
+
+**What does a database server, or Redis, hold?**
+A database server holds what the SQLite file would: the tracks and their lyrics, the queues, the history, the
+playlists, the settings, the people jukecord met (Discord names and IDs, members' names), and the logins, API tokens
+and listening links as SHA-256 hashes. Redis or Valkey holds what lasts minutes: rate counters by address and by login,
+failed logins by address and by name, login links and SSO logins under way under their hashes, and searches' results
+and the matches of other services' links; what the services tell each other passes through it without being kept. A
+database or a Redis on your own network keeps all of it there; a hosted one gives it to whoever runs it. A backup of a
+server is a SQLite file with the same.
 
 **Can people see servers they are not in?**
 No. A login sees only the servers it shares with the bot. Where a server has a DJ role, only its DJs and the people
