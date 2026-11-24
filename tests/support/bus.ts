@@ -15,6 +15,8 @@ export const TEST_BUS_URL = process.env.JUKECORD_TEST_BUS_URL?.trim() || null;
 /** One bus for a test: connections to it (one per service), the names under a prefix of its own, and its end. */
 export interface TestBus {
   readonly kind: 'memory' | 'redis';
+  /** The server's address (a Redis bus), for the shared cache the services keep there too; null in memory. */
+  readonly url: string | null;
   readonly names: BusNames;
   readonly prefix: string;
   /** Another service's connection to the same bus. */
@@ -47,6 +49,7 @@ export function memoryBus(): TestBus {
   const name = prefix();
   return {
     kind: 'memory',
+    url: null,
     names: busNames(name),
     prefix: name,
     connect: async () => {
@@ -67,6 +70,7 @@ export function redisBus(url: string): TestBus {
   const { log } = testLog();
   return {
     kind: 'redis',
+    url,
     names: busNames(name),
     prefix: name,
     connect: async (service = 'test') => {

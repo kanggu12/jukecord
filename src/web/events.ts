@@ -27,7 +27,7 @@
  * edges' browsers too (bus/presence.ts), and a logout or a revoked link ends connections on every edge.
  */
 import type { WebSocket } from 'ws';
-import type { Principal } from '../app/access.ts';
+import { hostLike, type Principal, personOf } from '../app/access.ts';
 import { type ActionContext, ActionError } from '../app/actions.ts';
 import type { EdgeListeners } from '../bus/presence.ts';
 import type { Ending } from '../bus/relay.ts';
@@ -36,6 +36,8 @@ import { steadyNow } from '../core/clock.ts';
 import { GuildLanes, throwFromTimer } from '../core/lanes.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import type { Logger } from '../log.ts';
+import { type Metrics, NO_METRICS } from '../metrics/registry.ts';
+import { type LiveMetrics, liveMetrics } from '../metrics/web.ts';
 import type { UserRepository } from '../store/store.ts';
 import { addressKey, type Caller } from './auth.ts';
 import type { AccessPort, ActionsPort } from './core.ts';
@@ -198,7 +200,19 @@ export interface EventHubOptions {
   readonly elsewhere?: ElsewhereListeners;
   /** Hears the connections this hub ends that other edges must end too (a logout, a revoked listening link). */
   readonly endings?: (ending: Ending) => void;
+  /**
+   * Whether what its messages are made of is read from another service (an edge's reads are the core's commands): a
+   * read that fails (the core away or late) is then said in the log and the message left out, the panels hearing
+   * the next change or asking again once the core is back, instead of thrown as jukecord's own trouble.
+   */
+  readonly remote?: boolean;
+  /** Where the connections and what is sent on them are counted; nowhere in tests that do not look. */
+  readonly metrics?: Metrics;
 }
+
+// The labels of the two kinds of frame, made once (every message to every panel is counted).
+const TEXT_FRAME = { frame: 'text' } as const;
+const BINARY_FRAME = { frame: 'binary' } as const;
 
 /** What a new connection asks for, where it comes from, and what its browser can take. */
 export interface AttachOptions {
@@ -215,8 +229,10 @@ export interface AttachOptions {
   readonly early?: () => readonly string[];
 }
 
-// The voice channels as one viewer sees them.
+// The voice channels as one viewer sees them, the votes to skip, and the voice channel's sound.
 type VoiceView = Awaited<ReturnType<HubActions['voiceChannels']>>;
+type SkipVotesView = Awaited<ReturnType<HubActions['skipVotes']>>;
+type SoundView = Awaited<ReturnType<HubActions['currentSound']>>;
 
 // The context for reading a server's state on behalf of everyone subscribed to it (reading needs no rights).
 function reader(guildId: string): ActionContext {
@@ -230,14 +246,14 @@ function guestVoice(voice: VoiceView): VoiceView {
 }
 
 // The context for what one connection may see: its own person (voice channels are listed as they see them in
-// Discord), or the host, who sees them all.
+// Discord), or the host and whoever may do what the host may, who see them all.
 function viewer(client: Client, guildId: string): ActionContext {
   const principal = client.principal;
   return {
     guildId,
-    userId: principal.kind === 'user' ? principal.userId : null,
+    userId: personOf(principal),
     mayControl: false,
-    mayManage: principal.kind === 'host',
+    mayManage: hostLike(principal),
   };
 }
 
@@ -288,9 +304,26 @@ export class EventHub {
   // The newest player snapshot's version sent to each server's panels (in a state or a message), while they are
   // there: an older one arriving afterwards (it was on its way while a state was read from the core) is not sent.
   private readonly newestPlayer = new Map<string, number>();
+  // The messages and bytes sent, and the connections, for the metrics.
+  private readonly sent: LiveMetrics;
+  // Counted up by every restartAll: work begun before one (a snapshot on its way, a state being read) is for
+  // connections that are gone, from a core that may be gone, and is dropped.
+  private generation = 0;
+  // When the log last said a message could not be made (an edge with its core away says it once a minute).
+  private unsentToldAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: EventHubOptions) {
     this.options = options;
+    const metrics = options.metrics ?? NO_METRICS;
+    this.sent = liveMetrics(metrics);
+    // Both kinds of frame named from the start, at zero.
+    for (const labels of [TEXT_FRAME, BINARY_FRAME]) this.sent.messages.inc(labels, 0);
+    // How many are connected, and how many of those play along, read when the metrics are written.
+    metrics.collect(() => {
+      const counts = this.counts();
+      this.sent.connections.set(counts.connections);
+      this.sent.listeners.set(counts.listening);
+    });
     this.now = options.now ?? Date.now;
     this.limits = options.limits ?? DEFAULT_LIVE_LIMITS;
     this.queueEveryMs = options.queueEveryMs ?? QUEUE_EVERY_MS;
@@ -300,7 +333,11 @@ export class EventHub {
       // Built only if someone is there to get it; small, so sent at once (the browsers follow the clock with it), in
       // its turn: the snapshot is the one of this moment, its names are read on the way.
       if (!this.rooms.has(snapshot.guildId)) return;
+      const generation = this.generation;
       return this.post(snapshot.guildId, async () => {
+        // Its panels are gone since (the last one left, or every one was told to reconnect): nobody to send it to,
+        // and its number must not stay to hold back the snapshots that come next (a new core counts from the start).
+        if (generation !== this.generation || !this.rooms.has(snapshot.guildId)) return;
         // Older than what the panels have: dropped (in one process that never happens; across services it can).
         if (snapshot.version <= (this.newestPlayer.get(snapshot.guildId) ?? -1)) return;
         this.newestPlayer.set(snapshot.guildId, snapshot.version);
@@ -357,7 +394,7 @@ export class EventHub {
           for (const [key, list] of answers) lists.set(key, list);
           send(lists as ReadonlyMap<string, VoiceView>);
         });
-      });
+      }).catch((error: unknown) => this.unsent(error, 'voice channels', guildId, false));
     };
     // The votes to skip changed: the panels hear the new view soon, at most four times a second.
     const onVotes = ({ guildId }: { guildId: string }) => {
@@ -380,7 +417,7 @@ export class EventHub {
             () => gzip(bytes),
           ),
         );
-      });
+      }).catch((error: unknown) => this.unsent(error, 'sound', guildId, false));
     };
     bus.on('player', onPlayer);
     bus.on('queue', onQueue);
@@ -406,7 +443,9 @@ export class EventHub {
     const principal = caller.principal;
     // The person's name and picture are read first: from the caps' check to the connection counted nothing waits, so
     // two connections at once cannot both take the last place.
-    const person = principal.kind === 'user' ? await this.options.users.get(principal.userId) : null;
+    // A Discord user's and a member's name are the users table's (a member's key is theirs in the data).
+    const personId = personOf(principal);
+    const person = personId === null ? null : await this.options.users.get(personId);
     // Gone while the name was read: nothing to take, and no goodbye will come for it.
     if (socket.readyState !== socket.OPEN) return false;
     // The host is not held to the per-login and per-address caps: it is the machine's own, and its tabs and scripts
@@ -458,18 +497,17 @@ export class EventHub {
           ? { id: null, name: 'Guest', avatar: null, guest: true }
           : principal.kind === 'friend'
             ? { id: null, name: 'Friend', avatar: null, friend: true }
-            : { id: principal.userId, name: person?.name ?? principal.userId, avatar: person?.avatar ?? null };
+            : { id: personId, name: person?.name ?? personId ?? '', avatar: person?.avatar ?? null };
     const client: Client = {
       socket,
       caller,
       principal,
       who,
+      // A Discord user and a member by who they are, however many tabs; the host as one; each friend's and guest's
+      // browser on its own.
       person:
-        principal.kind === 'user'
-          ? principal.userId
-          : principal.kind === 'host'
-            ? 'host'
-            : `${principal.kind} ${caller.sessionHash ?? caller.tokenId ?? ''}`,
+        personId ??
+        (principal.kind === 'host' ? 'host' : `${principal.kind} ${caller.sessionHash ?? caller.tokenId ?? ''}`),
       gzip: options.gzip === true,
       login,
       address,
@@ -649,10 +687,13 @@ export class EventHub {
    * asks for the whole state again (its player numbers start afresh with a new core).
    */
   restartAll(reason = 'jukecord is restarting'): void {
+    this.generation += 1;
     for (const client of [...this.clients]) {
       client.socket.close(1012, reason);
       this.drop(client);
     }
+    // Every room is empty now, and the next states start the count of snapshots afresh.
+    this.newestPlayer.clear();
   }
 
   /** Closes every connection (shutting down): the panels reconnect to the next jukecord. */
@@ -694,6 +735,7 @@ export class EventHub {
     // The access check may wait for Discord; a subscribe that began later (another server chosen meanwhile) wins.
     client.asking += 1;
     const mine = client.asking;
+    const generation = this.generation;
     try {
       await this.options.access.context(client.principal, guildId);
     } catch (error) {
@@ -723,18 +765,47 @@ export class EventHub {
       }
       const room = this.roomOf(guildId);
       const { actions, presenter } = this.options;
-      // The player as it is at this turn: a change of it from now on is sent after this state. (Asked of the core
-      // in an edge, where a snapshot on its way meanwhile may come after it: the newest is noted, see onPlayer.)
-      const snapshot = await actions.nowPlaying(reader(guildId));
-      this.newestPlayer.set(guildId, Math.max(snapshot.version, this.newestPlayer.get(guildId) ?? -1));
-      // The queue, the big part, is the start made once per version; only the end is this connection's own.
-      const start = await this.queueStart(guildId, room);
+      let state: {
+        snapshot: PlayerSnapshot;
+        voice: VoiceView;
+        votes: SkipVotesView;
+        sound: SoundView;
+        start: QueueStart;
+      };
+      try {
+        // The player as it is at this turn: a change of it from now on is sent after this state. (Asked of the core
+        // in an edge, where a snapshot on its way meanwhile may come after it: the newest is noted, see onPlayer.)
+        const snapshot = await actions.nowPlaying(reader(guildId));
+        // Gone meanwhile (closed, or every connection told to reconnect): its number would outlive it.
+        if (generation !== this.generation || client.asking !== mine || !this.clients.has(client)) return;
+        this.newestPlayer.set(guildId, Math.max(snapshot.version, this.newestPlayer.get(guildId) ?? -1));
+        // The queue, the big part, is the start made once per version; only the end is this connection's own.
+        const start = await this.queueStart(guildId, room);
+        const voice = await actions.voiceChannels(viewer(client, guildId));
+        // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
+        const votes = await actions.skipVotes(viewer(client, guildId));
+        const sound = await actions.currentSound(guildId);
+        state = { snapshot, voice, votes, sound, start };
+      } catch (error) {
+        // The state could not be read (an edge's core away or late, or the database): the connection leaves the
+        // room it never got the state of, and is told, as for a server it may not open; "unavailable" has the
+        // panel ask again shortly.
+        this.unsent(error, 'state', guildId, true);
+        if (client.asking !== mine || !this.clients.has(client)) return;
+        this.leaveRoom(client);
+        client.guild = null;
+        if (client.listening) this.listenersChanged(guildId);
+        const code = error instanceof ActionError ? error.code : 'unavailable';
+        const message =
+          error instanceof ActionError
+            ? error.message
+            : 'jukecord could not read this server now; try again in a moment';
+        this.send(client, { type: 'error', code, message });
+        return;
+      }
+      const { snapshot, voice, votes, sound, start } = state;
       client.queueVersion = start.version;
-      const voice = await actions.voiceChannels(viewer(client, guildId));
       const player = await presenter.player(snapshot);
-      // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
-      const votes = await actions.skipVotes(viewer(client, guildId));
-      const sound = await actions.currentSound(guildId);
       const ending = Buffer.from(
         `,"type":"state","player":${JSON.stringify(player)},` +
           `"voice":${JSON.stringify(client.principal.kind === 'guest' ? guestVoice(voice) : voice)},` +
@@ -750,6 +821,29 @@ export class EventHub {
           () => gzipJoined(this.compressedStart(start), ending),
         )(client),
       );
+    });
+  }
+
+  // A message for a server's panels that could not be made. An edge's reads are the core's commands, which fail
+  // while the core is away or late: said in the log (once a minute) and left, the panels hearing the next change or
+  // asking again once the core is back. In one process it is jukecord's own trouble: thrown from the timer as before
+  // (`fromTimer`), or passed on to the bus, which says which listener failed, as before; a state that could not be
+  // read is said either way, since the panel asking for it is told.
+  private unsent(error: unknown, what: string, guildId: string, fromTimer: boolean): void {
+    if (!this.options.remote && what !== 'state') {
+      if (fromTimer) throwFromTimer(error);
+      throw error;
+    }
+    if (!this.options.remote) {
+      this.options.log.error("could not read a server's state for a panel", { guild: guildId, error });
+      return;
+    }
+    const now = steadyNow();
+    if (now - this.unsentToldAt < 60_000) return;
+    this.unsentToldAt = now;
+    this.options.log.warn(`could not make the ${what} for a server's panels: the core did not answer`, {
+      guild: guildId,
+      error,
     });
   }
 
@@ -842,7 +936,7 @@ export class EventHub {
           client.queueVersion = start.version;
           this.write(client, frame(client));
         }
-      }).catch(throwFromTimer);
+      }).catch((error: unknown) => this.unsent(error, 'queue', guildId, true));
     }, wait);
     room.queueTimer.unref();
   }
@@ -920,7 +1014,9 @@ export class EventHub {
     room.votesTimer = setTimeout(() => {
       room.votesTimer = null;
       room.votesSentAt = steadyNow();
-      void this.post(guildId, () => this.sendVotes(guildId, room)).catch(throwFromTimer);
+      void this.post(guildId, () => this.sendVotes(guildId, room)).catch((error: unknown) =>
+        this.unsent(error, 'votes', guildId, true),
+      );
     }, wait);
     room.votesTimer.unref();
   }
@@ -976,6 +1072,8 @@ export class EventHub {
     }
     // The same bytes go to every connection (a Buffer is not copied per socket); nothing is compressed here.
     client.socket.send(frame.data, { binary: frame.binary, compress: false });
+    this.sent.messages.inc(frame.binary ? BINARY_FRAME : TEXT_FRAME);
+    this.sent.bytes.inc(undefined, frame.data.length);
   }
 
   // Pings every connection and closes the ones that did not answer the last ping. The login behind each connection is

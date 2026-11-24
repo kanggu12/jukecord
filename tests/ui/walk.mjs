@@ -86,6 +86,7 @@ async function open({
   discord = false,
   touch = width <= 744,
   forced = false,
+  methods = null,
 }) {
   const context = await browser.newContext({
     viewport: { width, height },
@@ -109,6 +110,8 @@ async function open({
   // Lyrics come from the walk itself: its server would ask LRCLIB, and the walk reaches no site.
   await madeUpLyrics(page);
   if (discord) await asDiscord(page, discord === true ? {} : discord);
+  // The ways in the login page shows, as a jukecord with them set up answers (the walk's own has none of them).
+  if (methods) await page.route(/\/api\/v1\/auth\/methods$/, (route) => route.fulfill({ json: methods }));
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -166,7 +169,7 @@ async function measure(page, name, setting, errors) {
 }
 
 // A state of the server, swept over every size, theme and language; `act` sets up the page (open a menu ...).
-async function sweep(name, sizes, act, { discord = false, touch, forced = false, login } = {}) {
+async function sweep(name, sizes, act, { discord = false, touch, forced = false, login, methods = null } = {}) {
   if (ONLY && !ONLY.has(name)) return;
   process.stdout.write(`${name}\n`);
   for (const theme of ['dark', 'light']) {
@@ -179,6 +182,7 @@ async function sweep(name, sizes, act, { discord = false, touch, forced = false,
           login: login ?? !name.startsWith('login'),
           discord,
           forced,
+          methods,
           ...(touch === undefined ? {} : { touch }),
         });
         try {
@@ -909,6 +913,35 @@ await sweep('menu', [...FEW, [2560, 1400]], async (page) => {
   // The page in use (in the menu on a phone) and the theme and language chosen, in the brand's blue.
   await choicesInBlue(page);
 });
+// A member who logged in through the host's identity provider, at the admin level: their name and initials on the
+// account key and at the top of the menu, how they logged in under it, the log among the pages (what the host may),
+// and no tokens to make (a token would outlast what their groups say). The server's own answer about who is logged in
+// (the host) is put in a member's words.
+await sweep('member-menu', [[360, 780], ...FEW], async (page) => {
+  await page.route(/\/api\/v1\/me$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...body,
+        kind: 'member',
+        id: 'oidc:3f9a0c1b2d4e5f6',
+        name: 'Hana Seo',
+        member: { provider: 'oidc', level: 'admin' },
+      },
+    });
+  });
+  await page.reload();
+  await page.waitForSelector('.app .card', { timeout: 15000 });
+  await page.click('[data-act="menu"]');
+  await page.waitForSelector('.sheet .section');
+  await page.waitForTimeout(400);
+  const head = await page.locator('.sheet .who-name').textContent();
+  if (head !== 'Hana Seo') throw new Error(`the menu names ${head}`);
+  if (!(await page.locator('.sheet').textContent())?.match(/SSO/)) throw new Error('the menu does not say SSO');
+  if (await page.locator('[data-key="token-create"]').count()) throw new Error('a member is offered to make tokens');
+});
 // A queue tool: its own key on a wide card, the list behind the tools key on a narrow one (phones).
 async function tool(page, act) {
   // The tools are drawn once the queue's state has come (none before it: nothing is known to act on). Asked at once,
@@ -1056,7 +1089,74 @@ await sweep(
   { discord: true },
 );
 // The Discord login on a phone: its key, a finger's size.
-await sweep('login-discord', [[360, 780]], null, { discord: true });
+await sweep('login-discord', [[360, 780]], null, {
+  discord: true,
+  methods: { discord: true, sso: null, directory: null },
+});
+// The login page with each way in alone, with all of them, and with a refusal, at a phone's width and up: the keys
+// say what they do, the first is the main key, the directory account's form has its fields under their names, and
+// the host's own way ends the plate.
+const LOGIN_SIZES = [
+  [360, 780],
+  [390, 844],
+  [1024, 768],
+  [1440, 900],
+];
+// Every way in, the provider's key in the words a host chose.
+const ALL_WAYS = { discord: true, sso: { label: 'Log in with Keycloak' }, directory: { label: null } };
+await sweep(
+  'login-sso',
+  LOGIN_SIZES,
+  async (page) => {
+    await page.waitForSelector('.login-plate [data-way="sso"].primary');
+    if (await page.locator('.login-form').count()) throw new Error('a form is shown without a directory');
+  },
+  { methods: { discord: false, sso: { label: null }, directory: null } },
+);
+await sweep(
+  'login-directory',
+  LOGIN_SIZES,
+  async (page) => {
+    await page.waitForSelector('.login-form button[type="submit"].primary');
+    // Each field has its name (a label the screen reader reads, not a placeholder).
+    for (const id of ['login-user', 'login-password']) {
+      if ((await page.locator(`label[for="${id}"]`).count()) !== 1) throw new Error(`#${id} has no label`);
+    }
+  },
+  { methods: { discord: false, sso: null, directory: { label: null } } },
+);
+await sweep(
+  'login-all',
+  LOGIN_SIZES,
+  async (page) => {
+    await page.waitForSelector('.login-plate .login-or');
+    // One main key: the provider's, first; the others are plain keys.
+    if ((await page.locator('.login-plate .key.primary').count()) !== 1) throw new Error('not one main key');
+    const first = await page.locator('.login-plate .login-key').first().textContent();
+    if (!first?.includes('Log in with Keycloak')) throw new Error(`the first key says ${first}`);
+  },
+  { methods: ALL_WAYS },
+);
+// A refusal: the directory's answer to a wrong password, said at the top of the plate without leaving the page, the
+// password cleared and the cursor in it.
+await sweep(
+  'login-refused',
+  LOGIN_SIZES,
+  async (page) => {
+    page.expectedErrors = [/401/];
+    await page.route(/\/auth\/directory$/, (route) =>
+      route.fulfill({ status: 401, json: { error: { code: 'wrong-password', message: 'wrong name or password' } } }),
+    );
+    await page.fill('#login-user', 'mina');
+    await page.fill('#login-password', 'not-it');
+    await page.click('.login-form button[type="submit"]');
+    await page.waitForSelector('.login-plate .notice:not([hidden])');
+    if ((await page.inputValue('#login-password')) !== '') throw new Error('the password stays after a refusal');
+    const focused = await page.evaluate(() => document.activeElement?.id);
+    if (focused !== 'login-password') throw new Error(`the cursor is in ${focused}`);
+  },
+  { methods: ALL_WAYS },
+);
 // A queued track's keys on a phone, behind the row's one key.
 await sweep(
   'track-menu',

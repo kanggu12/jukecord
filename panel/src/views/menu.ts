@@ -5,7 +5,7 @@
 import { api, logOut, type Settings, type Token } from '../api.ts';
 import { avatarUrl, face, fill, guildIconUrl, h, icon, keepingFocus } from '../dom.ts';
 import { pickLang } from '../i18n.ts';
-import { keep, state, t, update } from '../state.ts';
+import { hostLike, isPerson, keep, state, t, update } from '../state.ts';
 import { confirmDialog, problem, sheet, showDialog } from '../ui/layers.ts';
 import { copyText, inviteDialog, mayInvite, when } from './invite.ts';
 import { act, ago } from './player.ts';
@@ -101,15 +101,20 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   const me = state.me;
   if (!me) return;
   // The host has no Discord name: one line, "Host" in the panel's language; a friend and a guest the same, a guest with
-  // until when its link works (not "as a guest" again under "Guest"). A Discord login: the name, and how.
+  // until when its link works (not "as a guest" again under "Guest"). A Discord login and a member: the name, and how
+  // they logged in (through SSO, a Discord user through SSO too).
   const host = me.kind === 'host';
   const named = host ? words.host : me.kind === 'friend' ? words.friend : me.kind === 'guest' ? words.guest : me.name;
   const how =
-    me.kind === 'user'
-      ? words.discordLogin
-      : me.kind === 'guest' && me.guest
-        ? words.guestCanListen(when(me.guest.expiresAt))
-        : null;
+    me.member?.provider === 'oidc'
+      ? words.ssoLogin
+      : me.member?.provider === 'ldap'
+        ? words.directoryLogin
+        : me.kind === 'user'
+          ? words.discordLogin
+          : me.kind === 'guest' && me.guest
+            ? words.guestCanListen(when(me.guest.expiresAt))
+            : null;
   const who = h(
     'div',
     { class: 'section' },
@@ -117,7 +122,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
       'div',
       { class: 'line' },
       // A role (the host, a friend, a guest) has no account: a person in its face, as on the account key.
-      face(named, avatarUrl(me.id, me.avatar), '', me.kind !== 'user'),
+      face(named, avatarUrl(me.id, me.avatar), '', !isPerson()),
       h(
         'div',
         { class: 'grow' },
@@ -135,7 +140,7 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
     ...[
       ['/', 'music-2', words.player],
       ['/stats', 'chart-column', words.stats],
-      ...(me.kind === 'host' ? [['/logs', 'scroll-text', words.logs]] : []),
+      ...(hostLike() ? [['/logs', 'scroll-text', words.logs]] : []),
     ].map(([path, name, label]) => {
       // The page in use is marked, as the bar's links mark it on a wide window.
       const button = h(
@@ -234,8 +239,8 @@ export function menuSheet(navigate: (path: string) => void, hooks?: MenuHooks, f
   const guest = me.kind === 'guest';
   const out = h('button', { class: 'choice', type: 'button' }, icon('log-out'), guest ? words.leave : words.logOut);
   out.onclick = async () => {
-    await logOut();
-    location.assign('/login');
+    // A login through SSO logs out at the provider too, when it offers that; it sends the browser back to the login page.
+    location.assign((await logOut()) ?? '/login');
   };
   // Inviting someone to listen along, for whoever may make links (the key beside the listeners opens the same).
   const invite = h(
@@ -474,7 +479,9 @@ function drawShare(box: HTMLElement, guild: string, settings: Settings): void {
 // API tokens: the list, making one (shown once), revoking.
 async function drawTokens(box: HTMLElement): Promise<void> {
   const words = t();
-  if (state.me?.scope !== 'admin') {
+  // Tokens are made by the host and by Discord logins: a login through SSO or a directory makes none (a token would
+  // outlast what its groups say at the next login), so it is not offered the section.
+  if (state.me?.scope !== 'admin' || state.me.member) {
     box.hidden = true;
     return;
   }

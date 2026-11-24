@@ -15,14 +15,9 @@ fullnameOverride: ""
 
 # single: one pod is all of jukecord (the default). split: one core (Discord, every server's player and queue, the
 # media and its cache: one pod, with the volume) and edges (the panel, the API, the live updates, logins: as many pods
-# as you like), which share a database and a Redis or Valkey server (database and bus below).
+# as you like), which share a database server (database below: split mode needs one) and a Redis or Valkey server
+# (bus below).
 mode: single
-
-# The database every service shares in split mode (postgres://... or mysql://...), or a Secret of yours holding it
-# under the key url. Either way it reaches jukecord as a file.
-database:
-  url: ""
-  existingSecret: ""
 
 # The Redis or Valkey server the services of split mode talk through and keep their shared cache on (redis://...,
 # rediss:// for TLS; a password goes in the address), or a Secret of yours holding it under the key url.
@@ -72,8 +67,41 @@ discord:
   # The application's OAuth2 secret, for logging in to the panel with Discord.
   clientSecret: ""
 
+database:
+  # Where jukecord keeps its data: empty for the SQLite file in the data volume (persistence below), or a database
+  # server's address as JUKECORD_DATABASE_URL takes it: postgres://user:password@host:5432/jukecord or
+  # mysql://user:password@host:3306/jukecord (MariaDB too), TLS asked for in it (?sslmode=verify-full). The chart keeps
+  # it in a Secret and gives it to jukecord as a file (it holds a password). The data volume still keeps the media
+  # cache, the logs and the backups.
+  url: ""
+  # A Secret of yours holding the address under the key url, instead of url above (the chart refuses both).
+  existingSecret: ""
+
 # Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
 publicUrl: ""
+
+metrics:
+  # jukecord answers /metrics to a scraper on the cluster's network asking directly, with nothing to set. A token lets
+  # one in from anywhere else: from outside the cluster, through a proxy, or through a service mesh's sidecar (which adds
+  # forwarding headers). Prometheus sends it as Authorization: Bearer <token>; at least 16 characters (openssl rand -hex
+  # 32). The release's values (helm get values) then hold it too; existingSecret keeps it in a Secret of yours.
+  token: ""
+  # A Secret of yours with the token under the key metricsToken (the chart refuses it together with token above).
+  # Either way the pod reads it as a file, and the ServiceMonitor sends it.
+  existingSecret: ""
+  # prometheus.io/scrape, /port and /path on the pod, for a Prometheus that finds its targets by annotation. One you
+  # set in podAnnotations wins.
+  podAnnotations: false
+  serviceMonitor:
+    # A ServiceMonitor for the Prometheus Operator, made when the cluster has its CRD (monitoring.coreos.com/v1).
+    enabled: false
+    # Make it even when the cluster does not say it has the CRD: for helm template, and the tools that render charts
+    # without asking a cluster (Argo CD, Flux).
+    force: false
+    # The labels your Prometheus picks ServiceMonitors by (kube-prometheus-stack: release: <its release>).
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
 
 # Settings passed to jukecord as they are (JUKECORD_*; see docs/README.md), as strings: quote numbers and IDs, which
 # YAML would otherwise turn into floats. JUKECORD_HOST, JUKECORD_PORT, JUKECORD_DATA_DIR and the two *_FILE secrets
@@ -157,9 +185,12 @@ networkPolicy:
   #       matchLabels:
   #         app.kubernetes.io/name: ingress-nginx
   ingressFrom: []
-  # Where the database and the bus are, for split mode, as NetworkPolicy egress rules (to, ports): the cluster's private
-  # ranges are out of reach otherwise. Empty in split mode: any pod of the release's namespace on 5432 (PostgreSQL),
-  # 3306 (MySQL, MariaDB) and 6379 (Redis, Valkey). For a managed database outside the cluster:
+  # Where the database (and in split mode the bus) is, as NetworkPolicy egress rules (to, ports): the cluster's
+  # private ranges are out of reach otherwise. Empty with a database set: any pod of the release's namespace on 5432
+  # (PostgreSQL) and 3306 (MySQL, MariaDB), and in split mode 6379 (Redis, Valkey) too. Rules given here replace that
+  # one, for every pod of the release; an identity provider or a directory in a private range (JUKECORD_OIDC_ISSUER,
+  # JUKECORD_LDAP_URL: the pods that serve browsers log people in, the edges in split mode) needs its rule here too.
+  # For a database elsewhere in a private range:
   #   - to:
   #       - ipBlock:
   #           cidr: 10.20.0.0/24

@@ -14,7 +14,13 @@ import {
   type RoleInfo,
   type VoiceControl,
 } from '../../src/app/actions.ts';
+import { busPart, cachePart, databasePart, discordPart, Health, type HealthPart } from '../../src/app/health.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import type { LoginChecks } from '../../src/auth/check.ts';
+import { LdapLogin, type LdapOptions } from '../../src/auth/ldap.ts';
+import { OidcLogin } from '../../src/auth/oidc.ts';
+import type { LdapSettings, OidcSettings } from '../../src/auth/settings.ts';
+import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
@@ -27,7 +33,10 @@ import { Covers, type Picture } from '../../src/media/covers.ts';
 import type { LyricsSource } from '../../src/media/lyrics.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
 import { type Search, searchWords } from '../../src/media/search.ts';
+import { MetricsRegistry } from '../../src/metrics/registry.ts';
+import { describeService, discordMetrics, playerMetrics } from '../../src/metrics/service.ts';
 import type { Store } from '../../src/store/store.ts';
+import { VERSION } from '../../src/version.ts';
 import { Auth, type OAuthConfig } from '../../src/web/auth.ts';
 import type { LiveLimits } from '../../src/web/events.ts';
 import type { Rate } from '../../src/web/limits.ts';
@@ -137,6 +146,8 @@ export interface TestServer {
   readonly lanes: GuildLanes;
   readonly cache: MediaCache;
   readonly covers: Covers;
+  /** Every number the server reports at /metrics, composed as main.ts composes it. */
+  readonly metrics: MetricsRegistry;
   /** The pictures asked of the made-up image hosts, by address, in order. */
   readonly pictureRequests: string[];
   readonly logs: MemorySink;
@@ -186,6 +197,16 @@ export interface TestServerOptions {
   readonly lyrics?: LyricsSource;
   /** What a search finds for some words (anything else finds nothing). */
   readonly searched?: Record<string, NewTrack[]>;
+  /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN). */
+  readonly metricsToken?: string;
+  /** More parts for /readyz to check, beside the database, the bus, the cache and Discord. */
+  readonly parts?: readonly HealthPart[];
+  /** Logging in through an identity provider: its settings, and the fetch its made-up provider answers. */
+  readonly oidc?: { readonly settings: OidcSettings; readonly fetch: typeof fetch };
+  /** Logging in with a directory account: its settings, and a directory that stands in for one. */
+  readonly ldap?: { readonly settings: LdapSettings; readonly connect: LdapOptions['connect'] };
+  /** The login settings' tests (none by default). */
+  readonly loginChecks?: LoginChecks;
 }
 
 /** Example tracks: example.com addresses only, so tests never point at real pages. */
@@ -280,17 +301,69 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
+  const loginCache = new MemoryCache();
+  // Through the made-up provider, coming back to the address the test server says it has.
+  const oidc = options.oidc
+    ? new OidcLogin({
+        settings: options.oidc.settings,
+        redirectUri: 'http://localhost:8795/auth/sso/callback',
+        afterLogout: 'http://localhost:8795/login',
+        cache: loginCache,
+        log,
+        fetch: options.oidc.fetch,
+      })
+    : null;
+  const ldap = options.ldap
+    ? new LdapLogin({
+        settings: options.ldap.settings,
+        log,
+        ...(options.ldap.connect ? { connect: options.ldap.connect } : {}),
+      })
+    : null;
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
     secureCookies: false,
     oauth: options.oauth ?? null,
+    // The login links and failed logins in memory, as one jukecord keeps them (each test server its own).
+    cache: loginCache,
+    oidc,
+    ldap,
     log,
     // Real time for logins: the session repository uses the store's clock, which the tests keep fixed.
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-web-'));
-  const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log });
+  // The metrics as main.ts composes them, from the parts a test server has (no event loop watch, no media tools).
+  const metrics = new MetricsRegistry();
+  describeService(metrics, {
+    version: VERSION,
+    role: 'all',
+    database: store.sql.dialect,
+    bus: 'in-process',
+    cache: 'memory',
+  });
+  playerMetrics(metrics, { players, queue });
+  discordMetrics(metrics, {
+    connected: () => !options.browserOnly,
+    gateway: () => (options.browserOnly ? null : { state: 'ready', pingMs: 42 }),
+    guilds: () => (options.browserOnly ? 0 : directory.guildList.length),
+    voice: () => new Map(options.browserOnly ? [] : [['ready', voice.current.size]]),
+  });
+  const cache = new MediaCache({ dir: path.join(dataDir, 'cache'), maxBytes: 1024 ** 3, log, metrics });
+  // Readiness as main.ts makes it, the media programs aside (a test server runs none); a test may add parts.
+  const sharedCache = new MemoryCache();
+  const health = new Health({
+    parts: [
+      databasePart(store),
+      busPart('in-process'),
+      cachePart(sharedCache),
+      ...(options.browserOnly ? [] : [discordPart(() => ({ state: 'ready' as const }))]),
+      ...(options.parts ?? []),
+    ],
+    discord: () => !options.browserOnly,
+    metrics,
+  });
   cache.init();
   // Covers come from a table instead of the internet; every picture asked for is noted.
   const pictureRequests: string[] = [];
@@ -323,8 +396,9 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     // Never behind unless a test says so: a busy test machine must not make changes fail at random.
     behind: options.behind ?? (() => false),
     ...(options.timeouts ? { timeouts: options.timeouts } : {}),
-    ready: () => true,
-    discordReady: () => !options.browserOnly,
+    health,
+    metrics,
+    ...(options.metricsToken ? { metricsToken: options.metricsToken } : {}),
     deps: {
       actions,
       access,
@@ -337,6 +411,8 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
       logFiles: 5,
       backupDir: path.join(dataDir, 'backups'),
       discordMode: !options.browserOnly,
+      loginSettings: { oidc: options.oidc?.settings ?? null, ldap: options.ldap?.settings ?? null },
+      loginChecks: options.loginChecks ?? null,
       doctor: async () => ({ ok: true, checks: [{ name: 'test', status: 'ok', detail: 'fine' }], settings: {} }),
     },
   });
@@ -364,12 +440,15 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     lanes,
     cache,
     covers,
+    metrics,
     pictureRequests,
     logs,
     dataDir,
     url,
     close: async () => {
       await web.close();
+      await sharedCache.close();
+      await loginCache.close();
       await store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },

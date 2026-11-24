@@ -1,13 +1,15 @@
 /**
  * What else travels the bus: the core's events reaching every edge's own bus in the order they happened, the endings
  * of live connections, who listens on each edge added up (and forgotten when an edge goes quiet), and the core's
- * heartbeat and lease (one core at a time; an edge tells a core found, lost and replaced). On the memory bus always,
- * and on Redis or Valkey when JUKECORD_TEST_BUS_URL names one.
+ * heartbeat and lease (one core at a time, the lease given back last and a core stepping down when it cannot renew
+ * it; an edge tells a core found, lost, back, replaced and resumed). On the memory bus always, and on Redis or Valkey
+ * when JUKECORD_TEST_BUS_URL names one.
  */
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 import { CoreBeat, type CoreChange, type CoreFacts, CoreWatch } from '../../src/bus/beat.ts';
 import { serviceId } from '../../src/bus/commands.ts';
+import type { MemoryTransport } from '../../src/bus/memory.ts';
 import { type EdgeListeners, Presence, PresenceReporter } from '../../src/bus/presence.ts';
 import { type Ending, EventReceiver, EventSender } from '../../src/bus/relay.ts';
 import { busNames } from '../../src/bus/transport.ts';
@@ -152,7 +154,7 @@ for (const { name, make } of testBuses()) {
       await Promise.all([core.stop(), elsewhere.stop()]);
     });
 
-    it('takes one core at a time, and an edge tells the core found, replaced and lost', async () => {
+    it('takes one core at a time, and an edge tells the core found, lost, and back when the next one beats', async () => {
       const where = names();
       const changes: CoreChange[] = [];
       const watch = await CoreWatch.start({
@@ -199,11 +201,16 @@ for (const { name, make } of testBuses()) {
       });
       await settle(200);
       assert.equal(second, null, 'the second core waits');
-      // The first stops (its goodbye: the edge takes it for lost at once), and the second takes over.
-      await first.stop();
+      // The first says goodbye (the edge takes it for lost at once) and still holds the lease, while it leaves
+      // Discord: the second waits until it is given back.
+      await first.goodbye();
+      await eventually(() => changes.includes('lost'), 'the core lost at its goodbye');
+      await settle(200);
+      assert.equal(second, null, 'the second core waits for the lease to be given back');
+      await first.release();
       await starting;
       await eventually(() => watch.instance === secondInstance, 'the second core heard');
-      assert.deepEqual(changes, ['found', 'lost', 'found']);
+      assert.deepEqual(changes, ['found', 'lost', 'back']);
       await (second as unknown as CoreBeat).stop();
       await eventually(() => changes.length === 4, 'the second core gone');
       // Neither core lost its lease to the other while it ran.
@@ -212,6 +219,80 @@ for (const { name, make } of testBuses()) {
     });
   });
 }
+
+describe("a core's lease and its bus", () => {
+  it('steps down when it cannot renew its lease in time, before the lease runs out for another core', async () => {
+    const { memoryBus } = await import('../support/bus.ts');
+    const bus = memoryBus();
+    const transport = (await bus.connect()) as MemoryTransport;
+    const lost: number[] = [];
+    const started = Date.now();
+    const beat = await CoreBeat.start({
+      transport,
+      names: bus.names,
+      instance: serviceId('core'),
+      version: '0.4.0',
+      facts: () => FACTS,
+      log: testLog().log,
+      lost: () => lost.push(Date.now() - started),
+      everyMs: 20,
+      leaseMs: 600,
+      renewDeadlineMs: 300,
+    });
+    beat.announce();
+    // A bus out of reach for less than the deadline: nothing happens.
+    transport.setConnected(false);
+    await settle(150);
+    transport.setConnected(true);
+    await settle(200);
+    assert.deepEqual(lost, []);
+    // Out of reach for longer: this core steps down, once.
+    transport.setConnected(false);
+    await eventually(() => lost.length === 1, 'the core stepping down', 2000);
+    await settle(100);
+    assert.equal(lost.length, 1);
+    await beat.release();
+    await bus.close();
+  });
+
+  it("tells an edge the core resumed when the core's own bus came back, and the lease stays the core's", async () => {
+    const { memoryBus } = await import('../support/bus.ts');
+    const bus = memoryBus();
+    const changes: CoreChange[] = [];
+    const watch = await CoreWatch.start({
+      transport: await bus.connect(),
+      names: bus.names,
+      version: '0.4.0',
+      changed: (change) => changes.push(change),
+      log: testLog().log,
+      lostAfterMs: 5000,
+    });
+    const transport = (await bus.connect()) as MemoryTransport;
+    const lost: string[] = [];
+    const beat = await CoreBeat.start({
+      transport,
+      names: bus.names,
+      instance: serviceId('core'),
+      version: '0.4.0',
+      facts: () => FACTS,
+      log: testLog().log,
+      lost: () => lost.push('lost'),
+      everyMs: 20,
+    });
+    beat.announce();
+    await eventually(() => changes.includes('found'), 'the core found');
+    // A blip shorter than an edge's patience: the edge hears no silence, but the events sent meanwhile were lost.
+    transport.setConnected(false);
+    await settle(60);
+    transport.setConnected(true);
+    await eventually(() => changes.includes('resumed'), 'the core resumed');
+    assert.deepEqual(changes, ['found', 'resumed']);
+    assert.deepEqual(lost, []);
+    await beat.stop();
+    await watch.stop();
+    await bus.close();
+  });
+});
 
 describe('the reports of an edge that went quiet', () => {
   it('stop counting once a few heartbeats are missed, and the change is told', async () => {

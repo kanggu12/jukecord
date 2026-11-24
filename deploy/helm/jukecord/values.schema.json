@@ -21,15 +21,6 @@
       "enum": ["single", "split"],
       "description": "single: one pod is all of jukecord; split: one core and edges, over a shared database and a Redis or Valkey bus"
     },
-    "database": {
-      "type": "object",
-      "description": "The database the services share in split mode: its address, or a Secret holding it under url",
-      "additionalProperties": false,
-      "properties": {
-        "url": { "type": "string", "pattern": "^(|(postgres|postgresql|mysql|mariadb)://.+)$" },
-        "existingSecret": { "type": "string" }
-      }
-    },
     "bus": {
       "type": "object",
       "description": "The Redis or Valkey server of split mode: its address, or a Secret holding it under url",
@@ -79,7 +70,56 @@
         "clientSecret": { "type": "string" }
       }
     },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The database's address as JUKECORD_DATABASE_URL takes it; empty for the SQLite file in the data volume",
+          "pattern": "^(|sqlite:.*|(postgres|postgresql|mysql|mariadb)://.+)$"
+        },
+        "existingSecret": { "type": "string", "description": "A Secret holding the address under the key url" }
+      }
+    },
     "publicUrl": { "type": "string", "pattern": "^(|https?://[^\\s/]+(/.*)?)$" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "The token a scraper shows for /metrics (Authorization: Bearer): empty, or one word of at least 16 characters",
+          "pattern": "^(|\\S{16,})$"
+        },
+        "existingSecret": { "type": "string" },
+        "podAnnotations": { "type": "boolean" },
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "force": { "type": "boolean" },
+            "labels": {
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^(([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9])?$"
+              }
+            },
+            "interval": {
+              "type": "string",
+              "description": "A Prometheus duration: 30s, 1m, 1m30s",
+              "pattern": "^([0-9]+(ms|s|m|h))+$"
+            },
+            "scrapeTimeout": { "type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$" }
+          }
+        }
+      }
+    },
     "env": {
       "type": "object",
       "description": "JUKECORD_* settings passed as they are, as strings (quote numbers and IDs); the port, the listening address, the data directory and the secret files belong to the chart, and the token and the OAuth secret go in discord",
@@ -166,9 +206,10 @@
         },
         "egressTo": {
           "type": "array",
-          "description": "NetworkPolicy egress rules (to, ports) for the database and the bus of split mode; empty: the release's namespace on 5432, 3306 and 6379",
+          "description": "NetworkPolicy egress rules (to, ports) to the database (and the bus in split mode); empty with a database set: the release's namespace on 5432 and 3306, and 6379 in split mode",
           "items": {
             "type": "object",
+            "minProperties": 1,
             "additionalProperties": false,
             "properties": {
               "to": { "type": "array", "items": { "type": "object" } },

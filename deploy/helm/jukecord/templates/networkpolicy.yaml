@@ -36,6 +36,9 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+    {{- /* The database, which is often in the cluster's private range (out of reach by the rule below): the rule
+    split mode has too (jukecord.serviceEgress). */}}
+    {{- include "jukecord.serviceEgress" . | nindent 4 }}
     # The internet, any port: Discord voice uses UDP on ports it chooses.
     - to:
         - ipBlock:

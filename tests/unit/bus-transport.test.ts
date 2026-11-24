@@ -2,11 +2,13 @@
  * The bus's transports keep one contract: messages reach whoever listens when they are sent, in order and later (never
  * inside the publisher's call), a count of who heard them, and a lease one owner holds at a time. The same tests run
  * on the memory transport and, when JUKECORD_TEST_BUS_URL names a server, on Redis or Valkey, where a connection the
- * server cuts is seen going down and coming back with its subscriptions.
+ * server cuts is seen going down and coming back with its subscriptions, and so is one whose server goes silent
+ * without closing it (a proxy in between stops passing anything on).
  */
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import { after, describe, it } from 'node:test';
-import { connectRedis } from '../../src/bus/redis.ts';
+import { connectRedis, RedisTransport } from '../../src/bus/redis.ts';
 import { eventually, settle, TEST_BUS_URL, testBuses, testLog } from '../support/bus.ts';
 
 for (const { name, make } of testBuses()) {
@@ -131,6 +133,83 @@ describe('the Redis bus cut off', { skip: !TEST_BUS_URL && 'JUKECORD_TEST_BUS_UR
     } finally {
       await admin.close();
       await bus.close();
+    }
+  });
+});
+
+// A TCP proxy to the test server whose connections can be made silent: open both ways, passing nothing on, as a
+// server whose machine died (or a cut network) leaves them. Connections made after that pass as usual.
+async function silencer(target: string): Promise<{ url: string; silence(): void; close(): Promise<void> }> {
+  const to = new URL(target);
+  const pairs = new Set<{ silent: boolean; sockets: net.Socket[] }>();
+  const server = net.createServer((client) => {
+    const upstream = net.connect(Number(to.port || 6379), to.hostname);
+    const pair = { silent: false, sockets: [client, upstream] };
+    pairs.add(pair);
+    client.on('data', (data) => {
+      if (!pair.silent) upstream.write(data);
+    });
+    upstream.on('data', (data) => {
+      if (!pair.silent) client.write(data);
+    });
+    for (const socket of pair.sockets) {
+      socket.on('error', () => {});
+      socket.on('close', () => {
+        for (const other of pair.sockets) other.destroy();
+        pairs.delete(pair);
+      });
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  return {
+    url: `redis://127.0.0.1:${port}`,
+    silence: () => {
+      for (const pair of pairs) pair.silent = true;
+    },
+    close: async () => {
+      for (const pair of pairs) for (const socket of pair.sockets) socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+describe('the Redis bus whose server goes silent', {
+  skip: !TEST_BUS_URL && 'JUKECORD_TEST_BUS_URL is not set',
+}, () => {
+  it('takes the silent connections for down, makes them again, and listens again', async () => {
+    const proxy = await silencer(TEST_BUS_URL ?? '');
+    const log = testLog();
+    // Pings every 100 ms that may take 100 ms: silent for two of them, a connection is made again.
+    const timing = { pingEveryMs: 100, callLimitMs: 100 };
+    const transport = await RedisTransport.open(proxy.url, { log: log.log, service: 'silent', waitMs: 5000, timing });
+    const sender = await RedisTransport.open(TEST_BUS_URL ?? '', { log: log.log, service: 'sender', waitMs: 5000 });
+    try {
+      const channel = `jukecord-test-silent-${process.pid}`;
+      const heard: string[] = [];
+      await transport.subscribe(channel, (message) => heard.push(message));
+      const changes: boolean[] = [];
+      transport.onChange((up) => changes.push(up));
+      proxy.silence();
+      // A call on a silent connection fails within its limit, never hangs.
+      const started = Date.now();
+      await assert.rejects(transport.publish(channel, 'unheard'));
+      assert.ok(Date.now() - started < 2000, 'the call failed within its limit');
+      await eventually(() => changes.includes(false), 'the silent bus taken for down', 5000);
+      await eventually(() => transport.up, 'the bus made again', 5000);
+      assert.ok(
+        log.sink.records.some((record) => record.msg === 'the connection to Redis went silent; it is made again'),
+        'said in the log',
+      );
+      // Listening again on the new connection: a message sent now arrives.
+      await eventually(() => {
+        void sender.publish(channel, 'after').catch(() => {});
+        return heard.includes('after');
+      }, 'a message on the new connection');
+    } finally {
+      await transport.close();
+      await sender.close();
+      await proxy.close();
     }
   });
 });

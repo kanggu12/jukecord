@@ -12,7 +12,7 @@ import { after, before, describe, it } from 'node:test';
 import type { MemoryTransport } from '../../src/bus/memory.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import { openApiDocument } from '../../src/web/openapi.ts';
-import { eventually, testBuses } from '../support/bus.ts';
+import { eventually, settle, testBuses } from '../support/bus.ts';
 import { type Split, split, type TestCore, type TestEdge } from '../support/split.ts';
 import { ALICE, BOB, exampleTrack, GUILD, HOST_TOKEN } from '../support/web.ts';
 
@@ -116,9 +116,20 @@ for (const { name, make } of testBuses()) {
       assert.match(coreMetrics, /^jukecord_players\{status="idle"\} \d+$/m);
       assert.match(coreMetrics, /^jukecord_edges 2$/m);
       assert.match(coreMetrics, /^jukecord_bus_commands_served_total\{command="actions\.status",outcome="ok"\} \d+$/m);
-      // And their readiness by parts.
-      const coreReady = (await (await fetch(`${core.healthUrl}/readyz`)).json()) as { parts: Record<string, string> };
-      assert.deepEqual(coreReady.parts, { database: 'ok', bus: 'ok' });
+      // And their readiness by parts, in one process's shape: the core's database, bus and shared cache, and an
+      // edge's the same and its core.
+      const states = (body: unknown) =>
+        Object.fromEntries(
+          Object.entries((body as { parts: Record<string, { state: string }> }).parts).map(([part, report]) => [
+            part,
+            report.state,
+          ]),
+        );
+      const coreReady = await (await fetch(`${core.healthUrl}/readyz`)).json();
+      assert.deepEqual(states(coreReady), { database: 'ok', bus: 'ok', cache: 'ok' });
+      const edgeReady = await (await fetch(`${one.url}/readyz`)).json();
+      assert.deepEqual(states(edgeReady), { database: 'ok', bus: 'ok', cache: 'ok', core: 'ok' });
+      assert.equal((edgeReady as { ready: boolean }).ready, true);
     });
 
     it('keeps the status of every refusal: 404, 409, 400 and 403 as in one process', async () => {
@@ -231,6 +242,25 @@ for (const { name, make } of testBuses()) {
       assert.equal(await away.closed, 4401);
     });
 
+    it('takes a login link made on one edge at another, once (the links are on the shared cache)', async () => {
+      // `jukecord link` asks an edge for a link; the browser opening it may reach any edge behind the front.
+      const made = await ask(one, 'POST', '/login-links');
+      assert.equal(made.status, 200);
+      const code = String(made.body.url).split('/auth/link/')[1] ?? '';
+      assert.ok(code.length > 0, 'a link with its code');
+      const opened = await fetch(`${two.url}/auth/link/${code}`, { redirect: 'manual' });
+      assert.equal(opened.status, 302);
+      assert.equal(opened.headers.get('location'), '/');
+      const cookie = (opened.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+      assert.match(cookie, /=/);
+      // The browser is the host now, on either edge (a session is a database row).
+      const me = await fetch(`${one.url}/api/v1/me`, { headers: { cookie } });
+      assert.equal(me.status, 200);
+      // One use: the same link at the first edge is spent.
+      const again = await fetch(`${one.url}/auth/link/${code}`, { redirect: 'manual' });
+      assert.equal(again.headers.get('location'), '/login?error=link');
+    });
+
     it("ends a revoked listening link's guests on every edge, whichever edge revoked it", async () => {
       const made = await ask(one, 'POST', `/guilds/${GUILD}/listen-links`, { days: 1 });
       assert.equal(made.status, 200);
@@ -280,8 +310,13 @@ for (const { name, make } of testBuses()) {
       assert.equal(away.status, 503);
       assert.equal(away.headers.get('retry-after'), '2');
       assert.ok(Date.now() - started < 1000, 'refused at once');
-      const ready = await (await fetch(`${one.url}/readyz`)).json();
-      assert.equal((ready as { parts: Record<string, string> }).parts.core, 'no heartbeat from the core lately');
+      // Not ready without a core (an answer is kept for a second, so it may say so a moment later).
+      const coreState = async () =>
+        ((await (await fetch(`${one.url}/readyz`)).json()) as { parts: Record<string, { state: string }> }).parts.core
+          ?.state;
+      const deadline = Date.now() + 3000;
+      while ((await coreState()) !== 'down' && Date.now() < deadline) await settle(100);
+      assert.equal(await coreState(), 'down');
       // The next core: the edges find it and answer again, from where the database is.
       core = await pieces.core();
       await eventually(() => one.edge.watch.instance === core.instance, 'the new core heard');

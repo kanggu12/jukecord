@@ -38,7 +38,17 @@ describe('the HTTP API', () => {
   it('answers the status to anyone and everything else only after a login', async () => {
     const status = await inject({ method: 'GET', url: api('/status') });
     assert.equal(status.statusCode, 200);
-    assert.deepEqual(Object.keys(status.json()).sort(), ['discord', 'login', 'lyrics', 'mode', 'uptimeMs', 'version']);
+    assert.deepEqual(Object.keys(status.json()).sort(), [
+      'database',
+      'discord',
+      'login',
+      'lyrics',
+      'mode',
+      'uptimeMs',
+      'version',
+    ]);
+    // The kind of database alone (the test's own, on SQLite unless JUKECORD_TEST_STORE names a server).
+    assert.match(String(status.json().database), /^(sqlite|postgres|mysql|mariadb)$/);
     const me = await inject({ method: 'GET', url: api('/me') });
     assert.equal(me.statusCode, 401);
     assert.deepEqual(me.json(), { error: { code: 'unauthorized', message: 'log in first' } });
@@ -280,7 +290,7 @@ describe('the HTTP API', () => {
     assert.equal((await from('10.0.0.7', {}, api('/status'))).statusCode, 200);
     assert.equal((await from('10.0.0.7')).statusCode, 401);
     // A login link the host just made works from there too; a used one says the address is blocked.
-    const link = server.auth.createLink();
+    const link = await server.auth.createLink();
     const used = await inject({ method: 'GET', url: `/auth/link/${link.code}`, remoteAddress: '10.0.0.7' });
     assert.equal(used.headers.location, '/');
     assert.match(String(used.headers['set-cookie']), new RegExp(`${SESSION_COOKIE}=`));
@@ -318,7 +328,16 @@ describe('the HTTP API', () => {
 
   it('answers health, readiness and metrics', async () => {
     assert.equal((await inject({ method: 'GET', url: '/healthz' })).body, 'ok\n');
-    assert.deepEqual((await inject({ method: 'GET', url: '/readyz' })).json(), { ready: true, discord: true });
+    assert.deepEqual((await inject({ method: 'GET', url: '/readyz' })).json(), {
+      ready: true,
+      discord: true,
+      parts: {
+        database: { state: 'ok', required: true, kind: 'sqlite' },
+        bus: { state: 'ok', required: true, kind: 'in-process' },
+        cache: { state: 'ok', required: true, kind: 'memory' },
+        discord: { state: 'ok', required: false },
+      },
+    });
     const metrics = (await inject({ method: 'GET', url: '/metrics' })).body;
     assert.match(metrics, /^jukecord_info\{version="\d+\.\d+\.\d+.*"\} 1$/m);
     assert.match(metrics, /^jukecord_players\{status="loading"\} 1$/m);

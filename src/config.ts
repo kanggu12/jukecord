@@ -6,11 +6,16 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { AUTH_VARIABLES, type AuthSettings, describeAuth, readAuthSettings } from './auth/settings.ts';
 import { LINK_SERVICES, type LinkService } from './media/links.ts';
+import { type DatabaseAddress, defaultSqliteFile, describeAddress, parseDatabaseAddress } from './store/address.ts';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
 /** How much the logger writes; each level includes the ones after it. */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/** How the console's lines are written: readable text, or one JSON object per line (for a log shipper). */
+export type LogFormat = 'text' | 'json';
 
 /**
  * Which part of jukecord a process is (JUKECORD_ROLE): all of it (one process, the default), the core (Discord, the
@@ -28,6 +33,15 @@ export const DEFAULT_INTERNAL_PORT = 8796;
 export interface Config {
   /** Where the database, the media cache and the logs live (an absolute path). */
   readonly dataDir: string;
+  readonly database: {
+    /**
+     * Where the database is (JUKECORD_DATABASE_URL): the data folder's SQLite file by default, or another file, or a
+     * PostgreSQL or MySQL/MariaDB server's database.
+     */
+    readonly address: DatabaseAddress;
+    /** How many connections to a database server at most (JUKECORD_DATABASE_POOL); SQLite has its one. */
+    readonly pool: number;
+  };
   /** The address the panel and the API listen on. */
   readonly host: string;
   /** The port the panel and the API listen on. */
@@ -87,6 +101,8 @@ export interface Config {
   readonly lyrics: boolean;
   readonly log: {
     readonly level: LogLevel;
+    /** text (readable lines) or json (one object per line, the log file's own form) on the console. */
+    readonly format: LogFormat;
     /** The size at which the log file is rotated, in bytes. */
     readonly maxBytes: number;
     /** How many log files are kept, the current one included. */
@@ -94,6 +110,13 @@ export interface Config {
   };
   /** Settings that were read but look wrong without being fatal (an unknown JUKECORD_ variable, mostly typos). */
   readonly warnings: readonly string[];
+  readonly metrics: {
+    /**
+     * The token a scraper shows (Authorization: Bearer) to read /metrics from outside the private network or through
+     * a proxy; null: only a scraper on this machine or its network, asking directly.
+     */
+    readonly token: string | null;
+  };
   /** Which part of jukecord this process is (JUKECORD_ROLE); `all` unless split into services. */
   readonly role: Role;
   /** How the services of a split jukecord talk: a Redis or Valkey server, and the prefix of what jukecord puts there. */
@@ -124,6 +147,8 @@ export interface Config {
     /** The host's own Spotify app, for Spotify albums and playlists; null without one. */
     readonly spotify: { readonly clientId: string; readonly clientSecret: string } | null;
   };
+  /** Logging in through the host's identity provider (OIDC) and directory (LDAP, Active Directory); each null when off. */
+  readonly auth: AuthSettings;
 }
 
 /** Settings that cannot be used; `problems` lists every one, each naming the variable. */
@@ -144,6 +169,9 @@ export const DEFAULT_PORT = 8795;
 // Every variable jukecord reads. Anything else that starts with JUKECORD_ is reported as a probable typo.
 const KNOWN = new Set([
   'JUKECORD_DATA_DIR',
+  'JUKECORD_DATABASE_URL',
+  'JUKECORD_DATABASE_URL_FILE',
+  'JUKECORD_DATABASE_POOL',
   'JUKECORD_HOST',
   'JUKECORD_PORT',
   'JUKECORD_PUBLIC_URL',
@@ -156,6 +184,7 @@ const KNOWN = new Set([
   'JUKECORD_FETCH_TIMEOUT',
   'JUKECORD_PREFETCH',
   'JUKECORD_LOG_LEVEL',
+  'JUKECORD_LOG_FORMAT',
   'JUKECORD_LOG_MAX',
   'JUKECORD_LOG_FILES',
   'JUKECORD_DISCORD_TOKEN_FILE',
@@ -181,6 +210,10 @@ const KNOWN = new Set([
   'JUKECORD_SPOTIFY_CLIENT_ID',
   'JUKECORD_SPOTIFY_CLIENT_SECRET',
   'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
+  'JUKECORD_METRICS_TOKEN',
+  'JUKECORD_METRICS_TOKEN_FILE',
+  // Logging in through OIDC and LDAP (src/auth/settings.ts reads them).
+  ...AUTH_VARIABLES,
   // Services: the role, the bus and the shared cache (a Redis or Valkey server), and the core's port for edges.
   'JUKECORD_ROLE',
   'JUKECORD_BUS_URL',
@@ -205,7 +238,8 @@ export interface ConfigFiles {
   readable(file: string): boolean;
 }
 
-const diskFiles: ConfigFiles = {
+/** The files on this machine, as loadConfig reads them by default (the login settings' test reads them so too). */
+export const diskFiles: ConfigFiles = {
   read: (file) => fs.readFileSync(file, 'utf8'),
   readable: (file) => {
     try {
@@ -318,6 +352,25 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     return content || null;
   };
 
+  // The database: the data folder's SQLite file unless JUKECORD_DATABASE_URL names another, or a server (its address
+  // read from a file by JUKECORD_DATABASE_URL_FILE too, as the other secrets: a server's address holds a password).
+  // The address is checked here; whether the server answers is found out when jukecord starts.
+  let address: DatabaseAddress = { kind: 'sqlite', file: defaultSqliteFile(dataDir) };
+  const databaseUrl = secret('JUKECORD_DATABASE_URL');
+  // Whether a problem with the address was said already (its file unread, or the address wrong), for the roles' check.
+  let databaseSaid = databaseUrl === null && get('JUKECORD_DATABASE_URL_FILE') !== null;
+  if (databaseUrl !== null) {
+    try {
+      address = parseDatabaseAddress(databaseUrl, dataDir);
+    } catch (error) {
+      // The reason alone, which never quotes the address (it may hold the password).
+      problems.push(`JUKECORD_DATABASE_URL ${error instanceof Error ? error.message : String(error)}`);
+      databaseSaid = true;
+    }
+  }
+  // Connections to a server at most: ten serve a busy jukecord; a hosted database may allow few per user.
+  const database = { address, pool: read('JUKECORD_DATABASE_POOL', 10, integer(1, 100)) };
+
   // Discord settings. Each is optional on its own; the combinations are checked below.
   const token = secret('JUKECORD_DISCORD_TOKEN');
   const clientId = read('JUKECORD_DISCORD_CLIENT_ID', null as string | null, (text) => {
@@ -424,6 +477,12 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
       if (!LOG_LEVELS.includes(level as LogLevel)) throw new Error(`"${text}" is not one of ${LOG_LEVELS.join(', ')}`);
       return level as LogLevel;
     }),
+    // Readable lines by default; JSON for a log shipper (Loki, Elasticsearch, CloudWatch) reading the console.
+    format: read('JUKECORD_LOG_FORMAT', 'text' as LogFormat, (text) => {
+      const format = text.toLowerCase();
+      if (format !== 'text' && format !== 'json') throw new Error(`"${text}" is not text or json`);
+      return format;
+    }),
     maxBytes: read('JUKECORD_LOG_MAX', 5 * 1024 ** 2, (text) => {
       const bytes = parseSize(text);
       // A tiny limit would rotate on every line and lose the history that the log page shows.
@@ -459,8 +518,19 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     spotify: spotifyId && spotifySecret ? { clientId: spotifyId, clientSecret: spotifySecret } : null,
   };
 
-  // The role, and what the services of a split jukecord need: a database they all reach (stage 2a's setting; only its
-  // kind is looked at here), a bus, the internal secret, and for an edge, where the core is.
+  // The metrics token: a secret like the others (or its file), long enough that guessing it is hopeless, and one word,
+  // as a bearer token is.
+  const metricsToken = secret('JUKECORD_METRICS_TOKEN');
+  if (metricsToken !== null && !/^\S{16,}$/.test(metricsToken)) {
+    problems.push('JUKECORD_METRICS_TOKEN: at least 16 characters and no spaces (openssl rand -hex 32 makes one)');
+  }
+  const metrics = { token: metricsToken };
+  // Logging in through the host's identity provider and directory: off unless their addresses are set.
+  const auth = readAuthSettings(env, cwd, files);
+  problems.push(...auth.problems);
+
+  // The role, and what the services of a split jukecord need: a database server they all reach (read above), a bus,
+  // the internal secret, and for an edge, where the core is.
   const role = read('JUKECORD_ROLE', 'all' as Role, (text) => {
     const value = text.toLowerCase();
     if (!ROLES.includes(value as Role)) throw new Error(`"${text}" is not one of ${ROLES.join(', ')}`);
@@ -513,19 +583,11 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
   });
   if (role !== 'all') {
     const as = `JUKECORD_ROLE=${role}`;
-    // The database's kind, from its address (stage 2a reads and checks the rest of it): a SQLite file is one
-    // process's, so services need a database server. An address in a file that cannot be read is said by its own
-    // check.
-    const databaseFile = get('JUKECORD_DATABASE_URL_FILE');
-    const databaseFull = databaseFile ? path.resolve(cwd, databaseFile) : null;
-    const databaseText =
-      get('JUKECORD_DATABASE_URL') ??
-      (databaseFull && files.readable(databaseFull) ? files.read(databaseFull).trim() : null);
-    const unread = databaseFull !== null && !files.readable(databaseFull) && get('JUKECORD_DATABASE_URL') === null;
-    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(databaseText ?? '')?.[1]?.toLowerCase() ?? null;
-    if (!unread && (scheme === null || scheme === 'sqlite')) {
+    // A SQLite file is one process's: the services need a database server. An address that could not be read or
+    // parsed was said above already.
+    if (address.kind === 'sqlite' && !databaseSaid) {
       problems.push(
-        scheme === 'sqlite'
+        databaseUrl !== null
           ? `${as} needs a database every service reaches, and a SQLite file is one process's: set JUKECORD_DATABASE_URL to a postgres:// or mysql:// address`
           : `${as} needs JUKECORD_DATABASE_URL: the PostgreSQL or MySQL/MariaDB database every service shares (postgres://... or mysql://...)`,
       );
@@ -568,6 +630,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
 
   return {
     dataDir,
+    database,
     host,
     port,
     publishedPort,
@@ -583,7 +646,9 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     lyrics,
     log,
     warnings,
+    metrics,
     links,
+    auth: auth.settings,
     role,
     bus: { url: role === 'all' ? null : busUrl, prefix },
     cacheUrl,
@@ -605,6 +670,10 @@ export function describeConfig(config: Config): Record<string, string> {
   const secret = (value: string | null): string => (value === null ? 'not set' : 'set');
   return {
     'data directory': config.dataDir,
+    // Where the database is, never with its user or password.
+    database: describeAddress(config.database.address),
+    'database connections':
+      config.database.address.kind === 'sqlite' ? 'one (a file)' : `up to ${config.database.pool}`,
     listen: `${config.host}:${config.port}`,
     'public address': config.publicUrl ?? 'not set',
     'trust proxy headers': String(config.trustProxy),
@@ -617,6 +686,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'fetch timeout': `${config.media.fetchTimeoutMs} ms`,
     prefetch: String(config.media.prefetch),
     'log level': config.log.level,
+    'log format': config.log.format,
     'log rotation': `${config.log.files} files of ${config.log.maxBytes} bytes`,
     'longest track': `${config.media.trackMaxMs} ms`,
     'yt-dlp cookies': config.media.cookies ?? 'not set',
@@ -630,6 +700,8 @@ export function describeConfig(config: Config): Record<string, string> {
     'links read': config.links.services.size > 0 ? [...config.links.services].join(', ') : 'none',
     'spotify app': config.links.spotify?.clientId ?? 'not set',
     'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
+    'metrics token': secret(config.metrics.token),
+    ...describeAuth(config.auth),
     role: config.role,
     // The servers without their passwords (an address may carry one).
     bus: config.bus.url ? shownServer(config.bus.url) : 'in memory (one process)',

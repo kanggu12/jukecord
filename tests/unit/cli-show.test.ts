@@ -30,6 +30,17 @@ describe('the jukecord command shows', () => {
     assert.equal(COMMANDS.status.show({ ...status, uptimeMs: 3_723_000 }).split('\n')[2], 'Up for 1:02:03');
   });
 
+  it('which kind of database jukecord keeps its data in, by its name, when the server says', () => {
+    const status = { version: '0.4.0', mode: 'discord', discord: true, uptimeMs: 60_000, database: 'mariadb' };
+    assert.deepEqual(COMMANDS.status.show(status).split('\n'), [
+      'jukecord 0.4.0',
+      'Discord: connected',
+      'Database: MariaDB',
+      'Up for 1:00',
+    ]);
+    assert.equal(COMMANDS.status.show({ ...status, database: 'postgres' }).split('\n')[2], 'Database: PostgreSQL');
+  });
+
   it('a track that could not be played as one sentence under "Nothing is playing", as the panel says it', () => {
     const player = { status: 'idle', track: null, repeat: 'off', autoplay: 'off', notice: null, positionMs: 0 };
     // Not "Nothing is playing (Neon Rain: the site answered 404)": the track named, why in words.

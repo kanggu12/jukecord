@@ -59,21 +59,22 @@ The last line prints a one-time login link for the host. Without a bot token juk
 | `discord.token`, `discord.clientSecret`                                                      |                                                     | the same in the values; the chart makes the Secret        |
 | `discord.clientId`                                                                           |                                                     | the application's ID, for logging in with Discord         |
 | `publicUrl`                                                                                  |                                                     | the panel's address, for logins and the bot's links       |
+| `database.url`                                                                               |                SQLite in the volume                 | a database server: `postgres://…`, `mysql://…`            |
+| `database.existingSecret`                                                                    |                                                     | a Secret with that address under `url`                    |
 | `env`                                                                                        |                        `{}`                         | jukecord's settings by name, as strings                   |
 | `extraEnv`                                                                                   |                        `[]`                         | more variables as Kubernetes writes them                  |
 | `ingress.enabled`, `.host`, `.className`, `.annotations`, `.tls`                             |                         off                         | the panel from outside the cluster                        |
 | `persistence.enabled`, `.size`, `.storageClass`, `.existingClaim`                            |                      on, `5Gi`                      | the data volume                                           |
-| `networkPolicy.enabled`, `.ingressFrom`, `.privateRanges`                                    |           on, anyone, the private ranges            | who may reach the panel's port, and what jukecord may not |
+| `networkPolicy.enabled`, `.ingressFrom`, `.egressTo`, `.privateRanges`                       |           on, anyone, the private ranges            | who may reach the panel's port, and what jukecord may not |
 | `resources`                                                                                  |              250m, 512Mi; limit 1536Mi              | requests and limits                                       |
 | `service.type`, `.port`                                                                      |                 `ClusterIP`, `8795`                 | the Service                                               |
 | `podLabels`, `podAnnotations`, `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets` |                                                     | the usual pod settings                                    |
 | `mode`                                                                                       |                      `single`                       | `single`: one pod; `split`: one core and edges            |
-| `database.url`, `database.existingSecret`                                                    |                                                     | the database every service shares (split)                 |
 | `bus.url`, `bus.existingSecret`                                                              |                                                     | the Redis or Valkey server of the services (split)        |
 | `split.existingSecret`                                                                       |                    made and kept                    | the internal secret the core and edges share              |
 | `split.edge.replicas`, `.autoscaling.*`                                                      |                       2, off                        | how many edges, or a HorizontalPodAutoscaler              |
 | `split.core.resources`, `split.edge.resources`                                               |             as `resources`; 100m, 192Mi             | the core's and the edges' requests and limits             |
-| `networkPolicy.egressTo`                                                                     |          the namespace's 5432, 3306, 6379           | where the database and the bus are (split)                |
+| `networkPolicy.egressTo`                                                                     |      the namespace's 5432, 3306 (split: 6379)       | where the database and the bus are                        |
 
 - The pod does not start without the Secret's `token`; its `clientSecret` is read when a client ID is set.
   `existingSecret` and the values' secrets are refused together.
@@ -85,8 +86,9 @@ The last line prints a one-time login link for the host. Without a bot token juk
 - Every value is checked against the chart's schema, so a misspelt key fails the install. The settings jukecord reads
   are listed in [Using jukecord](https://github.com/kanggu12/jukecord/blob/main/docs/README.md#settings).
 - `mode: split` runs a core (one pod, `Recreate`, the volume) and edges (no volume) from the same image, over the
-  database and the bus the values name; the Service and the Ingress reach the edges, the core's Service its internal
-  port (edges only, by the NetworkPolicy). The jukecord command runs in an edge: `exec deploy/<release>-edge`.
+  database (`database.url`: a server, which split mode needs) and the bus the values name; the Service and the Ingress
+  reach the edges, the core's Service its internal port (edges only, by the NetworkPolicy). The jukecord command runs
+  in an edge: `exec deploy/<release>-edge`. The ServiceMonitor scrapes the core and every edge.
 
 ## Upgrade and uninstall
 

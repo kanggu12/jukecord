@@ -159,6 +159,9 @@ export class Presence {
   private readonly sweeper: NodeJS.Timeout;
   private readonly offChange: () => void;
   private stopListening: (() => Promise<void>) | null = null;
+  // The servers whose listeners changed while it was starting: a report can come with the subscription's own answer,
+  // before whoever started this has it in hand; they are told once it has.
+  private held: Set<string> | null = new Set();
 
   private constructor(options: PresenceOptions) {
     this.options = options;
@@ -178,6 +181,12 @@ export class Presence {
     presence.stopListening = await options.transport.subscribe(options.names.presence, (text) => presence.heard(text));
     // Every edge says everything now, so this one does not count nobody until their next heartbeats.
     presence.ask();
+    // What changed meanwhile is told a turn later, once the caller holds what this returns.
+    setImmediate(() => {
+      const held = presence.held ?? new Set<string>();
+      presence.held = null;
+      for (const guild of held) presence.options.changed(guild);
+    });
     return presence;
   }
 
@@ -236,7 +245,7 @@ export class Presence {
     if (message.type === 'gone') {
       const gone = this.edges.get(from);
       this.edges.delete(from);
-      for (const guild of gone?.guilds.keys() ?? []) this.options.changed(guild);
+      for (const guild of gone?.guilds.keys() ?? []) this.tell(guild);
       return;
     }
     if (message.type !== 'listeners' || typeof message.guilds !== 'object' || message.guilds === null) return;
@@ -256,7 +265,7 @@ export class Presence {
       if (now.count > 0) edge.guilds.set(guild, now);
       else edge.guilds.delete(guild);
       // Told only when something counted or shown is different: the heartbeat's repeats are not changes.
-      if (!same(was, now)) this.options.changed(guild);
+      if (!same(was, now)) this.tell(guild);
     }
   }
 
@@ -269,8 +278,14 @@ export class Presence {
       this.options.log.info('an edge stopped reporting who listens there; its browsers no longer count', {
         edge: name,
       });
-      for (const guild of edge.guilds.keys()) this.options.changed(guild);
+      for (const guild of edge.guilds.keys()) this.tell(guild);
     }
+  }
+
+  // Tells that who listens to a server changed: at once, or once started (see held).
+  private tell(guildId: string): void {
+    if (this.held) this.held.add(guildId);
+    else this.options.changed(guildId);
   }
 }
 

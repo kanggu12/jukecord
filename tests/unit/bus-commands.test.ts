@@ -21,6 +21,7 @@ import type { MemoryTransport } from '../../src/bus/memory.ts';
 import { busNames } from '../../src/bus/transport.ts';
 import { sayError } from '../../src/core/say.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
+import { busReport } from '../../src/metrics/services.ts';
 import { StoreError } from '../../src/store/sql.ts';
 import { eventually, memoryBus, settle, testBuses, testLog } from '../support/bus.ts';
 
@@ -66,7 +67,8 @@ for (const { name, make } of testBuses()) {
         names,
         caller: serviceId('edge'),
         log: edge.log,
-        metrics,
+        // The names these tests send, as an edge's list of the core's commands.
+        report: busReport(metrics, ['ok', 'no', 'slow', 'echo', 'check', 'boom']),
         limitMs: (command) => limits[command] ?? 2000,
       });
       return { server, client, core, edge, metrics };
@@ -214,19 +216,27 @@ for (const { name, make } of testBuses()) {
       await Promise.all([server.close(), client.close()]);
     });
 
-    it('counts each command and its time in the metrics, by outcome', async () => {
+    it('counts each command and its time in the metrics, by outcome, a name off the list as other', async () => {
       const { server, client, metrics } = await pair({
         ok: () => 1,
         no: () => {
           throw new ActionError('conflict', 'nothing is playing');
         },
+        unlisted: () => 2,
       });
       await client.call('ok', []);
       await assert.rejects(client.call('no', []));
+      await client.call('unlisted', []);
+      const aborted = new AbortController();
+      const cancelled = client.call('ok', [], { signal: aborted.signal });
+      aborted.abort(new Error('the browser went away'));
+      await assert.rejects(cancelled, /went away/);
       const text = metrics.render();
       assert.match(text, /jukecord_bus_commands_total\{command="ok",outcome="ok"\} 1/);
-      assert.match(text, /jukecord_bus_commands_total\{command="no",outcome="refused"\} 1/);
-      assert.match(text, /jukecord_bus_command_duration_seconds_count\{command="ok"\} 1/);
+      assert.match(text, /jukecord_bus_commands_total\{command="no",outcome="error"\} 1/);
+      assert.match(text, /jukecord_bus_commands_total\{command="other",outcome="ok"\} 1/);
+      assert.match(text, /jukecord_bus_commands_total\{command="ok",outcome="cancelled"\} 1/);
+      assert.match(text, /jukecord_bus_command_duration_seconds_count\{command="ok"\} 2/);
       await Promise.all([server.close(), client.close()]);
     });
   });

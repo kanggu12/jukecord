@@ -1,13 +1,12 @@
 /**
  * The cache a process uses: in its memory (one process, the default), or on a Redis or Valkey server when one is named
- * (JUKECORD_CACHE_URL; a split jukecord takes its bus's server unless told otherwise). Either way it is counted in the
- * metrics (metered.ts).
+ * (JUKECORD_CACHE_URL; a split jukecord takes its bus's server unless told otherwise). Either adapter reports its reads
+ * and its failures the same way (src/metrics/services.ts), so a dashboard compares a memory cache with a Redis one.
  */
 import type { Logger } from '../log.ts';
-import type { Metrics } from '../metrics/registry.ts';
+import { NO_SHARED_CACHE_REPORT, type SharedCacheReport } from '../metrics/services.ts';
 import type { Cache } from './cache.ts';
 import { MemoryCache } from './memory.ts';
-import { MeteredCache } from './metered.ts';
 import { RedisCache } from './redis.ts';
 
 /**
@@ -26,21 +25,21 @@ export interface OpenCacheOptions {
   readonly log: Logger;
   /** Which service connects, for the server's list of clients ("core", "edge-3f9a..."). */
   readonly service: string;
-  readonly metrics?: Metrics;
+  /** Where its reads, its failures and (in memory) its size are reported; nowhere by default. */
+  readonly report?: SharedCacheReport;
   /** How long to wait for the server at the start (60 s by default). */
   readonly waitMs?: number;
 }
 
-/** Opens the cache the settings name, counted in the metrics. */
+/** Opens the cache the settings name. */
 export async function openCache(options: OpenCacheOptions): Promise<Cache> {
-  const inner =
-    options.url === 'memory'
-      ? new MemoryCache({ capacity: MEMORY_ENTRIES, buckets: MEMORY_BUCKETS })
-      : await RedisCache.open(options.url, {
-          prefix: options.prefix,
-          log: options.log,
-          service: options.service,
-          ...(options.waitMs !== undefined ? { waitMs: options.waitMs } : {}),
-        });
-  return new MeteredCache(inner, options.metrics);
+  const report = options.report ?? NO_SHARED_CACHE_REPORT;
+  if (options.url === 'memory') return new MemoryCache({ capacity: MEMORY_ENTRIES, buckets: MEMORY_BUCKETS, report });
+  return RedisCache.open(options.url, {
+    prefix: options.prefix,
+    log: options.log,
+    service: options.service,
+    report,
+    ...(options.waitMs !== undefined ? { waitMs: options.waitMs } : {}),
+  });
 }

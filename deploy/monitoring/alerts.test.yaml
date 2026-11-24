@@ -1,0 +1,162 @@
+# Unit tests of alerts.yaml: promtool test rules alerts.test.yaml (from this folder). Each alert fires on the series
+# that should make it fire, and stays quiet on the ones that should not: a browser-only jukecord has no gateway, and a
+# quiet server's few failed fetches are no trend.
+rule_files:
+  - alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # Down: a target that does not answer, and no jukecord target at all.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jukecord", instance="10.0.0.5:8795"}'
+        values: "1 1 0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JukecordDown
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: JukecordDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: jukecord
+              instance: "10.0.0.5:8795"
+            exp_annotations:
+              summary: jukecord does not answer
+              description: >-
+                Prometheus has not scraped jukecord (10.0.0.5:8795) for five minutes: the process is down or
+                restarting, or something stops the scrape (a NetworkPolicy, a proxy, a wrong metrics token, a scrape
+                configuration that lost it).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="something-else", instance="10.0.0.9:9100"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: JukecordDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: jukecord does not answer
+              description: >-
+                Prometheus has not scraped jukecord for five minutes: the process is down or restarting, or
+                something stops the scrape (a NetworkPolicy, a proxy, a wrong metrics token, a scrape configuration
+                that lost it).
+
+  # Not ready, and ready again.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_ready{job="jukecord", instance="a:8795"}'
+        values: "1 0x6 1x5"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: JukecordNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: jukecord
+              instance: "a:8795"
+            exp_annotations:
+              summary: jukecord is not ready
+              description: >-
+                a:8795 has answered /readyz with 503 for five minutes: its database, bus or shared cache does not
+                work. jukecord_part_up and /readyz say which.
+      - eval_time: 10m
+        alertname: JukecordNotReady
+        exp_alerts: []
+
+  # Discord: a bot that stays disconnected, and a browser-only jukecord that has no gateway at all.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_discord_gateway_state{job="jukecord", instance="a:8795", state="ready"}'
+        values: "1 0x12"
+      - series: 'jukecord_discord_gateway_state{job="jukecord", instance="a:8795", state="reconnecting"}'
+        values: "0 1x12"
+      - series: 'jukecord_discord_connected{job="jukecord", instance="b:8795"}'
+        values: "0x12"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: JukecordDiscordDisconnected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: jukecord
+              instance: "a:8795"
+            exp_annotations:
+              summary: the bot is not connected to Discord
+              description: >-
+                The bot of a:8795 has not been connected to Discord for ten minutes, so it plays in no voice channel;
+                the panel still works. Its log says why (jukecord logs --component discord).
+
+  # Fetches: most failing, and on another server a few failures among many that work.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_fetches_total{job="jukecord", instance="a:8795", outcome="failed"}'
+        values: "0+1x60"
+      - series: 'jukecord_fetches_total{job="jukecord", instance="a:8795", outcome="ok"}'
+        values: "0x60"
+      - series: 'jukecord_fetches_total{job="jukecord", instance="b:8795", outcome="failed"}'
+        values: "0x30 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"
+      - series: 'jukecord_fetches_total{job="jukecord", instance="b:8795", outcome="ok"}'
+        values: "0+10x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: JukecordFetchFailuresClimbing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: jukecord
+              instance: "a:8795"
+            exp_annotations:
+              summary: most tracks fail to download
+              description: >-
+                More than half of the tracks a:8795 fetched in the last half hour failed. jukecord_fetch_failures_total
+                says why: bot-check is YouTube refusing this server (give jukecord a cookies file,
+                JUKECORD_YTDLP_COOKIES), offline is no way to the internet, http-4xx a site refusing.
+
+  # The cache: a disk nearly full; another instance with room.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_disk_free_bytes{job="jukecord", instance="a:8795"}'
+        values: "524288000x20"
+      - series: 'jukecord_disk_free_bytes{job="jukecord", instance="b:8795"}'
+        values: "53687091200x20"
+      - series: 'jukecord_cache_bytes{job="jukecord", instance="b:8795"}'
+        values: "1000x20"
+      - series: 'jukecord_cache_limit_bytes{job="jukecord", instance="b:8795"}'
+        values: "2147483648x20"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: JukecordCacheFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: jukecord
+              instance: "a:8795"
+            exp_annotations:
+              summary: the media cache has no room
+              description: >-
+                a:8795 cannot keep new tracks: the media cache is over its limit (JUKECORD_CACHE_MAX), or the disk
+                holding the data folder has less than 1 GiB free. Raise the limit or the volume, or free the disk.
+
+  # The event loop: behind half of each minute for a quarter of an hour.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_event_loop_behind_seconds_total{job="jukecord", instance="a:8795"}'
+        values: "0+30x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: JukecordEventLoopStalling
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: jukecord
+              instance: "a:8795"
+            exp_annotations:
+              summary: jukecord is falling behind
+              description: >-
+                a:8795 has been behind for over a quarter of the time for five minutes: its event loop is too busy,
+                so it turns away changes and audio for browsers. Give it more processor, or fewer panels.

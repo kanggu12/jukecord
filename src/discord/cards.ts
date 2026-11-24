@@ -11,7 +11,14 @@ import { type Length, withLongest } from '../core/lengths.ts';
 import type { PlayerSnapshot } from '../core/player.ts';
 import { sayNotice } from '../core/say.ts';
 import type { Sound } from '../core/sound.ts';
-import { AUTOPLAY, type HistoryEntry, type LikedTrack, type Playlist, type QueueItem } from '../core/types.ts';
+import {
+  AUTOPLAY,
+  discordUserId,
+  type HistoryEntry,
+  type LikedTrack,
+  type Playlist,
+  type QueueItem,
+} from '../core/types.ts';
 import type { LyricsAnswer } from '../media/lyrics.ts';
 import type { ListenLinkRow } from '../store/store.ts';
 import { formatDuration } from '../util/time.ts';
@@ -62,6 +69,9 @@ const TEXT = {
   // Whose tracks were played most (the counts are plays of what each one added, not tracks added), as the panel says.
   topPeople: { en: 'Whose picks played most', ko: '선곡이 많이 재생된 사람' },
   nobody: { en: 'the host', ko: '호스트' },
+  // Someone who logged in through the host's identity provider or directory: no Discord user to mention (the panel
+  // names them).
+  member: { en: 'a member', ko: '멤버' },
   noStats: { en: 'Nothing was played in this period', ko: '이 기간에 들은 곡 없음' },
   djRole: { en: 'DJ role', ko: 'DJ 역할' },
   everyone: { en: 'Everyone in the server may change the music', ko: '서버의 누구나 음악을 바꿀 수 있음' },
@@ -144,6 +154,13 @@ const TITLE_MAX = 100;
 // link to a file runs to a thousand characters) leaves the title as plain text, so the page shows every track.
 const LINK_MAX = 200;
 
+// A person as a card says them: a Discord user mentioned (Discord shows their name in the reader's server), a member
+// of the host's identity provider as a member, nobody (the host) as the host.
+function person(id: string | null, lang: Lang): string {
+  if (id === null) return TEXT.nobody[lang];
+  return discordUserId(id) ? `<@${id}>` : TEXT.member[lang];
+}
+
 // "Title" linked to its page, with length and who added it.
 function line(title: string, url: string, durationMs: number | null, addedBy: string | null, lang: Lang): string {
   const length = durationMs === null ? '' : ` · ${formatDuration(durationMs)}`;
@@ -152,7 +169,7 @@ function line(title: string, url: string, durationMs: number | null, addedBy: st
     addedBy === AUTOPLAY
       ? ` · ${TEXT.addedBy[lang]} ${TEXT.autoplay[lang]}`
       : addedBy
-        ? ` · ${TEXT.addedBy[lang]} <@${addedBy}>`
+        ? ` · ${TEXT.addedBy[lang]} ${person(addedBy, lang)}`
         : '';
   // A title past the limit is cut short, and the ellipsis says so.
   const shortened = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1).trimEnd()}…` : title;
@@ -433,7 +450,7 @@ export function statsCard(stats: StatsView, lang: Lang): EmbedBuilder {
   if (stats.topPeople.length > 0) {
     lines.push('', `**${TEXT.topPeople[lang]}**`);
     for (const entry of stats.topPeople.slice(0, 3)) {
-      lines.push(`${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${playsOf(entry.plays, lang)}`);
+      lines.push(`${person(entry.userId, lang)} · ${playsOf(entry.plays, lang)}`);
     }
   }
   return embed.setDescription(lines.join('\n'));
@@ -608,9 +625,7 @@ export function wrappedCard(
     );
   lines.push('', `**${TEXT.topPeople[lang]}**`);
   for (const [index, entry] of view.topPeople.entries())
-    lines.push(
-      `${peoplePlaces[index] ?? index + 1}. ${entry.userId ? `<@${entry.userId}>` : TEXT.nobody[lang]} · ${playsOf(entry.plays, lang)}`,
-    );
+    lines.push(`${peoplePlaces[index] ?? index + 1}. ${person(entry.userId, lang)} · ${playsOf(entry.plays, lang)}`);
   if (view.keptFrom) lines.push('', WRAPPED.kept[lang](view.keptFrom));
   embed.setDescription(lines.join('\n'));
   // The moments, side by side: the busiest day of the week and hour of the day where they are true (core/facts.ts: never
@@ -709,7 +724,7 @@ export function listenLinksCard(links: readonly ListenLinkRow[], lang: Lang): Em
         .slice(0, 25)
         .map(
           (link) =>
-            `**${link.id}** · ${TEXT.until[lang]} <t:${Math.floor(link.expiresAt / 1000)}:R> · ${TEXT.guests[lang]} ${link.guests}/${link.maxGuests} · ${link.createdBy ? `<@${link.createdBy}>` : TEXT.nobody[lang]}`,
+            `**${link.id}** · ${TEXT.until[lang]} <t:${Math.floor(link.expiresAt / 1000)}:R> · ${TEXT.guests[lang]} ${link.guests}/${link.maxGuests} · ${person(link.createdBy, lang)}`,
         )
         .join('\n'),
     );

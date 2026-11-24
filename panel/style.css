@@ -3764,8 +3764,9 @@ kbd {
   padding: max(24px, var(--safe-top)) max(16px, var(--safe-right)) max(24px, var(--safe-bottom))
     max(16px, var(--safe-left));
 }
-/* The login card: no music here yet to light the glass, so the card is the reading surface it would be over any light
-   (the mark's rainbow means "playing now", and is not spread behind it). */
+/* The login card (the page that waits for jukecord, and the login page's plate): no music here yet to light the glass,
+   so the card is the reading surface it would be over any light (the mark's rainbow means "playing now", and is not
+   spread behind it). */
 .login .card {
   width: min(420px, 100%);
   padding: var(--s-24);
@@ -3779,6 +3780,69 @@ kbd {
 .login .brand b {
   font-size: var(--fs-2xl);
   line-height: var(--lh-2xl);
+}
+/* The login page: the mark and the name standing over the plate of the ways in, one column in the middle of the
+   window (on a phone, the window's width less its sides). */
+.login-stage {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-24);
+}
+/* The name of the place, larger than in the bar and in the middle over the plate: the page's front, not a card's
+   head. */
+.login-brand {
+  justify-content: center;
+}
+/* The plate takes the column's width; inside, the ways in one under the other at its inset. */
+.login-plate.card {
+  width: 100%;
+  gap: var(--s-16);
+}
+/* The keys of the ways in: as wide as the plate, one under the other, their words beside their icon in the middle. */
+.login-ways {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+}
+.login-key {
+  width: 100%;
+}
+/* "or" between the keys and the form: a hairline on each side of the word. */
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: var(--s-12);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--ink-3);
+}
+.login-or::before,
+.login-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
+}
+/* The directory account's form: each field under its name, the key under them. */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+  margin: 0;
+}
+.login-form .field {
+  flex: none;
+}
+.login-label {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+/* The key a step further from the fields than the fields from their names: it ends the form. */
+.login-form .login-key {
+  margin-top: var(--s-8);
 }
 /* Which command gives a login link, by how jukecord runs. */
 .login-commands {
@@ -3806,6 +3870,23 @@ kbd {
   border-radius: var(--r-sm);
   background: var(--sunk);
   color: var(--ink);
+}
+/* The host's own way: under the others it is the plate's quiet end, apart from them by a line. */
+.login-host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-12);
+  margin: 0;
+}
+.login-host.apart {
+  padding-top: var(--s-16);
+  border-top: 1px solid var(--line);
+}
+.login-host.apart,
+.login-host.apart p,
+.login-host.apart .login-commands {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 /* Something the page says (a link that has ended, jukecord starting): its icon and words in its meaning's colour, on
    the card itself (a tinted box in the card was a box in a box). */

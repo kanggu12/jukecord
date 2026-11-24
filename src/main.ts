@@ -20,12 +20,17 @@ import { type AlertSink, Alerts, leftLoopAlert, restartedAlert, turnedAwayAlert 
 import { Autoplay } from './app/autoplay.ts';
 import { BackupSchedule, makeBackup } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
+import { busPart, cachePart, databasePart, discordPart, Health, toolPart } from './app/health.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { LoginChecks } from './auth/check.ts';
+import { LdapLogin } from './auth/ldap.ts';
+import { OidcLogin } from './auth/oidc.ts';
 import { CoreBeat, type CoreFacts } from './bus/beat.ts';
 import { serviceId } from './bus/commands.ts';
 import { RedisTransport } from './bus/redis.ts';
 import { type BusTransport, busNames } from './bus/transport.ts';
+import type { Cache } from './cache/cache.ts';
 import { openCache } from './cache/open.ts';
 import { type Config, ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
@@ -50,15 +55,24 @@ import { Media } from './media/preparer.ts';
 import { Resolver } from './media/resolver.ts';
 import { Search } from './media/search.ts';
 import { YtDlp } from './media/ytdlp.ts';
+import { databaseReport } from './metrics/database.ts';
+import { ToolWatch } from './metrics/media.ts';
 import { MetricsRegistry } from './metrics/registry.ts';
+import { diskMetrics, EventLoop, runtimeMetrics } from './metrics/runtime.ts';
+import { describeService, discordMetrics, playerMetrics } from './metrics/service.ts';
+import { sharedCacheReport } from './metrics/services.ts';
 import { type CoreServices, startCoreServices } from './roles/core.ts';
 import { startEdge } from './roles/edge.ts';
-import { Store } from './store/store.ts';
+import { transportPart } from './roles/health.ts';
+import { describeAddress } from './store/address.ts';
+import { ConnectionError } from './store/network.ts';
+import { openStore } from './store/open.ts';
+import type { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
 import { Auth, ensureHostToken } from './web/auth.ts';
 import { MediaFiles } from './web/files.ts';
-import { COVERS, Limit, Pressure } from './web/limits.ts';
+import { COVERS, Limit } from './web/limits.ts';
 import { readLogs } from './web/logs.ts';
 import { Presenter } from './web/present.ts';
 import { createWebServer, type WebServer } from './web/server.ts';
@@ -92,17 +106,37 @@ async function main(): Promise<number> {
   const log = createLogger({
     level: config.log.level,
     sinks: [
-      new ConsoleSink(),
+      // Readable lines, or with JUKECORD_LOG_FORMAT=json the log file's JSON lines, for a log shipper.
+      new ConsoleSink(config.log.format),
       new FileSink({ dir: path.join(config.dataDir, 'logs'), maxBytes: config.log.maxBytes, files: config.log.files }),
     ],
   });
   for (const warning of config.warnings) log.warn(warning);
   log.info(`starting jukecord ${VERSION}`, {
     data: config.dataDir,
+    // Where the database is, never with its user or password.
+    database: describeAddress(config.database.address),
     // An edge never logs in to Discord: the core does.
     discord: config.role === 'edge' ? 'at the core' : config.discord.token ? 'yes' : 'browser-only',
     ...(config.role !== 'all' ? { role: config.role } : {}),
   });
+
+  // Every number jukecord reports, for /metrics. A number that cannot be read is said in the log once per reason (a
+  // scrape every fifteen seconds would repeat it all day); the others are written all the same.
+  const unreadable = new Set<string>();
+  const registry = new MetricsRegistry({
+    onError: (error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (unreadable.has(reason)) return;
+      unreadable.add(reason);
+      log.warn('could not read a number for the metrics', { error });
+    },
+  });
+  // The event loop, watched once: for the metrics, and for the web server, which turns away what can wait while
+  // jukecord is behind.
+  const loop = new EventLoop();
+  runtimeMetrics(registry, loop);
+  diskMetrics(registry, config.dataDir);
 
   // A crash anywhere is logged with its stack before the process goes down; a stray rejected promise is logged and the
   // music goes on (each part already handles its own failures; this catches what slipped through).
@@ -123,17 +157,15 @@ async function main(): Promise<number> {
   });
 
   // An edge is the web server over the core, with none of the parts below.
-  if (config.role === 'edge') return runEdge(config, log);
+  if (config.role === 'edge') return runEdge(config, log, registry, loop);
   const core = config.role === 'core';
-  // What the modules count (the bus, the shared cache), for /metrics.
-  const registry = new MetricsRegistry();
   // A core's bus, and its lease on it, before anything only one core may do (the players, Discord, the backups): a
   // second core waits here until the first has stopped (see bus/beat.ts).
   const names = busNames(config.bus.prefix);
   const instance = serviceId('core');
   // The facts every heartbeat carries, filled in once the bot and the web side exist below.
   let facts = (): CoreFacts => ({ discordMode: false, discordReady: false, self: null, behind: false });
-  // Set when another core took the lease: this one stops (filled in once stopping is set up below).
+  // Set when this core can no longer be sure it holds the lease: it stops (filled in once stopping is set up below).
   let lostLease = (): void => process.exit(1);
   let transport: BusTransport | null = null;
   let beat: CoreBeat | null = null;
@@ -151,16 +183,36 @@ async function main(): Promise<number> {
     });
   }
 
-  // The database the settings name (JUKECORD_DATABASE_URL, from stage 2a); a SQLite file in the data folder by default.
-  const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
-  // The shared cache: what the rate limits count, and what the searches and the links of other services found (see
-  // src/cache/): in this process's memory unless JUKECORD_CACHE_URL names a Redis or Valkey server.
-  const shared = await openCache({
+  // The database JUKECORD_DATABASE_URL names (the data folder's SQLite file by default); a server is waited for while it
+  // does not answer yet, up to a minute. One that cannot be reached, or refuses jukecord, is said in its words and
+  // jukecord ends: there is nothing it can do without its database. Each statement is reported for the metrics.
+  let store: Store;
+  try {
+    store = await openStore(config.database.address, {
+      pool: config.database.pool,
+      log: log.child('database'),
+      report: databaseReport(registry),
+    });
+  } catch (error) {
+    if (!(error instanceof ConnectionError)) throw error;
+    log.error('jukecord cannot reach its database', { reason: error.message });
+    // A core gives its lease back first: another core need not wait for it to run out.
+    await beat?.release();
+    await transport?.close();
+    return 1;
+  }
+  if (config.database.address.kind !== 'sqlite') {
+    log.info('the database is open', { server: `${store.sql.server.product} ${store.sql.server.version}` });
+  }
+  // The shared cache (src/cache): the rates, the login links and failed logins, the searches' and the links' short
+  // answers. In this process's memory, all one process needs, unless JUKECORD_CACHE_URL names a Redis or Valkey server
+  // (a core's is its bus's unless told otherwise); its reads are counted.
+  const sharedCache: Cache = await openCache({
     url: config.cacheUrl,
     prefix: config.bus.prefix,
     log: log.child('cache'),
     service: core ? instance : 'all',
-    metrics: registry,
+    report: sharedCacheReport(registry),
   });
   // Every server's lane: its changes take turns there, whichever part of jukecord makes them (see core/lanes.ts).
   const lanes = new GuildLanes();
@@ -188,6 +240,7 @@ async function main(): Promise<number> {
     dir: path.join(config.dataDir, 'cache'),
     maxBytes: config.media.cacheMaxBytes,
     log: log.child('cache'),
+    metrics: registry,
   });
   cache.init();
   // yt-dlp writes cookies back to the file it was given; it gets a private copy, so a read-only mounted secret works.
@@ -199,6 +252,8 @@ async function main(): Promise<number> {
   }
   // Every connection yt-dlp makes goes through the address guard, unless private addresses are allowed (egress.ts).
   const egress = config.media.allowPrivate ? null : await startEgressGuard({ log: log.child('egress') });
+  // Every run of yt-dlp and ffmpeg is counted, and tells whether the program is there (/readyz says so).
+  const tools = new ToolWatch(registry);
   // yt-dlp runs YouTube's scripts with this very Node binary (the image has no other JavaScript runtime).
   const ytdlp = new YtDlp({
     proxy: egress?.url ?? null,
@@ -208,8 +263,9 @@ async function main(): Promise<number> {
     timeoutMs: config.media.fetchTimeoutMs,
     maxPlaylist: MAX_PLAYLIST,
     cacheDir: path.join(config.dataDir, 'yt-dlp'),
+    tools,
   });
-  const ffmpeg = new Ffmpeg(config.media.ffmpeg);
+  const ffmpeg = new Ffmpeg(config.media.ffmpeg, tools);
   const media = new Media({
     cache,
     ytdlp,
@@ -219,6 +275,7 @@ async function main(): Promise<number> {
     timeoutMs: config.media.fetchTimeoutMs,
     // How fetches go tells whether YouTube refuses this jukecord (its check for bots).
     watch: alerts,
+    metrics: registry,
   });
   const players = new Players({
     queue,
@@ -233,6 +290,8 @@ async function main(): Promise<number> {
     // A track taken out of a looping queue is told to its server's alerts channel too.
     onLeftLoop: (guildId, track, reason) => void alerts.raise(leftLoopAlert(guildId, track.title, track.id, reason)),
   });
+  // The servers' players by state and their queues' lengths.
+  playerMetrics(registry, { players, queue });
   const prefetcher = new Prefetcher({
     bus,
     players,
@@ -257,7 +316,7 @@ async function main(): Promise<number> {
     music: store.music,
     recent: async (source) => (await search?.recent(source)) ?? null,
   });
-  search = new Search({ ytdlp, slots: resolver, log: log.child('search'), cache: shared });
+  search = new Search({ ytdlp, slots: resolver, log: log.child('search'), cache: sharedCache });
   // jukecord's own requests (Deezer, Spotify, Apple Music, a file attached in Discord): public addresses only.
   const fetchOut = publicFetch({ allowPrivate: config.media.allowPrivate });
   // Lookups that come in lists (an imported playlist, a link's tracks), three at a time across every list.
@@ -270,7 +329,7 @@ async function main(): Promise<number> {
     log: log.child('links'),
     services: config.links.services,
     spotify: config.links.spotify,
-    cache: shared,
+    cache: sharedCache,
   });
   // A track when a queue runs out, for the servers that turn autoplay on.
   const autoplay = new Autoplay({
@@ -365,6 +424,36 @@ async function main(): Promise<number> {
     : null;
   const directory = (): Directory | null => bot;
   if (bot) actions.setVoice(bot.voice, () => bot.ready(), bot);
+  // Discord's gateway and the voice connections; without a bot, only that it is not connected.
+  discordMetrics(registry, {
+    connected: () => bot?.ready() ?? false,
+    gateway: () => bot?.gateway() ?? null,
+    guilds: () => bot?.guilds().length ?? 0,
+    voice: () => bot?.voice.states() ?? new Map(),
+  });
+  // Whether jukecord can serve, part by part (/readyz and the metrics): the parts it cannot serve without (a core's
+  // bus by its own ping), and the ones it reports without depending on them (Discord, when there is a bot, and the
+  // media programs).
+  const health = new Health({
+    parts: [
+      databasePart(store),
+      transport ? transportPart(transport) : busPart('in-process'),
+      cachePart(sharedCache),
+      ...(bot ? [discordPart(() => bot.gateway())] : []),
+      toolPart('ffmpeg', tools, () => ffmpeg.about()),
+      toolPart('yt-dlp', tools, () => ytdlp.version()),
+    ],
+    discord: () => bot?.ready() ?? false,
+    metrics: registry,
+  });
+  // What runs: the version, this process's role (all of it, or a split jukecord's core) and its backends.
+  describeService(registry, {
+    version: VERSION,
+    role: config.role,
+    database: store.sql.dialect,
+    bus: transport?.kind ?? 'in-process',
+    cache: sharedCache.kind,
+  });
   // The bot posts the alerts (it waits for Discord after a start); browser-only, the log alone says them.
   alertSink = bot;
   // The watchdog's restart, read at the start: raised now that the bot is there to post it (raised before, it found no
@@ -402,8 +491,6 @@ async function main(): Promise<number> {
   // Aborted when a core stops: an MP3 copy for an edge's browsers stops with it.
   const stopped = new AbortController();
   if (beat && transport) {
-    // How far behind the event loop is: audio for the edges' browsers waits while the core is behind.
-    const pressure = new Pressure();
     const files = new MediaFiles({
       players,
       queue,
@@ -413,8 +500,9 @@ async function main(): Promise<number> {
       covers,
       searched: (context, address) => actions.searched(context, address),
       // Covers fetched for the edges' browsers, counted where the edges count every other rate (the shared cache).
-      coverRate: new Limit(shared, 'covers', COVERS, log.child('web')),
-      behind: () => pressure.behind,
+      coverRate: new Limit(sharedCache, 'covers', COVERS, log.child('web')),
+      // Audio for the edges' browsers waits while the core is behind (the one watch of the event loop, above).
+      behind: () => loop.behind,
       stopping: stopped.signal,
     });
     const secret = config.internal.secret ?? '';
@@ -423,7 +511,7 @@ async function main(): Promise<number> {
       discordMode: bot !== null,
       discordReady: bot?.ready() ?? false,
       self: bot?.self() ?? null,
-      behind: pressure.behind,
+      behind: loop.behind,
     });
     services = await startCoreServices({
       transport,
@@ -432,8 +520,6 @@ async function main(): Promise<number> {
       bus,
       actions,
       access,
-      players,
-      queue,
       cache,
       files,
       backup: () => makeBackup(store, path.join(config.dataDir, 'backups'), config.backups.keep),
@@ -441,22 +527,42 @@ async function main(): Promise<number> {
       doctor,
       // Connections an edge turned away at a cap are jukecord's trouble, told to the alerts channels.
       turnedAway: (away) => void alerts.raise(turnedAwayAlert(away)),
-      discordReady: () => bot?.ready() ?? false,
-      databaseReady: () => store.isOpen(),
-      behind: () => pressure.behind,
+      health,
+      behind: () => loop.behind,
       host: config.host,
       port: config.port,
       internal: { port: config.internal.port, secret },
       registry,
+      metricsToken: config.metrics.token,
       log: log.child('core'),
     });
   } else {
+    // Logging in through the host's identity provider (OIDC), when it is set up: the provider sends people back to the
+    // public address, and after logging out there to the login page.
+    const oidcSettings = config.auth.oidc;
+    const oidc = oidcSettings
+      ? new OidcLogin({
+          settings: oidcSettings,
+          redirectUri: `${publicUrl}/auth/sso/callback`,
+          afterLogout: `${publicUrl}/login`,
+          cache: sharedCache,
+          log: log.child('sso'),
+        })
+      : null;
+    // Logging in with an account of the host's directory (LDAP, Active Directory), when it is set up.
+    const ldap = config.auth.ldap ? new LdapLogin({ settings: config.auth.ldap, log: log.child('directory') }) : null;
     const auth = new Auth({
       store,
       hostToken: ensureHostToken(config.dataDir),
       secureCookies: publicUrl.startsWith('https://'),
       oauth: clientId && clientSecret ? { clientId, clientSecret, redirectUri: `${publicUrl}/auth/callback` } : null,
+      // The login links not used yet and the failed logins: on the shared cache (this process's memory by default).
+      cache: sharedCache,
+      oidc,
+      ldap,
       log: log.child('auth'),
+      // Every login counted by its way in and how it went (jukecord_logins_total).
+      metrics: registry,
     });
     web = await createWebServer({
       host: config.host,
@@ -473,10 +579,12 @@ async function main(): Promise<number> {
       log: log.child('web'),
       // Open panels at once (JUKECORD_LIVE_MAX); the caps per login and per address stay at their defaults.
       live: { total: config.liveMax },
-      sharedCache: shared,
-      registry,
-      ready: () => store.isOpen(),
-      discordReady: () => bot?.ready() ?? false,
+      // Behind when the event loop is (the one watch above), so the web server keeps no watch of its own.
+      behind: () => loop.behind,
+      sharedCache,
+      metrics: registry,
+      metricsToken: config.metrics.token,
+      health,
       // Connections turned away at a cap are jukecord's trouble, told to the alerts channels.
       turnedAway: (away) => void alerts.raise(turnedAwayAlert(away)),
       deps: {
@@ -491,6 +599,15 @@ async function main(): Promise<number> {
         logFiles: config.log.files,
         backupDir: path.join(config.dataDir, 'backups'),
         backupKeep: config.backups.keep,
+        loginSettings: config.auth,
+        // The login settings' tests read the environment jukecord started with, under the values a test brings.
+        loginChecks: new LoginChecks({
+          env: process.env,
+          cwd: process.cwd(),
+          redirectUri: `${publicUrl}/auth/sso/callback`,
+          afterLogout: `${publicUrl}/login`,
+          log: log.child('auth-test'),
+        }),
         discordMode: bot !== null,
         doctor: () => doctor(auth.discordLogin),
       },
@@ -551,11 +668,10 @@ async function main(): Promise<number> {
     alerts.stop();
     schedule?.stop();
     // Where every server is, saved first (each in its server's turn, after a change under way); a failure of that is
-    // jukecord's own trouble, thrown as before. Then the panels are told (they reconnect to the next jukecord), then
-    // Discord, then the database.
+    // jukecord's own trouble, thrown as before. Then the panels are told (they reconnect to the next jukecord; a
+    // core's edges hear its goodbye and tell theirs), then Discord, then the database.
     void players.checkpointAll().then(
       () =>
-        // A core says goodbye to its edges (they tell their panels at once) and gives its lease back.
         (web ? web.close() : (services?.stop() ?? Promise.resolve()))
           .catch(() => {})
           .then(() => {
@@ -566,19 +682,23 @@ async function main(): Promise<number> {
           // A daily backup being written is let finish (within the ten seconds): cut off, it is no backup.
           .then(() => schedule?.idle())
           .finally(() => {
-            // Closed once no transaction holds it, then out (the shared cache and the bus with it).
-            void Promise.allSettled([store.close(), shared.close(), transport?.close()]).finally(() =>
-              process.exit(code),
-            );
+            // Closed once no transaction holds it, with the shared cache. A core gives its lease back last, once it
+            // has left Discord and its database: a core waiting for the lease never meets this one there. Then out.
+            void Promise.allSettled([store.close(), sharedCache.close()])
+              .then(() => beat?.release())
+              .catch(() => {})
+              .then(() => transport?.close())
+              .catch(() => {})
+              .finally(() => process.exit(code));
           }),
       throwFromTimer,
     );
   };
   process.once('SIGTERM', () => stop('SIGTERM'));
   process.once('SIGINT', () => stop('SIGINT'));
-  // Another core took the lease (this one lost the bus for longer than its lease): this one stops, and its restart
-  // policy starts it again, to wait for the other one.
-  lostLease = () => stop('another core holds the lease', 1);
+  // This core can no longer be sure it holds the lease (another took it, or the bus was out of reach for as long as
+  // the lease lasts): it stops, and its restart policy starts it again, to wait for the lease.
+  lostLease = () => stop('this core no longer holds its lease', 1);
   // A crash saves where every server is too, so a restart comes back there (best effort: the crash may be in that).
   crashCheckpoint = () => players.checkpointAll();
 
@@ -603,33 +723,72 @@ async function main(): Promise<number> {
 
 /**
  * An edge: the panel, the API, the live updates, logins and the browsers' audio, over the core (roles/edge.ts). It
- * opens the database (logins are its rows), the shared cache (the rates) and the bus, and nothing of the music.
+ * opens the database (logins are its rows), the shared cache (the rates, the login links and failed logins, the SSO
+ * logins under way) and the bus, and nothing of the music. Its numbers are this process's own: the web server's,
+ * the bus's, the shared cache's and the runtime's (the music's are the core's).
  */
-async function runEdge(config: Config, log: ReturnType<typeof createLogger>): Promise<number> {
-  const registry = new MetricsRegistry();
+async function runEdge(
+  config: Config,
+  log: ReturnType<typeof createLogger>,
+  registry: MetricsRegistry,
+  loop: EventLoop,
+): Promise<number> {
   const name = serviceId('edge');
   const transport = await RedisTransport.open(config.bus.url ?? '', { log: log.child('bus'), service: name });
-  // The database the settings name (JUKECORD_DATABASE_URL, from stage 2a), which every service shares.
-  const store = await Store.open(path.join(config.dataDir, 'jukecord.db'));
-  const shared = await openCache({
+  // The database every service shares, opened as one process opens it (see main).
+  let store: Store;
+  try {
+    store = await openStore(config.database.address, {
+      pool: config.database.pool,
+      log: log.child('database'),
+      report: databaseReport(registry),
+    });
+  } catch (error) {
+    if (!(error instanceof ConnectionError)) throw error;
+    log.error('jukecord cannot reach its database', { reason: error.message });
+    await transport.close();
+    return 1;
+  }
+  // The shared cache, on the bus's server unless JUKECORD_CACHE_URL says otherwise: what the edges count and keep
+  // together, so a login link made on one edge works on another and a login through SSO started on one ends on another.
+  const sharedCache = await openCache({
     url: config.cacheUrl,
     prefix: config.bus.prefix,
     log: log.child('cache'),
     service: name,
-    metrics: registry,
+    report: sharedCacheReport(registry),
   });
   // This edge's own bus: the core's events are announced on it, and its live updates hear them there.
   const bus = new Bus((event, guildId, error) => log.error('a listener failed', { event, guild: guildId, error }));
   const publicUrl = config.publicUrl ?? `http://localhost:${config.publishedPort}`;
   const { clientId, clientSecret } = config.discord;
-  // Logins are this edge's: sessions, tokens and listening links are rows every edge reads. The host token is this
-  // edge's own (its data folder), for the jukecord command run beside it.
+  // Logging in through the host's identity provider and directory happens where the browser is: here. The provider
+  // sends people back to the public address, which may be any edge.
+  const oidcSettings = config.auth.oidc;
+  const oidc = oidcSettings
+    ? new OidcLogin({
+        settings: oidcSettings,
+        redirectUri: `${publicUrl}/auth/sso/callback`,
+        afterLogout: `${publicUrl}/login`,
+        cache: sharedCache,
+        log: log.child('sso'),
+      })
+    : null;
+  const ldap = config.auth.ldap ? new LdapLogin({ settings: config.auth.ldap, log: log.child('directory') }) : null;
+  // Logins are this edge's: sessions, tokens and listening links are rows every edge reads, and the login links and
+  // failed logins are on the shared cache. The host token is this edge's own (its data folder), for the jukecord
+  // command run beside it.
   const auth = new Auth({
     store,
     hostToken: ensureHostToken(config.dataDir),
     secureCookies: publicUrl.startsWith('https://'),
     oauth: clientId && clientSecret ? { clientId, clientSecret, redirectUri: `${publicUrl}/auth/callback` } : null,
+    cache: sharedCache,
+    oidc,
+    ldap,
     log: log.child('auth'),
+    // Every login counted by its way in and how it went (jukecord_logins_total).
+    metrics: registry,
   });
   const edge = await startEdge({
     name,
@@ -639,7 +798,7 @@ async function runEdge(config: Config, log: ReturnType<typeof createLogger>): Pr
     store,
     auth,
     presenter: new Presenter(store.users),
-    sharedCache: shared,
+    sharedCache,
     registry,
     coreUrl: config.internal.coreUrl ?? '',
     secret: config.internal.secret ?? '',
@@ -656,8 +815,28 @@ async function runEdge(config: Config, log: ReturnType<typeof createLogger>): Pr
       logFiles: config.log.files,
       backupDir: path.join(config.dataDir, 'backups'),
       backupKeep: config.backups.keep,
+      // Behind when this edge's event loop is (the one watch, in main).
+      behind: () => loop.behind,
+      metricsToken: config.metrics.token,
+      loginSettings: config.auth,
+      // The login settings' tests run here, where logging in happens, with the environment this edge started with.
+      loginChecks: new LoginChecks({
+        env: process.env,
+        cwd: process.cwd(),
+        redirectUri: `${publicUrl}/auth/sso/callback`,
+        afterLogout: `${publicUrl}/login`,
+        log: log.child('auth-test'),
+      }),
     },
     log,
+  });
+  // What runs: the version, an edge, and its backends.
+  describeService(registry, {
+    version: VERSION,
+    role: 'edge',
+    database: store.sql.dialect,
+    bus: transport.kind,
+    cache: sharedCache.kind,
   });
   let stopping = false;
   const stop = (signal: string): void => {
@@ -669,13 +848,13 @@ async function runEdge(config: Config, log: ReturnType<typeof createLogger>): Pr
       log.error('stopping took longer than 10 s; exiting anyway');
       process.exit(1);
     }, 10_000).unref();
-    // The panels first (they reconnect to another edge), then the bus, then the database.
+    // The panels first (they reconnect to another edge), then the bus, then the database and the shared cache.
     void edge.web
       .close()
       .catch(() => {})
       .then(() => edge.stop())
       .finally(() => {
-        void Promise.allSettled([transport.close(), store.close(), shared.close()]).finally(() => process.exit(0));
+        void Promise.allSettled([transport.close(), store.close(), sharedCache.close()]).finally(() => process.exit(0));
       });
   };
   process.once('SIGTERM', () => stop('SIGTERM'));

@@ -1,13 +1,15 @@
 /**
- * Logging: one record per event, written as a readable line to the console and as JSON to a rotated file.
+ * Logging: one record per event, written to the console and as JSON to a rotated file.
  *
- * The console line is for `docker logs` and a terminal; the JSON file is what the panel's log page and
- * `jukecord logs` read, so it keeps the fields machine-readable. The file never grows without end: it is rotated at a
- * size limit and only a fixed number of files is kept. Secrets are masked before anything is written.
+ * The console line is for `docker logs` and a terminal: readable text by default, or with JUKECORD_LOG_FORMAT=json the
+ * same JSON object per line as the file, for a log shipper reading the console (Loki's Promtail or Alloy, Fluent Bit,
+ * Elasticsearch's agents, CloudWatch). The JSON file is what the panel's log page and `jukecord logs` read, so it keeps
+ * the fields machine-readable whatever the console shows. The file never grows without end: it is rotated at a size
+ * limit and only a fixed number of files is kept. Secrets are masked before anything is written.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LogLevel } from './config.ts';
+import type { LogFormat, LogLevel } from './config.ts';
 
 /** Extra facts attached to a record (an error, a guild ID, a duration). */
 export type LogFields = Readonly<Record<string, unknown>>;
@@ -103,29 +105,72 @@ export function createLogger(options: { level: LogLevel; sinks: readonly LogSink
   };
 }
 
-// JSON.stringify with a guard: a field holding a cycle (a request object, say) is written as a note, not a crash.
+// JSON.stringify with a guard: a value holding a cycle (a request object, say) or a bigint is written as a note, not a
+// crash.
 function toJson(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
-    return JSON.stringify({ unserialisable: String(value) });
+    return JSON.stringify({ unserialisable: described(value) });
+  }
+}
+
+// A value as text, for the note; even its own toString may throw.
+function described(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return typeof value;
   }
 }
 
 /**
- * Writes readable lines to the terminal: `time level component: message key=value ...`.
+ * A record as one line of JSON (without the line break): its time, level, component, message and fields, the log
+ * file's form and the console's with JUKECORD_LOG_FORMAT=json. A field that JSON cannot hold (a cycle, a bigint) is
+ * written as a note in its place, and the rest of the record as it is: a shipper always gets the time and the level.
+ */
+export function jsonLine(record: LogRecord): string {
+  try {
+    return JSON.stringify(record);
+  } catch {
+    const fields: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record.fields)) {
+      try {
+        JSON.stringify(value);
+        fields[key] = value;
+      } catch {
+        fields[key] = { unserialisable: described(value) };
+      }
+    }
+    return JSON.stringify({ ...record, fields });
+  }
+}
+
+/**
+ * Writes to the terminal: readable lines (`time level component: message key=value ...`), or the JSON lines of the log
+ * file, one object per line.
  *
  * Warnings and errors go to stderr so a shell redirect of stdout still shows them.
  */
 export class ConsoleSink implements LogSink {
+  private readonly format: LogFormat;
+
+  constructor(format: LogFormat = 'text') {
+    this.format = format;
+  }
+
   write(record: LogRecord): void {
+    const stream = record.level === 'warn' || record.level === 'error' ? process.stderr : process.stdout;
+    if (this.format === 'json') {
+      stream.write(`${jsonLine(record)}\n`);
+      return;
+    }
     // Fields follow the message as key=value pairs; nested values are written as compact JSON.
     const extras = Object.entries(record.fields)
       .filter(([, value]) => value !== undefined)
       .map(([key, value]) => `${key}=${typeof value === 'string' ? value : toJson(value)}`)
       .join(' ');
     const line = `${record.time} ${record.level.padEnd(5)} ${record.component}: ${record.msg}${extras ? ` ${extras}` : ''}\n`;
-    const stream = record.level === 'warn' || record.level === 'error' ? process.stderr : process.stdout;
     stream.write(line);
   }
 }
@@ -157,7 +202,7 @@ export class FileSink implements LogSink {
   }
 
   write(record: LogRecord): void {
-    const line = `${toJson(record)}\n`;
+    const line = `${jsonLine(record)}\n`;
     const bytes = Buffer.byteLength(line);
     try {
       // Rotate before a line that would cross the limit; an empty file is never rotated, so one huge line still lands.

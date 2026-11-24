@@ -39,7 +39,7 @@ import type { Players } from '../core/players.ts';
 import { isPlain, PLAIN_SOUND, type Sound } from '../core/sound.ts';
 import type { Logger } from '../log.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
-import { childEnv } from '../media/process.ts';
+import { childEnv, meterChild } from '../media/process.ts';
 
 // Below this offset the file is played from its start: the 3 s fade-in at the top covers the difference.
 const FROM_START_MS = 50;
@@ -173,6 +173,8 @@ export class VoiceOutput implements PlayerOutput {
         // Not the bot's environment: its token stays in this process.
         env: childEnv(),
       });
+      // Counted with ffmpeg's other runs: it ends well with the track, or is stopped by a skip or a seek.
+      meterChild(child, this.ffmpeg.meter('voice'));
       this.process = child;
       this.stream = child.stdout;
       // ffmpeg that cannot start at all (missing, or no memory or processes left) must not take the process down:
@@ -379,6 +381,16 @@ export class VoiceManager implements VoiceControl {
   channel(guildId: string): { channelId: string; name: string } | null {
     const joined = this.joined.get(guildId);
     return joined ? { channelId: joined.channelId, name: joined.name } : null;
+  }
+
+  /** How many voice connections are in each state (for the metrics). */
+  states(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const { connection } of this.joined.values()) {
+      const state = connection.state.status;
+      counts.set(state, (counts.get(state) ?? 0) + 1);
+    }
+    return counts;
   }
 
   /** The people (not bots) in the bot's voice channel of a server, by their Discord IDs; none when it is in none. */

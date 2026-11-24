@@ -10,11 +10,19 @@
  *
  * Nothing waits on a core that is gone. A core lost (its heartbeat silent, or its goodbye) or replaced (restarted)
  * refuses every command still waiting, and closes every live connection with 1012, so each panel reconnects and asks
- * for the whole state again; so does a bus that comes back after it was down, since it lost what it carried meanwhile.
- * A panel that connects while the core is away hears "unavailable" for its server and asks again shortly.
+ * for the whole state again; so does this edge's bus when it comes back after it was down, since it lost what it
+ * carried meanwhile. A core back after it was lost, or whose own bus came back (resumed), has the panels ask again
+ * too, without refusing the commands under way: it may be running them. A panel that connects while the core is away
+ * hears "unavailable" for its server and asks again shortly.
+ *
+ * Its readiness is the database's, the bus's and the shared cache's, as one process's is, and the core's heartbeat:
+ * an edge that hears no core has nothing to serve, so a front that asks /readyz sends it no browsers.
  */
 import type { Principal } from '../app/access.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import { cachePart, databasePart, Health } from '../app/health.ts';
+import type { LoginChecks } from '../auth/check.ts';
+import type { AuthSettings } from '../auth/settings.ts';
 import { type CoreChange, CoreWatch } from '../bus/beat.ts';
 import { COMMAND_LIMIT_MS, CommandClient } from '../bus/commands.ts';
 import { Presence, PresenceReporter } from '../bus/presence.ts';
@@ -24,16 +32,25 @@ import type { Cache } from '../cache/cache.ts';
 import type { Bus } from '../core/bus.ts';
 import type { Logger } from '../log.ts';
 import type { MetricsRegistry } from '../metrics/registry.ts';
+import { busReport } from '../metrics/services.ts';
 import type { Store } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import type { Auth } from '../web/auth.ts';
-import { type AccessPort, type ActionsPort, type HostJobs, WEB_ACTIONS, type WebAction } from '../web/core.ts';
+import {
+  type AccessPort,
+  type ActionsPort,
+  CORE_COMMANDS,
+  type HostJobs,
+  WEB_ACTIONS,
+  type WebAction,
+} from '../web/core.ts';
 import type { LiveLimits } from '../web/events.ts';
 import { RemoteFiles } from '../web/files.ts';
 import type { LogLine, LogQuery } from '../web/logs.ts';
 import type { Presenter } from '../web/present.ts';
 import { createWebServer, type TurnedAway, type WebServer } from '../web/server.ts';
 import { SIGNAL_AT } from './core.ts';
+import { corePart, transportPart } from './health.ts';
 
 /** How long a command may take: lookups on the sites take up to the fetch time limit, lists of them minutes. */
 export function commandLimit(command: string, fetchTimeoutMs: number): number {
@@ -135,6 +152,11 @@ export interface EdgeOptions {
     readonly rates?: Parameters<typeof createWebServer>[0]['rates'];
     /** Whether this edge has fallen behind (tests say never; by default its event loop says). */
     readonly behind?: () => boolean;
+    /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN). */
+    readonly metricsToken?: string | null;
+    /** The settings of logging in through the host's identity provider and directory, and their tests. */
+    readonly loginSettings?: AuthSettings;
+    readonly loginChecks?: LoginChecks | null;
   };
   readonly log: Logger;
   /** How long the core may say nothing before it is taken for lost (default from bus/beat.ts). */
@@ -157,15 +179,15 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
     names,
     caller: options.name,
     log: log.child('commands'),
-    metrics: options.registry,
+    report: busReport(options.registry, CORE_COMMANDS),
     limitMs: (command) => commandLimit(command, options.fetchTimeoutMs),
   });
   const versions = new QueueVersions();
   // The web server, once made (the parts below are started first and hear it late).
   let web: WebServer | null = null;
-  // Every change of the core, or a bus back after it was down: versions forgotten and every panel told to reconnect
-  // and ask again; and, but for a core found (it answers the commands waiting for it), the waiting commands refused,
-  // since the core they went to is gone or its answers were lost.
+  // A change of the core, or this edge's bus back after it was down: versions forgotten and every panel told to
+  // reconnect and ask again; and the waiting commands refused when the core they went to is gone (lost, replaced) or
+  // their answers were lost with this edge's connection.
   const restart = (why: string, refuse: boolean) => {
     if (refuse) client.failAll();
     versions.clear();
@@ -178,7 +200,11 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
     version: VERSION,
     log: log.child('core'),
     ...(options.coreLostAfterMs !== undefined ? { lostAfterMs: options.coreLostAfterMs } : {}),
-    changed: (change: CoreChange) => restart(`the core was ${change}`, change !== 'found'),
+    changed: (change: CoreChange) => {
+      // The first core this edge hears: what its panels asked meanwhile it answered already (or they ask again).
+      if (change === 'found') return;
+      restart(`the core was ${change}`, change === 'lost' || change === 'replaced');
+    },
   });
   let wasDown = false;
   const offChange = transport.onChange((up) => {
@@ -219,6 +245,18 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
   const files = new RemoteFiles({ coreUrl: options.coreUrl, secret: options.secret, log: log.child('files') });
   const facts = () => watch.facts;
   const { web: settings } = options;
+  // Whether this edge can serve, part by part: its database, its bus and its shared cache, as one process's, and
+  // the core (its heartbeat). Whether Discord is connected is the core's word.
+  const health = new Health({
+    parts: [
+      databasePart(options.store),
+      transportPart(transport),
+      cachePart(options.sharedCache),
+      corePart(() => watch.seen),
+    ],
+    discord: () => facts()?.discordReady ?? false,
+    metrics: options.registry,
+  });
   web = await createWebServer({
     host: settings.host,
     port: settings.port,
@@ -231,14 +269,9 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
     ...(settings.rates ? { rates: settings.rates } : {}),
     ...(settings.behind ? { behind: settings.behind } : {}),
     sharedCache: options.sharedCache,
-    registry: options.registry,
-    ready: () => options.store.isOpen(),
-    parts: async () => ({
-      database: options.store.isOpen() ? 'ok' : 'closed',
-      bus: transport.up ? 'ok' : 'not connected',
-      core: watch.seen ? 'ok' : 'no heartbeat from the core lately',
-    }),
-    discordReady: () => facts()?.discordReady ?? false,
+    metrics: options.registry,
+    ...(settings.metricsToken !== undefined ? { metricsToken: settings.metricsToken } : {}),
+    health,
     // Connections turned away at a cap are jukecord's trouble, told to the alerts channels by the core.
     turnedAway: (away: TurnedAway) => {
       client.call('core.turned-away', [away]).catch(() => {});
@@ -272,6 +305,8 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
       },
       doctor: () => client.call<DoctorReport>('core.doctor', [options.auth.discordLogin]),
       host,
+      ...(settings.loginSettings ? { loginSettings: settings.loginSettings } : {}),
+      ...(settings.loginChecks !== undefined ? { loginChecks: settings.loginChecks } : {}),
     },
   });
   const hub = web.hub;

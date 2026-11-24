@@ -73,6 +73,21 @@ export const WEB_ACTIONS = [
 
 export type WebAction = (typeof WEB_ACTIONS)[number];
 
+/**
+ * Every command the core answers for its edges (roles/core.ts): the actions, the access rules and the host's jobs. The
+ * names the bus's metrics take as labels, a list that does not grow with what is sent.
+ */
+export const CORE_COMMANDS: readonly string[] = [
+  ...WEB_ACTIONS.map((name) => `actions.${name}`),
+  'access.context',
+  'access.guilds',
+  'access.forget',
+  'core.backup',
+  'core.logs',
+  'core.doctor',
+  'core.turned-away',
+];
+
 /** A value now, or a promise of it. */
 export type Later<T> = T | Promise<T>;
 

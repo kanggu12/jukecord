@@ -13,6 +13,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from '../log.ts';
+import { type Counter, type Metrics, NO_METRICS } from '../metrics/registry.ts';
 
 /** What the cache knows about one track's file. */
 export interface CacheEntry {
@@ -61,7 +62,13 @@ export interface MediaCacheOptions {
   readonly maxBytes: number;
   readonly log: Logger;
   readonly now?: () => number;
+  /** Where its size, its limit and what it evicts are counted; nowhere in tests that do not look. */
+  readonly metrics?: Metrics;
 }
+
+// The labels of the two kinds of file the cache evicts, made once (an eviction happens in a loop).
+const EVICTED_TRACK = { kind: 'track' } as const;
+const EVICTED_COVER = { kind: 'cover' } as const;
 
 export class MediaCache {
   readonly dir: string;
@@ -73,12 +80,36 @@ export class MediaCache {
   private readonly covers = new Map<string, CoverEntry>();
   // How many holders pin each key; a key is safe from eviction while its count is above zero.
   private readonly pins = new Map<string, number>();
+  // Files evicted to keep under the limit, by kind.
+  private readonly evictions: Counter;
 
   constructor(options: MediaCacheOptions) {
     this.dir = options.dir;
     this.maxBytes = options.maxBytes;
     this.log = options.log;
     this.now = options.now ?? Date.now;
+    const metrics = options.metrics ?? NO_METRICS;
+    this.evictions = metrics.counter(
+      'jukecord_cache_evictions_total',
+      'Files the media cache removed to stay under its limit, by kind: a track (its audio) or a cover.',
+      ['kind'],
+    );
+    // Both kinds named from the start, at zero.
+    for (const labels of [EVICTED_TRACK, EVICTED_COVER]) this.evictions.inc(labels, 0);
+    // The names 0.3 gave these three stay; the limit is new, beside them, for "how full" (bytes over limit).
+    const bytes = metrics.gauge('jukecord_cache_bytes', 'Bytes in the media cache, covers included.');
+    const tracks = metrics.gauge('jukecord_cache_tracks', 'Tracks in the media cache.');
+    const covers = metrics.gauge('jukecord_cache_covers', "Tracks' covers in the media cache.");
+    const limit = metrics.gauge(
+      'jukecord_cache_limit_bytes',
+      'The most the media cache may hold (JUKECORD_CACHE_MAX).',
+    );
+    limit.set(this.maxBytes);
+    metrics.collect(() => {
+      bytes.set(this.size());
+      tracks.set(this.count());
+      covers.set(this.coverCount());
+    });
   }
 
   /** The cache key of a canonical source: 32 hex characters of its SHA-256. */
@@ -333,10 +364,12 @@ export class MediaCache {
       if (candidate.kind === 'audio') {
         this.removeFiles(candidate.entry.key);
         this.entries.delete(candidate.entry.key);
+        this.evictions.inc(EVICTED_TRACK);
         this.log.debug('evicted a cached track', { key: candidate.entry.key, source: candidate.entry.source });
       } else {
         fs.rmSync(this.coverPath(candidate.entry.key, candidate.entry.type), { force: true });
         this.covers.delete(candidate.entry.key);
+        this.evictions.inc(EVICTED_COVER);
         this.log.debug('evicted a cached cover', { key: candidate.entry.key });
       }
       total -= candidate.entry.bytes;

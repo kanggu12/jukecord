@@ -12,7 +12,8 @@ import { describe, it } from 'node:test';
 import { AUTOPLAY } from '../../src/core/types.ts';
 import { MIGRATIONS } from '../../src/store/schema.ts';
 import { Store } from '../../src/store/store.ts';
-import { addTracks, memoryStore } from '../support/store.ts';
+import { eachDatabase } from '../support/databases.ts';
+import { addTracks } from '../support/store.ts';
 
 const GUILD = '100000000000000001';
 const ALICE = '300000000000000001';
@@ -61,10 +62,10 @@ describe('the migration for likes and autoplay', () => {
   });
 });
 
-describe('LikeRepository', () => {
+eachDatabase('LikeRepository', (db) => {
   it('likes once per login, lists newest first and takes a like back', async () => {
     let now = 1000;
-    const store = await memoryStore(() => now);
+    const store = await db.open({ now: () => now });
     const [one, two, three] = await addTracks(store, 3);
     assert.ok(one && two && three);
     assert.equal(await store.likes.add(ALICE, one.id), true);
@@ -96,9 +97,9 @@ describe('LikeRepository', () => {
   });
 });
 
-describe('the player state', () => {
+eachDatabase('the player state', (db) => {
   it('keeps the autoplay mode, and reads one it does not know as off', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     await store.playerState.save({
       guildId: GUILD,
       trackId: null,
@@ -124,9 +125,9 @@ describe('the player state', () => {
   });
 });
 
-describe('the end of a queue autoplay filled', () => {
+eachDatabase('the end of a queue autoplay filled', (db) => {
   it('is after the last track a person queued, at 0 when only autoplay queued, and none without autoplay', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const tracks = (await addTracks(store, 4)).map((track) => track.id);
     assert.equal(await store.queue.autoplayTail(GUILD), null);
     await store.queue.insert(GUILD, tracks.slice(0, 2), 0, ALICE);
@@ -142,9 +143,9 @@ describe('the end of a queue autoplay filled', () => {
   });
 });
 
-describe('the history for autoplay and likes', () => {
+eachDatabase('the history for autoplay and likes', (db) => {
   it('says what played in a server, its newest plays, and how often each track played and was liked', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [one, two, three] = await addTracks(store, 3);
     assert.ok(one && two && three);
     const play = (trackId: number, at: number, by: string | null = ALICE) =>
@@ -166,7 +167,7 @@ describe('the history for autoplay and likes', () => {
   });
 
   it('leaves autoplay out of the people who added, and counts its plays', async () => {
-    const store = await memoryStore();
+    const store = await db.open();
     const [one] = await addTracks(store, 1);
     assert.ok(one);
     // Autoplay played most, then Alice, then the host.

@@ -244,7 +244,7 @@ describe('the rates of changes and shedding when behind', () => {
       }
       assert.equal((await inject({ method: 'GET', url: '/healthz' })).statusCode, 200);
       assert.equal((await inject({ method: 'GET', url: '/readyz' })).statusCode, 200);
-      const link = server.auth.createLink();
+      const link = await server.auth.createLink();
       assert.equal((await inject({ method: 'GET', url: `/auth/link/${link.code}` })).headers.location, '/');
     } finally {
       await server.close();

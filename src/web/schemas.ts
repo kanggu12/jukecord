@@ -312,6 +312,12 @@ export const StatusSchema = Type.Object(
     uptimeMs: Type.Integer(),
     login: Type.Object({ discord: Type.Boolean({ description: 'Whether logging in with Discord is set up' }) }),
     lyrics: Type.Boolean({ description: 'Whether lyrics are looked up here (JUKECORD_LYRICS)' }),
+    database: Type.Union(
+      [Type.Literal('sqlite'), Type.Literal('postgres'), Type.Literal('mysql'), Type.Literal('mariadb')],
+      {
+        description: 'The kind of database jukecord keeps its data in (JUKECORD_DATABASE_URL)',
+      },
+    ),
   },
   { title: 'Status' },
 );
@@ -331,9 +337,19 @@ export const ScopeSchema = Type.Union([Type.Literal('read'), Type.Literal('contr
 
 export const MeSchema = Type.Object(
   {
-    kind: Type.Union([Type.Literal('host'), Type.Literal('user'), Type.Literal('friend'), Type.Literal('guest')], {
-      description: 'friend: let in by the host with a login link; guest: in with a listening link',
-    }),
+    kind: Type.Union(
+      [
+        Type.Literal('host'),
+        Type.Literal('user'),
+        Type.Literal('friend'),
+        Type.Literal('member'),
+        Type.Literal('guest'),
+      ],
+      {
+        description:
+          "friend: let in by the host with a login link; member: logged in through the host's identity provider (OIDC) or directory (LDAP); guest: in with a listening link",
+      },
+    ),
     id: Nullable(Type.String()),
     name: Type.String(),
     avatar: Nullable(Type.String()),
@@ -344,6 +360,18 @@ export const MeSchema = Type.Object(
       Type.Object(
         { guildId: Type.String(), expiresAt: Type.Integer() },
         { description: "A guest's server, and when its listening link stops working" },
+      ),
+    ),
+    member: Nullable(
+      Type.Object(
+        {
+          provider: Type.Union([Type.Literal('oidc'), Type.Literal('ldap')]),
+          level: ScopeSchema,
+        },
+        {
+          description:
+            'For a member, and a Discord user who logged in through OIDC: where they logged in, and the level their groups gave (admin: what the host may; control: change the music everywhere; read: look and listen); it changes at their next login',
+        },
       ),
     ),
   },
@@ -395,6 +423,69 @@ export const DoctorSchema = Type.Object(
     settings: Type.Record(Type.String(), Type.String()),
   },
   { title: 'Doctor' },
+);
+
+/** What the login page shows: the ways of logging in that are set up here, with the words of their keys. */
+export const AuthMethodsSchema = Type.Object(
+  {
+    discord: Type.Boolean({ description: 'Whether logging in with Discord is set up' }),
+    sso: Nullable(
+      Type.Object(
+        {
+          label: Nullable(
+            Type.String({ description: "The login key's words as the host wrote them; null: the panel's own" }),
+          ),
+        },
+        { description: "Logging in through the host's identity provider (OIDC); null when it is not set up" },
+      ),
+    ),
+    directory: Nullable(
+      Type.Object(
+        {
+          label: Nullable(
+            Type.String({ description: "The form key's words as the host wrote them; null: the panel's own" }),
+          ),
+        },
+        { description: 'Logging in with a directory account (LDAP, Active Directory); null when it is not set up' },
+      ),
+    ),
+  },
+  { title: 'AuthMethods' },
+);
+
+// One finding of a settings test, as the doctor's.
+const CheckSchema = Type.Object({
+  name: Type.String(),
+  status: Type.Union([Type.Literal('ok'), Type.Literal('warn'), Type.Literal('fail')]),
+  detail: Type.String(),
+});
+
+/** Settings not saved yet to test instead of the ones in use, by their environment names (JUKECORD_OIDC_*...). */
+export const LoginSettingsSchema = Type.Record(Type.String({ maxLength: 64 }), Type.String({ maxLength: 4000 }), {
+  // As many as there are login settings, and a few to spare for the names a test refuses one by one.
+  maxProperties: 40,
+  description:
+    'Values to test in place of the ones in use, by environment name; the others stay as they are. A secret left out is the one in use.',
+});
+
+export const OidcTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'False when any check failed' }),
+    checks: Type.Array(CheckSchema),
+  },
+  { title: 'OidcTest' },
+);
+
+export const LdapTestSchema = Type.Object(
+  {
+    ok: Type.Boolean({ description: 'False when any check failed' }),
+    checks: Type.Array(CheckSchema),
+    groups: Nullable(Type.Array(Type.String(), { description: "The person's groups by DN, when a name was given" })),
+    level: Type.Union([ScopeSchema, Type.Null()], {
+      description: 'The level those groups give (null: the person would be refused, or no name was given)',
+    }),
+  },
+  { title: 'LdapTest' },
 );
 
 export const ErrorSchema = Type.Object(

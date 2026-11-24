@@ -10,10 +10,17 @@ import fs from 'node:fs';
 import type { Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import zlib from 'node:zlib';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { hostLike, personOf } from '../app/access.ts';
 import { ActionError } from '../app/actions.ts';
+import type { Health } from '../app/health.ts';
+import { LdapError } from '../auth/ldap.ts';
+import { levelOf, sameLdapGroup, sameOidcGroup } from '../auth/levels.ts';
+import { OidcError, SSO_COOKIE } from '../auth/oidc.ts';
 import type { Cache } from '../cache/cache.ts';
 import { MemoryCache } from '../cache/memory.ts';
 import { MEMORY_BUCKETS, MEMORY_ENTRIES } from '../cache/open.ts';
@@ -23,14 +30,24 @@ import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
-import { isPrivateAddress } from '../media/address.ts';
 import type { MediaCache } from '../media/cache.ts';
 import type { Covers } from '../media/covers.ts';
-import type { MetricsRegistry } from '../metrics/registry.ts';
+import { MetricsGate, negotiate } from '../metrics/http.ts';
+import { MetricsRegistry } from '../metrics/registry.ts';
+import { httpMetrics, methodLabel, routeLabel, statusClass } from '../metrics/web.ts';
 import { StoreError } from '../store/store.ts';
-import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
-import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
+import {
+  addressFailures,
+  addressKey,
+  type Caller,
+  CSRF_HEADER,
+  cookie,
+  nameFailures,
+  parseCookies,
+  SESSION_COOKIE,
+  safeNext,
+} from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, type ElsewhereListeners, EventHub, type LiveLimits } from './events.ts';
 import { type Files, MediaFiles } from './files.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
@@ -72,9 +89,6 @@ export interface EdgeMedia {
   readonly covers?: undefined;
 }
 
-/** What one part of a readiness check says: "ok", or why not. */
-export type ReadyParts = Readonly<Record<string, string>>;
-
 export type WebServerOptions = WebServerCommon & (LocalMedia | EdgeMedia);
 
 interface WebServerCommon {
@@ -91,21 +105,17 @@ interface WebServerCommon {
   readonly log: Logger;
   /** How many live connections there may be (in all, per login, per address); tests and the settings change it. */
   readonly live?: Partial<LiveLimits>;
-  /** Whether jukecord can serve requests (for /readyz). */
-  readonly ready: () => boolean;
-  /**
-   * The parts a split jukecord's service needs, each "ok" or why not (the database, the bus, the core's heartbeat):
-   * /readyz says which is missing. One process has none beyond `ready`.
-   */
-  readonly parts?: () => Promise<ReadyParts>;
-  /** What the other modules count (the bus, the shared cache), written out on /metrics after the server's own. */
-  readonly registry?: MetricsRegistry;
+  /** Whether jukecord can serve, part by part (for /readyz, src/app/health.ts). */
+  readonly health: Health;
+  /** Where every number of jukecord is kept, for /metrics; a server made on its own (a test's) makes its own. */
+  readonly metrics?: MetricsRegistry;
+  /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN); none: the address rule. */
+  readonly metricsToken?: string | null;
   /**
    * Hears, at most once a minute per cap, that connections were turned away at one: every connection's, one
    * address's, or the live connections' (for app/alerts.ts).
    */
   readonly turnedAway?: (cap: TurnedAway) => void;
-  readonly discordReady: () => boolean;
   /**
    * Where the rates are counted (and whatever else browsers' requests share): the process's shared cache, which several
    * edges keep on one Redis or Valkey server. Without it the server keeps one in its memory.
@@ -178,6 +188,10 @@ const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
 const TOO_MANY_SEARCHES = 'too many searches at once; try again in a moment';
 
+// The metrics' text, compressed off the main thread for a scraper that takes gzip (Prometheus always does): a few tens
+// of kilobytes become a few.
+const gzipped = promisify(zlib.gzip);
+
 // HTTP/1.1 lets a client send requests one after another without waiting for the answers (pipelining). Browsers never
 // do; undici with pipelining and benchmark tools do. A client that sends many in one go and reads nothing had each one
 // answered, and each answer held in memory for a reader that never came: a few connections of small requests filled
@@ -223,6 +237,11 @@ function unfit(error: Unfit, request: FastifyRequest): string {
   return `${name} ${first.message ?? 'is not right'}`;
 }
 
+// What went wrong, in the words of its error, for the log.
+function reasonOf(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
 // The key a caller's changes are counted under: its session, or its API token.
 function loginKey(caller: Caller): string {
   return caller.sessionHash ? `session ${caller.sessionHash}` : `token ${caller.tokenId ?? 'host'}`;
@@ -248,6 +267,12 @@ function forbiddenFor(access: Permission, caller: Caller): string {
       ? "a friend cannot change the server's settings or tokens"
       : 'a friend who may only look and listen cannot change the music';
   }
+  // A member's level is their groups' word: said so, with who can change it.
+  if (caller.principal.kind === 'member') {
+    return access === 'admin'
+      ? "your groups let you change the music, not the server's settings or tokens"
+      : 'your groups let you look and listen, not change the music';
+  }
   return `this needs ${access === 'admin' ? 'an' : 'a'} ${access} token`;
 }
 
@@ -257,12 +282,17 @@ function permission(access: Permission, caller: Caller | null): 'ok' | 'unauthor
   if (access === 'read') return 'ok';
   if (access === 'control') return caller.scope === 'read' ? 'forbidden' : 'ok';
   if (access === 'admin') return caller.scope === 'admin' ? 'ok' : 'forbidden';
-  return caller.principal.kind === 'host' && caller.scope === 'admin' ? 'ok' : 'forbidden';
+  // What only the host may do: the host, and a login whose groups gave it the admin level (src/app/access.ts).
+  return hostLike(caller.principal) && caller.scope === 'admin' ? 'ok' : 'forbidden';
 }
 
 export async function createWebServer(options: WebServerOptions): Promise<WebServer> {
   const { deps, log } = options;
   const { auth } = deps;
+  // Every number for /metrics, and who may read them.
+  const registry = options.metrics ?? new MetricsRegistry();
+  const gate = new MetricsGate(options.metricsToken ?? null);
+  const http = httpMetrics(registry);
   // A hop count becomes "trust the nearest n proxies"; Fastify's types take that only as a function.
   const hops = options.trustProxy;
   const trustProxy =
@@ -368,11 +398,12 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     presenter: deps.presenter,
     users: deps.store.users,
     log: log.child('events'),
+    metrics: registry,
     // The queue's change counter, read without the queue (an edge: as the bus last said it): the hub keeps each
     // server's queue message per version.
     queueVersion: (guildId) => (options.edge ? options.edge.queueVersion(guildId) : options.queue.version(guildId)),
-    // An edge's: the other edges' listeners, and the endings they must hear.
-    ...(options.edge ? { elsewhere: options.edge.elsewhere, endings: options.edge.endings } : {}),
+    // An edge's: the other edges' listeners, the endings they must hear, and reads that are the core's commands.
+    ...(options.edge ? { elsewhere: options.edge.elsewhere, endings: options.edge.endings, remote: true } : {}),
     stillValid: (caller) => auth.stillValid(caller),
     limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
     // Only the cap of every live connection is jukecord's trouble; one login's or one address's is that person's.
@@ -482,11 +513,20 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     });
   });
 
-  // Responses by status class, for /metrics.
-  const responses = new Map<string, number>();
-  app.addHook('onResponse', async (_request, reply) => {
-    const group = `${Math.floor(reply.statusCode / 100)}xx`;
-    responses.set(group, (responses.get(group) ?? 0) + 1);
+  // Every answer counted by its status class, and timed by its method, route and class. The live connection is left
+  // out of the times: its "answer" lasts as long as the panel stays open.
+  const live = `${API_PREFIX}/events`;
+  app.addHook('onResponse', async (request, reply) => {
+    const status = reply.statusCode;
+    const group = statusClass(status);
+    http.responses.inc({ class: group });
+    const template = request.routeOptions.url;
+    if (template === live) return;
+    http.duration.observe(reply.elapsedTime / 1000, {
+      method: methodLabel(request.method),
+      route: routeLabel(template, status),
+      class: group,
+    });
   });
 
   // Security headers on everything; the content security policy on pages.
@@ -593,9 +633,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const session = request.headers.cookie?.includes(`${SESSION_COOKIE}=`) ?? false;
     // A request without any credential is not a failed login (a public page, or a "log in first").
     if (caller || (!request.headers.authorization && !session)) return { caller, blocked: false };
-    // Asked before this failure counts, as before: the attempt after the twentieth is the first one refused.
-    const blocked = auth.limiter.blocked(request.ip);
-    auth.limiter.fail(request.ip);
+    // Counted, and whether the address was blocked before this failure, as before: the attempt after the twentieth is
+    // the first one refused.
+    const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
     if (reply && session) reply.header('set-cookie', await auth.endSession(null));
     return { caller: null, blocked };
   };
@@ -663,8 +703,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // (a household, an office, Docker's bridge, a proxy not trusted): counted by it, fifteen panels opening at
         // once behind one were refused, and a refused /me shows the panel's start-failed page.
         if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
+          const person = caller ? personOf(caller.principal) : null;
           const keys = caller
-            ? [caller.principal.kind === 'user' ? `person ${caller.principal.userId}` : `login ${loginKey(caller)}`]
+            ? [person !== null ? `person ${person}` : `login ${loginKey(caller)}`]
             : [`address ${addressKey(request.ip)}`];
           // A search, which starts yt-dlp, is held to its own rate as well, by the same keys (both must have a token).
           const searching = name === 'search';
@@ -833,7 +874,10 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (error || !code || !state) return reply.redirect('/login?error=cancelled');
       // Refused before Discord is asked: whether this login works is only known from Discord's answer, and a blocked
       // address must not be able to make jukecord ask Discord over and over (Discord limits how often it may).
-      if (auth.limiter.blocked(request.ip)) return reply.redirect('/login?error=too-many');
+      if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+        auth.counted('discord', 'blocked');
+        return reply.redirect('/login?error=too-many');
+      }
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
         await deps.store.users.upsert(person);
@@ -841,34 +885,180 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         deps.access.forget(person.id);
         // Only people in a server the bot is in get in: the panel is for those servers.
         const guilds = await deps.access.guilds({ kind: 'user', userId: person.id });
-        if (guilds.length === 0) return reply.redirect('/login?error=not-a-member');
+        if (guilds.length === 0) {
+          auth.counted('discord', 'denied');
+          return reply.redirect('/login?error=not-a-member');
+        }
         reply.header('set-cookie', [
           auth.clearOAuthCookie(),
           await auth.startSession({ kind: 'user', userId: person.id }),
         ]);
+        auth.counted('discord', 'ok');
         log.info('logged in with Discord', { user: person.name });
         return reply.redirect(next);
       } catch (failure) {
         // Just started and not connected to Discord yet: not the person's failure, and not counted as one.
-        if (failure instanceof ActionError && failure.code === 'unavailable')
+        if (failure instanceof ActionError && failure.code === 'unavailable') {
+          auth.counted('discord', 'unavailable');
           return reply.redirect('/login?error=connecting');
-        auth.limiter.fail(request.ip);
+        }
+        await auth.limiter.fail([addressFailures(request.ip)]);
+        auth.counted('discord', 'failed');
         log.info('a Discord login failed', { reason: failure instanceof Error ? failure.message : String(failure) });
         return reply.redirect('/login?error=failed');
       }
     },
   );
+  // Logging in through the host's identity provider (OIDC): off to the provider, and back. Where the person wanted to
+  // go travels with the login on the cache, checked to be a path on this site.
+  app.get<{ Querystring: { next?: string } }>('/auth/sso', async (request, reply) => {
+    const oidc = auth.oidc;
+    if (!oidc) return reply.redirect('/login?error=no-sso');
+    // Held to a rate per address: each start keeps a login's state on the cache for ten minutes.
+    if (!(await auth.mayStartSso(request.ip))) {
+      auth.counted('oidc', 'blocked');
+      return reply.redirect('/login?error=sso-too-fast');
+    }
+    try {
+      const started = await oidc.start(safeNext(typeof request.query.next === 'string' ? request.query.next : '/'));
+      const tie = cookie(started.cookie.name, started.cookie.value, {
+        maxAgeSeconds: started.cookie.maxAgeMs / 1000,
+        secure: auth.secure,
+      });
+      return reply.header('set-cookie', tie).redirect(started.location);
+    } catch (failure) {
+      // The provider's document could not be read: its trouble, said on the login page; the next try asks again.
+      auth.counted('oidc', 'unavailable');
+      log.warn('could not start a login through SSO', { reason: reasonOf(failure) });
+      return reply.redirect('/login?error=sso-unavailable');
+    }
+  });
+  app.get('/auth/sso/callback', async (request, reply) => {
+    // The cookie that tied the login to this browser has done its job, whatever happens next.
+    reply.header('set-cookie', cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }));
+    const oidc = auth.oidc;
+    const settings = deps.loginSettings?.oidc;
+    if (!oidc || !settings) return reply.redirect('/login?error=no-sso');
+    // Refused before the provider is asked: a blocked address must not be able to make jukecord trade codes on and on.
+    if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+      auth.counted('oidc', 'blocked');
+      return reply.redirect('/login?error=too-many');
+    }
+    // The provider's answer, as it put it after the "?".
+    const query = new URLSearchParams(request.raw.url?.split('?')[1] ?? '');
+    try {
+      const { identity, next } = await oidc.finish(query, parseCookies(request.headers.cookie).get(SSO_COOKIE));
+      const level = levelOf(identity.groups, settings.groups, sameOidcGroup);
+      // Their Discord user, when the provider names one and a bot is there to ask about it (deps.directory).
+      const principal = await auth.admit('oidc', identity, level, deps.directory() !== null);
+      if (!principal) {
+        auth.counted('oidc', 'denied');
+        log.info('refused a login through SSO: in none of the groups jukecord lets in', {
+          user: identity.name,
+          groups: identity.groups.length,
+        });
+        return reply.redirect('/login?error=no-group');
+      }
+      // Asked afresh at a Discord user's login: someone refused a minute ago may have joined a server since.
+      if (principal.kind === 'user') deps.access.forget(principal.userId);
+      reply.header('set-cookie', [
+        cookie(SSO_COOKIE, '', { maxAgeSeconds: 0, secure: auth.secure }),
+        await auth.startSession(principal),
+      ]);
+      auth.counted('oidc', 'ok');
+      log.info('logged in through SSO', {
+        user: identity.name,
+        level: level ?? undefined,
+        ...(principal.kind === 'user' ? { discord: true } : {}),
+      });
+      return reply.redirect(next);
+    } catch (failure) {
+      const code = failure instanceof OidcError ? failure.code : 'failed';
+      // The provider not answering is not the person's failure, nor is turning back there; a state that is no login
+      // of this browser and a code the provider refused are counted, as any failed login is.
+      if (code === 'expired' || code === 'failed') await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('oidc', code === 'unavailable' ? 'unavailable' : code === 'cancelled' ? 'denied' : 'failed');
+      log.info('a login through SSO did not go through', { reason: reasonOf(failure) });
+      return reply.redirect(`/login?error=sso-${code}`);
+    }
+  });
+
+  // Logging in with an account of the host's directory (LDAP, Active Directory): the login page's form sends the name
+  // and the password here, from the panel's own pages only (another site cannot log a browser in as someone). Held
+  // back per address and per name before the directory is asked, so neither a guess at one account from many places
+  // nor many accounts from one place goes fast.
+  app.post<{ Body: { username?: unknown; password?: unknown; next?: unknown } }>(
+    '/auth/directory',
+    async (request, reply) => {
+      if (!sameOrigin(request, options.publicUrl)) {
+        return failure(reply, 'forbidden', 'connections come from the panel only');
+      }
+      const ldap = auth.ldap;
+      const settings = deps.loginSettings?.ldap;
+      if (!ldap || !settings)
+        return failure(reply, 'not-found', 'logging in with a directory account is not set up here');
+      const body = request.body ?? {};
+      const username = typeof body.username === 'string' ? body.username : '';
+      const password = typeof body.password === 'string' ? body.password : '';
+      const refused = (status: number, code: string, message: string) =>
+        reply.code(status).send({ error: { code, message } });
+      const keys = [addressFailures(request.ip), nameFailures('ldap', username)];
+      if (await auth.limiter.blocked(keys)) {
+        auth.counted('ldap', 'blocked');
+        return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+      }
+      try {
+        const identity = await ldap.login(username, password);
+        const level = levelOf(identity.groups, settings.groups, sameLdapGroup);
+        const principal = await auth.admit('ldap', identity, level, false);
+        if (!principal) {
+          auth.counted('ldap', 'denied');
+          log.info('refused a directory login: in none of the groups jukecord lets in', {
+            user: identity.name,
+            groups: identity.groups.length,
+          });
+          return refused(403, 'no-group', 'your account is in none of the groups jukecord lets in');
+        }
+        auth.counted('ldap', 'ok');
+        log.info('logged in with a directory account', { user: identity.name, level: level ?? undefined });
+        const next = safeNext(typeof body.next === 'string' ? body.next : '/');
+        return reply.header('set-cookie', await auth.startSession(principal)).send({ ok: true, next });
+      } catch (failure) {
+        const code = failure instanceof LdapError ? failure.code : 'unavailable';
+        // The name or password the person typed is never in the log, nor in what the panel is told: only why.
+        log.info('a directory login did not go through', { reason: code, detail: reasonOf(failure) });
+        if (code === 'invalid') return refused(400, 'invalid', 'type your name and your password');
+        if (code === 'unavailable') {
+          auth.counted('ldap', 'unavailable');
+          return refused(503, 'directory-down', 'the directory did not answer; try again in a moment');
+        }
+        if (code === 'ambiguous') {
+          auth.counted('ldap', 'denied');
+          return refused(409, 'ambiguous', 'the directory has more than one account by that name');
+        }
+        // A refused name or password counts against the address and the name; the try after the twentieth is refused.
+        const blocked = await auth.limiter.fail(keys);
+        auth.counted('ldap', blocked ? 'blocked' : 'failed');
+        if (blocked) return refused(429, 'too-many', 'too many failed logins; wait ten minutes');
+        if (code === 'expired') return refused(403, 'password-expired', 'your password has expired; change it first');
+        if (code === 'disabled') return refused(403, 'account-disabled', 'your account is turned off or locked');
+        return refused(401, 'wrong-password', 'wrong name or password');
+      }
+    },
+  );
+
   // A one-time login link from `jukecord open`: the browser becomes the host, or the host's friend with the view or
   // control the link was made for.
   app.get<{ Params: { code: string } }>('/auth/link/:code', async (request, reply) => {
     // A link that works logs in even from a blocked address (it was made by the host a moment ago); one that does not
     // counts as a failure, and from a blocked address says so.
-    const scope = auth.useLink(request.params.code);
+    const scope = await auth.useLink(request.params.code);
     if (scope === null) {
-      const blocked = auth.limiter.blocked(request.ip);
-      auth.limiter.fail(request.ip);
+      const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('link', blocked ? 'blocked' : 'failed');
       return reply.redirect(blocked ? '/login?error=too-many' : '/login?error=link');
     }
+    auth.counted('link', 'ok');
     log.info(scope === 'admin' ? 'logged in with a login link' : 'a friend logged in with a login link', { scope });
     return reply.header('set-cookie', await auth.startLinkSession(scope)).redirect('/');
   });
@@ -884,14 +1074,18 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const used = await auth.useListenLink(code, caller);
     if (used.kind === 'invalid') {
       // A code that does not work is a failed login like any other (a guess at the codes is held back).
-      const blocked = auth.limiter.blocked(request.ip);
-      auth.limiter.fail(request.ip);
+      const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('listen', blocked ? 'blocked' : 'failed');
       return blocked
         ? failure(reply, 'too-many', 'too many failed logins; wait ten minutes')
         : failure(reply, 'not-found', 'this listening link has ended or does not exist');
     }
-    if (used.kind === 'full') return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    if (used.kind === 'full') {
+      auth.counted('listen', 'denied');
+      return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    }
     if (used.kind === 'already') return reply.send({ ok: true });
+    auth.counted('listen', 'ok');
     log.info('a guest came in with a listening link', { link: used.linkId, guild: used.guildId });
     return reply.header('set-cookie', used.cookie).send({ ok: true });
   });
@@ -904,33 +1098,46 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     if (caller?.principal.kind === 'user') deps.access.forget(caller.principal.userId);
     // This browser's live connection ends with its login (on every edge of a split jukecord).
     if (caller?.sessionHash) hub.endSession(caller.sessionHash);
-    return reply
-      .header('set-cookie', await auth.endSession(caller))
-      .code(204)
-      .send();
+    const ended = await auth.endSession(caller);
+    // A login through the host's identity provider logs out there too, when it offers that: the panel goes where the
+    // answer says, and the provider sends it back to the login page. Every other logout answers nothing, as before.
+    const principal = caller?.principal;
+    const throughSso =
+      principal !== undefined &&
+      ((principal.kind === 'member' && principal.provider === 'oidc') ||
+        (principal.kind === 'user' && principal.level !== undefined));
+    const next = throughSso ? await auth.oidc?.logoutUrl() : null;
+    if (next) return reply.header('set-cookie', ended).send({ next });
+    return reply.header('set-cookie', ended).code(204).send();
   });
 
-  // Health: alive (the process answers), ready (it can serve), and the figures for Prometheus.
+  // Health: alive (the process answers, nothing checked: a liveness probe must not fail for a database that is down),
+  // ready (it can serve: each part's state, kept for a second), and the figures for Prometheus.
   app.get('/healthz', async (_request, reply) => reply.type('text/plain').send('ok\n'));
   app.get('/readyz', async (_request, reply) => {
-    // The parts a service of a split jukecord needs, each "ok" or what is missing; ready only when all are.
-    const parts = options.parts ? await options.parts() : null;
-    const ready = options.ready() && Object.values(parts ?? {}).every((state) => state === 'ok');
+    const readiness = await options.health.read();
     return reply
-      .code(ready ? 200 : 503)
-      .send({ ready, discord: options.discordReady(), ...(parts ? { parts: { ...parts } } : {}) });
+      .code(readiness.ready ? 200 : 503)
+      .header('cache-control', 'no-store')
+      .send(readiness);
   });
-  // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), not for the
-  // internet: a request that came through the reverse proxy (it carries X-Forwarded-For, or the standard Forwarded)
-  // or from a public address gets the 404 any unknown path gets, so the version and the counts are not handed to
-  // everyone.
+  // Metrics are for a scraper beside jukecord (on the same machine, in the same cluster or network), or one that shows
+  // the metrics token, not for the internet: a request that came through the reverse proxy (it carries
+  // X-Forwarded-For, or the standard Forwarded) or from a public address, without the token, gets the 404 any unknown
+  // path gets, so the version and the counts are not handed to everyone (src/metrics/http.ts). The connection's own
+  // address decides, not a forwarded one.
   app.get('/metrics', async (request, reply) => {
-    const peer = request.socket.remoteAddress ?? '';
-    const forwarded = request.headers['x-forwarded-for'] !== undefined || request.headers.forwarded !== undefined;
-    if (forwarded || !isPrivateAddress(peer)) {
-      return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
+    const verdict = gate.verdict(request.socket.remoteAddress ?? '', request.headers);
+    if (verdict === 'hidden') return reply.code(404).send({ error: { code: 'not-found', message: 'no such path' } });
+    if (verdict === 'wrong-token') {
+      return failure(reply.header('www-authenticate', 'Bearer'), 'unauthorized', 'the metrics token is not right');
     }
-    return reply.type('text/plain; version=0.0.4').send(await metrics(options, hub, responses, pressure));
+    // Prometheus asks for OpenMetrics first; anything else gets the text format.
+    const exposition = negotiate(request.headers.accept);
+    const text = await registry.scrape(exposition.format);
+    reply.type(exposition.contentType).header('cache-control', 'no-store').header('vary', 'accept, accept-encoding');
+    if (!/\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''))) return reply.send(text);
+    return reply.header('content-encoding', 'gzip').send(await gzipped(text));
   });
 
   // Anything else: the panel's page for a browser asking for a page (the panel draws /stats, /login ... itself), a
@@ -977,79 +1184,6 @@ function sameOrigin(request: FastifyRequest, publicUrl: string): boolean {
   if (!origin) return true;
   const here = `${request.protocol}://${request.headers.host ?? ''}`;
   return origin === here || origin === new URL(publicUrl).origin;
-}
-
-// A gauge's lines in the Prometheus text.
-function gaugeLines(name: string, help: string, values: [string, number][]): string[] {
-  return [
-    `# HELP ${name} ${help}`,
-    `# TYPE ${name} gauge`,
-    ...values.map(([labels, value]) => `${name}${labels} ${value}`),
-  ];
-}
-
-/** The figures of the players, the queues and the media cache: one process's, and the core's in a split jukecord. */
-export async function mediaMetrics(players: Players, queue: QueueService, cache: MediaCache): Promise<string[]> {
-  const byStatus = new Map<string, number>([
-    ['idle', 0],
-    ['loading', 0],
-    ['playing', 0],
-    ['paused', 0],
-  ]);
-  let queued = 0;
-  for (const player of players.all()) {
-    const status = player.snapshot().status;
-    byStatus.set(status, (byStatus.get(status) ?? 0) + 1);
-    queued += await queue.size(player.guildId);
-  }
-  return [
-    ...gaugeLines(
-      'jukecord_players',
-      'Players by state.',
-      [...byStatus.entries()].map(([status, count]) => [`{status="${status}"}`, count]),
-    ),
-    ...gaugeLines('jukecord_queue_tracks', 'Tracks waiting in all queues.', [['', queued]]),
-    ...gaugeLines('jukecord_cache_bytes', 'Bytes in the media cache.', [['', cache.size()]]),
-    ...gaugeLines('jukecord_cache_tracks', 'Tracks in the media cache.', [['', cache.count()]]),
-    ...gaugeLines('jukecord_cache_covers', "Tracks' covers in the media cache.", [['', cache.coverCount()]]),
-  ];
-}
-
-// The Prometheus text: what is playing, queues, the cache (the core's, in an edge: its own /metrics has them), the
-// panels, and the answers given.
-async function metrics(
-  options: WebServerOptions,
-  hub: EventHub,
-  responses: Map<string, number>,
-  pressure: Pressure | null,
-): Promise<string> {
-  const lines: string[] = [];
-  const gauge = (name: string, help: string, values: [string, number][]) => {
-    lines.push(...gaugeLines(name, help, values));
-  };
-  const counts = hub.counts();
-  gauge('jukecord_info', 'The running version.', [[`{version="${VERSION}"}`, 1]]);
-  gauge('jukecord_discord_connected', 'Whether the bot is connected to Discord.', [
-    ['', options.discordReady() ? 1 : 0],
-  ]);
-  if (!options.edge) lines.push(...(await mediaMetrics(options.players, options.queue, options.cache)));
-  gauge('jukecord_panel_connections', 'Open live connections from panels.', [['', counts.connections]]);
-  gauge('jukecord_browser_listeners', 'Browsers playing along.', [['', counts.listening]]);
-  // How far behind the event loop is: above 0.2 s, audio (for everyone) and changes from anyone but the host are
-  // turned away.
-  if (pressure) {
-    gauge('jukecord_event_loop_delay_seconds', "The 99th percentile of the event loop's delay over the last second.", [
-      ['', Math.round(pressure.delayMs) / 1000],
-    ]);
-  }
-  lines.push('# HELP jukecord_http_responses_total Answers given, by status class.');
-  lines.push('# TYPE jukecord_http_responses_total counter');
-  for (const [group, count] of [...responses.entries()].sort())
-    lines.push(`jukecord_http_responses_total{class="${group}"} ${count}`);
-  // What the modules report into the registry (the bus, the shared cache), after the server's own.
-  const reported = options.registry?.render().trimEnd();
-  if (reported) lines.push(reported);
-  return `${lines.join('\n')}\n`;
 }
 
 /** The operation names the server answers (for tests). */

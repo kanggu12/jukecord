@@ -9,21 +9,20 @@
  * - Who listens: the edges' reports, added up (bus/presence.ts), are what its rest and its votes to skip count, told
  *   on its own bus as one process's live updates tell it.
  * - Its internal port: the audio and the covers of its media cache, for edges with the shared secret (internal.ts).
- * - Its own port: health and figures only (health.ts).
+ * - Its own port: health and numbers only (health.ts), with how many edges report among them.
  * - Its heartbeat: once all of that answers, the edges hear it runs (bus/beat.ts; the lease was taken before anything
- *   else started).
+ *   else started). Stopping says goodbye first; the lease is given back by whoever stops the core, last (main.ts).
  */
 import type { Access } from '../app/access.ts';
 import { ActionError, type Actions } from '../app/actions.ts';
 import type { DoctorReport } from '../app/doctor.ts';
+import type { Health } from '../app/health.ts';
 import type { CoreBeat } from '../bus/beat.ts';
 import { type CommandHandler, CommandServer } from '../bus/commands.ts';
 import { Presence } from '../bus/presence.ts';
 import { EventSender } from '../bus/relay.ts';
 import type { BusNames, BusTransport } from '../bus/transport.ts';
 import type { Bus } from '../core/bus.ts';
-import type { Players } from '../core/players.ts';
-import type { QueueService } from '../core/queue.ts';
 import type { Logger } from '../log.ts';
 import type { MediaCache } from '../media/cache.ts';
 import type { MetricsRegistry } from '../metrics/registry.ts';
@@ -49,8 +48,7 @@ export interface CoreServicesOptions {
   readonly bus: Bus;
   readonly actions: Actions;
   readonly access: Access;
-  readonly players: Players;
-  readonly queue: QueueService;
+  /** The media cache, whose folder the internal port serves the audio from. */
   readonly cache: MediaCache;
   /** The audio and the covers of the core's media cache (MediaFiles), for the internal port. */
   readonly files: Files;
@@ -60,9 +58,8 @@ export interface CoreServicesOptions {
   readonly doctor: (discordLogin: boolean) => Promise<DoctorReport>;
   /** Connections an edge turned away at a cap, which are jukecord's trouble, told to the alerts channels. */
   readonly turnedAway: (away: TurnedAway) => void;
-  readonly discordReady: () => boolean;
-  /** Whether the database answers (for the core's readiness). */
-  readonly databaseReady: () => boolean;
+  /** The core's parts, as one process checks them, for its own port's /readyz. */
+  readonly health: Health;
   /** Whether the core has fallen behind (audio for edges waits then, as one process's does). */
   readonly behind: () => boolean;
   readonly host: string;
@@ -70,7 +67,10 @@ export interface CoreServicesOptions {
   readonly port: number;
   /** The internal port for edges, and the secret they carry. */
   readonly internal: { readonly port: number; readonly secret: string };
+  /** Every number of the core, for its own port's /metrics; the commands served and the edges are counted there too. */
   readonly registry: MetricsRegistry;
+  /** The token that lets a scraper read /metrics from anywhere (JUKECORD_METRICS_TOKEN). */
+  readonly metricsToken: string | null;
   readonly log: Logger;
 }
 
@@ -82,7 +82,10 @@ export interface CoreServices {
   readonly audience: { count(guildId: string): number; people(guildId: string): readonly string[] };
   /** Ends a revoked listening link's guests' live connections on every edge. */
   endGuests(linkId: number): void;
-  /** Stops answering edges: the goodbye first (they stop waiting at once), then everything else. */
+  /**
+   * Stops answering edges: the goodbye first (they stop waiting at once), then everything else. The lease stays held
+   * until the core's beat gives it back (main.ts does, once Discord is left).
+   */
   stop(): Promise<void>;
 }
 
@@ -143,8 +146,9 @@ export async function startCoreServices(options: CoreServicesOptions): Promise<C
   });
   const sender = new EventSender(bus, { transport, names, log: log.child('relay'), metrics: options.registry });
   // Who listens in the edges' browsers changed: the core's own parts hear it as one process's live updates tell it
-  // (the votes recount, the rest looks again at whether the server is heard).
-  const presence = await Presence.start({
+  // (the votes recount, the rest looks again at whether the server is heard). Presence tells its changes only once it
+  // has started, so this never meets it unmade.
+  const presence: Presence = await Presence.start({
     transport,
     names,
     log: log.child('presence'),
@@ -153,6 +157,12 @@ export async function startCoreServices(options: CoreServicesOptions): Promise<C
       bus.emit('listeners', { guildId, count: presence.count(guildId) });
     },
   });
+  // How many edges report who listens in their browsers: every running edge does, every few seconds.
+  const edges = options.registry.gauge(
+    'jukecord_edges',
+    'Edges of a split jukecord that report who listens in their browsers (each one does every few seconds).',
+  );
+  options.registry.collect(() => edges.set(presence.edgeCount));
   let internal: InternalServer | null = null;
   let health: HealthServer | null = null;
   let internalAddress = '';
@@ -171,16 +181,9 @@ export async function startCoreServices(options: CoreServicesOptions): Promise<C
     health = createHealthServer({
       host: options.host,
       port: options.port,
-      parts: async () => ({
-        database: options.databaseReady() ? 'ok' : 'closed',
-        bus: transport.up && (await transport.ping()) ? 'ok' : 'not connected',
-      }),
-      discordReady: options.discordReady,
-      players: options.players,
-      queue: options.queue,
-      cache: options.cache,
+      health: options.health,
       registry: options.registry,
-      edges: () => presence.edgeCount,
+      metricsToken: options.metricsToken,
     });
     healthAddress = await health.listen();
   } catch (error) {
@@ -202,7 +205,7 @@ export async function startCoreServices(options: CoreServicesOptions): Promise<C
     endGuests: (linkId) => sender.end({ what: 'guests', linkId, reason: 'the listening link has ended' }),
     stop: async () => {
       // The goodbye first: the edges stop sending commands and tell their panels at once.
-      await options.beat.stop();
+      await options.beat.goodbye();
       sender.stop();
       await Promise.allSettled([commands.close(), presence.stop(), internal?.close(), health?.close()]);
     },

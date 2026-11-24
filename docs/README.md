@@ -274,10 +274,17 @@ set or not set.
 | `JUKECORD_SPOTIFY_CLIENT_SECRET_FILE`                                |                    | the Spotify app's secret, read from a file                                                          |
 | **Data, logs and backups**                                           |                    |                                                                                                     |
 | `JUKECORD_DATA_DIR`                                                  |      `./data`      | the database, the media cache and the logs (`/data` in the image)                                   |
+| `JUKECORD_DATABASE_URL`                                              |     `sqlite:`      | the database: `sqlite:` (the data folder's), `sqlite:/a/file.db`, `postgres://…`, `mysql://…`       |
+| `JUKECORD_DATABASE_URL_FILE`                                         |                    | that address read from a file (it holds the database's password)                                    |
+| `JUKECORD_DATABASE_POOL`                                             |        `10`        | the most connections jukecord opens to a database server                                            |
 | `JUKECORD_LOG_LEVEL`                                                 |       `info`       | `debug`, `info`, `warn` or `error`                                                                  |
+| `JUKECORD_LOG_FORMAT`                                                |       `text`       | `json`: the console writes the log file's JSON lines, one object per line                           |
 | `JUKECORD_LOG_MAX`, `JUKECORD_LOG_FILES`                             |    `5MiB`, `5`     | the log file's size, and how many are kept                                                          |
 | `JUKECORD_BACKUP_AT`                                                 |       `off`        | a database backup every day at this time (`04:30`, in jukecord's time zone)                         |
 | `JUKECORD_BACKUP_KEEP`                                               |        `7`         | how many backups the backups folder keeps                                                           |
+| **Monitoring**                                                       |                    |                                                                                                     |
+| `JUKECORD_METRICS_TOKEN`                                             |                    | a token that lets a scraper read `/metrics` from anywhere (`Authorization: Bearer`)                 |
+| `JUKECORD_METRICS_TOKEN_FILE`                                        |                    | the metrics token, read from a file                                                                 |
 | **Services** (a core and its edges)                                  |                    |                                                                                                     |
 | `JUKECORD_ROLE`                                                      |       `all`        | `all` (one process), `core` (Discord, players, media: one) or `edge` (panel, API: any number)       |
 | `JUKECORD_BUS_URL`, `JUKECORD_BUS_URL_FILE`                          |                    | the Redis or Valkey server the services talk through (`redis://`, `rediss://`)                      |

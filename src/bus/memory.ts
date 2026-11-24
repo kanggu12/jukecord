@@ -58,7 +58,9 @@ export class MemoryBroker {
     set.add(subscription);
     return () => {
       set.delete(subscription);
-      if (set.size === 0) this.channels.delete(channel);
+      // Only this channel's own set, once it is empty: an end called again after the channel was left and taken by
+      // another subscriber leaves the new set alone.
+      if (set.size === 0 && this.channels.get(channel) === set) this.channels.delete(channel);
     };
   }
 

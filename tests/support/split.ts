@@ -2,19 +2,22 @@
  * A split jukecord in one process, for tests: a core (the players, the actions, a fake Discord, fake media, its
  * commands, events, presence, internal port and health port) and edges (the real web server over the core), joined by
  * a bus (in memory; Redis or Valkey when JUKECORD_TEST_BUS_URL names one) and sharing one database, as services share
- * PostgreSQL. Everything listens on 127.0.0.1 on ports the system picks.
+ * PostgreSQL, and one shared cache: one in memory, or on the bus's server, each service with its own connection to it
+ * as the real ones have. Everything listens on 127.0.0.1 on ports the system picks.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Access } from '../../src/app/access.ts';
 import { Actions } from '../../src/app/actions.ts';
+import { cachePart, databasePart, Health } from '../../src/app/health.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
 import { CoreBeat } from '../../src/bus/beat.ts';
 import { serviceId } from '../../src/bus/commands.ts';
 import type { BusTransport } from '../../src/bus/transport.ts';
 import type { Cache } from '../../src/cache/cache.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
+import { openCache } from '../../src/cache/open.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
@@ -25,14 +28,16 @@ import { MediaCache } from '../../src/media/cache.ts';
 import { Covers } from '../../src/media/covers.ts';
 import type { Resolver } from '../../src/media/resolver.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
+import { playerMetrics } from '../../src/metrics/service.ts';
 import { type CoreServices, startCoreServices } from '../../src/roles/core.ts';
 import { type Edge, startEdge } from '../../src/roles/edge.ts';
+import { transportPart } from '../../src/roles/health.ts';
 import type { Store } from '../../src/store/store.ts';
 import { Auth } from '../../src/web/auth.ts';
 import { MediaFiles } from '../../src/web/files.ts';
 import { COVERS, Limit } from '../../src/web/limits.ts';
 import { Presenter } from '../../src/web/present.ts';
-import type { TestBus } from './bus.ts';
+import { type TestBus, testLog } from './bus.ts';
 import { FakeClock, FakeMedia } from './fakes.ts';
 import { memoryStore } from './store.ts';
 import { FakeDirectory, FakeVoice, HOST_TOKEN } from './web.ts';
@@ -66,6 +71,8 @@ export interface TestEdge {
   readonly transport: BusTransport;
   readonly url: string;
   readonly auth: Auth;
+  /** Its shared cache: the one in memory, or its own connection to the bus's server. */
+  readonly cache: Cache;
   readonly logs: MemorySink;
   stop(): Promise<void>;
 }
@@ -103,6 +110,15 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
   const shared = new MemoryCache();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-split-'));
   const running: (() => Promise<void>)[] = [];
+  // Each service's shared cache: the one in memory, or a connection of its own to the bus's server, under the bus's
+  // prefix (what one edge keeps there, another reads).
+  const opened: Cache[] = [];
+  const cacheFor = async (service: string): Promise<Cache> => {
+    if (!bus.url) return shared;
+    const cache = await openCache({ url: bus.url, prefix: bus.prefix, log: testLog().log, service, waitMs: 5000 });
+    opened.push(cache);
+    return cache;
+  };
   // The media cache is the core's disk: one folder, which a restarted core finds again.
   const cacheDir = path.join(dataDir, 'cache');
 
@@ -111,6 +127,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
     const log = createLogger({ level: 'debug', sinks: [logs] });
     const instance = serviceId('core');
     const transport: BusTransport = await bus.connect(`core-${instance}`);
+    const coreCache = await cacheFor(instance);
     const beat = await CoreBeat.start({
       transport,
       names: bus.names,
@@ -153,6 +170,8 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
     } as unknown as Resolver;
     const directory = new FakeDirectory();
     const voice = new FakeVoice();
+    // The core's numbers, as its own port's /metrics shows them (the players and queues, as main.ts declares them).
+    const registry = new MetricsRegistry();
     let browsers: (guildId: string) => readonly string[] = () => [];
     const votes = new SkipVotes({
       players,
@@ -178,6 +197,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
     const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
     const cache = new MediaCache({ dir: cacheDir, maxBytes: 1024 ** 3, log });
     cache.init();
+    playerMetrics(registry, { players, queue });
     const covers = new Covers({ cache, log, fetch: async () => Promise.reject(new Error('no pictures in tests')) });
     const stopping = new AbortController();
     const files = new MediaFiles({
@@ -188,7 +208,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       mp3: async () => null,
       covers,
       searched: (context, address) => actions.searched(context, address),
-      coverRate: new Limit(shared, 'covers', COVERS),
+      coverRate: new Limit(coreCache, 'covers', COVERS),
       behind: () => false,
       stopping: stopping.signal,
     });
@@ -199,8 +219,6 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       bus: local,
       actions,
       access,
-      players,
-      queue,
       cache,
       files,
       backup: async () => ({ file: path.join(dataDir, 'backups', 'test.db'), bytes: 1 }),
@@ -213,13 +231,16 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
         settings: {},
       }),
       turnedAway: () => {},
-      discordReady: () => !options.browserOnly,
-      databaseReady: () => store.isOpen(),
+      health: new Health({
+        parts: [databasePart(store), transportPart(transport), cachePart(coreCache)],
+        discord: () => !options.browserOnly,
+      }),
       behind: () => false,
       host: '127.0.0.1',
       port: 0,
       internal: { port: 0, secret: SECRET },
-      registry: new MetricsRegistry(),
+      registry,
+      metricsToken: null,
       log,
     });
     actions.setEndGuests((linkId) => services.endGuests(linkId));
@@ -255,7 +276,9 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
     const log = createLogger({ level: 'debug', sinks: [logs] });
     const name = serviceId('edge');
     const transport = await bus.connect(`edge-${name}`);
-    const auth = new Auth({ store, hostToken: HOST_TOKEN, secureCookies: false, oauth: null, log });
+    const cache = await cacheFor(name);
+    // Its logins: the database's rows, and the login links and failed logins on the shared cache, as a real edge's.
+    const auth = new Auth({ store, hostToken: HOST_TOKEN, secureCookies: false, oauth: null, cache, log });
     const made = await startEdge({
       name,
       transport,
@@ -264,7 +287,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       store,
       auth,
       presenter: new Presenter(store.users),
-      sharedCache: shared,
+      sharedCache: cache,
       registry: new MetricsRegistry(),
       coreUrl: to.internalUrl,
       secret: given.secret ?? SECRET,
@@ -296,7 +319,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       await transport.close();
     };
     running.push(stop);
-    return { edge: made, transport, url, auth, logs, stop };
+    return { edge: made, transport, url, auth, cache, logs, stop };
   };
 
   return {
@@ -312,6 +335,7 @@ export async function split(bus: TestBus, options: SplitOptions = {}): Promise<S
       await bus.close();
       await store.close();
       await shared.close();
+      await Promise.allSettled(opened.map((cache) => cache.close()));
       fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };

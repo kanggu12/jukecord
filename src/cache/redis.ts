@@ -10,10 +10,12 @@
  * so two edges that ask at once cannot both have one: the server must be Redis 6.2 or newer, or any Valkey.
  *
  * Calls while the server is away fail at once (the connection queues nothing): the callers decide what that means
- * (the rate limits let a request through, a lookup simply finds nothing).
+ * (the rate limits let a request through, a lookup simply finds nothing). Each read is reported as found or not, and
+ * each call that fails as a failure (src/metrics/services.ts), as the memory adapter reports its reads.
  */
 import { connectRedis, type RedisConnection, runScript, type Script } from '../bus/redis.ts';
 import type { Logger } from '../log.ts';
+import { NO_SHARED_CACHE_REPORT, type SharedCacheReport } from '../metrics/services.ts';
 import type { Cache, TokenRate } from './cache.ts';
 
 // Takes a token from every bucket or from none: 0, or how many milliseconds until every one has a token again.
@@ -78,74 +80,75 @@ export class RedisCache implements Cache {
   readonly kind = 'redis';
   private readonly client: RedisConnection;
   private readonly prefix: string;
+  private readonly report: SharedCacheReport;
 
-  private constructor(client: RedisConnection, prefix: string) {
+  private constructor(client: RedisConnection, prefix: string, report: SharedCacheReport) {
     this.client = client;
     this.prefix = prefix;
+    this.report = report;
   }
 
   /** Connects to the server at `url`, waiting for it up to `waitMs` (60 s by default). */
   static async open(
     url: string,
-    options: { prefix: string; log: Logger; service: string; waitMs?: number },
+    options: { prefix: string; log: Logger; service: string; report?: SharedCacheReport; waitMs?: number },
   ): Promise<RedisCache> {
     const client = await connectRedis(url, {
       log: options.log,
       name: `jukecord-${options.service}-cache`,
       ...(options.waitMs !== undefined ? { waitMs: options.waitMs } : {}),
     });
-    return new RedisCache(client, options.prefix);
+    return new RedisCache(client, options.prefix, options.report ?? NO_SHARED_CACHE_REPORT);
   }
 
   async get(key: string): Promise<string | null> {
-    const value = await this.client.sendCommand(['GET', this.entry(key)]);
-    return typeof value === 'string' ? value : null;
+    const value = await this.call(this.client.sendCommand(['GET', this.entry(key)]));
+    const found = typeof value === 'string' ? value : null;
+    this.report.lookup(found !== null);
+    return found;
   }
 
   async set(key: string, value: string, ttlMs: number): Promise<void> {
-    await this.client.sendCommand(['SET', this.entry(key), value, 'PX', String(ttl(ttlMs))]);
+    await this.call(this.client.sendCommand(['SET', this.entry(key), value, 'PX', String(ttl(ttlMs))]));
   }
 
   async add(key: string, value: string, ttlMs: number): Promise<boolean> {
     // OK when it was free (and is now this value's); null when it held something.
-    return (await this.client.sendCommand(['SET', this.entry(key), value, 'NX', 'PX', String(ttl(ttlMs))])) === 'OK';
+    const answer = await this.call(
+      this.client.sendCommand(['SET', this.entry(key), value, 'NX', 'PX', String(ttl(ttlMs))]),
+    );
+    return answer === 'OK';
   }
 
   async take(key: string): Promise<string | null> {
-    const value = await this.client.sendCommand(['GETDEL', this.entry(key)]);
-    return typeof value === 'string' ? value : null;
+    const value = await this.call(this.client.sendCommand(['GETDEL', this.entry(key)]));
+    const found = typeof value === 'string' ? value : null;
+    this.report.lookup(found !== null);
+    return found;
   }
 
   async delete(key: string): Promise<void> {
-    await this.client.sendCommand(['DEL', this.entry(key)]);
+    await this.call(this.client.sendCommand(['DEL', this.entry(key)]));
   }
 
   async increment(key: string, ttlMs: number, by = 1): Promise<number> {
     // Whole steps as integers; a fraction (none of jukecord's counters has one) as a float.
     const command = Number.isInteger(by) ? 'INCRBY' : 'INCRBYFLOAT';
-    return Number(await runScript(this.client, INCREMENT, [this.entry(key)], [by, ttl(ttlMs), command]));
+    return Number(await this.call(runScript(this.client, INCREMENT, [this.entry(key)], [by, ttl(ttlMs), command])));
   }
 
   async spend(keys: readonly string[], rate: TokenRate): Promise<number> {
     if (keys.length === 0) return 0;
+    const buckets = keys.map((key) => this.bucket(key));
     return Number(
-      await runScript(
-        this.client,
-        SPEND,
-        keys.map((key) => this.bucket(key)),
-        [rate.perSecond, rate.burst, lifetime(rate)],
-      ),
+      await this.call(runScript(this.client, SPEND, buckets, [rate.perSecond, rate.burst, lifetime(rate)])),
     );
   }
 
   async refund(keys: readonly string[], rate: TokenRate): Promise<void> {
     if (keys.length === 0) return;
-    await runScript(
-      this.client,
-      REFUND,
-      keys.map((key) => this.bucket(key)),
-      [rate.perSecond, rate.burst, lifetime(rate)],
-    );
+    const buckets = keys.map((key) => this.bucket(key));
+    await this.call(runScript(this.client, REFUND, buckets, [rate.perSecond, rate.burst, lifetime(rate)]));
   }
 
   async ping(): Promise<boolean> {
@@ -159,6 +162,16 @@ export class RedisCache implements Cache {
 
   async close(): Promise<void> {
     await this.client.close().catch(() => this.client.destroy());
+  }
+
+  // A call to the server, reported when it fails (the server out of reach, or an error answer); passed on either way.
+  private async call<T>(work: Promise<T>): Promise<T> {
+    try {
+      return await work;
+    } catch (error) {
+      this.report.failed();
+      throw error;
+    }
   }
 
   private entry(key: string): string {

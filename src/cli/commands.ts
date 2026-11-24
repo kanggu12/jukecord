@@ -111,6 +111,15 @@ interface AddJson {
   skippedNotFound?: number;
 }
 
+// A test's checks, one a line, as the doctor shows its own.
+function showChecks(answer: unknown): string {
+  const report = answer as { checks: { name: string; status: string; detail: string }[] };
+  const marks: Record<string, string> = { ok: 'ok  ', warn: 'warn', fail: 'FAIL' };
+  return report.checks
+    .map((check) => `${marks[check.status] ?? check.status}  ${check.name}: ${check.detail}`)
+    .join('\n');
+}
+
 // The text of the words joined, for inputs typed without quotes ("jukecord add never gonna give you up").
 function rest(words: Words, what: string): string {
   const text = words.args.join(' ').trim();
@@ -393,6 +402,14 @@ function showWrapped(answer: unknown): string {
 }
 
 /** Every command, by the operation it runs. */
+// The kinds of database /status names, as people write them.
+const DATABASE_NAMES: Readonly<Record<string, string>> = {
+  sqlite: 'SQLite',
+  postgres: 'PostgreSQL',
+  mysql: 'MySQL',
+  mariadb: 'MariaDB',
+};
+
 export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   'now-playing': { name: 'np', usage: '', summary: 'What is playing', request: () => ({}), show: showPlayer },
   'play-now': {
@@ -656,7 +673,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     summary: 'The version and the connection to Discord',
     request: () => ({}),
     show: (answer) => {
-      const status = answer as { version: string; mode: string; discord: boolean; uptimeMs: number };
+      const status = answer as {
+        version: string;
+        mode: string;
+        discord: boolean;
+        uptimeMs: number;
+        database?: string;
+      };
       const discord =
         status.mode === 'browser-only' ? 'browser-only (no bot)' : status.discord ? 'connected' : 'not connected';
       // Past a day, days and hours ("9 d 0 h"); a clock's hours ran to "216:00:00".
@@ -665,7 +688,9 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
         status.uptimeMs >= day
           ? `${Math.floor(status.uptimeMs / day)} d ${Math.floor((status.uptimeMs % day) / 3_600_000)} h`
           : formatDuration(status.uptimeMs);
-      return `jukecord ${status.version}\nDiscord: ${discord}\nUp for ${up}`;
+      // The kind of database, by its name (a jukecord from before 0.4 does not say it).
+      const database = status.database ? `\nDatabase: ${DATABASE_NAMES[status.database] ?? status.database}` : '';
+      return `jukecord ${status.version}\nDiscord: ${discord}${database}\nUp for ${up}`;
     },
   },
 
@@ -803,6 +828,41 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
       lines.push('', ...Object.entries(report.settings).map(([key, value]) => `${key}: ${value}`));
       return lines.join('\n');
     },
+  },
+  'auth-methods': {
+    name: 'auth methods',
+    usage: '',
+    summary: 'The ways of logging in that are set up here',
+    request: () => ({}),
+    show: (answer) => {
+      const methods = answer as {
+        discord: boolean;
+        sso: { label: string | null } | null;
+        directory: { label: string | null } | null;
+      };
+      return [
+        `Discord: ${methods.discord ? 'on' : 'off'}`,
+        `SSO (OIDC): ${methods.sso ? `on${methods.sso.label ? ` (${methods.sso.label})` : ''}` : 'off'}`,
+        `Directory (LDAP): ${methods.directory ? `on${methods.directory.label ? ` (${methods.directory.label})` : ''}` : 'off'}`,
+      ].join('\n');
+    },
+  },
+  'auth-test-oidc': {
+    name: 'auth test-oidc',
+    usage: '',
+    summary: 'Test logging in through the identity provider (OIDC), logging no one in',
+    request: () => ({ body: {} }),
+    show: (answer) => showChecks(answer),
+  },
+  'auth-test-ldap': {
+    name: 'auth test-ldap',
+    usage: '[username]',
+    summary: 'Test logging in with a directory account (LDAP), and look a name up (no password)',
+    request: (words) => {
+      const username = words.args.join(' ').trim();
+      return { body: username ? { username } : {} };
+    },
+    show: (answer) => showChecks(answer),
   },
   wrapped: {
     name: 'wrapped',

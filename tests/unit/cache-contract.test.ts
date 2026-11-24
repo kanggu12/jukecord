@@ -8,26 +8,27 @@ import { randomBytes } from 'node:crypto';
 import { after, describe, it } from 'node:test';
 import type { Cache } from '../../src/cache/cache.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
-import { MeteredCache } from '../../src/cache/metered.ts';
 import { openCache } from '../../src/cache/open.ts';
 import { RedisCache } from '../../src/cache/redis.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
+import { type SharedCacheReport, sharedCacheReport } from '../../src/metrics/services.ts';
 import { settle, TEST_BUS_URL, testLog } from '../support/bus.ts';
 
-// The adapters to run the contract on, each made fresh under a prefix of its own.
-const adapters: { name: string; make: () => Promise<Cache> }[] = [
-  { name: 'memory', make: async () => new MemoryCache() },
+// The adapters to run the contract on, each made fresh under a prefix of its own (and reporting where it is told).
+const adapters: { name: string; make: (report?: SharedCacheReport) => Promise<Cache> }[] = [
+  { name: 'memory', make: async (report) => new MemoryCache(report ? { report } : {}) },
 ];
 const serverUrl = TEST_BUS_URL;
 if (serverUrl) {
   adapters.push({
     name: 'redis',
-    make: () =>
+    make: (report) =>
       RedisCache.open(serverUrl, {
         prefix: `jukecord-test-${randomBytes(4).toString('hex')}`,
         log: testLog().log,
         service: 'test',
         waitMs: 5000,
+        ...(report ? { report } : {}),
       }),
   });
 }
@@ -177,25 +178,37 @@ describe('the memory cache and the system clock', () => {
   });
 });
 
-describe('the metered cache', () => {
-  it('counts hits, misses, tokens refused and errors, whichever adapter is under it', async () => {
+describe("the shared cache's report", () => {
+  for (const { name, make } of adapters) {
+    it(`${name}: counts every read as found or not, in the same families either way`, async () => {
+      const metrics = new MetricsRegistry();
+      const cache = await make(sharedCacheReport(metrics));
+      try {
+        await cache.set('a', '1', 60_000);
+        await cache.get('a');
+        await cache.get('b');
+        await cache.take('a');
+        await cache.take('a');
+        const text = metrics.render();
+        assert.match(text, /jukecord_shared_cache_lookups_total\{result="hit"\} 2/);
+        assert.match(text, /jukecord_shared_cache_lookups_total\{result="miss"\} 2/);
+        assert.match(text, /jukecord_shared_cache_errors_total 0/);
+      } finally {
+        await cache.close();
+      }
+    });
+  }
+
+  it('redis: counts a call to a server that cannot answer it as a failure, and passes the failure on', {
+    skip: !serverUrl,
+  }, async () => {
     const metrics = new MetricsRegistry();
-    const memory = new MemoryCache();
-    const cache = new MeteredCache(memory, metrics);
-    await cache.set('a', '1', 60_000);
-    await cache.get('a');
-    await cache.get('b');
-    await cache.spend(['x'], { perSecond: 0.01, burst: 1 });
-    await cache.spend(['x'], { perSecond: 0.01, burst: 1 });
-    await memory.close();
+    const cache = await (adapters.find((adapter) => adapter.name === 'redis')?.make(sharedCacheReport(metrics)) ??
+      Promise.reject(new Error('no Redis')));
+    await cache.close();
     await assert.rejects(cache.get('a'));
-    const text = metrics.render();
-    assert.match(text, /jukecord_shared_cache_operations_total\{operation="get",result="hit"\} 1/);
-    assert.match(text, /jukecord_shared_cache_operations_total\{operation="get",result="miss"\} 1/);
-    assert.match(text, /jukecord_shared_cache_operations_total\{operation="spend",result="taken"\} 1/);
-    assert.match(text, /jukecord_shared_cache_operations_total\{operation="spend",result="refused"\} 1/);
-    assert.match(text, /jukecord_shared_cache_operations_total\{operation="get",result="error"\} 1/);
-    assert.equal(cache.kind, 'memory');
+    await assert.rejects(cache.spend(['x'], { perSecond: 1, burst: 1 }));
+    assert.match(metrics.render(), /jukecord_shared_cache_errors_total 2/);
   });
 
   it('is what a process opens: memory unless a server is named', async () => {

@@ -22,11 +22,12 @@ spec:
       protocol: TCP
 {{- $name := include "jukecord.splitSecretName" . }}
 {{- $kept := lookup "v1" "Secret" .Release.Namespace $name | default dict }}
-{{- if or .Values.database.url .Values.bus.url (not .Values.split.existingSecret) }}
+{{- if or .Values.bus.url (not .Values.split.existingSecret) }}
 ---
-# What split mode needs the chart to keep: the database's and the bus's addresses when the values give them, and the
-# internal secret when no Secret of yours holds one. The internal secret is made at the first install and kept on
-# every upgrade (helm template, which sees no cluster, shows a new one each time).
+# What split mode needs the chart to keep: the bus's address when the values give it, and the internal secret when no
+# Secret of yours holds one (the database's address is in the Secret of database-secret.yaml, as in single mode). The
+# internal secret is made at the first install and kept on every upgrade (helm template, which sees no cluster, shows
+# a new one each time).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -35,9 +36,6 @@ metadata:
     {{- include "jukecord.labels" . | nindent 4 }}
 type: Opaque
 data:
-  {{- with .Values.database.url }}
-  database-url: {{ . | b64enc | quote }}
-  {{- end }}
   {{- with .Values.bus.url }}
   bus-url: {{ . | b64enc | quote }}
   {{- end }}

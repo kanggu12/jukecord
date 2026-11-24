@@ -21,8 +21,13 @@ spec:
       labels:
         {{- include "jukecord.partPodLabels" (list . "core") | nindent 8 }}
       annotations:
-        # A changed secret in the values restarts the pod, which reads them only when it starts.
-        checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.database.url .Values.bus.url .Values.split.existingSecret | sha256sum | trunc 16 }}
+        # A changed secret in the values restarts the pod, which reads them only when it starts; so does a changed
+        # database. And where a Prometheus that finds its targets by annotation scrapes (metrics.podAnnotations).
+        checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        {{- include "jukecord.databaseChecksum" . | nindent 8 }}
+        {{- with include "jukecord.scrapeAnnotations" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -102,7 +107,10 @@ spec:
             - name: split
               mountPath: {{ include "jukecord.splitDir" . }}
               readOnly: true
-            {{- if include "jukecord.readsToken" . }}
+            - name: database
+              mountPath: {{ include "jukecord.databaseDir" . }}
+              readOnly: true
+            {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsMetricsToken" .) }}
             - name: discord
               mountPath: {{ include "jukecord.secretDir" . }}
               readOnly: true
@@ -120,18 +128,30 @@ spec:
           emptyDir:
             sizeLimit: 1Gi
         {{- include "jukecord.splitSecrets" . | nindent 8 }}
-        {{- if include "jukecord.readsToken" . }}
-        # The bot's token as a file, readable by jukecord's group only (not optional: see deployment.yaml).
+        {{- include "jukecord.databaseVolume" . | nindent 8 }}
+        {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsMetricsToken" .) }}
+        # The bot's token and the metrics token as files, readable by jukecord's group only (not optional: see
+        # deployment.yaml).
         - name: discord
           projected:
             defaultMode: 0440
             sources:
+              {{- if include "jukecord.readsToken" . }}
               - secret:
                   name: {{ include "jukecord.secretName" . }}
                   items:
                     - key: token
                       path: token
                   optional: false
+              {{- end }}
+              {{- if include "jukecord.readsMetricsToken" . }}
+              - secret:
+                  name: {{ include "jukecord.metricsSecretName" . }}
+                  items:
+                    - key: metricsToken
+                      path: metricsToken
+                  optional: false
+              {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

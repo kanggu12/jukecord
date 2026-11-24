@@ -5,12 +5,14 @@
  * Pages: / (the player), /stats, /stats/wrapped, /logs (the host only) and /login. Moving between them keeps the player screen and
  * the listening bar alive, so the music in this browser does not stop when someone looks at the statistics.
  */
-import { ApiError, api, coverUrl, joinListen, type Player, setCsrf, whenLoggedOut } from './api.ts';
+import { ApiError, api, authMethods, coverUrl, joinListen, type Player, setCsrf, whenLoggedOut } from './api.ts';
 import { avatarUrl, cssUrl, face, fill, guildIconUrl, h, icon, refill } from './dom.ts';
 import { Live } from './live.ts';
 import { logoMark } from './logo.ts';
 import {
   collect,
+  hostLike,
+  isPerson,
   keep,
   liveWhy,
   lookOnlyWhy,
@@ -48,7 +50,7 @@ function routeOf(path: string): Route {
   if (path.startsWith('/stats')) return 'stats';
   // What another app shared (the installed panel is a share target).
   if (path.startsWith('/add')) return 'add';
-  if (path.startsWith('/logs') && state.me?.kind === 'host') return 'logs';
+  if (path.startsWith('/logs') && hostLike()) return 'logs';
   return 'player';
 }
 
@@ -91,7 +93,9 @@ async function boot(): Promise<void> {
     // jukecord not answering: the login page and the frame say so through the live connection below.
   }
   if (location.pathname === '/login') {
-    fill(root, loginPage(state.status, new URLSearchParams(location.search).get('error')));
+    // The ways in that are set up here; without an answer, the page shows what the status says (Discord, the host's).
+    const methods = await authMethods().catch(() => null);
+    fill(root, loginPage(state.status, methods, new URLSearchParams(location.search).get('error')));
     return;
   }
   if (location.pathname === '/listen' && !(await join())) return;
@@ -343,7 +347,7 @@ function frame(): void {
     refill(pill, label, h('span', { class: 'dot' }), label);
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them
     // must survive the status and guild updates.
-    const host = state.me?.kind === 'host';
+    const host = hostLike();
     // A guest has the player alone: no pages to move between.
     nav.hidden = guestLogin;
     refill(
@@ -353,7 +357,7 @@ function frame(): void {
         [
           ['/', 'player', 'music-2', words.player],
           ['/stats', 'stats', 'chart-column', words.stats],
-          ...(state.me?.kind === 'host' ? [['/logs', 'logs', 'scroll-text', words.logs]] : []),
+          ...(host ? [['/logs', 'logs', 'scroll-text', words.logs]] : []),
         ] as [string, Route, 'music-2', string][]
       ).map(([path, name, iconName, text]) =>
         h(
@@ -384,8 +388,9 @@ function frame(): void {
       refill(
         account,
         `${me.id}|${name}|${me.avatar}`,
-        // The host, a friend and a guest have no account: a person in their face, not the letter of a word.
-        face(name, avatarUrl(me.id, me.avatar), 'sm', me.kind !== 'user'),
+        // The host, a friend and a guest have no account: a person in their face, not the letter of a word. A member
+        // has one (at the host's identity provider or directory): their initials.
+        face(name, avatarUrl(me.id, me.avatar), 'sm', !isPerson()),
         // Cut short when long (a Discord name can be 32 letters), with the whole name as its title.
         h('span', { class: 'name', title: name, 'data-clip': 'ok' }, name),
         icon('menu'),

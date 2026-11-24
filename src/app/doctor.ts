@@ -1,8 +1,8 @@
 /**
  * The self-check behind `jukecord doctor`: every part jukecord needs, each with a plain verdict and the fact behind it.
  *
- * "fail" means something does not work now (no ffmpeg with Opus, a database that does not pass SQLite's check, a bot
- * that cannot reach Discord). "warn" means it works but will not for long (the disk nearly full, a yt-dlp older than
+ * "fail" means something does not work now (no ffmpeg with Opus, a database that does not answer or does not pass
+ * SQLite's check, a bot that cannot reach Discord). "warn" means it works but will not for long (the disk nearly full, a yt-dlp older than
  * the newest release, which YouTube's changes break sooner or later). Everything else is "ok" with what was seen.
  */
 import { randomUUID } from 'node:crypto';
@@ -12,7 +12,7 @@ import { type Config, describeConfig, timeOfDay } from '../config.ts';
 import type { MediaCache } from '../media/cache.ts';
 import type { Ffmpeg } from '../media/ffmpeg.ts';
 import type { YtDlp } from '../media/ytdlp.ts';
-import type { Store } from '../store/store.ts';
+import { LATEST_SCHEMA, type Store } from '../store/store.ts';
 import { formatSize } from '../util/units.ts';
 import type { Directory } from './actions.ts';
 import { listBackups } from './backups.ts';
@@ -49,6 +49,10 @@ export interface DoctorOptions {
 
 // Below this much free space the cache cannot take new tracks for long.
 const LOW_DISK = 1024 ** 3;
+
+// A database server further than this (one statement there and back) makes every change wait that long several times
+// over: it works, but slowly.
+const SLOW_DATABASE_MS = 100;
 
 /** Asks GitHub for the newest yt-dlp release tag; null when offline or rate-limited. */
 export async function latestYtDlpRelease(): Promise<string | null> {
@@ -106,9 +110,29 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   });
 
   await check('database', async () => {
-    const answer = await options.store.quickCheck();
+    const { store } = options;
+    // A statement there and back, and the schema the database is at: the same for every kind of database.
+    const health = await store.health();
+    if (!health.ok) return { status: 'fail', detail: `${health.server} does not answer: ${health.error}` };
+    // Another jukecord (a newer one beside this one, on a shared database) moved the schema on while this one ran.
+    if (health.schema !== LATEST_SCHEMA) {
+      return {
+        status: 'fail',
+        detail: `the database is at schema ${health.schema}, this jukecord at ${LATEST_SCHEMA} (run the jukecord that wrote it)`,
+      };
+    }
+    if (store.backend !== 'sqlite') {
+      // A server checks its own files; what it says of its size, and how far it is.
+      const bytes = await store.size();
+      const slow = (health.roundTripMs ?? 0) > SLOW_DATABASE_MS;
+      return {
+        status: slow ? 'warn' : 'ok',
+        detail: `${health.server}, schema ${health.schema}${bytes === null ? '' : `, ${formatSize(bytes)}`}, ${health.roundTripMs} ms there and back${slow ? ' (far: every change waits that long a few times)' : ''}`,
+      };
+    }
+    const answer = await store.quickCheck();
     // The file on this machine, if the database is one (not an in-memory one, the tests').
-    const file = options.store.file;
+    const file = store.file;
     const onDisk = file !== null && file !== ':memory:';
     const bytes = onDisk ? fs.statSync(file).size : 0;
     // What its write-ahead log holds that the file does not yet: on disk too, and folded in now and then.
@@ -122,7 +146,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     return {
       status: healthy ? 'ok' : 'fail',
       detail: healthy
-        ? `schema ${await options.store.schemaVersion()}, ${formatSize(bytes)}${log > 0 ? `, and ${formatSize(log)} in its write-ahead log` : ''}`
+        ? `schema ${health.schema}, ${formatSize(bytes)}${log > 0 ? `, and ${formatSize(log)} in its write-ahead log` : ''}`
         : `SQLite found damage: ${answer ?? 'no answer'} (restore a backup)`,
     };
   });

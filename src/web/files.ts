@@ -240,10 +240,11 @@ export class RemoteFiles implements Files {
   constructor(options: RemoteFilesOptions) {
     this.options = options;
     this.base = new URL(options.coreUrl);
-    this.agent =
-      this.base.protocol === 'https:'
-        ? new https.Agent({ keepAlive: true, maxSockets: 256 })
-        : new http.Agent({ keepAlive: true, maxSockets: 256 });
+    // As many connections as browsers stream through this edge at once, which the edge's own connection caps bound: a
+    // paused <audio> holds its stream for minutes, and a cap here would leave the next browser waiting behind it until
+    // its answer limit ran out. The idle ones kept for the next request: a few dozen.
+    const pool = { keepAlive: true, maxSockets: Number.POSITIVE_INFINITY, maxFreeSockets: 64 };
+    this.agent = this.base.protocol === 'https:' ? new https.Agent(pool) : new http.Agent(pool);
   }
 
   audio(request: FastifyRequest, reply: FastifyReply, guildId: string, trackId: number, mp3: boolean) {

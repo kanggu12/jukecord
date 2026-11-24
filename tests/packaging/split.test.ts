@@ -128,22 +128,55 @@ describe("the chart's split mode", { skip: !have('helm') && 'helm is not install
     // The bot's token stays with the core; behind the Ingress the edges believe one proxy.
     assert.doesNotMatch(edge, /JUKECORD_DISCORD_TOKEN_FILE/);
     assert.match(edge, /name: JUKECORD_TRUST_PROXY\n\s+value: "1"/);
-    // The secrets reach both as files.
+    // The secrets reach both as files: the database's as in single mode (one Secret, key and mount), split mode's own
+    // beside it.
     for (const part of [core, edge]) {
-      for (const name of ['DATABASE_URL', 'BUS_URL', 'INTERNAL_SECRET']) {
+      assert.match(part, /name: JUKECORD_DATABASE_URL_FILE\n\s+value: \/run\/secrets\/jukecord-database\/url\n/);
+      assert.match(
+        part,
+        /secretName: t-jukecord-database\n\s+defaultMode: 0440\n\s+items:\n\s+- key: url\n\s+path: url/,
+      );
+      assert.match(part, /checksum\/database: /);
+      for (const name of ['BUS_URL', 'INTERNAL_SECRET']) {
         assert.match(part, new RegExp(`name: JUKECORD_${name}_FILE\\n\\s+value: /run/secrets/jukecord-split/`));
       }
     }
     assert.doesNotMatch(rendered, /secretKeyRef/);
+    assert.match(object(rendered, 'Secret', 't-jukecord-database'), /url: "postgres:/);
     // The panel's Service finds the edges; the core's finds the core, its internal port and its own.
     assert.match(object(rendered, 'Service', 't-jukecord'), /app\.kubernetes\.io\/component: edge/);
     const coreService = object(rendered, 'Service', 't-jukecord-core');
     assert.match(coreService, /app\.kubernetes\.io\/component: core/);
     assert.match(coreService, /port: 8796/);
-    // The chart's Secret: the addresses given, and an internal secret made for the release.
+    // The chart's Secret of split mode: the bus's address given, and an internal secret made for the release.
     const secret = object(rendered, 'Secret', 't-jukecord-split');
-    for (const key of ['database-url', 'bus-url', 'internal-secret'])
-      assert.match(secret, new RegExp(`^ {2}${key}: "`, 'm'));
+    for (const key of ['bus-url', 'internal-secret']) assert.match(secret, new RegExp(`^ {2}${key}: "`, 'm'));
+    assert.doesNotMatch(secret, /database-url/);
+  });
+
+  it('gives both parts the metrics token, and has the ServiceMonitor scrape the core and every edge', () => {
+    const rendered = render(
+      ...SPLIT,
+      '--set',
+      'metrics.token=0123456789abcdef0123',
+      '--set',
+      'metrics.serviceMonitor.enabled=true',
+      '--set',
+      'metrics.serviceMonitor.force=true',
+      '--set',
+      'metrics.podAnnotations=true',
+    );
+    for (const name of ['t-jukecord-core', 't-jukecord-edge']) {
+      const part = object(rendered, 'Deployment', name);
+      assert.match(part, /name: JUKECORD_METRICS_TOKEN_FILE\n\s+value: \/run\/secrets\/jukecord\/metricsToken/);
+      assert.match(part, /- key: metricsToken\n\s+path: metricsToken/);
+      assert.match(part, /prometheus\.io\/scrape: "true"/);
+    }
+    const monitor = object(rendered, 'ServiceMonitor', 't-jukecord');
+    assert.match(monitor, /key: app\.kubernetes\.io\/component\n\s+operator: In\n\s+values: \[server, core\]/);
+    // The panel's Service (the edges) and the core's both carry what it selects, on their http port.
+    assert.match(object(rendered, 'Service', 't-jukecord'), /app\.kubernetes\.io\/component: server/);
+    assert.match(object(rendered, 'Service', 't-jukecord-core'), /name: http\n\s+port: 8795/);
   });
 
   it("lets only the edges reach the core's internal port, and both reach the database and the bus", () => {
@@ -185,7 +218,7 @@ describe("the chart's split mode", { skip: !have('helm') && 'helm is not install
     );
     assert.doesNotMatch(theirs, /name: t-jukecord-split\n/);
     const core = object(theirs, 'Deployment', 't-jukecord-core');
-    assert.match(core, /name: db\n\s+items:\n\s+- key: url\n\s+path: database-url/);
+    assert.match(core, /secretName: db\n\s+defaultMode: 0440\n\s+items:\n\s+- key: url\n\s+path: url/);
     assert.match(core, /name: internal\n\s+items:\n\s+- key: internalSecret\n\s+path: internal-secret/);
   });
 
@@ -202,8 +235,8 @@ describe("the chart's split mode", { skip: !have('helm') && 'helm is not install
     assert.match(render(...SPLIT, '--set', 'env.JUKECORD_ROLE=edge'), /set by the chart/);
     assert.match(render('--set', 'mode=both'), /don't meet the specifications of the schema/);
     assert.match(
-      render('--set', 'mode=split', '--set', 'database.url=sqlite:/data/x.db'),
-      /don't meet the specifications/,
+      render('--set', 'mode=split', '--set', 'bus.url=redis://v:6379', '--set', 'database.url=sqlite:/data/x.db'),
+      /a SQLite file is one pod's/,
     );
   });
 

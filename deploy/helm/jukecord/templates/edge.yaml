@@ -26,7 +26,12 @@ spec:
       labels:
         {{- include "jukecord.partPodLabels" (list . "edge") | nindent 8 }}
       annotations:
-        checksum/secret: {{ printf "%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.database.url .Values.bus.url .Values.split.existingSecret | sha256sum | trunc 16 }}
+        # As the core's: its secrets, its database, and where a Prometheus that finds its targets by annotation scrapes.
+        checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        {{- include "jukecord.databaseChecksum" . | nindent 8 }}
+        {{- with include "jukecord.scrapeAnnotations" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -108,7 +113,10 @@ spec:
             - name: split
               mountPath: {{ include "jukecord.splitDir" . }}
               readOnly: true
-            {{- if include "jukecord.readsClientSecret" . }}
+            - name: database
+              mountPath: {{ include "jukecord.databaseDir" . }}
+              readOnly: true
+            {{- if or (include "jukecord.readsClientSecret" .) (include "jukecord.readsMetricsToken" .) }}
             - name: discord
               mountPath: {{ include "jukecord.secretDir" . }}
               readOnly: true
@@ -121,18 +129,29 @@ spec:
           emptyDir:
             sizeLimit: 64Mi
         {{- include "jukecord.splitSecrets" . | nindent 8 }}
-        {{- if include "jukecord.readsClientSecret" . }}
-        # The OAuth secret as a file, for logging in with Discord (an edge does the login).
+        {{- include "jukecord.databaseVolume" . | nindent 8 }}
+        {{- if or (include "jukecord.readsClientSecret" .) (include "jukecord.readsMetricsToken" .) }}
+        # The OAuth secret as a file, for logging in with Discord (an edge does the login), and the metrics token.
         - name: discord
           projected:
             defaultMode: 0440
             sources:
+              {{- if include "jukecord.readsClientSecret" . }}
               - secret:
                   name: {{ include "jukecord.secretName" . }}
                   items:
                     - key: clientSecret
                       path: clientSecret
                   optional: true
+              {{- end }}
+              {{- if include "jukecord.readsMetricsToken" . }}
+              - secret:
+                  name: {{ include "jukecord.metricsSecretName" . }}
+                  items:
+                    - key: metricsToken
+                      path: metricsToken
+                  optional: false
+              {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

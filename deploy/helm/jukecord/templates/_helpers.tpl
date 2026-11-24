@@ -75,14 +75,15 @@ app.kubernetes.io/component: {{ index . 1 }}
 {{- printf "%s-edge" (include "jukecord.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/* The Secret the chart makes for split mode: the bus's address, the database's when given here, the internal secret. */}}
+{{/* The Secret the chart makes for split mode: the bus's address when given here, and the internal secret. */}}
 {{- define "jukecord.splitSecretName" -}}
 {{- printf "%s-split" (include "jukecord.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
-Where split mode's secrets are mounted, as files that jukecord reads through JUKECORD_*_FILE: the database's address,
-the bus's, and the internal secret, each from a Secret of the user's or the chart's.
+Where split mode's own secrets are mounted, as files that jukecord reads through JUKECORD_*_FILE: the bus's address
+and the internal secret, each from a Secret of the user's or the chart's. The database's address is mounted as in
+single mode (jukecord.databaseVolume).
 */}}
 {{- define "jukecord.splitDir" -}}/run/secrets/jukecord-split{{- end -}}
 
@@ -94,8 +95,14 @@ the bus's, and the internal secret, each from a Secret of the user's or the char
   value: "8795"
 - name: JUKECORD_DATA_DIR
   value: /data
+# The database's address as a file (it holds a password), as in single mode.
 - name: JUKECORD_DATABASE_URL_FILE
-  value: {{ include "jukecord.splitDir" . }}/database-url
+  value: {{ include "jukecord.databaseDir" . }}/url
+{{- if include "jukecord.readsMetricsToken" . }}
+# The token a scraper from outside the cluster's network shows for /metrics (metrics.token).
+- name: JUKECORD_METRICS_TOKEN_FILE
+  value: {{ include "jukecord.secretDir" . }}/metricsToken
+{{- end }}
 - name: JUKECORD_BUS_URL_FILE
   value: {{ include "jukecord.splitDir" . }}/bus-url
 - name: JUKECORD_INTERNAL_SECRET_FILE
@@ -119,17 +126,12 @@ the bus's, and the internal secret, each from a Secret of the user's or the char
 {{- end }}
 {{- end -}}
 
-{{/* The projected volume of split mode's secrets (the database, the bus, the internal secret). */}}
+{{/* The projected volume of split mode's own secrets (the bus, the internal secret). */}}
 {{- define "jukecord.splitSecrets" -}}
 - name: split
   projected:
     defaultMode: 0440
     sources:
-      - secret:
-          name: {{ .Values.database.existingSecret | default (include "jukecord.splitSecretName" .) }}
-          items:
-            - key: {{ ternary "url" "database-url" (not (empty .Values.database.existingSecret)) }}
-              path: database-url
       - secret:
           name: {{ .Values.bus.existingSecret | default (include "jukecord.splitSecretName" .) }}
           items:
@@ -174,6 +176,83 @@ an ID it is not read at all (a file that is not there would stop jukecord at sta
 {{- if .Values.discord.existingSecret -}}
 {{- if or .Values.discord.clientId (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID")) -}}true{{- end -}}
 {{- else if .Values.discord.clientSecret -}}true
+{{- end -}}
+{{- end -}}
+
+{{/* Whether jukecord reads a metrics token: given in the values, or in an existing Secret (which must hold it). */}}
+{{- define "jukecord.readsMetricsToken" -}}
+{{- if or .Values.metrics.existingSecret .Values.metrics.token -}}true{{- end -}}
+{{- end -}}
+
+{{/* The Secret holding the metrics token: the user's own, or the chart's. */}}
+{{- define "jukecord.metricsSecretName" -}}
+{{- .Values.metrics.existingSecret | default (include "jukecord.fullname" .) -}}
+{{- end -}}
+
+{{/* Whether the chart makes a Secret: for the Discord secrets or the metrics token given in the values. */}}
+{{- define "jukecord.makesSecret" -}}
+{{- if and (not .Values.discord.existingSecret) (or .Values.discord.token .Values.discord.clientSecret) -}}true
+{{- else if and (not .Values.metrics.existingSecret) .Values.metrics.token -}}true
+{{- end -}}
+{{- end -}}
+
+{{/* Whether there is a file to mount from a Secret at all. */}}
+{{- define "jukecord.mountsSecrets" -}}
+{{- if or (include "jukecord.readsToken" .) (include "jukecord.readsClientSecret" .) (include "jukecord.readsMetricsToken" .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Whether to make the ServiceMonitor: asked for, and the cluster has the Prometheus Operator's CRD (helm install and
+upgrade ask the cluster), or forced (helm template asks none, and would never make it).
+*/}}
+{{- define "jukecord.serviceMonitor" -}}
+{{- $monitor := .Values.metrics.serviceMonitor -}}
+{{- if and $monitor.enabled (or $monitor.force (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) -}}true{{- end -}}
+{{- end -}}
+
+{{/* Whether jukecord reads its database's address from a Secret: given in the values, or in a Secret of yours. */}}
+{{- define "jukecord.readsDatabase" -}}
+{{- if or .Values.database.url .Values.database.existingSecret -}}true{{- end -}}
+{{- end -}}
+
+{{/* The Secret holding the database's address under the key url: the user's own, or the chart's. */}}
+{{- define "jukecord.databaseSecretName" -}}
+{{- .Values.database.existingSecret | default (printf "%s-database" (include "jukecord.fullname" .) | trunc 63 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/* Where the database's address is mounted as a file; jukecord reads it through JUKECORD_DATABASE_URL_FILE. */}}
+{{- define "jukecord.databaseDir" -}}/run/secrets/jukecord-database{{- end -}}
+
+{{/*
+The database's address as a file, readable by jukecord's group (the pod's fsGroup) only: one volume for the one pod and
+for both parts of split mode. Not optional: a Secret without it (or a misspelt name) keeps the pod from starting, with
+an event that names the key.
+*/}}
+{{- define "jukecord.databaseVolume" -}}
+- name: database
+  secret:
+    secretName: {{ include "jukecord.databaseSecretName" . }}
+    defaultMode: 0440
+    items:
+      - key: url
+        path: url
+{{- end -}}
+
+{{/* The pod's annotations for a changed database (the pod opens it only when it starts) and for a Prometheus that
+finds its targets by annotation (metrics.podAnnotations; one set in podAnnotations wins). */}}
+{{- define "jukecord.databaseChecksum" -}}
+checksum/database: {{ printf "%s/%s" .Values.database.url .Values.database.existingSecret | sha256sum | trunc 16 }}
+{{- end -}}
+
+{{- define "jukecord.scrapeAnnotations" -}}
+{{- if .Values.metrics.podAnnotations -}}
+{{- $lines := list -}}
+{{- range $key, $value := dict "prometheus.io/scrape" "true" "prometheus.io/port" "8795" "prometheus.io/path" "/metrics" -}}
+{{- if not (hasKey ($.Values.podAnnotations | default dict) $key) -}}
+{{- $lines = append $lines (printf "%s: %s" $key ($value | quote)) -}}
+{{- end -}}
+{{- end -}}
+{{- join "\n" $lines -}}
 {{- end -}}
 {{- end -}}
 
@@ -225,16 +304,16 @@ without a host or with a wildcard host, which names no single address. The Deplo
 
 {{/* Values that cannot work together, refused with a message that says what to change. */}}
 {{- define "jukecord.validate" -}}
-{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" "JUKECORD_ROLE" "mode" "JUKECORD_BUS_URL" "bus.url or bus.existingSecret" "JUKECORD_BUS_URL_FILE" "bus.url or bus.existingSecret" "JUKECORD_INTERNAL_SECRET" "split.existingSecret" "JUKECORD_INTERNAL_SECRET_FILE" "split.existingSecret" "JUKECORD_INTERNAL_PORT" "the core's Service" "JUKECORD_CORE_URL" "the core's Service" -}}
+{{- $chartSets := dict "JUKECORD_HOST" "service.port and the pod's address" "JUKECORD_PORT" "service.port" "JUKECORD_DATA_DIR" "persistence" "JUKECORD_DISCORD_TOKEN_FILE" "discord.token or discord.existingSecret" "JUKECORD_DISCORD_CLIENT_SECRET_FILE" "discord.clientSecret or discord.existingSecret" "JUKECORD_METRICS_TOKEN_FILE" "metrics.token or metrics.existingSecret" "JUKECORD_DATABASE_URL_FILE" "database.url or database.existingSecret" "JUKECORD_ROLE" "mode" "JUKECORD_BUS_URL" "bus.url or bus.existingSecret" "JUKECORD_BUS_URL_FILE" "bus.url or bus.existingSecret" "JUKECORD_INTERNAL_SECRET" "split.existingSecret" "JUKECORD_INTERNAL_SECRET_FILE" "split.existingSecret" "JUKECORD_INTERNAL_PORT" "the core's Service" "JUKECORD_CORE_URL" "the core's Service" -}}
 {{- if eq .Values.mode "split" -}}
 {{- if not (or .Values.database.url .Values.database.existingSecret) -}}
 {{- fail "mode: split needs a database every service shares: database.url (postgres://... or mysql://...) or database.existingSecret (a Secret with the key url)." -}}
 {{- end -}}
+{{- if hasPrefix "sqlite:" (toString .Values.database.url) -}}
+{{- fail "mode: split needs a database every service shares, and a SQLite file is one pod's: database.url takes a postgres:// or mysql:// address." -}}
+{{- end -}}
 {{- if not (or .Values.bus.url .Values.bus.existingSecret) -}}
 {{- fail "mode: split needs the Redis or Valkey server the services talk through: bus.url (redis://...) or bus.existingSecret (a Secret with the key url)." -}}
-{{- end -}}
-{{- if and .Values.database.url .Values.database.existingSecret -}}
-{{- fail "database.url and database.existingSecret are both set; set one of them." -}}
 {{- end -}}
 {{- if and .Values.bus.url .Values.bus.existingSecret -}}
 {{- fail "bus.url and bus.existingSecret are both set; set one of them." -}}
@@ -249,6 +328,12 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- if has $name (list "JUKECORD_DISCORD_TOKEN" "JUKECORD_DISCORD_CLIENT_SECRET") -}}
 {{- fail (printf "%s: %s is not set here. The bot's token goes in discord.token and the OAuth secret in discord.clientSecret, or both in a Secret named by discord.existingSecret; the chart gives them to jukecord as files." $where $name) -}}
 {{- end -}}
+{{- if eq $name "JUKECORD_METRICS_TOKEN" -}}
+{{- fail (printf "%s: JUKECORD_METRICS_TOKEN is not set here. The metrics token goes in metrics.token, or in a Secret named by metrics.existingSecret (key metricsToken); the chart gives it to jukecord as a file and to the ServiceMonitor." $where) -}}
+{{- end -}}
+{{- if eq $name "JUKECORD_DATABASE_URL" -}}
+{{- fail (printf "%s: JUKECORD_DATABASE_URL is not set here. The database's address goes in database.url, or under the key url of a Secret named by database.existingSecret; the chart gives it to jukecord as a file (it holds a password)." $where) -}}
+{{- end -}}
 {{- if hasKey $chartSets $name -}}
 {{- fail (printf "%s: %s is set by the chart (from %s); leave it out." $where $name (index $chartSets $name)) -}}
 {{- end -}}
@@ -261,8 +346,14 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- if and .Values.discord.clientSecret (not (or .Values.discord.clientId (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID")))) -}}
 {{- fail "discord.clientSecret is set without discord.clientId. Logging in with Discord needs both: the application's ID (discord.clientId, quoted) and its OAuth2 secret; leave both empty for host logins only." -}}
 {{- end -}}
+{{- if and .Values.database.url .Values.database.existingSecret -}}
+{{- fail "database.url and database.existingSecret are both set; set one: the address in the values, or under the key url of a Secret of yours." -}}
+{{- end -}}
 {{- if and .Values.discord.existingSecret (or .Values.discord.token .Values.discord.clientSecret) -}}
 {{- fail "discord.existingSecret is set together with discord.token or discord.clientSecret, which would be ignored. Put the token and the OAuth secret in the Secret named by existingSecret and leave those two empty, or leave existingSecret empty to have the chart make the Secret from them." -}}
+{{- end -}}
+{{- if and .Values.metrics.existingSecret .Values.metrics.token -}}
+{{- fail "metrics.existingSecret is set together with metrics.token, which would be ignored. Put the token in the Secret named by existingSecret (key metricsToken) and leave metrics.token empty, or leave existingSecret empty to have the chart make the Secret from it." -}}
 {{- end -}}
 {{- end -}}
 
@@ -286,11 +377,21 @@ networks, and the database and the bus (egressTo, or the release's namespace on 
         except:
           - fc00::/7
           - fe80::/10
+{{ include "jukecord.serviceEgress" . }}
+{{- end }}
+
+{{/*
+The rule out to what jukecord's pods use in the cluster's private range, the same in both modes: the database, and
+in split mode the bus. The rules given (networkPolicy.egressTo), or any pod of the release's namespace on PostgreSQL's
+and MySQL's ports (and Redis's in split mode). None for the one pod on its SQLite file.
+*/}}
+{{- define "jukecord.serviceEgress" -}}
+{{- if or (include "jukecord.readsDatabase" .) (eq .Values.mode "split") }}
 {{- with .Values.networkPolicy.egressTo }}
-# The database and the bus, where networkPolicy.egressTo says they are.
+# Where networkPolicy.egressTo says the database{{ if eq $.Values.mode "split" }} and the bus are{{ else }} is{{ end }}.
 {{ toYaml . }}
 {{- else }}
-# The database and the bus, in the release's namespace (networkPolicy.egressTo names them elsewhere).
+# The database{{ if eq .Values.mode "split" }} and the bus{{ end }}, in the release's namespace (networkPolicy.egressTo names {{ if eq .Values.mode "split" }}them{{ else }}it{{ end }} elsewhere).
 - to:
     - podSelector: {}
   ports:
@@ -298,7 +399,10 @@ networks, and the database and the bus (egressTo, or the release's namespace on 
       protocol: TCP
     - port: 3306
       protocol: TCP
+    {{- if eq .Values.mode "split" }}
     - port: 6379
       protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}
+{{- end -}}

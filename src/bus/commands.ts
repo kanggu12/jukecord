@@ -15,7 +15,8 @@
 import { randomBytes } from 'node:crypto';
 import { ActionError } from '../app/actions.ts';
 import type { Logger } from '../log.ts';
-import { type Counter, type Histogram, type Metrics, NO_METRICS } from '../metrics/registry.ts';
+import { type Counter, type Metrics, NO_METRICS } from '../metrics/registry.ts';
+import { type BusReport, type CommandOutcome, NO_BUS_REPORT } from '../metrics/services.ts';
 import { decode, decodeArgs, encode, encodeArgs, fromWire, toWire } from './codec.ts';
 import type { BusNames, BusTransport } from './transport.ts';
 
@@ -46,7 +47,8 @@ export interface CommandClientOptions {
   /** This caller's name, which its answers are sent to (see serviceId). */
   readonly caller: string;
   readonly log: Logger;
-  readonly metrics?: Metrics;
+  /** Where each call is reported when it ends: how long it took, and how it ended (src/metrics/services.ts). */
+  readonly report?: BusReport;
   /** How long each command may take, by name (default COMMAND_LIMIT_MS). */
   readonly limitMs?: (command: string) => number;
   /** The clock the deadlines are on (wall time: the core compares them with its own). */
@@ -59,7 +61,7 @@ interface Waiting {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
   readonly timer: NodeJS.Timeout;
-  readonly done: (outcome: string) => void;
+  readonly done: (outcome: CommandOutcome) => void;
   readonly cleanup: () => void;
 }
 
@@ -68,8 +70,7 @@ export class CommandClient {
   private readonly options: CommandClientOptions;
   private readonly now: () => number;
   private readonly waiting = new Map<string, Waiting>();
-  private readonly calls: Counter;
-  private readonly seconds: Histogram;
+  private readonly report: BusReport;
   private sequence = 0;
   private stop: (() => Promise<void>) | null = null;
   // Answers that could not be read, told at most once a minute.
@@ -78,16 +79,7 @@ export class CommandClient {
   private constructor(options: CommandClientOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
-    const metrics = options.metrics ?? NO_METRICS;
-    this.calls = metrics.counter('jukecord_bus_commands_total', 'Commands an edge asked of the core, by outcome.', [
-      'command',
-      'outcome',
-    ]);
-    this.seconds = metrics.histogram(
-      'jukecord_bus_command_duration_seconds',
-      'How long the core took to answer a command, as the edge waited for it.',
-      ['command'],
-    );
+    this.report = options.report ?? NO_BUS_REPORT;
   }
 
   /** Starts listening for answers, then takes calls. */
@@ -117,9 +109,8 @@ export class CommandClient {
     const id = `${this.sequence}`;
     const started = performance.now();
     return new Promise<T>((resolve, reject) => {
-      const finish = (outcome: string) => {
-        this.calls.inc({ command, outcome });
-        this.seconds.observe((performance.now() - started) / 1000, { command });
+      const finish = (outcome: CommandOutcome) => {
+        this.report.command(command, (performance.now() - started) / 1000, outcome);
       };
       const onAbort = () => {
         const waiting = this.settle(id);
@@ -214,10 +205,9 @@ export class CommandClient {
       waiting.resolve(message.value);
       return;
     }
-    const error = fromWire(message.error, waiting.command);
-    // A refusal is an answer like any other; a failure of the core's is counted apart.
-    waiting.done(error instanceof ActionError ? 'refused' : 'failed');
-    waiting.reject(error);
+    // A refusal (the action's own) or a failure of the core's: an error answer either way.
+    waiting.done('error');
+    waiting.reject(fromWire(message.error, waiting.command));
   }
 
   // Takes a call out of the waiting ones (once: whichever of the answer, the time limit or the abort comes first).

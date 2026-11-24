@@ -302,7 +302,8 @@ export interface Guild {
   mayManage: boolean;
 }
 export interface Me {
-  kind: 'host' | 'user' | 'friend' | 'guest';
+  /** member: logged in through the host's identity provider (OIDC) or directory (LDAP). */
+  kind: 'host' | 'user' | 'friend' | 'member' | 'guest';
   id: string | null;
   name: string;
   avatar: string | null;
@@ -311,6 +312,14 @@ export interface Me {
   bot: { id: string; name: string; avatar: string | null } | null;
   /** A guest's server, and when its listening link stops working. */
   guest: { guildId: string; expiresAt: number } | null;
+  /** For a member, and a Discord user who logged in through OIDC: where they logged in, and their groups' level. */
+  member: { provider: 'oidc' | 'ldap'; level: 'admin' | 'control' | 'read' } | null;
+}
+/** The ways of logging in that are set up here, with the words the host chose for their keys. */
+export interface AuthMethods {
+  discord: boolean;
+  sso: { label: string | null } | null;
+  directory: { label: string | null } | null;
 }
 export interface Token {
   id: number;
@@ -474,13 +483,44 @@ export const api = {
     request<Imported>('POST', `${g(guild)}/playlists/import`, { name, content }),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
-/** Ends the login (the cookie goes) and shows the login page. */
-export async function logOut(): Promise<void> {
-  await fetch('/auth/logout', {
+/**
+ * Ends the login (the cookie goes). Returns where to go next: the identity provider's logout, for a login through
+ * SSO when the provider offers one (it sends the browser back to the login page), or null for the login page.
+ */
+export async function logOut(): Promise<string | null> {
+  const response = await fetch('/auth/logout', {
     method: 'POST',
     headers: csrf ? { 'x-jukecord-csrf': csrf } : {},
     credentials: 'same-origin',
   });
+  if (response.status !== 200) return null;
+  const answer = (await response.json().catch(() => null)) as { next?: unknown } | null;
+  // Only an address of the web: anything else in the answer is not followed.
+  return typeof answer?.next === 'string' && /^https?:\/\//.test(answer.next) ? answer.next : null;
+}
+
+/** The ways of logging in that are set up here (the login page's keys). */
+export async function authMethods(): Promise<AuthMethods> {
+  return request<AuthMethods>('GET', '/auth/methods');
+}
+
+/**
+ * Logs in with a directory account: where to go once in, or ApiError with the code of the refusal (wrong-password,
+ * password-expired, account-disabled, no-group, too-many, directory-down, ambiguous, invalid).
+ */
+export async function directoryLogin(username: string, password: string, next: string): Promise<string> {
+  const response = await fetch('/auth/directory', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ username, password, next }),
+  });
+  const json = (await response.json().catch(() => null)) as {
+    next?: unknown;
+    error?: { code?: string; message?: string };
+  } | null;
+  if (response.ok) return typeof json?.next === 'string' ? json.next : '/';
+  throw new ApiError(json?.error?.code ?? String(response.status), json?.error?.message ?? '', response.status);
 }
 
 /**
