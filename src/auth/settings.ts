@@ -9,6 +9,7 @@
  */
 import path from 'node:path';
 import type { ConfigFiles } from '../config.ts';
+import { definition, SETTINGS } from '../settings/definitions.ts';
 import { parseDuration } from '../util/units.ts';
 
 /** What a member may do: what the host may (admin), change the music everywhere (control), or look and listen. */
@@ -76,48 +77,32 @@ export interface AuthSettings {
   readonly ldap: LdapSettings | null;
 }
 
-/** Every variable read here, for src/config.ts's list of the settings it knows. */
-export const AUTH_VARIABLES: readonly string[] = [
-  'JUKECORD_OIDC_ISSUER',
-  'JUKECORD_OIDC_CLIENT_ID',
-  'JUKECORD_OIDC_CLIENT_SECRET',
-  'JUKECORD_OIDC_CLIENT_SECRET_FILE',
-  'JUKECORD_OIDC_SCOPES',
-  'JUKECORD_OIDC_GROUPS_CLAIM',
-  'JUKECORD_OIDC_ADMIN_GROUPS',
-  'JUKECORD_OIDC_CONTROL_GROUPS',
-  'JUKECORD_OIDC_READ_GROUPS',
-  'JUKECORD_OIDC_LABEL',
-  'JUKECORD_OIDC_DISCORD_CLAIM',
-  'JUKECORD_LDAP_URL',
-  'JUKECORD_LDAP_STARTTLS',
-  'JUKECORD_LDAP_CA_FILE',
-  'JUKECORD_LDAP_BIND_DN',
-  'JUKECORD_LDAP_BIND_PASSWORD',
-  'JUKECORD_LDAP_BIND_PASSWORD_FILE',
-  'JUKECORD_LDAP_BASE_DN',
-  'JUKECORD_LDAP_USER_FILTER',
-  'JUKECORD_LDAP_GROUP_FILTER',
-  'JUKECORD_LDAP_GROUP_BASE_DN',
-  'JUKECORD_LDAP_NESTED_GROUPS',
-  'JUKECORD_LDAP_ADMIN_GROUPS',
-  'JUKECORD_LDAP_CONTROL_GROUPS',
-  'JUKECORD_LDAP_READ_GROUPS',
-  'JUKECORD_LDAP_TIMEOUT',
-  'JUKECORD_LDAP_LABEL',
-];
+// The settings read here: the logins' SSO and directory parts of the settings table (Discord's login is config.ts's).
+const LOGIN_SETTINGS = SETTINGS.filter(
+  (setting) => setting.group === 'logins' && (setting.part === 'sso' || setting.part === 'directory'),
+);
+
+/** Every variable read here (each setting and the _FILE twin of each secret), for src/config.ts's list it knows. */
+export const AUTH_VARIABLES: readonly string[] = LOGIN_SETTINGS.flatMap((setting) =>
+  setting.file ? [setting.name, `${setting.name}_FILE`] : [setting.name],
+);
 
 /** The secrets among them: never shown, only whether they are set. */
-export const AUTH_SECRETS: readonly string[] = ['JUKECORD_OIDC_CLIENT_SECRET', 'JUKECORD_LDAP_BIND_PASSWORD'];
+export const AUTH_SECRETS: readonly string[] = LOGIN_SETTINGS.filter((setting) => setting.secret).map(
+  (setting) => setting.name,
+);
 
 /** The scopes asked for when none are set: who the person is and their name. */
-export const DEFAULT_SCOPES: readonly string[] = ['openid', 'profile'];
+export const DEFAULT_SCOPES: readonly string[] = (definition('JUKECORD_OIDC_SCOPES').default ?? '').split(' ');
 
 /** The filter that finds a person when none is set: OpenLDAP's and FreeIPA's user ID (AD's is sAMAccountName). */
-export const DEFAULT_USER_FILTER = '(uid={username})';
+export const DEFAULT_USER_FILTER = definition('JUKECORD_LDAP_USER_FILTER').default ?? '';
 
-// The longest words a login key takes before they would break over two lines on a phone.
-const LABEL_MAX = 40;
+// The longest words a login key takes before they would break over two lines on a phone (the table's, for both keys).
+const LABEL_MAX = definition('JUKECORD_OIDC_LABEL').maxLength ?? 0;
+
+// The directory's time limit: its default and its range, from the table.
+const LDAP_TIMEOUT = definition('JUKECORD_LDAP_TIMEOUT');
 
 /**
  * Splits a list of groups: OIDC's at commas and semicolons; LDAP's at semicolons, because a DN has commas in it, and
@@ -262,7 +247,7 @@ export function readAuthSettings(
       clientId: clientId ?? '',
       clientSecret: secret('JUKECORD_OIDC_CLIENT_SECRET'),
       scopes,
-      groupsClaim: claimPath('JUKECORD_OIDC_GROUPS_CLAIM') ?? 'groups',
+      groupsClaim: claimPath('JUKECORD_OIDC_GROUPS_CLAIM') ?? definition('JUKECORD_OIDC_GROUPS_CLAIM').default ?? '',
       groups: levelGroups('JUKECORD_OIDC', 'oidc'),
       label: label('JUKECORD_OIDC_LABEL'),
       discordClaim: claimPath('JUKECORD_OIDC_DISCORD_CLAIM'),
@@ -349,14 +334,14 @@ export function readAuthSettings(
       problems.push(
         'JUKECORD_LDAP_GROUP_BASE_DN is where groups are searched: set JUKECORD_LDAP_GROUP_FILTER or JUKECORD_LDAP_NESTED_GROUPS too',
       );
-    let timeoutMs = 10_000;
+    let timeoutMs = parseDuration(LDAP_TIMEOUT.default ?? '0');
     const timeout = get('JUKECORD_LDAP_TIMEOUT');
     if (timeout !== null) {
       try {
         timeoutMs = parseDuration(timeout);
         // Under a second a busy directory fails people; over a minute a login page waits too long to say so.
-        if (timeoutMs < 1000 || timeoutMs > 60_000)
-          problems.push(`JUKECORD_LDAP_TIMEOUT: ${timeout} is outside 1s-60s`);
+        if (timeoutMs < parseDuration(LDAP_TIMEOUT.min ?? '0') || timeoutMs > parseDuration(LDAP_TIMEOUT.max ?? '0'))
+          problems.push(`JUKECORD_LDAP_TIMEOUT: ${timeout} is outside ${LDAP_TIMEOUT.min}-${LDAP_TIMEOUT.max}`);
       } catch (error) {
         problems.push(`JUKECORD_LDAP_TIMEOUT: ${error instanceof Error ? error.message : String(error)}`);
       }

@@ -13,8 +13,10 @@ import { describe, it } from 'node:test';
 import { LIVE_ACTIONS, PANEL_ACTIONS } from '../../panel/src/api.ts';
 import { withTable } from '../../scripts/api-doc.ts';
 import { notesFor } from '../../scripts/release-notes.ts';
+import { withSettingsTable } from '../../scripts/settings-doc.ts';
 import { ACTIONS } from '../../src/app/actions.ts';
 import { COMMANDS } from '../../src/cli/commands.ts';
+import { DEPLOYMENT_VARIABLES, KNOWN_VARIABLES } from '../../src/settings/definitions.ts';
 import { VERSION } from '../../src/version.ts';
 
 const read = (file: string) => fs.readFileSync(file, 'utf8');
@@ -55,21 +57,23 @@ describe('documents', () => {
     assert.equal(withTable(document), document, 'docs/API.md is out of date: node scripts/api-doc.ts');
   });
 
-  it('lists in .env.example only settings jukecord knows', () => {
-    // The settings of logging in through OIDC and LDAP are read in their own module.
-    const config = read('src/config.ts') + read('src/auth/settings.ts');
-    for (const name of read('.env.example').match(/^JUKECORD_[A-Z_]+(?==)/gm) ?? []) {
-      assert.ok(config.includes(`'${name}'`), `${name} in .env.example is not a setting`);
+  it('lists in the settings examples only settings jukecord knows', () => {
+    // Every name of the settings table (and its _FILE twins, and the two Compose reads).
+    for (const example of ['.env.example', 'deploy/bundle/env.example']) {
+      for (const name of read(example).match(/^JUKECORD_[A-Z_]+(?==)/gm) ?? []) {
+        assert.ok(KNOWN_VARIABLES.includes(name), `${name} in ${example} is not a setting`);
+      }
     }
   });
 
-  it('documents every setting jukecord reads', () => {
+  it('documents every setting jukecord reads (the guide’s table is made from the settings table)', () => {
     const guide = read('docs/README.md');
-    const known = [...read('src/config.ts').matchAll(/^ {2}'(JUKECORD_[A-Z_]+)',$/gm)].map((match) => match[1] ?? '');
+    assert.equal(withSettingsTable(guide), guide, 'docs/README.md is out of date: node scripts/settings-doc.ts');
     // The two read by compose.yaml only are in INSTALL.md.
-    for (const name of known.filter((setting) => !['JUKECORD_BIND', 'JUKECORD_IMAGE'].includes(setting))) {
+    for (const name of KNOWN_VARIABLES.filter((setting) => !DEPLOYMENT_VARIABLES.includes(setting))) {
       assert.ok(guide.includes(name), `${name} is missing from the settings table in docs/README.md`);
     }
+    for (const name of DEPLOYMENT_VARIABLES) assert.ok(read('docs/INSTALL.md').includes(name), name);
   });
 
   it('links only to files that exist', () => {

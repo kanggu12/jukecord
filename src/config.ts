@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AUTH_VARIABLES, type AuthSettings, describeAuth, readAuthSettings } from './auth/settings.ts';
 import { LINK_SERVICES, type LinkService } from './media/links.ts';
+import { definition, KNOWN_VARIABLES } from './settings/definitions.ts';
 import { type DatabaseAddress, defaultSqliteFile, describeAddress, parseDatabaseAddress } from './store/address.ts';
 import { parseDuration, parseSize, UnitError } from './util/units.ts';
 
@@ -16,6 +17,9 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 /** How the console's lines are written: readable text, or one JSON object per line (for a log shipper). */
 export type LogFormat = 'text' | 'json';
+
+/** What starts jukecord again when it restarts itself (see src/settings/restart.ts); none: nothing does. */
+export type Supervisor = 'docker' | 'kubernetes' | 'systemd' | 'launcher' | 'none';
 
 /** The settings the rest of jukecord reads. Built once by loadConfig and not changed afterwards. */
 export interface Config {
@@ -114,6 +118,8 @@ export interface Config {
   };
   /** Logging in through the host's identity provider (OIDC) and directory (LDAP, Active Directory); each null when off. */
   readonly auth: AuthSettings;
+  /** What starts jukecord again when it restarts itself, as JUKECORD_SUPERVISOR says; null: found out at the start. */
+  readonly supervisor: Supervisor | null;
 }
 
 /** Settings that cannot be used; `problems` lists every one, each naming the variable. */
@@ -129,57 +135,25 @@ export class ConfigError extends Error {
 }
 
 /** The default port: chosen not to clash with the other services that run on the same machines (8777-8798 taken). */
-export const DEFAULT_PORT = 8795;
+export const DEFAULT_PORT = Number(definition('JUKECORD_PORT').default);
 
-// Every variable jukecord reads. Anything else that starts with JUKECORD_ is reported as a probable typo.
-const KNOWN = new Set([
-  'JUKECORD_DATA_DIR',
-  'JUKECORD_DATABASE_URL',
-  'JUKECORD_DATABASE_URL_FILE',
-  'JUKECORD_DATABASE_POOL',
-  'JUKECORD_HOST',
-  'JUKECORD_PORT',
-  'JUKECORD_PUBLIC_URL',
-  'JUKECORD_DISCORD_TOKEN',
-  'JUKECORD_DISCORD_CLIENT_ID',
-  'JUKECORD_DISCORD_CLIENT_SECRET',
-  'JUKECORD_YTDLP',
-  'JUKECORD_FFMPEG',
-  'JUKECORD_CACHE_MAX',
-  'JUKECORD_FETCH_TIMEOUT',
-  'JUKECORD_PREFETCH',
-  'JUKECORD_LOG_LEVEL',
-  'JUKECORD_LOG_FORMAT',
-  'JUKECORD_LOG_MAX',
-  'JUKECORD_LOG_FILES',
-  'JUKECORD_DISCORD_TOKEN_FILE',
-  'JUKECORD_DISCORD_CLIENT_SECRET_FILE',
-  'JUKECORD_TRACK_MAX',
-  'JUKECORD_YTDLP_COOKIES',
-  'JUKECORD_QUEUE_MAX',
-  'JUKECORD_LIVE_MAX',
-  'JUKECORD_VOICE_IDLE',
-  'JUKECORD_TRUST_PROXY',
-  'JUKECORD_ALLOW_PRIVATE_ADDRESSES',
-  'JUKECORD_REST_AFTER',
-  'JUKECORD_BACKUP_AT',
-  'JUKECORD_BACKUP_KEEP',
-  'JUKECORD_LYRICS',
-  // Read by compose.yaml (the published address and the image), not by jukecord; known so they raise no warning
-  // when .env passes them through.
-  'JUKECORD_BIND',
-  'JUKECORD_IMAGE',
-  // Set by compose.yaml from JUKECORD_PORT: the port outside the container.
-  'JUKECORD_PUBLISHED_PORT',
-  'JUKECORD_LINK_SERVICES',
-  'JUKECORD_SPOTIFY_CLIENT_ID',
-  'JUKECORD_SPOTIFY_CLIENT_SECRET',
-  'JUKECORD_SPOTIFY_CLIENT_SECRET_FILE',
-  'JUKECORD_METRICS_TOKEN',
-  'JUKECORD_METRICS_TOKEN_FILE',
-  // Logging in through OIDC and LDAP (src/auth/settings.ts reads them).
-  ...AUTH_VARIABLES,
-]);
+// Every variable jukecord reads (each setting of the table, the _FILE twins of the secrets, the login settings that
+// src/auth/settings.ts reads, and the two Compose reads alone). Anything else that starts with JUKECORD_ is reported as
+// a probable typo.
+const KNOWN = new Set([...KNOWN_VARIABLES, ...AUTH_VARIABLES]);
+
+// A setting's default as the table writes it (each of the settings read below has one).
+function defaultText(name: string): string {
+  const text = definition(name).default;
+  if (text === null) throw new Error(`${name} has no default in the settings table`);
+  return text;
+}
+
+// A whole number setting's default, smallest and largest, from the table.
+function wholeOf(name: string): { readonly fallback: number; readonly min: number; readonly max: number } {
+  const setting = definition(name);
+  return { fallback: Number(setting.default), min: Number(setting.min), max: Number(setting.max) };
+}
 
 /** File access loadConfig needs, passed in so tests can give it files without touching the disk. */
 export interface ConfigFiles {
@@ -246,13 +220,19 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     };
 
   // The data directory: relative paths are taken from the working directory, so `./data` works in a checkout.
-  const dataDir = path.resolve(cwd, get('JUKECORD_DATA_DIR') ?? 'data');
+  const dataDir = path.resolve(cwd, get('JUKECORD_DATA_DIR') ?? defaultText('JUKECORD_DATA_DIR'));
 
   // 127.0.0.1 unless told otherwise: on a PC the panel should not be open to the network by surprise. The
   // container image sets 0.0.0.0, and compose publishes the port on 127.0.0.1 only.
-  const host = get('JUKECORD_HOST') ?? '127.0.0.1';
-  const port = read('JUKECORD_PORT', DEFAULT_PORT, integer(1, 65535));
-  const publishedPort = read('JUKECORD_PUBLISHED_PORT', port, integer(1, 65535));
+  const host = get('JUKECORD_HOST') ?? defaultText('JUKECORD_HOST');
+  // A whole number between the table's limits, its default when unset.
+  const whole = (name: string, fallback?: number): number => {
+    const { fallback: tableDefault, min, max } = wholeOf(name);
+    return read(name, fallback ?? tableDefault, integer(min, max));
+  };
+  const port = whole('JUKECORD_PORT');
+  // The port as this machine reaches it: the port itself unless Compose says otherwise.
+  const publishedPort = whole('JUKECORD_PUBLISHED_PORT', port);
 
   // The public address must be a full http(s) URL; login redirects are built from it, so a bare host name would
   // produce redirects Discord refuses.
@@ -270,15 +250,20 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
 
   // Behind a reverse proxy or an Ingress the client's address and https come in X-Forwarded-* headers, which are
   // believed only when this says so: otherwise anyone could claim any address and dodge the login limiter.
-  const trustProxy = read('JUKECORD_TRUST_PROXY', false as boolean | number | string, (text) => {
-    const value = text.toLowerCase();
-    if (value === 'true' || value === 'yes') return true;
-    if (value === 'false' || value === 'no') return false;
-    if (/^\d+$/.test(value)) return integer(1, 10)(value);
-    // Otherwise a list of addresses or ranges, which proxy-addr checks; refuse anything with characters it cannot be.
-    if (!/^[0-9a-f.:/,\s]+$/i.test(value)) throw new Error(`"${text}" is not true, false, a hop count or addresses`);
-    return text.replace(/\s+/g, '');
-  });
+  const trustProxy = read<boolean | number | string>(
+    'JUKECORD_TRUST_PROXY',
+    // The table's default is false: no header is believed.
+    defaultText('JUKECORD_TRUST_PROXY') === 'true',
+    (text) => {
+      const value = text.toLowerCase();
+      if (value === 'true' || value === 'yes') return true;
+      if (value === 'false' || value === 'no') return false;
+      if (/^\d+$/.test(value)) return integer(1, 10)(value);
+      // Otherwise a list of addresses or ranges, which proxy-addr checks; refuse anything with characters it cannot be.
+      if (!/^[0-9a-f.:/,\s]+$/i.test(value)) throw new Error(`"${text}" is not true, false, a hop count or addresses`);
+      return text.replace(/\s+/g, '');
+    },
+  );
 
   // A secret comes either from the variable or from a file named by <VARIABLE>_FILE, the way Docker and Kubernetes
   // secrets are mounted; giving both is ambiguous, so it is refused.
@@ -315,7 +300,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     }
   }
   // Connections to a server at most: ten serve a busy jukecord; a hosted database may allow few per user.
-  const database = { address, pool: read('JUKECORD_DATABASE_POOL', 10, integer(1, 100)) };
+  const database = { address, pool: whole('JUKECORD_DATABASE_POOL') };
 
   // Discord settings. Each is optional on its own; the combinations are checked below.
   const token = secret('JUKECORD_DISCORD_TOKEN');
@@ -331,67 +316,83 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
   }
 
   // Media settings, with the limits that keep a mistyped value from filling a disk or hammering a site.
-  const media = {
-    ytdlp: get('JUKECORD_YTDLP') ?? 'yt-dlp',
-    ffmpeg: get('JUKECORD_FFMPEG') ?? 'ffmpeg',
-    cacheMaxBytes: read('JUKECORD_CACHE_MAX', 2 * 1024 ** 3, (text) => {
+  // A duration between the table's limits ("outside 5s-10m"), its default when unset.
+  const duration = (name: string): number => {
+    const setting = definition(name);
+    return read(name, parseDuration(defaultText(name)), (text) => {
+      const ms = parseDuration(text);
+      if (ms < parseDuration(setting.min ?? '0') || ms > parseDuration(setting.max ?? '0'))
+        throw new Error(`${text} is outside ${setting.min}-${setting.max}`);
+      return ms;
+    });
+  };
+  // A size at least the table's smallest ("too small for the media cache (at least 64MiB)"), its default when unset.
+  const size = (name: string, what: string): number => {
+    const least = definition(name).min ?? '0';
+    return read(name, parseSize(defaultText(name)), (text) => {
       const bytes = parseSize(text);
-      // Below 64 MiB the cache cannot hold the playing track and the next ones, and every track would be fetched twice.
-      if (bytes < 64 * 1024 ** 2) throw new Error(`${text} is too small for the media cache (at least 64MiB)`);
+      if (bytes < parseSize(least)) throw new Error(`${text} is too small for ${what} (at least ${least})`);
       return bytes;
-    }),
-    fetchTimeoutMs: read('JUKECORD_FETCH_TIMEOUT', 60_000, (text) => {
-      const ms = parseDuration(text);
-      // Under 5 s even a short track from a fast site fails; over 10 min a stuck download blocks the queue.
-      if (ms < 5_000 || ms > 600_000) throw new Error(`${text} is outside 5s-10m`);
-      return ms;
-    }),
-    prefetch: read('JUKECORD_PREFETCH', 2, integer(0, 5)),
-    trackMaxMs: read('JUKECORD_TRACK_MAX', 3 * 3_600_000, (text) => {
-      const ms = parseDuration(text);
-      // Under a minute refuses ordinary songs; over a day is no limit at all.
-      if (ms < 60_000 || ms > 86_400_000) throw new Error(`${text} is outside 1m-24h`);
-      return ms;
-    }),
+    });
+  };
+
+  const media = {
+    ytdlp: get('JUKECORD_YTDLP') ?? defaultText('JUKECORD_YTDLP'),
+    ffmpeg: get('JUKECORD_FFMPEG') ?? defaultText('JUKECORD_FFMPEG'),
+    // Below 64 MiB the cache cannot hold the playing track and the next ones, and every track would be fetched twice.
+    cacheMaxBytes: size('JUKECORD_CACHE_MAX', 'the media cache'),
+    // Under 5 s even a short track from a fast site fails; over 10 min a stuck download blocks the queue.
+    fetchTimeoutMs: duration('JUKECORD_FETCH_TIMEOUT'),
+    prefetch: whole('JUKECORD_PREFETCH'),
+    // Under a minute refuses ordinary songs; over a day is no limit at all.
+    trackMaxMs: duration('JUKECORD_TRACK_MAX'),
     cookies: read('JUKECORD_YTDLP_COOKIES', null as string | null, (text) => {
       const full = path.resolve(cwd, text);
       if (!files.readable(full)) throw new Error(`${full} cannot be read`);
       return full;
     }),
     // Off unless asked for: people who may add tracks should not be able to make the server fetch from its own network.
-    allowPrivate: read('JUKECORD_ALLOW_PRIVATE_ADDRESSES', false, (text) => {
-      const value = text.toLowerCase();
-      if (value === 'true' || value === 'yes' || value === '1') return true;
-      if (value === 'false' || value === 'no' || value === '0') return false;
-      throw new Error(`"${text}" is not true or false`);
-    }),
+    allowPrivate: read(
+      'JUKECORD_ALLOW_PRIVATE_ADDRESSES',
+      defaultText('JUKECORD_ALLOW_PRIVATE_ADDRESSES') === 'true',
+      (text) => {
+        const value = text.toLowerCase();
+        if (value === 'true' || value === 'yes' || value === '1') return true;
+        if (value === 'false' || value === 'no' || value === '0') return false;
+        throw new Error(`"${text}" is not true or false`);
+      },
+    ),
   };
 
   // The queue limit keeps a pasted 5,000-track playlist (or a script) from making the panel and the database crawl.
-  const queueMax = read('JUKECORD_QUEUE_MAX', 1000, integer(10, 100_000));
+  const queueMax = whole('JUKECORD_QUEUE_MAX');
 
   // How many live connections at once: each open panel tab is one. A thousand idle ones take about 120 MiB, and each
   // queue change goes out to all of them; a bigger machine can take more, a small one may want fewer.
-  const liveMax = read('JUKECORD_LIVE_MAX', 1000, integer(10, 100_000));
+  const liveMax = whole('JUKECORD_LIVE_MAX');
+
+  // A duration that can also be off ("0"): between the table's limits otherwise, saying how to turn it off.
+  const offOr = (name: string, off: (text: string) => boolean, never: string): number => {
+    const setting = definition(name);
+    return read(name, parseDuration(defaultText(name)), (text) => {
+      if (off(text)) return 0;
+      const ms = parseDuration(text);
+      if (ms < parseDuration(setting.min ?? '0') || ms > parseDuration(setting.max ?? '0'))
+        throw new Error(`${text} is outside ${setting.min}-${setting.max} (or 0 to ${never})`);
+      return ms;
+    });
+  };
 
   // How long the bot waits alone in a voice channel; "0" turns leaving by itself off.
-  const voice = {
-    idleMs: read('JUKECORD_VOICE_IDLE', 5 * 60_000, (text) => {
-      if (text.trim() === '0') return 0;
-      const ms = parseDuration(text);
-      if (ms < 10_000 || ms > 86_400_000) throw new Error(`${text} is outside 10s-24h (or 0 to never leave)`);
-      return ms;
-    }),
-  };
+  const voice = { idleMs: offOr('JUKECORD_VOICE_IDLE', (text) => text.trim() === '0', 'never leave') };
 
   // How long a playing server that nobody hears (the bot out of voice, no browser playing along) waits before it
   // pauses; "0" or "off" lets it play on to nobody, as before.
-  const restAfterMs = read('JUKECORD_REST_AFTER', 2 * 60_000, (text) => {
-    if (text === '0' || text.toLowerCase() === 'off') return 0;
-    const ms = parseDuration(text);
-    if (ms < 10_000 || ms > 86_400_000) throw new Error(`${text} is outside 10s-24h (or 0 to never pause)`);
-    return ms;
-  });
+  const restAfterMs = offOr(
+    'JUKECORD_REST_AFTER',
+    (text) => text === '0' || text.toLowerCase() === 'off',
+    'never pause',
+  );
 
   // A backup every day at a time of day ("04:30", in the time zone jukecord runs in), or none ("off", the default), and
   // how many stay: each is a whole copy of the database.
@@ -404,12 +405,12 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
       if (!time || hour > 23 || minute > 59) throw new Error(`"${text}" is not off or a time of day like 04:30`);
       return { hour, minute };
     }),
-    keep: read('JUKECORD_BACKUP_KEEP', 7, integer(1, 365)),
+    keep: whole('JUKECORD_BACKUP_KEEP'),
   };
 
   // Lyrics are looked up at LRCLIB unless turned off: the one outside service jukecord asks besides Discord and the
   // sites the tracks come from, so it has a switch of its own.
-  const lyrics = read('JUKECORD_LYRICS', true, (text) => {
+  const lyrics = read('JUKECORD_LYRICS', defaultText('JUKECORD_LYRICS') === 'on', (text) => {
     const value = text.toLowerCase();
     if (['on', 'true', 'yes', '1'].includes(value)) return true;
     if (['off', 'false', 'no', '0'].includes(value)) return false;
@@ -418,24 +419,20 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
 
   // Log settings: rotation keeps the log from growing without end (every log has a size limit and a count).
   const log = {
-    level: read('JUKECORD_LOG_LEVEL', 'info' as LogLevel, (text) => {
+    level: read('JUKECORD_LOG_LEVEL', defaultText('JUKECORD_LOG_LEVEL') as LogLevel, (text) => {
       const level = text.toLowerCase();
       if (!LOG_LEVELS.includes(level as LogLevel)) throw new Error(`"${text}" is not one of ${LOG_LEVELS.join(', ')}`);
       return level as LogLevel;
     }),
     // Readable lines by default; JSON for a log shipper (Loki, Elasticsearch, CloudWatch) reading the console.
-    format: read('JUKECORD_LOG_FORMAT', 'text' as LogFormat, (text) => {
+    format: read('JUKECORD_LOG_FORMAT', defaultText('JUKECORD_LOG_FORMAT') as LogFormat, (text) => {
       const format = text.toLowerCase();
       if (format !== 'text' && format !== 'json') throw new Error(`"${text}" is not text or json`);
       return format;
     }),
-    maxBytes: read('JUKECORD_LOG_MAX', 5 * 1024 ** 2, (text) => {
-      const bytes = parseSize(text);
-      // A tiny limit would rotate on every line and lose the history that the log page shows.
-      if (bytes < 64 * 1024) throw new Error(`${text} is too small for a log file (at least 64KiB)`);
-      return bytes;
-    }),
-    files: read('JUKECORD_LOG_FILES', 5, integer(1, 50)),
+    // A tiny limit would rotate on every line and lose the history that the log page shows.
+    maxBytes: size('JUKECORD_LOG_MAX', 'a log file'),
+    files: whole('JUKECORD_LOG_FILES'),
   };
 
   // Links of other music services: which are read (all by default; "none" for none), and the host's Spotify app.
@@ -471,6 +468,14 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     problems.push('JUKECORD_METRICS_TOKEN: at least 16 characters and no spaces (openssl rand -hex 32 makes one)');
   }
   const metrics = { token: metricsToken };
+  // What starts jukecord again after a restart from the panel: the deployment says (Compose, the launcher), or it is
+  // found out from where jukecord runs (src/settings/restart.ts).
+  const supervisors = definition('JUKECORD_SUPERVISOR').choices ?? [];
+  const supervisor = read('JUKECORD_SUPERVISOR', null as Supervisor | null, (text) => {
+    const word = text.toLowerCase();
+    if (!supervisors.includes(word)) throw new Error(`"${text}" is not one of ${supervisors.join(', ')}`);
+    return word as Supervisor;
+  });
   // Logging in through the host's identity provider and directory: off unless their addresses are set.
   const auth = readAuthSettings(env, cwd, files);
   problems.push(...auth.problems);
@@ -504,6 +509,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     metrics,
     links,
     auth: auth.settings,
+    supervisor,
   };
 }
 
