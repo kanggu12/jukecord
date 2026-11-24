@@ -248,6 +248,12 @@ playlist) so a program does not need to ask again.
 
 <!-- operations:end -->
 
+`auth-test-oidc` and `auth-test-ldap` check the logins' settings and log nobody in. `{"settings": {...}}` tests values
+not saved yet, by their environment names (`JUKECORD_OIDC_ISSUER`, `JUKECORD_LDAP_URL` ...), in place of the ones in
+use; a secret left out is the one in use, and a file's setting (a `_FILE`, `JUKECORD_LDAP_CA_FILE`) is refused.
+`auth-test-ldap` also takes `"username"`, a person to look up. The answer is `ok` with each check's `name`, `status`
+(`ok`, `warn`, `fail`) and `detail`, and for a person their `groups` and the `level` they would log in at.
+
 ## Live updates
 
 `GET /api/v1/events` upgrades to a WebSocket. Log in as for any request (a token in the `Authorization` header, or the
