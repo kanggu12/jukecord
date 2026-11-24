@@ -20,10 +20,17 @@
  * goes to one server's panels takes turns in an outbox of that server's, in the order it happened: a panel that
  * subscribes takes its turn there too, so its whole state is the first thing it gets from the server and everything
  * after it is newer, as when the state was made in one go.
+ *
+ * In a split jukecord an edge's hub is the same: its bus hears the core's events (bus/relay.ts), and what it reads it
+ * asks the core (web/core.ts). A snapshot of the player that was on its way while a panel's state was read can arrive
+ * after it, so a snapshot older than the newest one sent to a server's panels is dropped. Who listens counts the other
+ * edges' browsers too (bus/presence.ts), and a logout or a revoked link ends connections on every edge.
  */
 import type { WebSocket } from 'ws';
-import { type Access, hostLike, type Principal, personOf } from '../app/access.ts';
-import { type ActionContext, ActionError, type Actions } from '../app/actions.ts';
+import { hostLike, type Principal, personOf } from '../app/access.ts';
+import { type ActionContext, ActionError } from '../app/actions.ts';
+import type { EdgeListeners } from '../bus/presence.ts';
+import type { Ending } from '../bus/relay.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import { GuildLanes, throwFromTimer } from '../core/lanes.ts';
@@ -33,6 +40,7 @@ import { type Metrics, NO_METRICS } from '../metrics/registry.ts';
 import { type LiveMetrics, liveMetrics } from '../metrics/web.ts';
 import type { UserRepository } from '../store/store.ts';
 import { addressKey, type Caller } from './auth.ts';
+import type { AccessPort, ActionsPort } from './core.ts';
 import { compressStart, gzip, gzipJoined, type Start } from './gzip.ts';
 import type { Presenter } from './present.ts';
 
@@ -155,10 +163,24 @@ interface Frame {
   readonly binary: boolean;
 }
 
+/** What the hub reads of the actions: the state of a server and its changes (the core's own, or over the bus). */
+export type HubActions = Pick<
+  ActionsPort,
+  'nowPlaying' | 'queue' | 'voiceChannels' | 'skipVotes' | 'skipVoters' | 'currentSound'
+>;
+
+/** Who listens in the browsers of the other edges of a split jukecord, as bus/presence.ts adds them up. */
+export interface ElsewhereListeners {
+  /** How many browsers play along to a server there. */
+  count(guildId: string): number;
+  /** The people among them as panels show them, each with the key the hub counts them by. */
+  shown(guildId: string): readonly { readonly person: string; readonly who: Listener }[];
+}
+
 export interface EventHubOptions {
   readonly bus: Bus;
-  readonly actions: Actions;
-  readonly access: Access;
+  readonly actions: HubActions;
+  readonly access: Pick<AccessPort, 'context'>;
   readonly presenter: Presenter;
   readonly users: UserRepository;
   readonly log: Logger;
@@ -174,6 +196,16 @@ export interface EventHubOptions {
   readonly listenersEveryMs?: number;
   /** Hears, when the log says so, that connections were refused at the cap of every live connection, and how many. */
   readonly refused?: (count: number, limit: number) => void;
+  /** The other edges' listeners, in a split jukecord: counted with this hub's own and shown beside them. */
+  readonly elsewhere?: ElsewhereListeners;
+  /** Hears the connections this hub ends that other edges must end too (a logout, a revoked listening link). */
+  readonly endings?: (ending: Ending) => void;
+  /**
+   * Whether what its messages are made of is read from another service (an edge's reads are the core's commands): a
+   * read that fails (the core away or late) is then said in the log and the message left out, the panels hearing
+   * the next change or asking again once the core is back, instead of thrown as jukecord's own trouble.
+   */
+  readonly remote?: boolean;
   /** Where the connections and what is sent on them are counted; nowhere in tests that do not look. */
   readonly metrics?: Metrics;
 }
@@ -197,6 +229,11 @@ export interface AttachOptions {
   readonly early?: () => readonly string[];
 }
 
+// The voice channels as one viewer sees them, the votes to skip, and the voice channel's sound.
+type VoiceView = Awaited<ReturnType<HubActions['voiceChannels']>>;
+type SkipVotesView = Awaited<ReturnType<HubActions['skipVotes']>>;
+type SoundView = Awaited<ReturnType<HubActions['currentSound']>>;
+
 // The context for reading a server's state on behalf of everyone subscribed to it (reading needs no rights).
 function reader(guildId: string): ActionContext {
   return { guildId, userId: null, mayControl: false, mayManage: false };
@@ -204,7 +241,7 @@ function reader(guildId: string): ActionContext {
 
 // What a guest is told of the voice channel: that the bot is in one (the listening bar says the music plays there),
 // not which, nor the server's other channels.
-function guestVoice(voice: ReturnType<Actions['voiceChannels']>): ReturnType<Actions['voiceChannels']> {
+function guestVoice(voice: VoiceView): VoiceView {
   return { current: voice.current ? { channelId: '', name: '' } : null, channels: [] };
 }
 
@@ -265,8 +302,16 @@ export class EventHub {
   // What goes to each server's panels, one message (or one panel's state) at a time, in the order it happened: a
   // message waits for the database while it is made, and must not overtake the one before it.
   private readonly outbox = new GuildLanes();
+  // The newest player snapshot's version sent to each server's panels (in a state or a message), while they are
+  // there: an older one arriving afterwards (it was on its way while a state was read from the core) is not sent.
+  private readonly newestPlayer = new Map<string, number>();
   // The messages and bytes sent, and the connections, for the metrics.
   private readonly sent: LiveMetrics;
+  // Counted up by every restartAll: work begun before one (a snapshot on its way, a state being read) is for
+  // connections that are gone, from a core that may be gone, and is dropped.
+  private generation = 0;
+  // When the log last said a message could not be made (an edge with its core away says it once a minute).
+  private unsentToldAt = Number.NEGATIVE_INFINITY;
 
   /**
    * The most live connections at once from now on. Those already open stay (a smaller cap is not a reason to close
@@ -297,7 +342,14 @@ export class EventHub {
       // Built only if someone is there to get it; small, so sent at once (the browsers follow the clock with it), in
       // its turn: the snapshot is the one of this moment, its names are read on the way.
       if (!this.rooms.has(snapshot.guildId)) return;
+      const generation = this.generation;
       return this.post(snapshot.guildId, async () => {
+        // Its panels are gone since (the last one left, or every one was told to reconnect): nobody to send it to,
+        // and its number must not stay to hold back the snapshots that come next (a new core counts from the start).
+        if (generation !== this.generation || !this.rooms.has(snapshot.guildId)) return;
+        // Older than what the panels have: dropped (in one process that never happens; across services it can).
+        if (snapshot.version <= (this.newestPlayer.get(snapshot.guildId) ?? -1)) return;
+        this.newestPlayer.set(snapshot.guildId, snapshot.version);
         const player = await presenter.player(snapshot);
         const room = this.rooms.get(snapshot.guildId);
         if (!room) return;
@@ -324,18 +376,34 @@ export class EventHub {
         if (!room) return;
         // Each connection gets the channels its own person can see, worked out once per person; a guest, only that
         // the bot is in one.
-        const lists = new Map<string, unknown>();
-        for (const client of room.clients) {
+        const keyOf = (client: Client) => {
           const context = viewer(client, guildId);
-          const guest = client.principal.kind === 'guest';
-          const key = guest ? 'guest' : (context.userId ?? (context.mayManage ? 'host' : 'anyone'));
-          if (!lists.has(key)) {
-            const voice = actions.voiceChannels(context);
-            lists.set(key, guest ? guestVoice(voice) : voice);
-          }
-          this.send(client, { type: 'voice', guild: guildId, voice: lists.get(key) });
+          return client.principal.kind === 'guest'
+            ? 'guest'
+            : (context.userId ?? (context.mayManage ? 'host' : 'anyone'));
+        };
+        const lists = new Map<string, VoiceView | Promise<VoiceView>>();
+        for (const client of room.clients) {
+          const key = keyOf(client);
+          if (lists.has(key)) continue;
+          const shown = (voice: VoiceView) => (client.principal.kind === 'guest' ? guestVoice(voice) : voice);
+          const voice = actions.voiceChannels(viewer(client, guildId));
+          lists.set(key, voice instanceof Promise ? voice.then(shown) : shown(voice));
         }
-      });
+        const send = (ready: ReadonlyMap<string, VoiceView>) => {
+          for (const client of this.rooms.get(guildId)?.clients ?? []) {
+            const list = ready.get(keyOf(client));
+            if (list) this.send(client, { type: 'voice', guild: guildId, voice: list });
+          }
+        };
+        // One process knows every list at once, and sends them at once; an edge asks the core for them all together.
+        const asked = [...lists].filter((entry): entry is [string, Promise<VoiceView>] => entry[1] instanceof Promise);
+        if (asked.length === 0) return send(lists as ReadonlyMap<string, VoiceView>);
+        return Promise.all(asked.map(async ([key, list]) => [key, await list] as const)).then((answers) => {
+          for (const [key, list] of answers) lists.set(key, list);
+          send(lists as ReadonlyMap<string, VoiceView>);
+        });
+      }).catch((error: unknown) => this.unsent(error, 'voice channels', guildId, false));
     };
     // The votes to skip changed: the panels hear the new view soon, at most four times a second.
     const onVotes = ({ guildId }: { guildId: string }) => {
@@ -358,7 +426,7 @@ export class EventHub {
             () => gzip(bytes),
           ),
         );
-      });
+      }).catch((error: unknown) => this.unsent(error, 'sound', guildId, false));
     };
     bus.on('player', onPlayer);
     bus.on('queue', onQueue);
@@ -509,10 +577,61 @@ export class EventHub {
     this.probing.set(key, timer);
   }
 
-  /** The people listening in a browser to a server (the first twenty), and how many browsers that is. */
+  /**
+   * The people listening in a browser to a server (the first twenty), and how many browsers that is: this hub's, and
+   * the other edges' in a split jukecord.
+   */
   listeners(guildId: string): Listeners {
     const room = this.rooms.get(guildId);
-    return room ? this.listenersOf(room) : { people: [], count: 0 };
+    if (room) return this.listenersOf(room, guildId);
+    const elsewhere = this.options.elsewhere;
+    if (!elsewhere) return { people: [], count: 0 };
+    return {
+      people: elsewhere
+        .shown(guildId)
+        .slice(0, LISTENERS_NAMED)
+        .map((entry) => entry.who),
+      count: elsewhere.count(guildId),
+    };
+  }
+
+  /** Who listens to a server in this hub's own browsers, for the other services of a split jukecord. */
+  ownListeners(guildId: string): EdgeListeners {
+    const room = this.rooms.get(guildId);
+    if (!room) return { count: 0, shown: [], people: [] };
+    const shown = new Map<string, Listener>();
+    let count = 0;
+    for (const client of room.clients) {
+      if (!client.listening) continue;
+      count += 1;
+      if (shown.size < LISTENERS_NAMED && !shown.has(client.person)) shown.set(client.person, client.who);
+    }
+    return {
+      count,
+      shown: [...shown].map(([person, who]) => ({ person, who })),
+      people: this.listeningPeople(guildId),
+    };
+  }
+
+  /** The servers with anyone listening in this hub's browsers. */
+  listenedGuilds(): string[] {
+    const guilds: string[] = [];
+    for (const [guildId, room] of this.rooms) {
+      for (const client of room.clients) {
+        if (!client.listening) continue;
+        guilds.push(guildId);
+        break;
+      }
+    }
+    return guilds;
+  }
+
+  /** Who listens to a server on the other edges changed: its panels hear the new count, as for a change here. */
+  elsewhereChanged(guildId: string): void {
+    const room = this.rooms.get(guildId);
+    if (!room) return;
+    room.listeners = null;
+    this.listenersSoon(guildId, room);
   }
 
   /**
@@ -547,6 +666,43 @@ export class EventHub {
       client.socket.close(4401, reason);
       this.drop(client);
     }
+  }
+
+  /** Ends a session's connections (it logged out): here, and on every other edge of a split jukecord. */
+  endSession(sessionHash: string, reason = 'logged out'): void {
+    this.ended({ what: 'session', sessionHash, reason });
+    this.options.endings?.({ what: 'session', sessionHash, reason });
+  }
+
+  /** Ends a listening link's guests' connections (it was revoked): here, and on every other edge. */
+  endGuests(linkId: number, reason = 'the listening link has ended'): void {
+    this.ended({ what: 'guests', linkId, reason });
+    this.options.endings?.({ what: 'guests', linkId, reason });
+  }
+
+  /** Ends the connections an ending names, here only (another edge or the core said so, and told the others). */
+  ended(ending: Ending): void {
+    if (ending.what === 'session') this.end((caller) => caller.sessionHash === ending.sessionHash, ending.reason);
+    else
+      this.end(
+        (caller) => caller.principal.kind === 'guest' && caller.principal.linkId === ending.linkId,
+        ending.reason,
+      );
+  }
+
+  /**
+   * Closes every connection with 1012 (a service restart), which the panels take as "reconnect", and goes on taking
+   * connections: the core this edge serves was lost or replaced, or the bus lost what it was carrying, so each panel
+   * asks for the whole state again (its player numbers start afresh with a new core).
+   */
+  restartAll(reason = 'jukecord is restarting'): void {
+    this.generation += 1;
+    for (const client of [...this.clients]) {
+      client.socket.close(1012, reason);
+      this.drop(client);
+    }
+    // Every room is empty now, and the next states start the count of snapshots afresh.
+    this.newestPlayer.clear();
   }
 
   /** Closes every connection (shutting down): the panels reconnect to the next jukecord. */
@@ -588,6 +744,7 @@ export class EventHub {
     // The access check may wait for Discord; a subscribe that began later (another server chosen meanwhile) wins.
     client.asking += 1;
     const mine = client.asking;
+    const generation = this.generation;
     try {
       await this.options.access.context(client.principal, guildId);
     } catch (error) {
@@ -617,20 +774,51 @@ export class EventHub {
       }
       const room = this.roomOf(guildId);
       const { actions, presenter } = this.options;
-      // The player as it is at this turn: a change of it from now on is sent after this state.
-      const snapshot = actions.nowPlaying(reader(guildId));
-      // The queue, the big part, is the start made once per version; only the end is this connection's own.
-      const start = await this.queueStart(guildId, room);
+      let state: {
+        snapshot: PlayerSnapshot;
+        voice: VoiceView;
+        votes: SkipVotesView;
+        sound: SoundView;
+        start: QueueStart;
+      };
+      try {
+        // The player as it is at this turn: a change of it from now on is sent after this state. (Asked of the core
+        // in an edge, where a snapshot on its way meanwhile may come after it: the newest is noted, see onPlayer.)
+        const snapshot = await actions.nowPlaying(reader(guildId));
+        // Gone meanwhile (closed, or every connection told to reconnect): its number would outlive it.
+        if (generation !== this.generation || client.asking !== mine || !this.clients.has(client)) return;
+        this.newestPlayer.set(guildId, Math.max(snapshot.version, this.newestPlayer.get(guildId) ?? -1));
+        // The queue, the big part, is the start made once per version; only the end is this connection's own.
+        const start = await this.queueStart(guildId, room);
+        const voice = await actions.voiceChannels(viewer(client, guildId));
+        // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
+        const votes = await actions.skipVotes(viewer(client, guildId));
+        const sound = await actions.currentSound(guildId);
+        state = { snapshot, voice, votes, sound, start };
+      } catch (error) {
+        // The state could not be read (an edge's core away or late, or the database): the connection leaves the
+        // room it never got the state of, and is told, as for a server it may not open; "unavailable" has the
+        // panel ask again shortly.
+        this.unsent(error, 'state', guildId, true);
+        if (client.asking !== mine || !this.clients.has(client)) return;
+        this.leaveRoom(client);
+        client.guild = null;
+        if (client.listening) this.listenersChanged(guildId);
+        const code = error instanceof ActionError ? error.code : 'unavailable';
+        const message =
+          error instanceof ActionError
+            ? error.message
+            : 'jukecord could not read this server now; try again in a moment';
+        this.send(client, { type: 'error', code, message });
+        return;
+      }
+      const { snapshot, voice, votes, sound, start } = state;
       client.queueVersion = start.version;
-      const voice = actions.voiceChannels(viewer(client, guildId));
       const player = await presenter.player(snapshot);
-      // The votes as this connection's person sees them: with whether they voted (their panel's Skip says so).
-      const votes = await actions.skipVotes(viewer(client, guildId));
-      const sound = await actions.currentSound(guildId);
       const ending = Buffer.from(
         `,"type":"state","player":${JSON.stringify(player)},` +
           `"voice":${JSON.stringify(client.principal.kind === 'guest' ? guestVoice(voice) : voice)},` +
-          `"listeners":${JSON.stringify(this.listenersOf(room))},` +
+          `"listeners":${JSON.stringify(this.listenersOf(room, guildId))},` +
           `"votes":${JSON.stringify(votes)},` +
           `"sound":${JSON.stringify(sound)}}`,
       );
@@ -642,6 +830,29 @@ export class EventHub {
           () => gzipJoined(this.compressedStart(start), ending),
         )(client),
       );
+    });
+  }
+
+  // A message for a server's panels that could not be made. An edge's reads are the core's commands, which fail
+  // while the core is away or late: said in the log (once a minute) and left, the panels hearing the next change or
+  // asking again once the core is back. In one process it is jukecord's own trouble: thrown from the timer as before
+  // (`fromTimer`), or passed on to the bus, which says which listener failed, as before; a state that could not be
+  // read is said either way, since the panel asking for it is told.
+  private unsent(error: unknown, what: string, guildId: string, fromTimer: boolean): void {
+    if (!this.options.remote && what !== 'state') {
+      if (fromTimer) throwFromTimer(error);
+      throw error;
+    }
+    if (!this.options.remote) {
+      this.options.log.error("could not read a server's state for a panel", { guild: guildId, error });
+      return;
+    }
+    const now = steadyNow();
+    if (now - this.unsentToldAt < 60_000) return;
+    this.unsentToldAt = now;
+    this.options.log.warn(`could not make the ${what} for a server's panels: the core did not answer`, {
+      guild: guildId,
+      error,
     });
   }
 
@@ -674,6 +885,8 @@ export class EventHub {
     if (room.clients.size > 0) return;
     this.stopTimers(room);
     this.rooms.delete(guildId);
+    // Nobody shows the server any more: the next state starts the count of snapshots afresh.
+    this.newestPlayer.delete(guildId);
   }
 
   private stopTimers(room: Room): void {
@@ -732,13 +945,14 @@ export class EventHub {
           client.queueVersion = start.version;
           this.write(client, frame(client));
         }
-      }).catch(throwFromTimer);
+      }).catch((error: unknown) => this.unsent(error, 'queue', guildId, true));
     }, wait);
     room.queueTimer.unref();
   }
 
-  // Who listens in a server: worked out when it changed, not for every message.
-  private listenersOf(room: Room): Listeners {
+  // Who listens in a server: worked out when it changed, not for every message. In a split jukecord the other edges'
+  // browsers count too, and their people are named after this hub's own.
+  private listenersOf(room: Room, guildId: string): Listeners {
     if (room.listeners) return room.listeners;
     const people = new Map<string, Listener>();
     let count = 0;
@@ -747,6 +961,14 @@ export class EventHub {
       count += 1;
       // The first twenty people are named; everyone counts.
       if (people.size < LISTENERS_NAMED) people.set(client.person, client.who);
+    }
+    const elsewhere = this.options.elsewhere;
+    if (elsewhere) {
+      count += elsewhere.count(guildId);
+      for (const entry of elsewhere.shown(guildId)) {
+        if (people.size >= LISTENERS_NAMED) break;
+        if (!people.has(entry.person)) people.set(entry.person, entry.who);
+      }
     }
     room.listeners = { people: [...people.values()], count };
     return room.listeners;
@@ -764,7 +986,12 @@ export class EventHub {
     // got the one from before the change (a server played to nobody until its next change).
     if (room) room.listeners = null;
     this.options.bus.emit('listeners', { guildId, count });
-    if (!room) return;
+    if (room) this.listenersSoon(guildId, room);
+  }
+
+  // Sends a server's listeners soon: at once if none went lately, otherwise when LISTENERS_EVERY_MS has passed since
+  // the last, with who listens then.
+  private listenersSoon(guildId: string, room: Room): void {
     if (room.listenersTimer) return;
     const wait = Math.max(0, room.listenersSentAt + this.listenersEveryMs - steadyNow());
     room.listenersTimer = setTimeout(() => {
@@ -773,7 +1000,7 @@ export class EventHub {
       // In its turn, after a state being made (which counts the listeners as they are then).
       void this.post(guildId, () => {
         if (this.rooms.get(guildId) !== room) return;
-        const bytes = json({ type: 'listeners', guild: guildId, listeners: this.listenersOf(room) });
+        const bytes = json({ type: 'listeners', guild: guildId, listeners: this.listenersOf(room, guildId) });
         this.broadcast(
           room,
           outgoing(
@@ -796,7 +1023,9 @@ export class EventHub {
     room.votesTimer = setTimeout(() => {
       room.votesTimer = null;
       room.votesSentAt = steadyNow();
-      void this.post(guildId, () => this.sendVotes(guildId, room)).catch(throwFromTimer);
+      void this.post(guildId, () => this.sendVotes(guildId, room)).catch((error: unknown) =>
+        this.unsent(error, 'votes', guildId, true),
+      );
     }, wait);
     room.votesTimer.unref();
   }

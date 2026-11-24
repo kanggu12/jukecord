@@ -213,7 +213,8 @@ describe('EventHub', () => {
   });
 
   it('sends a burst of queue changes as one message with the latest queue, then at most one per interval', async () => {
-    const { events, handlers, queue } = hub({}, { queueEveryMs: 60 });
+    // An interval long beside the waits below, so a busy machine (the whole suite at once) cannot let it pass early.
+    const { events, handlers, queue } = hub({}, { queueEveryMs: 250 });
     const browser = socket();
     await events.attach(browser.fake as never, { principal: { kind: 'host' } } as never, { guild: 'G' });
     await settle(10);
@@ -235,7 +236,7 @@ describe('EventHub', () => {
     handlers.get('queue')?.({ guildId: 'G' });
     await settle(20);
     assert.equal(browser.of('queue').length, 1, 'sent before the interval had passed');
-    await settle(80);
+    await settle(300);
     assert.deepEqual(
       browser.of('queue').map((message) => (message.queue as { version: number }).version),
       [5, 7],

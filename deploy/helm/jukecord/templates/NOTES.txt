@@ -1,4 +1,11 @@
 jukecord {{ .Chart.AppVersion }} is installed as {{ include "jukecord.fullname" . }} in {{ .Release.Namespace }}.
+{{- /* The pod the jukecord command runs in: the one pod, or in split mode an edge (which asks the core). */}}
+{{- $pod := ternary (include "jukecord.edgeName" .) (include "jukecord.fullname" .) (eq .Values.mode "split") }}
+{{- if eq .Values.mode "split" }}
+
+Split into services: one core ({{ include "jukecord.coreName" . }}) and {{ .Values.split.edge.replicas }} edges ({{ include "jukecord.edgeName" . }}), over the
+database and the bus the values name.
+{{- end }}
 {{- /* The same address the pod is given (jukecord.publicUrl), so these notes and the bot's links agree. */}}
 {{- $url := include "jukecord.publicUrl" . }}
 {{- $elsewhere := include "jukecord.publicUrlElsewhere" . }}
@@ -19,7 +26,7 @@ The panel, from this computer:
 {{- end }}
 
 Log in as the host with a one-time link (valid for 10 minutes):
-  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "jukecord.fullname" . }} -- jukecord link
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ $pod }} -- jukecord link
 
 {{- if not (include "jukecord.readsToken" .) }}
 
@@ -60,4 +67,4 @@ ServiceMonitor was made. Install the Prometheus Operator first, or set metrics.s
 {{- end }}
 
 Check every part it needs:
-  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "jukecord.fullname" . }} -- jukecord doctor
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ $pod }} -- jukecord doctor

@@ -85,3 +85,34 @@ groups:
           description: >-
             {{ $labels.instance }} has been behind for over a quarter of the time for five minutes: its event loop is
             too busy, so it turns away changes and audio for browsers. Give it more processor, or fewer panels.
+
+      - alert: JukecordNoEdges
+        # A split's core that has heard from none of its edges (one process has no such series): nobody reaches it.
+        expr: jukecord_edges == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: the core hears from no edge
+          description: >-
+            The core {{ $labels.instance }} has heard from none of its edges for ten minutes, so no browser reaches
+            jukecord: the edges are down, or cannot reach the bus (JUKECORD_BUS_URL). Their logs and /readyz say why.
+
+      - alert: JukecordCoreNotAnswering
+        # An edge whose commands to the core mostly went unanswered (not in time, or no core to hear them), at least
+        # twenty in the last ten minutes: a quiet panel's few are no trend.
+        expr: >-
+          (
+            sum by (job, instance) (increase(jukecord_bus_commands_total{outcome=~"timeout|unavailable"}[10m]))
+            / sum by (job, instance) (increase(jukecord_bus_commands_total[10m]))
+          ) > 0.5
+          and sum by (job, instance) (increase(jukecord_bus_commands_total{outcome=~"timeout|unavailable"}[10m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: an edge gets no answers from the core
+          description: >-
+            More than half of what {{ $labels.instance }} asked of the core in the last ten minutes went unanswered
+            (not in time, or no core to hear it), so people see "try again in a moment". The core's log says whether
+            it restarts or falls behind; jukecord_bus_command_duration_seconds says how long its answers take.

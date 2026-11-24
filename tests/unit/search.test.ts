@@ -95,11 +95,11 @@ describe('Search', () => {
     calls[0]?.finish();
     assert.equal((await first).length, 8);
     assert.equal((await search.find('example chill', { limit: 3 })).length, 3);
-    assert.equal(search.cached('EXAMPLE CHILL')?.length, 8);
+    assert.equal((await search.cached('EXAMPLE CHILL'))?.length, 8);
     assert.equal(calls.length, 1);
     // A minute later the words are searched again.
     await clock.advance(60_001);
-    assert.equal(search.cached('example chill'), null);
+    assert.equal(await search.cached('example chill'), null);
     const again = search.find('example chill');
     await flush();
     assert.equal(calls.length, 2);
@@ -193,9 +193,9 @@ describe('Search', () => {
     await flush();
     calls.at(-1)?.finish();
     await third;
-    assert.notEqual(search.cached('one'), null);
-    assert.equal(search.cached('two'), null);
-    assert.notEqual(search.cached('three'), null);
+    assert.notEqual(await search.cached('one'), null);
+    assert.equal(await search.cached('two'), null);
+    assert.notEqual(await search.cached('three'), null);
   });
 
   it('cleans words as the add box does', () => {
@@ -219,7 +219,7 @@ describe('picking a result', () => {
       } as unknown as YtDlp,
       tracks: store.tracks,
       log,
-      recent: (source) => search?.recent(source) ?? null,
+      recent: async (source) => (await search?.recent(source)) ?? null,
     });
     search = new Search({ ytdlp, slots: resolver, log });
     const finding = search.find('example chill');

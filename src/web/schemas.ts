@@ -727,6 +727,20 @@ export const SettingsViewSchema = Type.Object(
     role: Type.Union([Type.Literal('all'), Type.Literal('core'), Type.Literal('edge')]),
     strays: Type.Array(Type.String(), { description: 'Saved names that are no setting kept where they are' }),
     move: MoveStateSchema,
+    services: Type.Array(
+      Type.Object(
+        {
+          role: Type.Union([Type.Literal('core'), Type.Literal('edge')]),
+          name: Type.String({ description: "Its run's name on the bus" }),
+          version: Type.String(),
+          startedAt: Nullable(Type.Integer()),
+          ready: Nullable(Type.Boolean()),
+          seenAt: Type.Integer({ description: 'When it was last heard of' }),
+        },
+        { title: 'Service' },
+      ),
+      { description: 'The services of a split jukecord: the core and each edge (none in one process)' },
+    ),
   },
   { title: 'HostSettings' },
 );

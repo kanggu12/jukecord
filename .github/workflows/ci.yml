@@ -1,6 +1,7 @@
 # Every push to main and every pull request: lint and types, the tests on Node 24 and 26 on both processors, the
-# store on the six database servers it takes, the panel's build, the packaging checks, and the image built on an
-# amd64 and an arm64 runner (no emulation) and started once on each. release.yml runs this before it publishes anything.
+# store on the six database servers it takes, the panel's build, the packaging checks, the image built on an amd64
+# and an arm64 runner (no emulation) and started once on each, and jukecord split into services (a core and two edges
+# over Valkey) end to end on PostgreSQL and on MySQL. release.yml runs this before it publishes anything.
 name: ci
 
 on:
@@ -168,6 +169,15 @@ jobs:
             https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
           echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kubeconform.tar.gz" | sha256sum -c -
           sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+      # The Prometheus of deploy/monitoring/compose.yaml (tests/packaging/monitoring.test.ts holds the two together):
+      # its promtool checks the alert rules and runs their tests, which fail here rather than being skipped.
+      - name: promtool, checked against its release's checksum
+        run: |
+          curl -fsSL --retry 4 --retry-delay 5 --max-time 120 -o /tmp/prometheus.tar.gz \
+            https://github.com/prometheus/prometheus/releases/download/v3.16.0/prometheus-3.16.0.linux-amd64.tar.gz
+          echo "68727009472a2c02e1ff7f062fd5b3e637285bffc8fc2d340c76fb449d6e0f34  /tmp/prometheus.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/prometheus.tar.gz -C /usr/local/bin --strip-components=1 \
+            prometheus-3.16.0.linux-amd64/promtool
       - name: One version everywhere
         run: node scripts/check-version.ts
       - name: The chart, the workflows, the scripts, the changelog and the API document
@@ -177,7 +187,8 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.9.0 --severity=warning /mnt/jukecord \
             /mnt/deploy/kind/check.sh /mnt/tests/ui/run.sh /mnt/deploy/bundle/ffmpeg.sh /mnt/deploy/bundle/build-ffmpeg.sh \
-            /mnt/deploy/bundle/jukecord
+            /mnt/deploy/bundle/jukecord /mnt/tests/auth/run.sh /mnt/tests/auth/run-ad.sh /mnt/tests/split/run.sh \
+            /mnt/deploy/kind/check-split.sh
 
   image:
     name: image (${{ matrix.platform }})
@@ -230,3 +241,42 @@ jobs:
           size=$(docker image inspect jukecord:ci --format '{{.Size}}')
           echo "image: $((size / 1000000)) MB"
           test "$size" -lt 500000000
+
+  split:
+    name: split into services (${{ matrix.database }})
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgres, mysql]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # The bus's and the shared cache's tests against a real Valkey, beside the end-to-end run (which starts its own).
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
+        ports:
+          - 127.0.0.1:6379:6379
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: The bus, the shared cache and a core with two edges, on Valkey
+        env:
+          JUKECORD_TEST_BUS_URL: redis://127.0.0.1:6379
+        run: >-
+          node --disable-warning=ExperimentalWarning --test --test-reporter=spec
+          tests/unit/bus-transport.test.ts tests/unit/bus-commands.test.ts tests/unit/bus-events.test.ts
+          tests/unit/cache-contract.test.ts tests/integration/split.test.ts
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          load: true
+          tags: jukecord:ci
+          cache-from: type=gha,scope=linux/amd64
+      - name: The Compose split end to end (browser-only), removed afterwards
+        run: tests/split/run.sh ${{ matrix.database }} jukecord:ci

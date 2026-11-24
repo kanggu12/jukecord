@@ -72,6 +72,20 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['too many skips at once; try again in a moment', '건너뛰기가 너무 잦음: 잠시 뒤 다시 시도하세요'],
   ['too many requests at once; try again in a moment', '요청이 너무 많음: 잠시 뒤 다시 시도하세요'],
   ['jukecord is busy; try again in a moment', 'jukecord가 지금 바쁨: 잠시 뒤 다시 시도하세요'],
+  // A split jukecord whose core cannot be reached (it starts, restarts, or the bus is down), or was too slow (503).
+  [
+    'jukecord is starting or restarting; try again in a moment',
+    'jukecord가 시작하거나 다시 시작하는 중: 잠시 뒤 다시 시도하세요',
+  ],
+  ['jukecord did not answer in time; try again in a moment', 'jukecord가 제때 답하지 않음: 잠시 뒤 다시 시도하세요'],
+  // A server's state that could not be read for a live connection (the panel asks again).
+  [
+    'jukecord could not read this server now; try again in a moment',
+    'jukecord가 지금 이 서버를 읽지 못함: 잠시 뒤 다시 시도하세요',
+  ],
+  // An edge's question to the core that names no login (a mistake between services, never a person's).
+  ['no login or server named', '로그인이나 서버가 빠진 요청'],
+  ['no login named', '로그인이 빠진 요청'],
   // Why a live connection ended, which the panel shows.
   ['jukecord is restarting', 'jukecord가 다시 시작하는 중'],
   ['logged out', '로그아웃됨'],
@@ -399,6 +413,45 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     /^JUKECORD_LDAP_GROUP_BASE_DN is where groups are searched: set (JUKECORD_\w+) or (JUKECORD_\w+) too$/,
     'JUKECORD_LDAP_GROUP_BASE_DN은 그룹을 찾는 위치: $1, $2 가운데 하나도 정하세요',
   ],
+  // A split jukecord's settings (src/config.ts): the role's needs, the bus's and the cache's addresses, the secret.
+  [/^(JUKECORD_\w+): that is not an address \(example: (.+)\)$/, '$1: 주소가 아님(예: $2)'],
+  [
+    /^(JUKECORD_\w+): a Redis or Valkey address starts with redis:\/\/ or rediss:\/\/ \(TLS\), and names a host$/,
+    '$1: Redis나 Valkey 주소는 redis:// 또는 rediss://(TLS)로 시작하고 호스트를 적어야 함',
+  ],
+  [
+    /^(JUKECORD_\w+): a prefix is up to 64 letters, digits and \. _ : - \(starting with a letter or digit\)$/,
+    '$1: 접두어는 영문자, 숫자, . _ : -로 64자까지(영문자나 숫자로 시작)',
+  ],
+  [
+    /^JUKECORD_INTERNAL_SECRET is too short: at least (\d+) characters \(openssl rand -hex 32 makes one\)$/,
+    'JUKECORD_INTERNAL_SECRET: 너무 짧음, 최소 $1자(openssl rand -hex 32로 만들 수 있음)',
+  ],
+  [
+    /^JUKECORD_ROLE=(\w+) needs a database every service reaches, and a SQLite file is one process's: set JUKECORD_DATABASE_URL to a postgres:\/\/ or mysql:\/\/ address$/,
+    'JUKECORD_ROLE=$1: 모든 서비스가 닿는 데이터베이스가 필요함. SQLite 파일은 한 프로세스용이니 JUKECORD_DATABASE_URL에 postgres:// 또는 mysql:// 주소를 넣으세요',
+  ],
+  [
+    /^JUKECORD_ROLE=(\w+) needs JUKECORD_DATABASE_URL: .+$/,
+    'JUKECORD_ROLE=$1: 모든 서비스가 함께 쓰는 PostgreSQL 또는 MySQL/MariaDB 데이터베이스를 JUKECORD_DATABASE_URL에 넣으세요',
+  ],
+  [
+    /^JUKECORD_ROLE=(\w+) needs JUKECORD_BUS_URL: .+$/,
+    'JUKECORD_ROLE=$1: 서비스끼리 주고받는 Redis나 Valkey 서버를 JUKECORD_BUS_URL에 넣으세요',
+  ],
+  [
+    /^JUKECORD_ROLE=(\w+) needs JUKECORD_INTERNAL_SECRET \(or _FILE\): .+ (\d+) characters or more$/,
+    'JUKECORD_ROLE=$1: 코어와 엣지가 함께 쓰는 $2자 이상의 비밀 값을 JUKECORD_INTERNAL_SECRET(또는 _FILE)에 넣으세요',
+  ],
+  [
+    /^JUKECORD_ROLE=(\w+) needs JUKECORD_CORE_URL: where the core's internal port is \((.+)\)$/,
+    'JUKECORD_ROLE=$1: 코어의 내부 포트 주소를 JUKECORD_CORE_URL에 넣으세요($2)',
+  ],
+  [
+    /^JUKECORD_INTERNAL_PORT is the panel's port \((\d+)\): the core needs two ports$/,
+    'JUKECORD_INTERNAL_PORT가 패널의 포트($1)와 같음: 코어에는 포트가 두 개 필요함',
+  ],
+  [/^(JUKECORD_\w+): "(.*)" is not an address \(example: (.+)\)$/, '$1: 주소가 아님("$2", 예: $3)'],
   // The database's address (src/store/address.ts): what is wrong with it, never the address itself (a password).
   [
     'JUKECORD_DATABASE_URL is not an address like postgres://user:password@host/database, mysql://... or sqlite:',

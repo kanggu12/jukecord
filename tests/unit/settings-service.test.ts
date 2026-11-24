@@ -167,10 +167,10 @@ describe('the settings service', () => {
     assert.ok(refused instanceof SettingsRefused);
     assert.equal(refused.code, 'invalid');
     assert.deepEqual(
-      refused.problems.map((problem) => problem.names),
+      (refused.problems ?? []).map((problem) => problem.names),
       [['JUKECORD_PORT'], ['JUKECORD_QUEUE_MAX']],
     );
-    assert.match(refused.problems[1]?.message ?? '', /^JUKECORD_QUEUE_MAX: 5 is outside 10-100000$/);
+    assert.match(refused.problems?.[1]?.message ?? '', /^JUKECORD_QUEUE_MAX: 5 is outside 10-100000$/);
     // Nothing of it was kept, the good part neither.
     assert.deepEqual(await store.hostSettings.all(), []);
     assert.equal(fs.existsSync(path.join(dataDir, SETTINGS_FILE)), false);
@@ -180,7 +180,7 @@ describe('the settings service', () => {
     const { settings } = await setup();
     const half = await refusal(settings.change({ JUKECORD_SPOTIFY_CLIENT_ID: SPOTIFY_ID }));
     assert.ok(half instanceof SettingsRefused);
-    assert.deepEqual(half.problems[0]?.names, ['JUKECORD_SPOTIFY_CLIENT_ID', 'JUKECORD_SPOTIFY_CLIENT_SECRET']);
+    assert.deepEqual(half.problems?.[0]?.names, ['JUKECORD_SPOTIFY_CLIENT_ID', 'JUKECORD_SPOTIFY_CLIENT_SECRET']);
     const { changed } = await settings.change({
       JUKECORD_SPOTIFY_CLIENT_ID: SPOTIFY_ID,
       JUKECORD_SPOTIFY_CLIENT_SECRET: SPOTIFY_SECRET,

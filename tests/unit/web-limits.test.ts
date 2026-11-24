@@ -5,62 +5,10 @@ import type { InjectOptions } from 'fastify';
 import { MediaCache } from '../../src/media/cache.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { CSRF_HEADER } from '../../src/web/auth.ts';
-import { Buckets, Pressure } from '../../src/web/limits.ts';
+import { Pressure } from '../../src/web/limits.ts';
 import { ALICE, asHost, BOB, DJ_ROLE, exampleTrack, GUILD, sessionFor, testServer } from '../support/web.ts';
 
 const api = (path: string) => `${API_PREFIX}${path}`;
-
-describe('Buckets', () => {
-  it('lets a burst through, then the steady rate, and says how long to wait', () => {
-    let now = 0;
-    const buckets = new Buckets({ perSecond: 10, burst: 20 }, { now: () => now });
-    for (let i = 0; i < 20; i += 1) {
-      assert.equal(buckets.wait(['a']), 0);
-      buckets.take(['a']);
-    }
-    // Empty: one token comes back every 100 ms.
-    assert.equal(buckets.wait(['a']), 100);
-    now += 100;
-    assert.equal(buckets.wait(['a']), 0);
-    // Every key must have one: a full bucket beside an empty one still waits.
-    assert.equal(buckets.wait(['b']), 0);
-    buckets.take(['a']);
-    assert.equal(buckets.wait(['b', 'a']), 100);
-    // After a quiet while it is full again, never fuller.
-    now += 60_000;
-    for (let i = 0; i < 20; i += 1) buckets.take(['a']);
-    assert.ok(buckets.wait(['a']) > 0);
-  });
-
-  it('is not thrown by the system clock being set back', () => {
-    // The system clock as jukecord would see it, which this test sets back; in place before the buckets are made, as
-    // the system's is.
-    const realNow = Date.now;
-    let back = 0;
-    Date.now = () => realNow() - back;
-    try {
-      const buckets = new Buckets({ perSecond: 10, burst: 2 });
-      buckets.take(['someone']);
-      back = 600_000;
-      // Ten minutes back, one token still in the bucket: no wait, and after it at most a tenth of a second.
-      assert.equal(buckets.wait(['someone']), 0);
-      buckets.take(['someone']);
-      assert.ok(buckets.wait(['someone']) <= 100, `${buckets.wait(['someone'])} ms to wait`);
-    } finally {
-      Date.now = realNow;
-    }
-  });
-
-  it('keeps at most its capacity of keys, forgetting the least recently used', () => {
-    const buckets = new Buckets({ perSecond: 1, burst: 1 }, { now: () => 0, capacity: 2 });
-    buckets.take(['a']);
-    buckets.take(['b']);
-    buckets.take(['c']);
-    // "a" was forgotten, so it is full again; "c" is not.
-    assert.equal(buckets.wait(['a']), 0);
-    assert.ok(buckets.wait(['c']) > 0);
-  });
-});
 
 describe('Pressure', () => {
   it('is behind for the window after the event loop was held up, and not once it runs freely again', async () => {

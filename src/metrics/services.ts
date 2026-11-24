@@ -5,8 +5,12 @@
  */
 import type { Metrics } from './registry.ts';
 
-/** How a command ended: answered, answered with the action's own refusal, not answered in time, or not sent at all. */
-export type CommandOutcome = 'ok' | 'error' | 'timeout' | 'unavailable';
+/**
+ * How a command ended: answered, answered with an error (the action's own refusal, or the core's failure), not
+ * answered in time, not sent at all (no core, the bus down) or refused when the core was lost, or given up by its
+ * caller (the browser went away; the core stops the work if it can).
+ */
+export type CommandOutcome = 'ok' | 'error' | 'timeout' | 'unavailable' | 'cancelled';
 
 /** Where a bus adapter reports its commands. */
 export interface BusReport {
@@ -28,7 +32,7 @@ export function busReport(metrics: Metrics, names: readonly string[]): BusReport
   const known = new Set(names);
   const commands = metrics.counter(
     'jukecord_bus_commands_total',
-    'Commands sent over the bus to the core, by command and how they ended: ok, error (the action refused), timeout, unavailable.',
+    'Commands sent over the bus to the core, by command and how they ended: ok, error (the action refused), timeout, unavailable, cancelled.',
     ['command', 'outcome'],
   );
   const duration = metrics.histogram(

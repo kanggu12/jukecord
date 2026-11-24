@@ -35,7 +35,7 @@ export interface ResolverOptions {
    * A track found by a recent search, by its canonical address (see Search.recent): picking a search result adds it
    * from what the search already learned, with nothing fetched now, as an address seen before is.
    */
-  readonly recent?: (source: string) => NewTrack | null;
+  readonly recent?: (source: string) => NewTrack | null | Promise<NewTrack | null>;
 }
 
 export class Resolver {
@@ -85,7 +85,7 @@ export class Resolver {
       const known = await this.options.tracks.bySource(source);
       if (known) return [known];
       // A result of a recent search: stored from what the search learned, the same as a search that adds it would.
-      const found = this.options.recent?.(source);
+      const found = await this.options.recent?.(source);
       if (found) return [await this.store(found)];
     }
     let found: Awaited<ReturnType<YtDlp['lookup']>>;

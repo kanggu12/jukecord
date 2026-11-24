@@ -42,15 +42,15 @@ import { restartRefusal } from './restart.ts';
 import { sameValue, shownValue } from './values.ts';
 
 /** A change refused by the settings' rules: every problem it would bring, each with the settings it is about. */
+// The secrets that are addresses: shown as where they are (their user and password left out).
+const SHOWN = new Set(['JUKECORD_DATABASE_URL', 'JUKECORD_BUS_URL', 'JUKECORD_CACHE_URL']);
+
 export type { SettingProblem } from './read.ts';
 export { startingSettings } from './read.ts';
 
 export class SettingsRefused extends ActionError {
-  readonly problems: readonly SettingProblem[];
-
   constructor(problems: readonly SettingProblem[]) {
-    super('invalid', problems.map((problem) => problem.message).join('; '));
-    this.problems = problems;
+    super('invalid', problems.map((problem) => problem.message).join('; '), { problems });
   }
 }
 
@@ -100,6 +100,20 @@ export interface SettingState {
   readonly refused: string | null;
 }
 
+/** A service of a split jukecord, as the page's Services section lists it. */
+export interface ServiceInfo {
+  readonly role: 'core' | 'edge';
+  /** Its run's name on the bus (a new one at every start). */
+  readonly name: string;
+  readonly version: string;
+  /** When it started; null when it did not say. */
+  readonly startedAt: number | null;
+  /** Whether it is ready to serve (its readiness check), when it said. */
+  readonly ready: boolean | null;
+  /** When it was last heard of. */
+  readonly seenAt: number;
+}
+
 /** How a restart ends: its exit code, what runs before the database closes, and how long it all may take. */
 export interface RestartOptions {
   readonly code?: number;
@@ -125,6 +139,8 @@ export interface HostSettingsView {
   readonly strays: readonly string[];
   /** The database move under way or done, and the last switch that did not finish (from the run before). */
   readonly move: { readonly state: MoveState | null; readonly lastFailure: MoveFailure | null };
+  /** The services of a split jukecord (the core and each edge); none in one process. */
+  readonly services: readonly ServiceInfo[];
 }
 
 /** One setting a change touched, as the change's summary shows it (a secret's values never). */
@@ -161,15 +177,16 @@ export interface HostSettingsOptions {
   readonly restart?: (options?: RestartOptions) => void;
   /** The database move (src/settings/move.ts); absent where none can be made (tests of the rest). */
   readonly move?: DatabaseMove;
+  /** The services of a split jukecord, for the page's Services section (the core's settings service has them). */
+  readonly services?: () => Promise<readonly ServiceInfo[]>;
   /** Tells every service that settings changed (in one process: this service's own take-in). */
   readonly announce?: (names: readonly string[]) => Promise<void>;
   readonly log: Pick<Logger, 'info' | 'warn' | 'error'>;
   readonly role?: 'all' | 'core' | 'edge';
 }
 
-/** What the web layer asks of the settings (a split's edge carries it to its core as it carries the actions). */
-export type HostSettingsPort = Pick<
-  HostSettings,
+// The service's methods the web layer calls.
+type PortMethod =
   | 'view'
   | 'change'
   | 'reset'
@@ -178,9 +195,17 @@ export type HostSettingsPort = Pick<
   | 'startMove'
   | 'moveState'
   | 'cancelMove'
-  | 'switchMove'
-  | 'supervisor'
->;
+  | 'switchMove';
+
+/**
+ * What the web layer asks of the settings: the service itself in one process, the core's over the bus in a split's
+ * edge (src/settings/bus.ts), each answer now or later.
+ */
+export type HostSettingsPort = {
+  readonly [K in PortMethod]: (
+    ...args: Parameters<HostSettings[K]>
+  ) => Awaited<ReturnType<HostSettings[K]>> | Promise<Awaited<ReturnType<HostSettings[K]>>>;
+};
 
 export class HostSettings {
   private readonly options: HostSettingsOptions;
@@ -255,11 +280,12 @@ export class HostSettings {
       if (error instanceof ConnectionError) throw new ActionError('unavailable', 'the database does not answer');
       throw error;
     }
-    return this.viewOf(layers);
+    const services = (await this.options.services?.()) ?? [];
+    return { ...this.viewOf(layers), services };
   }
 
-  // The view over layers already read.
-  private viewOf(layers: SavedLayers): HostSettingsView {
+  // The view over layers already read (the services are added by view()).
+  private viewOf(layers: SavedLayers): Omit<HostSettingsView, 'services'> {
     const { env, rules, started } = this.options;
     const usable = this.usable(layers);
     // As it would read after a restart; when that cannot be read (a saved value refused meanwhile), what runs.
@@ -310,7 +336,8 @@ export class HostSettings {
         roles: setting.roles,
         value: secret ? null : text,
         set: secret ? shownValue(next, setting.name) !== null : text !== null && text !== '',
-        shown: setting.name === 'JUKECORD_DATABASE_URL' ? shownValue(next, setting.name) : null,
+        // What an address that holds a password may say of itself (where it is, never who).
+        shown: SHOWN.has(setting.name) ? shownValue(next, setting.name) : null,
         source: source.kind,
         variable,
         editable: locked === null,
@@ -493,7 +520,7 @@ export class HostSettings {
    * would start it again, it stays stopped and uses the new database when started). A failure of that last copy
    * writes nothing: jukecord starts again on the database it used, and the page says why.
    */
-  switchMove(): { readonly where: string; readonly restarts: boolean } {
+  switchMove(): { readonly where: string; readonly restarts: boolean; readonly supervisor: Supervisor } {
     this.changeable('JUKECORD_DATABASE_URL');
     const move = this.mover();
     const restart = this.options.restart;
@@ -521,7 +548,7 @@ export class HostSettings {
     // Started again (the restart's own code), or stopped for good where nothing starts it again (0: a clean stop).
     setTimeout(() => restart(restarts ? { last, withinMs } : { code: 0, last, withinMs }), 200);
     this.options.log.info('switching to another database', { to: where, restarts });
-    return { where, restarts };
+    return { where, restarts, supervisor: this.options.supervisor };
   }
 
   // The move, where one can be made.

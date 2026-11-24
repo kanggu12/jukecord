@@ -473,6 +473,37 @@ const ROWS: readonly Row[] = [
         width: 8,
         min: 0,
       },
+      {
+        type: 'stat',
+        title: 'Edges',
+        description: 'The edges that report to the core (a split setup); none in one process.',
+        queries: [{ expr: 'max(jukecord_edges{})', instant: true }],
+        width: 4,
+        noValue: 'one process',
+      },
+      {
+        type: 'timeseries',
+        title: 'Commands the core ran a second',
+        description: 'Commands the core ran for its edges, by how they ended (late: its caller had stopped waiting).',
+        queries: [
+          {
+            expr: 'sum by (outcome) (rate(jukecord_bus_commands_served_total{}[$__rate_interval]))',
+            legend: '{{outcome}}',
+          },
+        ],
+        width: 10,
+        min: 0,
+      },
+      {
+        type: 'timeseries',
+        title: 'Events on the bus a second',
+        description: 'Events of the core sent to its edges and heard there, and the ones lost while the bus was down.',
+        queries: [
+          { expr: 'sum by (outcome) (rate(jukecord_bus_events_total{}[$__rate_interval]))', legend: '{{outcome}}' },
+        ],
+        width: 10,
+        min: 0,
+      },
     ],
   },
   {

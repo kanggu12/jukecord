@@ -6,7 +6,7 @@
  * secret is only whether it is set.
  */
 import type { Config } from '../config.ts';
-import { timeOfDay } from '../config.ts';
+import { shownServer, timeOfDay } from '../config.ts';
 import { describeAddress } from '../store/address.ts';
 
 // Each setting's value out of a Config, by name. A setting the Config holds only together with others (a way of
@@ -73,6 +73,13 @@ const READERS: Readonly<Record<string, (config: Config) => unknown>> = {
   JUKECORD_LOG_MAX: (config) => config.log.maxBytes,
   JUKECORD_LOG_FILES: (config) => config.log.files,
   JUKECORD_METRICS_TOKEN: (config) => config.metrics.token,
+  JUKECORD_BUS_URL: (config) => config.bus.url,
+  JUKECORD_CACHE_URL: (config) => config.cacheUrl,
+  JUKECORD_KEY_PREFIX: (config) => config.bus.prefix,
+  JUKECORD_ROLE: (config) => config.role,
+  JUKECORD_INTERNAL_PORT: (config) => config.internal.port,
+  JUKECORD_INTERNAL_SECRET: (config) => config.internal.secret,
+  JUKECORD_CORE_URL: (config) => config.internal.coreUrl,
 };
 
 /** The names READERS knows, for the test that holds them to the settings table. */
@@ -96,6 +103,9 @@ export function sameValue(a: Config, b: Config, name: string): boolean {
  */
 export function shownValue(config: Config, name: string): string | null {
   if (name === 'JUKECORD_DATABASE_URL') return describeAddress(config.database.address);
+  // The bus's and the shared cache's servers, without their user or password.
+  if (name === 'JUKECORD_BUS_URL') return config.bus.url === null ? null : shownServer(config.bus.url);
+  if (name === 'JUKECORD_CACHE_URL') return config.cacheUrl === 'memory' ? 'memory' : shownServer(config.cacheUrl);
   const value = valueIn(config, name);
   if (value === null || value === undefined) return null;
   if (Array.isArray(value)) return value.join(', ');

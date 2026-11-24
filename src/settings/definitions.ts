@@ -73,6 +73,8 @@ export interface SettingDefinition {
   readonly words?: readonly [string, string];
   /** The longest text it takes, in characters (a login key's words). */
   readonly maxLength?: number;
+  /** The shortest text it takes, in characters (a secret shared between services). */
+  readonly minLength?: number;
   /** Whether a change applies at once, or once jukecord restarts. */
   readonly applies: 'now' | 'restart';
   /**
@@ -729,6 +731,56 @@ export const SETTINGS: readonly SettingDefinition[] = [
     },
   },
 
+  // Cache and bus: where the services of a split jukecord talk, and the shared cache (Redis or Valkey).
+  {
+    name: 'JUKECORD_BUS_URL',
+    group: 'cache',
+    kind: 'url',
+    default: null,
+    applies: 'restart',
+    layer: 'environment',
+    secret: true,
+    file: true,
+    roles: BOTH,
+    label: { en: 'Bus', ko: '버스' },
+    help: {
+      en: 'The Redis or Valkey server the services of a split jukecord talk through (redis://, rediss:// for TLS)',
+      ko: '나눠 띄운 jukecord의 서비스들이 주고받는 Redis 또는 Valkey 서버(redis://, TLS는 rediss://)',
+    },
+  },
+  {
+    name: 'JUKECORD_CACHE_URL',
+    group: 'cache',
+    kind: 'url',
+    default: 'memory',
+    defaultNote: { en: 'memory; in a split, the bus’s server', ko: '메모리. 나눠 띄우면 버스의 서버' },
+    applies: 'restart',
+    layer: 'bootstrap',
+    secret: true,
+    file: true,
+    roles: BOTH,
+    label: { en: 'Shared cache', ko: '공유 캐시' },
+    help: {
+      en: 'Where the rates, logins and searches are kept between requests: memory, or a Redis or Valkey address',
+      ko: '요청 사이에 속도 제한, 로그인, 검색 결과를 두는 곳: memory, 또는 Redis나 Valkey 주소',
+    },
+  },
+  {
+    name: 'JUKECORD_KEY_PREFIX',
+    group: 'cache',
+    kind: 'text',
+    default: 'jukecord',
+    maxLength: 64,
+    applies: 'restart',
+    layer: 'bootstrap',
+    roles: BOTH,
+    label: { en: 'Key prefix', ko: '키 접두어' },
+    help: {
+      en: 'What every key and channel on that server goes under, so several jukecords can share one',
+      ko: '그 서버에 두는 모든 키와 채널의 앞머리. 여러 jukecord가 한 서버를 함께 쓸 수 있음',
+    },
+  },
+
   // Media and limits: what may be added, how tracks are fetched, and the outside services asked.
   {
     name: 'JUKECORD_QUEUE_MAX',
@@ -1025,6 +1077,70 @@ export const SETTINGS: readonly SettingDefinition[] = [
     help: {
       en: 'A token that lets a scraper read /metrics from anywhere (Authorization: Bearer)',
       ko: '어디서든 /metrics를 읽게 해 주는 토큰(Authorization: Bearer)',
+    },
+  },
+
+  // Services: the role of this process, and how a split jukecord's edges reach their core.
+  {
+    name: 'JUKECORD_ROLE',
+    group: 'services',
+    kind: 'choice',
+    default: 'all',
+    choices: ['all', 'core', 'edge'],
+    applies: 'restart',
+    layer: 'environment',
+    roles: BOTH,
+    label: { en: 'Role', ko: '역할' },
+    help: {
+      en: 'all: one process does everything; core: Discord, the players and the media; edge: the panel and the API',
+      ko: 'all: 한 프로세스가 모두 맡음. core: 디스코드, 플레이어, 미디어. edge: 패널과 API',
+    },
+  },
+  {
+    name: 'JUKECORD_INTERNAL_PORT',
+    group: 'services',
+    kind: 'integer',
+    default: '8796',
+    min: '1',
+    max: '65535',
+    applies: 'restart',
+    layer: 'environment',
+    roles: CORE,
+    label: { en: 'Internal port', ko: '내부 포트' },
+    help: {
+      en: "The core's port for its edges: the audio and the covers, for edges only",
+      ko: '코어가 엣지에게만 여는 포트: 음원과 커버 이미지',
+    },
+  },
+  {
+    name: 'JUKECORD_INTERNAL_SECRET',
+    group: 'services',
+    kind: 'secret',
+    default: null,
+    minLength: 32,
+    applies: 'restart',
+    layer: 'environment',
+    secret: true,
+    file: true,
+    roles: BOTH,
+    label: { en: 'Internal secret', ko: '내부 비밀 값' },
+    help: {
+      en: 'The secret the core and its edges share, 32 characters or more',
+      ko: '코어와 엣지가 함께 쓰는 32자 이상의 비밀 값',
+    },
+  },
+  {
+    name: 'JUKECORD_CORE_URL',
+    group: 'services',
+    kind: 'url',
+    default: null,
+    applies: 'restart',
+    layer: 'environment',
+    roles: EDGE,
+    label: { en: "Core's address", ko: '코어 주소' },
+    help: {
+      en: "Where an edge reaches the core's internal port (http://core:8796)",
+      ko: '엣지가 코어의 내부 포트에 닿는 주소(http://core:8796)',
     },
   },
 ];

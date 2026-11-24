@@ -293,6 +293,10 @@ effect when it is saved; the others when jukecord restarts.
 | **Database**                                                            |                                |         |                                                                                                                          |
 | `JUKECORD_DATABASE_URL`, `JUKECORD_DATABASE_URL_FILE`                   |           `sqlite:`            | restart | Where the data is: sqlite: (the data folder’s file), sqlite:/a/file.db, postgres://… or mysql://…                        |
 | `JUKECORD_DATABASE_POOL`                                                |              `10`              | restart | The most connections jukecord opens to a database server (SQLite has its one)                                            |
+| **Cache and bus**                                                       |                                |         |                                                                                                                          |
+| `JUKECORD_BUS_URL`, `JUKECORD_BUS_URL_FILE`                             |                                | restart | The Redis or Valkey server the services of a split jukecord talk through (redis://, rediss:// for TLS)                   |
+| `JUKECORD_CACHE_URL`, `JUKECORD_CACHE_URL_FILE`                         |            `memory`            | restart | Where the rates, logins and searches are kept between requests: memory, or a Redis or Valkey address                     |
+| `JUKECORD_KEY_PREFIX`                                                   |           `jukecord`           | restart | What every key and channel on that server goes under, so several jukecords can share one                                 |
 | **Media and limits**                                                    |                                |         |                                                                                                                          |
 | `JUKECORD_QUEUE_MAX`                                                    |             `1000`             | at once | The most tracks a server's queue holds                                                                                   |
 | `JUKECORD_TRACK_MAX`                                                    |              `3h`              | at once | The longest track that may be added                                                                                      |
@@ -317,6 +321,11 @@ effect when it is saved; the others when jukecord restarts.
 | `JUKECORD_LOG_MAX`                                                      |             `5MiB`             | at once | The size at which a log file is put aside for a new one                                                                  |
 | `JUKECORD_LOG_FILES`                                                    |              `5`               | at once | How many log files are kept, the current one included                                                                    |
 | `JUKECORD_METRICS_TOKEN`, `JUKECORD_METRICS_TOKEN_FILE`                 |                                | at once | A token that lets a scraper read /metrics from anywhere (Authorization: Bearer)                                          |
+| **Services**                                                            |                                |         |                                                                                                                          |
+| `JUKECORD_ROLE`                                                         |             `all`              | restart | all: one process does everything; core: Discord, the players and the media; edge: the panel and the API                  |
+| `JUKECORD_INTERNAL_PORT`                                                |             `8796`             | restart | The core's port for its edges: the audio and the covers, for edges only                                                  |
+| `JUKECORD_INTERNAL_SECRET`, `JUKECORD_INTERNAL_SECRET_FILE`             |                                | restart | The secret the core and its edges share, 32 characters or more                                                           |
+| `JUKECORD_CORE_URL`                                                     |                                | restart | Where an edge reaches the core's internal port (http://core:8796)                                                        |
 
 <!-- settings:end -->
 

@@ -46,6 +46,15 @@ export const SPLIT: LayerRules = {
   environmentOnly: (setting) => setting.layer === 'environment' || storedIn(setting) === 'file',
 };
 
+/**
+ * The rules for a process, by its role as the environment says it (the role is read from there alone): one process's,
+ * or a split's service's. A role that is no role is loadConfig's to refuse; one process's rules meanwhile.
+ */
+export function rulesFor(env: NodeJS.ProcessEnv): LayerRules {
+  const role = env.JUKECORD_ROLE?.trim().toLowerCase();
+  return role === 'core' || role === 'edge' ? SPLIT : ONE_PROCESS;
+}
+
 // Whether a variable is given a value, as loadConfig reads it: something but spaces.
 function given(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name]?.trim() ?? '') !== '';

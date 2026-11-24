@@ -1,0 +1,24 @@
+# The front of jukecord split into services (deploy/compose/split.yaml): browsers spread over the edges.
+{
+	# Nothing to manage at runtime, and plain HTTP: the published address is this machine's (put your TLS front before
+	# it, or name your domain below instead of :80 and let Caddy get its certificate).
+	admin off
+	auto_https off
+}
+
+:80 {
+	reverse_proxy edge1:8795 edge2:8795 {
+		# Each request to the next edge; any edge answers any request (logins are database rows, the rates are counted
+		# together on the bus's server).
+		lb_policy round_robin
+		# An edge that does not take the connection (restarting) is passed over for the other, for up to five seconds.
+		lb_try_duration 5s
+		fail_duration 10s
+		# An edge in rotation answers its health check (it runs). Not /readyz: while the core restarts every edge says
+		# not ready, and the panel should still load and say it reconnects rather than be cut off.
+		health_uri /healthz
+		health_interval 5s
+		# Audio and live updates stream as they come: nothing is held back to be sent in bigger pieces.
+		flush_interval -1
+	}
+}

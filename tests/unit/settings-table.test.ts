@@ -32,10 +32,18 @@ const DIRECTORY_ON = {
   JUKECORD_LDAP_BASE_DN: 'dc=example,dc=org',
   JUKECORD_LDAP_READ_GROUPS: '*',
 };
+// What a split's service needs beside its role: a database server, the bus, the shared secret, the core's address.
+const SPLIT_ON = {
+  JUKECORD_DATABASE_URL: 'postgres://jukecord@db.example/jukecord',
+  JUKECORD_BUS_URL: 'redis://bus.example:6379',
+  JUKECORD_INTERNAL_SECRET: 'x'.repeat(32),
+  JUKECORD_CORE_URL: 'http://core:8796',
+};
 // What a setting needs beside it to be read.
 function around(setting: SettingDefinition): Record<string, string> {
   if (setting.part === 'sso') return SSO_ON;
   if (setting.part === 'directory') return DIRECTORY_ON;
+  if (setting.name === 'JUKECORD_ROLE') return SPLIT_ON;
   return {};
 }
 

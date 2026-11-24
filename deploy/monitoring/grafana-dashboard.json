@@ -2618,6 +2618,213 @@
     },
     {
       "id": 41,
+      "type": "stat",
+      "title": "Edges",
+      "description": "The edges that report to the core (a split setup); none in one process.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "one process",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(jukecord_edges{job=~\"$job\", instance=~\"$instance\"})",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Commands the core ran a second",
+      "description": "Commands the core ran for its edges, by how they ended (late: its caller had stopped waiting).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 4,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (outcome) (rate(jukecord_bus_commands_served_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "range": true,
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Events on the bus a second",
+      "description": "Events of the core sent to its edges and heard there, and the ones lost while the bus was down.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (outcome) (rate(jukecord_bus_events_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "range": true,
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 44,
       "type": "row",
       "title": "Discord",
       "collapsed": false,
@@ -2625,12 +2832,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 91
       },
       "panels": []
     },
     {
-      "id": 42,
+      "id": 45,
       "type": "timeseries",
       "title": "Gateway",
       "description": "The state the bot's gateway was in: a line for each state it held (ready, reconnecting, ...).",
@@ -2642,7 +2849,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 92
       },
       "fieldConfig": {
         "defaults": {
@@ -2702,7 +2909,7 @@
       ]
     },
     {
-      "id": 43,
+      "id": 46,
       "type": "timeseries",
       "title": "Gateway latency",
       "description": "The round trip of the gateway's heartbeat.",
@@ -2714,7 +2921,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 84
+        "y": 92
       },
       "fieldConfig": {
         "defaults": {
@@ -2773,7 +2980,7 @@
       ]
     },
     {
-      "id": 44,
+      "id": 47,
       "type": "timeseries",
       "title": "Servers and voice",
       "description": "Discord servers the bot is in, and its voice connections by state.",
@@ -2785,7 +2992,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 84
+        "y": 92
       },
       "fieldConfig": {
         "defaults": {
@@ -2855,7 +3062,7 @@
       ]
     },
     {
-      "id": 45,
+      "id": 48,
       "type": "row",
       "title": "Process",
       "collapsed": false,
@@ -2863,12 +3070,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 100
       },
       "panels": []
     },
     {
-      "id": 46,
+      "id": 49,
       "type": "timeseries",
       "title": "Event loop delay",
       "description": "Over each second; above 0.2 s at the 99th percentile jukecord turns away what can wait.",
@@ -2880,7 +3087,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 93
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -2960,7 +3167,7 @@
       ]
     },
     {
-      "id": 47,
+      "id": 50,
       "type": "timeseries",
       "title": "Event loop use, and time behind",
       "description": "How much of each second the loop worked, and the share of the time jukecord was behind.",
@@ -2972,7 +3179,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 93
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -3042,7 +3249,7 @@
       ]
     },
     {
-      "id": 48,
+      "id": 51,
       "type": "timeseries",
       "title": "Processor",
       "description": "Processor time a second (1 is one whole core).",
@@ -3054,7 +3261,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 93
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -3113,7 +3320,7 @@
       ]
     },
     {
-      "id": 49,
+      "id": 52,
       "type": "timeseries",
       "title": "Memory",
       "description": "The process's resident memory, and the JavaScript heap.",
@@ -3125,7 +3332,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 101
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {
@@ -3217,7 +3424,7 @@
       ]
     },
     {
-      "id": 50,
+      "id": 53,
       "type": "timeseries",
       "title": "Open files",
       "description": "Files and sockets open, and the most the process may have (Linux).",
@@ -3229,7 +3436,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 101
+        "y": 109
       },
       "fieldConfig": {
         "defaults": {

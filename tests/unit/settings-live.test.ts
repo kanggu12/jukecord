@@ -112,6 +112,13 @@ const NEXT_ENV = {
   JUKECORD_LOG_MAX: '1MiB',
   JUKECORD_LOG_FILES: '2',
   JUKECORD_METRICS_TOKEN: 'abcdefghijklmnopqrstuvwxyz',
+  // A split's core, so its own settings move too (the address of a core is an edge's alone: left unmoved).
+  JUKECORD_ROLE: 'core',
+  JUKECORD_BUS_URL: 'redis://bus.example:6379',
+  JUKECORD_CACHE_URL: 'redis://cache.example:6379',
+  JUKECORD_KEY_PREFIX: 'jk',
+  JUKECORD_INTERNAL_PORT: '8797',
+  JUKECORD_INTERNAL_SECRET: 'abcdefghijklmnopqrstuvwxyz0123456789',
 };
 // The settings NEXT_ENV cannot move off their default in the same Config (the directory's StartTLS takes ldap://, its
 // nested groups no group filter, its CA file a file to read, the cookies a file too).
@@ -120,6 +127,7 @@ const UNMOVED = new Set([
   'JUKECORD_LDAP_NESTED_GROUPS',
   'JUKECORD_LDAP_CA_FILE',
   'JUKECORD_YTDLP_COOKIES',
+  'JUKECORD_CORE_URL',
 ]);
 
 describe('the settings that apply at once', () => {

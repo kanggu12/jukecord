@@ -1,4 +1,4 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- if and .Values.networkPolicy.enabled (eq .Values.mode "single") }}
 # In: the panel's port only. Out: DNS, and the internet (Discord's gateway and its voice servers over UDP, the sites
 # tracks come from) but none of the cluster's private networks, so a compromised jukecord cannot reach other services.
 apiVersion: networking.k8s.io/v1
@@ -36,20 +36,13 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    {{- if include "jukecord.readsDatabase" . }}
-    # The database, which is often in the cluster's private range (out of reach by the rule below): the rules given
-    # (networkPolicy.egressTo), or any pod of the release's namespace on PostgreSQL's and MySQL's ports.
-    {{- with .Values.networkPolicy.egressTo }}
-    {{- toYaml . | nindent 4 }}
-    {{- else }}
-    - to:
-        - podSelector: {}
-      ports:
-        - port: 5432
-          protocol: TCP
-        - port: 3306
-          protocol: TCP
+    {{- /* The database, which is often in the cluster's private range (out of reach by the rule below): the rule
+    split mode has too (jukecord.serviceEgress). */}}
+    {{- with include "jukecord.serviceEgress" . | trim }}
+    {{- . | nindent 4 }}
     {{- end }}
+    {{- with include "jukecord.authEgress" . | trim }}
+    {{- . | nindent 4 }}
     {{- end }}
     # The internet, any port: Discord voice uses UDP on ports it chooses.
     - to:
@@ -62,4 +55,81 @@ spec:
             except:
               - fc00::/7
               - fe80::/10
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (eq .Values.mode "split") }}
+---
+# The core: its own port (health and figures) as the panel's port is in single mode; its internal port from the edges
+# only. Out as below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "jukecord.coreName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "core") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "jukecord.partSelector" (list . "core") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8795
+          protocol: TCP
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    # The audio and the covers: for this release's edges and nobody else.
+    - ports:
+        - port: 8796
+          protocol: TCP
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "jukecord.partSelector" (list . "edge") | nindent 14 }}
+  egress:
+    {{- include "jukecord.splitEgress" . | nindent 4 }}
+---
+# The edges: the panel's port, as in single mode. Out: as the core, and the core's internal port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "jukecord.edgeName" . }}
+  labels:
+    {{- include "jukecord.partLabels" (list . "edge") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "jukecord.partSelector" (list . "edge") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8795
+          protocol: TCP
+      {{- with .Values.networkPolicy.ingressFrom }}
+      # Only from these (networkPolicy.ingressFrom), and helm test's pod.
+      from:
+        {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ $.Release.Name }}
+              app.kubernetes.io/component: test
+      {{- end }}
+  egress:
+    {{- include "jukecord.splitEgress" . | nindent 4 }}
+    {{- with include "jukecord.authEgress" . | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    # The core's internal port, in the cluster (its private range is out of reach otherwise).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "jukecord.partSelector" (list . "core") | nindent 14 }}
+      ports:
+        - port: 8796
+          protocol: TCP
 {{- end }}

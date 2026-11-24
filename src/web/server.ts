@@ -8,6 +8,7 @@
  */
 import fs from 'node:fs';
 import type { Socket } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
@@ -15,24 +16,25 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { hostLike, personOf } from '../app/access.ts';
-import { ActionError, likesOwner } from '../app/actions.ts';
+import { ActionError } from '../app/actions.ts';
 import type { Health } from '../app/health.ts';
 import { LdapError } from '../auth/ldap.ts';
 import { levelOf, sameLdapGroup, sameOidcGroup } from '../auth/levels.ts';
 import { OidcError, SSO_COOKIE } from '../auth/oidc.ts';
+import type { Cache } from '../cache/cache.ts';
+import { MemoryCache } from '../cache/memory.ts';
+import { MEMORY_BUCKETS, MEMORY_ENTRIES } from '../cache/open.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
 import type { Players } from '../core/players.ts';
 import type { QueueService } from '../core/queue.ts';
 import type { Track } from '../core/types.ts';
 import type { Logger } from '../log.ts';
-import { BusyError } from '../media/busy.ts';
-import { MediaCache } from '../media/cache.ts';
-import type { CoverFile, Covers, Pictured } from '../media/covers.ts';
+import type { MediaCache } from '../media/cache.ts';
+import type { Covers } from '../media/covers.ts';
 import { MetricsGate, negotiate } from '../metrics/http.ts';
 import { MetricsRegistry } from '../metrics/registry.ts';
 import { httpMetrics, methodLabel, routeLabel, statusClass } from '../metrics/web.ts';
-import { SettingsRefused } from '../settings/service.ts';
 import { StoreError } from '../store/store.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
 import {
@@ -46,13 +48,50 @@ import {
   SESSION_COOKIE,
   safeNext,
 } from './auth.ts';
-import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
+import { DEFAULT_LIVE_LIMITS, type ElsewhereListeners, EventHub, type LiveLimits } from './events.ts';
+import { type Files, MediaFiles } from './files.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
-import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
+import { CHANGES, COVERS, FETCHES, Limit, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
 import { openApiDocument } from './openapi.ts';
+import { BUSY, failure, later, TOO_MANY_READS } from './replies.ts';
 import { type FieldSchema, misfit } from './schemas.ts';
 
-export interface WebServerOptions {
+/** One process (or a core's own use): its players, its queue and its media, which the routes read themselves. */
+export interface LocalMedia {
+  readonly players: Players;
+  readonly queue: QueueService;
+  readonly cache: MediaCache;
+  /** Makes the MP3 copy of a cached track for browsers without Opus. */
+  readonly mp3: (track: Track, signal: AbortSignal) => Promise<string | null>;
+  /** The tracks' covers, served from the cache and fetched once (src/media/covers.ts). */
+  readonly covers: Covers;
+  readonly edge?: undefined;
+}
+
+/** An edge of a split jukecord: the core has the players, the queue and the media (see roles/edge.ts). */
+export interface EdgeMedia {
+  readonly edge: {
+    /** The core's audio and covers, streamed from its internal port. */
+    readonly files: Files;
+    /** A server's queue version as the bus last told it (the live updates keep a server's queue per version). */
+    readonly queueVersion: (guildId: string) => number;
+    /** Who listens in the other edges' browsers, shown and counted with this edge's own. */
+    readonly elsewhere: ElsewhereListeners;
+    /** Tells the other edges to end the connections a logout or a revoked link ends here. */
+    readonly endings: NonNullable<ConstructorParameters<typeof EventHub>[0]['endings']>;
+    /** Whether the core has fallen behind, which sheds what can wait here too (the core does the work). */
+    readonly behind: () => boolean;
+  };
+  readonly players?: undefined;
+  readonly queue?: undefined;
+  readonly cache?: undefined;
+  readonly mp3?: undefined;
+  readonly covers?: undefined;
+}
+
+export type WebServerOptions = WebServerCommon & (LocalMedia | EdgeMedia);
+
+interface WebServerCommon {
   readonly host: string;
   readonly port: number;
   /** Where people reach the panel, without a trailing slash (login links and Discord's way back are built on it). */
@@ -63,13 +102,6 @@ export interface WebServerOptions {
   readonly panelDir: string | null;
   readonly deps: HandlerDeps;
   readonly bus: Bus;
-  readonly players: Players;
-  readonly queue: QueueService;
-  readonly cache: MediaCache;
-  /** Makes the MP3 copy of a cached track for browsers without Opus. */
-  readonly mp3: (track: Track, signal: AbortSignal) => Promise<string | null>;
-  /** The tracks' covers, served from the cache and fetched once (src/media/covers.ts). */
-  readonly covers: Covers;
   readonly log: Logger;
   /** How many live connections there may be (in all, per login, per address); tests and the settings change it. */
   readonly live?: Partial<LiveLimits>;
@@ -84,6 +116,11 @@ export interface WebServerOptions {
    * address's, or the live connections' (for app/alerts.ts).
    */
   readonly turnedAway?: (cap: TurnedAway) => void;
+  /**
+   * Where the rates are counted (and whatever else browsers' requests share): the process's shared cache, which several
+   * edges keep on one Redis or Valkey server. Without it the server keeps one in its memory.
+   */
+  readonly sharedCache?: Cache;
   /** The rates changes are held to, and the clock they are counted on (tests set both). */
   readonly rates?: {
     readonly changes?: Rate;
@@ -138,19 +175,6 @@ interface LiveQuery {
   gzip?: string;
 }
 
-// The HTTP status of each error code.
-const STATUS: Readonly<Record<string, number>> = {
-  invalid: 400,
-  unauthorized: 401,
-  forbidden: 403,
-  'not-found': 404,
-  conflict: 409,
-  'too-many': 429,
-  'rate-limited': 429,
-  unavailable: 503,
-  busy: 503,
-};
-
 // The changes that start a fetch somebody waits for (yt-dlp and ffmpeg, at once): the tighter rate applies to them.
 const FETCHING: ReadonlySet<OperationName> = new Set(['skip', 'play-now', 'jump', 'remove-current']);
 
@@ -160,14 +184,10 @@ const FETCHING: ReadonlySet<OperationName> = new Set(['skip', 'play-now', 'jump'
 const GUEST_MAY: ReadonlySet<OperationName> = new Set(['now-playing', 'queue', 'lyrics', 'me', 'guilds', 'status']);
 const GUEST_ONLY = 'a guest can only look and listen';
 
-// What a refusal says when jukecord sheds work it can do later, and when a login or an address sends changes faster
-// than the rates allow.
-const BUSY = 'jukecord is busy; try again in a moment';
+// What a refusal says when a login or an address sends changes faster than the rates allow (BUSY and TOO_MANY_READS
+// are in replies.ts, which the audio and the covers answer with too).
 const TOO_MANY_CHANGES = 'too many changes at once; try again in a moment';
 const TOO_MANY_SKIPS = 'too many skips at once; try again in a moment';
-const TOO_MANY_READS = 'too many requests at once; try again in a moment';
-// What an audio request is told while the MP3 copy it asked for is still being made.
-const MAKING_MP3 = 'jukecord is making the MP3 copy of this track; try again in a moment';
 const TOO_MANY_SEARCHES = 'too many searches at once; try again in a moment';
 
 // The metrics' text, compressed off the main thread for a scraper that takes gzip (Prometheus always does): a few tens
@@ -183,23 +203,6 @@ const gzipped = promisify(zlib.gzip);
 // answer, the first sixteen too, without a word in the log.
 const PIPELINED_MAX = 16;
 const PIPELINED_HELD = 112;
-
-// Waits for `promise` at most `ms`: its value when it settled in time, `undefined` when the time ran out first (the
-// promise goes on; whoever made it keeps it). A rejection in time is passed on.
-async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  let timer: NodeJS.Timeout | undefined;
-  // The wait itself: a timer that ends in `undefined`, and that must not keep a stopping process alive.
-  const late = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), ms);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([promise, late]);
-  } finally {
-    // Settled first: the timer has nothing left to do.
-    clearTimeout(timer);
-  }
-}
 
 // A request that does not fit its operation's schema, as Fastify reports it: where (the query, the path, the body) and
 // the validator's findings, the first of which is the one that counts.
@@ -239,21 +242,6 @@ function unfit(error: Unfit, request: FastifyRequest): string {
 // What went wrong, in the words of its error, for the log.
 function reasonOf(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
-}
-
-// The answer for an error, in the one shape every API error has (a refused change of settings adds its problems).
-function failure(
-  reply: FastifyReply,
-  code: string,
-  message: string,
-  problems?: readonly { readonly names: readonly string[]; readonly message: string }[],
-): FastifyReply {
-  return reply.code(STATUS[code] ?? 500).send({ error: { code, message, ...(problems ? { problems } : {}) } });
-}
-
-// A refusal that says when to try again (Retry-After, in whole seconds).
-function later(reply: FastifyReply, code: string, message: string, ms: number): FastifyReply {
-  return failure(reply.header('retry-after', String(Math.max(1, Math.ceil(ms / 1000)))), code, message);
 }
 
 // The key a caller's changes are counted under: its session, or its API token.
@@ -413,8 +401,11 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     users: deps.store.users,
     log: log.child('events'),
     metrics: registry,
-    // The queue's change counter, read without the queue: the hub keeps each server's queue message per version.
-    queueVersion: (guildId) => options.queue.version(guildId),
+    // The queue's change counter, read without the queue (an edge: as the bus last said it): the hub keeps each
+    // server's queue message per version.
+    queueVersion: (guildId) => (options.edge ? options.edge.queueVersion(guildId) : options.queue.version(guildId)),
+    // An edge's: the other edges' listeners, the endings they must hear, and reads that are the core's commands.
+    ...(options.edge ? { elsewhere: options.edge.elsewhere, endings: options.edge.endings, remote: true } : {}),
     stillValid: (caller) => auth.stillValid(caller),
     limits: { ...DEFAULT_LIVE_LIMITS, ...options.live },
     // Only the cap of every live connection is jukecord's trouble; one login's or one address's is that person's.
@@ -428,16 +419,44 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   // Aborted when the server closes: work shared by several requests (an MP3 copy) stops with jukecord, not with one
   // of the requests.
   const stopping = new AbortController();
-  // The rates of changes, per login and per address, and whether the event loop has fallen behind.
-  const clock = options.rates?.now ?? Date.now;
-  const changes = new Buckets(options.rates?.changes ?? CHANGES, { now: clock });
-  const fetches = new Buckets(options.rates?.fetches ?? FETCHES, { now: clock });
-  const reads = new Buckets(options.rates?.reads ?? READS, { now: clock });
+  // The rates of changes, per login and per address, counted in the shared cache (a cache of its own when none is
+  // given, on the steady clock unless a test gives one), and whether the event loop has fallen behind.
+  const ownCache = options.sharedCache
+    ? null
+    : new MemoryCache({
+        capacity: MEMORY_ENTRIES,
+        buckets: MEMORY_BUCKETS,
+        ...(options.rates?.now ? { now: options.rates.now } : {}),
+      });
+  const shared = options.sharedCache ?? (ownCache as MemoryCache);
+  const changes = new Limit(shared, 'changes', options.rates?.changes ?? CHANGES, log);
+  const fetches = new Limit(shared, 'fetches', options.rates?.fetches ?? FETCHES, log);
+  const reads = new Limit(shared, 'reads', options.rates?.reads ?? READS, log);
   // Covers asked for that jukecord must fetch first (a cached one costs what a file of the panel costs, and is free).
-  const coverFetches = new Buckets(options.rates?.covers ?? COVERS, { now: clock });
-  const searches = new Buckets(options.rates?.searches ?? SEARCHES, { now: clock });
+  const coverFetches = new Limit(shared, 'covers', options.rates?.covers ?? COVERS, log);
+  const searches = new Limit(shared, 'searches', options.rates?.searches ?? SEARCHES, log);
   const pressure = options.behind ? null : new Pressure();
-  const behind = options.behind ?? (() => pressure?.behind ?? false);
+  // An edge sheds what can wait when the core is behind as well: the core does the work it would ask.
+  const coreBehind = options.edge?.behind ?? (() => false);
+  const ownBehind = options.behind ?? (() => pressure?.behind ?? false);
+  const behind = () => ownBehind() || coreBehind();
+
+  // The audio and the covers: from this process's media cache, or (an edge) streamed from the core's.
+  const files: Files = options.edge
+    ? options.edge.files
+    : new MediaFiles({
+        players: options.players,
+        queue: options.queue,
+        store: deps.store,
+        cache: options.cache,
+        mp3: options.mp3,
+        covers: options.covers,
+        searched: async (context, address) => deps.actions.searched(context, address),
+        coverRate: coverFetches,
+        behind,
+        stopping: stopping.signal,
+        ...(timeouts.mp3WaitMs !== undefined ? { mp3WaitMs: timeouts.mp3WaitMs } : {}),
+      });
 
   // Answers under way on each connection, and the requests waiting for a place among them (see PIPELINED_MAX). An
   // upgrade to a WebSocket keeps its place, and the connection then carries no more requests.
@@ -552,8 +571,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     // A refusal of a busy moment says when to ask again (Retry-After), as the server's own busy answers do.
     if (error instanceof ActionError) {
       if (error.retryAfterMs !== null) return later(reply, error.code, error.message, error.retryAfterMs);
-      // A change of the host's settings that their rules refuse: every problem, with the settings it is about.
-      if (error instanceof SettingsRefused) return failure(reply, error.code, error.message, error.problems);
+      // A change of the host's settings that their rules refuse: every problem, with the settings it is about (an
+      // edge's refusal from the core carries them too).
+      if (error.problems) return failure(reply, error.code, error.message, error.problems);
       return failure(reply, error.code, error.message);
     }
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);
@@ -583,7 +603,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   const panelDir =
     options.panelDir && fs.existsSync(path.join(options.panelDir, 'index.html')) ? options.panelDir : null;
   await app.register(fastifyStatic, {
-    root: panelDir ?? options.cache.dir,
+    // Without the panel, a folder that exists (sendFile needs a root; an edge has no media cache to name).
+    root: panelDir ?? (options.edge ? os.tmpdir() : options.cache.dir),
     serve: panelDir !== null,
     prefix: '/',
     // Each file is a route; anything else falls through to the panel's page (see the not-found handler).
@@ -661,20 +682,25 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // that address (a household, an office) are not held back by one person's refusals; that person's login still is.
         // A refusal after a lookup on the site (a search that found nothing) cost a lookup, and keeps it spent: a person
         // with several logins or tokens behind one address otherwise had no brake from the address at all.
-        let giveBack: (() => void) | null = null;
+        let giveBack: (() => Promise<void>) | null = null;
         if (spec.method !== 'GET' && caller && caller.principal.kind !== 'host') {
           if (behind()) return later(reply, 'busy', BUSY, 2000);
           const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
           const fetching = FETCHING.has(name);
-          const forFetch = fetching ? fetches.wait(keys) : 0;
-          const wait = Math.max(changes.wait(keys), forFetch);
-          if (wait > 0) return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
-          changes.take(keys);
-          if (fetching) fetches.take(keys);
+          // Each kind takes from all its buckets or none; a kind that took while the other refused gives its token
+          // back, so a refusal costs nothing, and the wait is the longer of the two.
+          const forFetch = fetching ? await fetches.spend(keys) : 0;
+          const forChange = await changes.spend(keys);
+          if (forFetch > 0 || forChange > 0) {
+            if (fetching && forFetch === 0) await fetches.refund(keys);
+            if (forChange === 0) await changes.refund(keys);
+            const wait = Math.max(forFetch, forChange);
+            return later(reply, 'rate-limited', forFetch > 0 ? TOO_MANY_SKIPS : TOO_MANY_CHANGES, wait);
+          }
           const address = keys.slice(1);
-          giveBack = () => {
-            changes.give(address);
-            if (fetching) fetches.give(address);
+          giveBack = async () => {
+            await changes.refund(address);
+            if (fetching) await fetches.refund(address);
           };
         }
         // A read from anyone but the host is held to the wider rate of reads: a logged-in one by the person behind it
@@ -688,11 +714,14 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             : [`address ${addressKey(request.ip)}`];
           // A search, which starts yt-dlp, is held to its own rate as well, by the same keys (both must have a token).
           const searching = name === 'search';
-          const forSearch = searching ? searches.wait(keys) : 0;
-          const wait = Math.max(reads.wait(keys), forSearch);
-          if (wait > 0) return later(reply, 'rate-limited', forSearch > 0 ? TOO_MANY_SEARCHES : TOO_MANY_READS, wait);
-          reads.take(keys);
-          if (searching) searches.take(keys);
+          const forSearch = searching ? await searches.spend(keys) : 0;
+          const forRead = await reads.spend(keys);
+          if (forSearch > 0 || forRead > 0) {
+            if (searching && forSearch === 0) await searches.refund(keys);
+            if (forRead === 0) await reads.refund(keys);
+            const wait = Math.max(forSearch, forRead);
+            return later(reply, 'rate-limited', forSearch > 0 ? TOO_MANY_SEARCHES : TOO_MANY_READS, wait);
+          }
         }
         const params = (request.params ?? {}) as Record<string, unknown>;
         // Aborted when the caller goes away before its answer is sent (a search whose words were typed over), so the
@@ -716,7 +745,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             signal: gone.signal,
           });
         } catch (error) {
-          if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) giveBack?.();
+          if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) await giveBack?.();
           throw error;
         }
       },
@@ -737,77 +766,15 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
       if (!caller) return failure(reply, 'unauthorized', 'log in first');
       const context = await deps.access.context(caller.principal, request.params.guild);
-      const id = Number(request.params.track);
-      const valid = Number.isSafeInteger(id) && id > 0;
-      const current = options.players.get(context.guildId).snapshot().track;
-      // Asked of the index, not by reading the queue: a browser seeking sends a Range request each time.
-      const queued = valid && (current?.id === id || (await options.queue.contains(context.guildId, id)));
-      const track = queued ? await deps.store.tracks.get(id) : null;
-      if (!track) return failure(reply, 'not-found', 'that track is not playing or queued in this server');
-      const key = MediaCache.keyOf(track.source);
-      if (!options.cache.has(key)) return failure(reply, 'conflict', 'the track is not prepared yet');
-      let file = options.cache.opusPath(key);
-      if (request.query.format === 'mp3') {
-        // Shared by everyone asking at once and not tied to this request: a second browser may be waiting for it. It
-        // ends at its own time limit, which grows with the track (see Media.mp3), or when jukecord stops.
-        const making = options.mp3(track, stopping.signal);
-        // A copy that fails after every request stopped waiting for it is Media's to log, not an unhandled rejection.
-        making.catch(() => {});
-        // The request waits a few seconds, which covers the copy of an ordinary song. A long track takes longer (an
-        // hour of audio took most of a minute under two processors), and a request waiting on it moves nothing on its
-        // connection, which the idle limit then cut with no answer at all: it is told to ask again instead (503 with
-        // Retry-After, which the panel takes as "not now"), and the copy goes on meanwhile.
-        let mp3: string | null | undefined;
-        try {
-          mp3 = await within(making, timeouts.mp3WaitMs ?? 5000);
-        } catch (error) {
-          if (error instanceof BusyError) return later(reply, 'unavailable', error.message, 2000);
-          throw error;
-        }
-        if (mp3 === undefined) return later(reply, 'unavailable', MAKING_MP3, 2000);
-        if (!mp3) return failure(reply, 'conflict', 'the track is not prepared yet');
-        file = mp3;
-      }
-      // A track's file does not change once made; the browser may keep it for a day.
-      return reply.header('cache-control', 'private, max-age=86400').sendFile(path.basename(file), path.dirname(file));
+      // From this process's media cache, or the core's (files.ts): the same checks, files and refusals.
+      return files.audio(request, reply, context.guildId, Number(request.params.track), request.query.format === 'mp3');
     },
   );
 
-  // Sends a cover from the cache, or fetches it once first (src/media/covers.ts): within the cover rate of the login and
-  // its address, and not while jukecord is behind. A picture that cannot be had, or none at all, answers `missing`,
-  // which the browser need not ask again for an hour: as long as jukecord remembers the failure.
-  const sendCover = async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-    caller: Caller,
-    pictured: Pictured,
-    missing: string,
-  ): Promise<FastifyReply> => {
-    const none = () => failure(reply.header('cache-control', 'private, max-age=3600'), 'not-found', missing);
-    if (!pictured.thumbnail) return none();
-    let cover: CoverFile | null = options.covers.cached(pictured);
-    if (!cover) {
-      if (behind()) return later(reply, 'busy', BUSY, 2000);
-      // The host is not held to a rate, as for every other request.
-      if (caller.principal.kind !== 'host') {
-        const keys = [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
-        const wait = coverFetches.wait(keys);
-        if (wait > 0) return later(reply, 'rate-limited', TOO_MANY_READS, wait);
-        coverFetches.take(keys);
-      }
-      try {
-        cover = await options.covers.get(pictured);
-      } catch (error) {
-        if (error instanceof BusyError) return later(reply, 'busy', error.message, 2000);
-        throw error;
-      }
-      if (!cover) return none();
-    }
-    // A cover does not change once fetched; the browser may keep it for a day, then ask whether it did.
-    return reply
-      .header('cache-control', 'private, max-age=86400')
-      .sendFile(path.basename(cover.path), path.dirname(cover.path));
-  };
+  // The keys a caller's covers are counted under when jukecord must fetch one first; none for the host, who is not
+  // held to a rate, as for every other request.
+  const coverKeys = (request: FastifyRequest, caller: Caller): string[] | null =>
+    caller.principal.kind === 'host' ? null : [`login ${loginKey(caller)}`, `address ${addressKey(request.ip)}`];
 
   // A track's cover, from jukecord itself: only for a track the server shows somewhere (playing, queued, in its
   // history or in one of its playlists), to a login that can open that server.
@@ -818,21 +785,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (blocked) return failure(reply, 'too-many', 'too many failed logins; wait ten minutes');
       if (!caller) return failure(reply, 'unauthorized', 'log in first');
       const context = await deps.access.context(caller.principal, request.params.guild);
-      const id = Number(request.params.track);
-      const valid = Number.isSafeInteger(id) && id > 0;
-      // Each question is one lookup by an index, cheapest first: the player, the queue, the history, the playlists, and
-      // this login's likes (a login's own in every server it opens, so its liked list shows them here too; a guest has
-      // none).
-      const shown =
-        valid &&
-        (options.players.get(context.guildId).snapshot().track?.id === id ||
-          (await options.queue.contains(context.guildId, id)) ||
-          (await deps.store.history.has(context.guildId, id)) ||
-          (await deps.store.playlists.has(context.guildId, id)) ||
-          (caller.principal.kind !== 'guest' && (await deps.store.likes.has(likesOwner(context), id))));
-      const track = shown ? await deps.store.tracks.get(id) : null;
-      if (!track) return failure(reply, 'not-found', 'that track is not in this server');
-      return sendCover(request, reply, caller, track, 'that track has no cover');
+      const guest = caller.principal.kind === 'guest';
+      return files.cover(request, reply, context, guest, Number(request.params.track), coverKeys(request, caller));
     },
   );
 
@@ -852,9 +806,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (verdict === 'forbidden') return failure(reply, 'forbidden', forbiddenFor(API.search.access, caller));
       const context = await deps.access.context(caller.principal, request.params.guild);
       const address = typeof request.query.url === 'string' ? request.query.url : '';
-      const found = deps.actions.searched(context, address);
-      if (!found) return failure(reply, 'not-found', 'no search found that address lately');
-      return sendCover(request, reply, caller, found, 'that search result has no picture');
+      return files.searchCover(request, reply, context, address, coverKeys(request, caller));
     },
   );
 
@@ -1149,8 +1101,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       return failure(reply, 'forbidden', "the logout came without the panel's CSRF token");
     }
     if (caller?.principal.kind === 'user') deps.access.forget(caller.principal.userId);
-    // This browser's live connection ends with its login.
-    if (caller?.sessionHash) hub.end((other) => other.sessionHash === caller.sessionHash);
+    // This browser's live connection ends with its login (on every edge of a split jukecord).
+    if (caller?.sessionHash) hub.endSession(caller.sessionHash);
     const ended = await auth.endSession(caller);
     // A login through the host's identity provider logs out there too, when it offers that: the panel goes where the
     // answer says, and the provider sends it back to the login page. Every other logout answers nothing, as before.
@@ -1215,6 +1167,8 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       hub.close();
       pressure?.stop();
       stopping.abort();
+      // A cache of its own goes with the server; a shared one is its owner's to close.
+      await ownCache?.close();
       // Fastify closes the idle connections and waits for the answers under way. Audio to a browser lasts as long as
       // the browser takes to read it (a paused <audio> reads nothing for minutes), and jukecord gives its whole stop ten
       // seconds: what is still under way after two is cut.

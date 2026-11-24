@@ -150,13 +150,29 @@ export class ActionError extends Error {
    * web server sends it as Retry-After, which the command line turns into its own exit code. Null for any other.
    */
   readonly retryAfterMs: number | null;
+  /**
+   * For a change of the host's settings their rules refuse (src/settings): each problem with the settings it names, so
+   * the page shows each under its own; null for any other refusal.
+   */
+  readonly problems: readonly SettingProblemOf[] | null;
 
-  constructor(code: ActionErrorCode, message: string, options: { spent?: boolean; retryAfterMs?: number } = {}) {
+  constructor(
+    code: ActionErrorCode,
+    message: string,
+    options: { spent?: boolean; retryAfterMs?: number; problems?: readonly SettingProblemOf[] } = {},
+  ) {
     super(message);
     this.code = code;
     this.spent = options.spent ?? false;
     this.retryAfterMs = options.retryAfterMs ?? null;
+    this.problems = options.problems ?? null;
   }
+}
+
+/** A problem of a refused change of settings, and the settings it names (see ActionError.problems). */
+export interface SettingProblemOf {
+  readonly names: readonly string[];
+  readonly message: string;
 }
 
 /** Joining and leaving voice, which only the Discord side can do; absent when jukecord runs without a bot token. */
@@ -1227,7 +1243,7 @@ export class Actions {
    * A track a search showed in the last half hour, by its address, or null for an address no recent search found: the
    * add field's list shows its picture from jukecord (web/server.ts). Only for people who may search.
    */
-  searched(context: ActionContext, address: string): NewTrack | null {
+  async searched(context: ActionContext, address: string): Promise<NewTrack | null> {
     this.control(context);
     let url: URL;
     try {
@@ -1237,7 +1253,7 @@ export class Actions {
       return null;
     }
     // By the canonical address, which is what the search kept it by (Search.recent).
-    return this.options.search?.recent(canonicalSource(url)) ?? null;
+    return (await this.options.search?.recent(canonicalSource(url))) ?? null;
   }
 
   /** The tracks this login liked, newest first (anyone may look at their own). */
