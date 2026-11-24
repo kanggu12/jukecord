@@ -164,6 +164,27 @@ describe('LdapLogin', () => {
     assert.equal(await refusal(login(server).login('alice', 'alice-password')), 'unavailable');
   });
 
+  it('tells a directory that cannot be reached from one that refused the service account', async () => {
+    const server = directory();
+    const message = async (settings: Partial<LdapSettings>) => {
+      try {
+        await login(server, settings).login('alice', 'alice-password');
+        return 'none';
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    assert.match(await message({ bindPassword: 'wrong' }), /^the directory refused jukecord's service account/);
+    // ldapts connects at the first request: there the socket's error shows, and it is no refusal.
+    server.unreachable = true;
+    assert.match(await message({}), /^the directory could not be reached: connect ECONNREFUSED/);
+    const { checks } = await login(server).test();
+    assert.deepEqual(
+      checks.map((check) => [check.name, check.status]),
+      [['connection', 'fail']],
+    );
+  });
+
   it('refuses a filter that finds two people', async () => {
     const server = directory();
     assert.equal(

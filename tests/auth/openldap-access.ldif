@@ -1,0 +1,7 @@
+# What jukecord's service account may do in the test directory: read people and groups (never passwords), as a
+# host grants it in a real directory. Applied to osixia/openldap's database over ldapi:/// as the server's own root.
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+replace: olcAccess
+olcAccess: {0}to attrs=userPassword,shadowLastChange by self write by dn="cn=admin,dc=example,dc=org" write by anonymous auth by * none
+olcAccess: {1}to * by self read by dn="cn=admin,dc=example,dc=org" write by dn="cn=jukecord,ou=services,dc=example,dc=org" read by * none

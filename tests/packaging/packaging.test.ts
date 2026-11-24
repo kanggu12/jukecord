@@ -792,6 +792,7 @@ describe('workflows and scripts', () => {
       '.github/badges.sh',
       'deploy/bundle/ffmpeg.sh',
       'deploy/bundle/build-ffmpeg.sh',
+      'tests/auth/run.sh',
     ]) {
       assert.ok(fs.statSync(file).mode & 0o100, `${file} is not executable`);
     }

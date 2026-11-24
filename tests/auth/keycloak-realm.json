@@ -1,0 +1,174 @@
+{
+  "realm": "jukecord-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "groups": [
+    {
+      "name": "jukecord-admins"
+    },
+    {
+      "name": "jukecord-djs"
+    },
+    {
+      "name": "jukecord-listeners"
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "jukecord-dj",
+        "description": "Changes the music in jukecord"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "jukecord",
+      "name": "jukecord",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "jukecord-e2e-client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:18900/auth/sso/callback", "http://127.0.0.1:18902/auth/sso/callback"],
+      "webOrigins": ["http://127.0.0.1:18900", "http://127.0.0.1:18902"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:18900/login##http://127.0.0.1:18902/login"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm roles in the userinfo",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "jukecord-userinfo",
+      "name": "jukecord, its groups in the userinfo only",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "jukecord-e2e-userinfo-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:18901/auth/sso/callback"],
+      "webOrigins": ["http://127.0.0.1:18901"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:18901/login"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups in the userinfo",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "ada",
+      "enabled": true,
+      "email": "ada@example.test",
+      "emailVerified": true,
+      "firstName": "Ada",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ada-e2e-password",
+          "temporary": false
+        }
+      ],
+      "groups": ["/jukecord-admins"]
+    },
+    {
+      "username": "dan",
+      "enabled": true,
+      "email": "dan@example.test",
+      "emailVerified": true,
+      "firstName": "Dan",
+      "lastName": "Deejay",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dan-e2e-password",
+          "temporary": false
+        }
+      ],
+      "groups": ["/jukecord-djs"],
+      "realmRoles": ["jukecord-dj"]
+    },
+    {
+      "username": "lee",
+      "enabled": true,
+      "email": "lee@example.test",
+      "emailVerified": true,
+      "firstName": "Lee",
+      "lastName": "Listener",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "lee-e2e-password",
+          "temporary": false
+        }
+      ],
+      "groups": ["/jukecord-listeners"]
+    },
+    {
+      "username": "sam",
+      "enabled": true,
+      "email": "sam@example.test",
+      "emailVerified": true,
+      "firstName": "Sam",
+      "lastName": "Stranger",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "sam-e2e-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

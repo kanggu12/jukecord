@@ -176,14 +176,20 @@ export class LdapLogin {
   }
 
   // Binds as jukecord's service account, when there is one (an anonymous search otherwise). A refusal is the host's
-  // trouble (a wrong password in the settings), never the person's: said as the directory being unavailable.
+  // trouble (a wrong password in the settings), never the person's: said as the directory being unavailable. ldapts
+  // connects at the first request, so a directory that cannot be reached (or a certificate not trusted) shows here.
   private async serviceBind(client: DirectoryClient): Promise<void> {
     const { bindDn, bindPassword } = this.options.settings;
     if (bindDn === null || bindPassword === null) return;
     try {
       await client.bind(bindDn, bindPassword);
     } catch (error) {
-      throw new LdapError('unavailable', `the directory refused jukecord's service account: ${said(error)}`);
+      throw new LdapError(
+        'unavailable',
+        error instanceof InvalidCredentialsError
+          ? `the directory refused jukecord's service account: ${said(error)}`
+          : `the directory could not be reached: ${said(error)}`,
+      );
     }
   }
 
@@ -291,11 +297,27 @@ export class LdapLogin {
     let client: DirectoryClient;
     try {
       client = await this.open();
-      const how = settings.url.startsWith('ldaps:') ? 'over TLS' : settings.startTls ? 'with StartTLS' : 'unencrypted';
-      checks.push({ name: 'connection', status: 'ok', detail: `${settings.url} answered, ${how}` });
     } catch (error) {
       checks.push({ name: 'connection', status: 'fail', detail: `${settings.url}: ${said(error)}` });
       return { checks, groups: null };
+    }
+    // ldapts connects at the first request: the directory's root entry, which a directory shows anyone, says whether it
+    // answers (over TLS, with its certificate trusted). A refusal to show it is an answer too.
+    const how = settings.url.startsWith('ldaps:') ? 'over TLS' : settings.startTls ? 'with StartTLS' : 'unencrypted';
+    try {
+      await client.search('', { scope: 'base', filter: '(objectClass=*)', attributes: ['1.1'], sizeLimit: 1 });
+      checks.push({ name: 'connection', status: 'ok', detail: `${settings.url} answered, ${how}` });
+    } catch (error) {
+      const answered = error instanceof Error && 'code' in error && typeof error.code === 'number';
+      checks.push(
+        answered
+          ? { name: 'connection', status: 'ok', detail: `${settings.url} answered, ${how}` }
+          : { name: 'connection', status: 'fail', detail: `${settings.url}: ${said(error)}` },
+      );
+      if (!answered) {
+        await client.unbind().catch(() => {});
+        return { checks, groups: null };
+      }
     }
     let groups: string[] | null = null;
     try {

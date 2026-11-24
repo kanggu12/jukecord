@@ -30,6 +30,11 @@ export class FakeDirectoryServer {
   readonly log: string[] = [];
   /** When set, opening a connection fails as an unreachable server does. */
   down = false;
+  /**
+   * When set, the connection opens but its first request fails, as ldapts' does with a server that cannot be reached
+   * or a certificate that is not trusted (it connects at the first request).
+   */
+  unreachable = false;
 
   /** The connect function LdapLogin takes. */
   readonly connect = (): DirectoryClient => {
@@ -39,11 +44,17 @@ export class FakeDirectoryServer {
   };
 
   private client(): DirectoryClient {
+    // The first request of a connection that cannot be made: a socket's error, not a directory's answer.
+    const reach = () => {
+      if (this.unreachable) throw new Error('connect ECONNREFUSED 127.0.0.1:636');
+    };
     return {
       startTLS: async () => {
+        reach();
         this.log.push('starttls');
       },
       bind: async (dn, password) => {
+        reach();
         this.log.push(`bind ${dn}`);
         if (dn === this.service.dn) {
           if (password !== this.service.password) throw new InvalidCredentialsError('invalid credentials');
@@ -60,6 +71,7 @@ export class FakeDirectoryServer {
           );
       },
       search: async (base, options) => {
+        reach();
         this.log.push(`search ${base} ${options.filter}`);
         const under = (dn: string) => dn.toLowerCase().endsWith(base.toLowerCase());
         if (options.scope === 'base') return { searchEntries: under(base) ? [{ dn: base }] : [] };
