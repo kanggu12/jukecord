@@ -740,6 +740,7 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
             context: context as never,
             deps,
             signal: gone.signal,
+            live: hub,
           });
         } catch (error) {
           if ((error instanceof ActionError && !error.spent) || error instanceof StoreError) await giveBack?.();

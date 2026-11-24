@@ -198,6 +198,8 @@ playlist) so a program does not need to ask again.
 
 | Operation | Request | Needs | CLI | Discord |
 | :-- | :-- | :-- | :-- | :-- |
+| `sessions` Every panel login that has not ended, the most recently seen first (the guests of listening links apart: they end with their link) | `GET /api/v1/sessions` | the host | `jukecord session list` |  |
+| `session-end` End a panel login: its browser is logged out at once | `DELETE /api/v1/sessions/{id}` | the host | `jukecord session end` |  |
 | `logs` The newest log records, oldest first | `GET /api/v1/logs` | the host | `jukecord logs` |  |
 | `login-link` Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
 | `backup` Write a copy of the database to the backups folder of the data directory | `POST /api/v1/backups` | the host | `jukecord backup` |  |

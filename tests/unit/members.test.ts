@@ -161,7 +161,8 @@ describe('member sessions', () => {
   const inject = (options: InjectOptions) => server.web.app.inject(options);
 
   before(async () => {
-    server = await testServer({ found: { one: [exampleTrack('m1')] } });
+    // Every way in set up: a member's login, and a linked one, come in only through ways that are.
+    server = await testServer({ found: { one: [exampleTrack('m1')] }, logins: true });
     // A member is known by what their provider said at their last login.
     await server.store.users.upsert({ id: CAROL, name: 'Carol', avatar: null });
   });

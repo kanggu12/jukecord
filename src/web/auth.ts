@@ -48,8 +48,11 @@ export const SESSION_COOKIE = 'jukecord_session';
 const STATE_COOKIE = 'jukecord_oauth';
 /** The header the panel sends its CSRF token in. */
 export const CSRF_HEADER = 'x-jukecord-csrf';
-// A panel login lasts thirty days; logging out, or the host revoking, ends it sooner.
+// A panel login lasts thirty days; logging out, or the host ending it, ends it sooner.
 const SESSION_MS = 30 * 86_400_000;
+// A login through the host's provider or directory lasts a working day: its level is what the groups said at the
+// login, and a new login (cheap while the provider's own session lasts) reads them afresh.
+export const MEMBER_SESSION_MS = 8 * 3_600_000;
 // A login link must be used within ten minutes, and only once.
 const LINK_MS = 10 * 60_000;
 // The prefix of API tokens; the logger masks anything that looks like one.
@@ -246,6 +249,25 @@ export class LoginLimiter {
   }
 }
 
+/** A panel login as the host sees it in the list of logins (see Auth.listSessions). */
+export interface SessionInfo {
+  /** The first 16 hex digits of its hash: enough to tell logins apart, never the secret of its cookie. */
+  readonly id: string;
+  readonly way: 'link' | 'discord' | 'oidc' | 'ldap';
+  readonly kind: 'host' | 'user' | 'friend' | 'member';
+  readonly userId: string | null;
+  readonly name: string | null;
+  readonly scope: TokenScope;
+  readonly createdAt: number;
+  readonly seenAt: number;
+  readonly expiresAt: number;
+  /** Whether it is the login of the caller. */
+  readonly current: boolean;
+}
+
+// How many hex digits of a login's hash make its ID in the API.
+const SESSION_ID_DIGITS = 16;
+
 /** Why a login with Discord did not go through: no login of this browser under way, or Discord's refusal. */
 export class DiscordLoginError extends Error {
   override name = 'DiscordLoginError';
@@ -428,6 +450,8 @@ export class Auth {
     const principal = principalOf(session);
     // A row that names nobody it could be (a member without a key of theirs) logs nobody in.
     if (!principal) return null;
+    // Nor does a member's login through a way that is no longer set up: the host turned it off, or moved to another.
+    if (!this.wayIsOn(principal)) return null;
     // What the login may call: a friend's view or control, a member's level, and for everyone else all their login
     // may (an OIDC login that is a Discord user too: its level only adds to its Discord rights, in Access).
     const scope =
@@ -470,6 +494,14 @@ export class Auth {
     }
   }
 
+  // Whether the way a login came in by is set up here: a member's provider or directory, and for an SSO login linked
+  // to a Discord user, SSO and Discord login both (the link was proven through Discord's). Other logins need none.
+  private wayIsOn(principal: Principal): boolean {
+    if (principal.kind === 'member') return principal.provider === 'oidc' ? this.oidc !== null : this.ldap !== null;
+    if (principal.kind === 'user' && principal.level) return this.oidc !== null && this.discordLogin;
+    return true;
+  }
+
   /** Whether a caller's login still exists: a session not logged out or expired, a token not revoked, a guest whose
    * link was not revoked and has not expired. */
   async stillValid(caller: Caller): Promise<boolean> {
@@ -484,6 +516,9 @@ export class Auth {
   /** Starts a panel login and returns the Set-Cookie value. A guest's comes from useListenLink instead. */
   async startSession(principal: MemberPrincipal): Promise<string> {
     const secret = newSecret();
+    // A member's login, and an SSO login linked to a Discord user, last hours; every other one thirty days.
+    const member = principal.kind === 'member' || (principal.kind === 'user' && principal.level !== undefined);
+    const lasts = member ? MEMBER_SESSION_MS : SESSION_MS;
     await this.options.store.sessions.create({
       idHash: hashSecret(secret),
       // An OIDC login that is a Discord user is a row of its own kind, so its level comes back with it.
@@ -498,11 +533,60 @@ export class Auth {
           : principal.kind === 'member' || principal.kind === 'user'
             ? (principal.level ?? 'admin')
             : 'admin',
-      expiresAt: this.now() + SESSION_MS,
+      expiresAt: this.now() + lasts,
     });
     // Old logins are cleared now and then; the start of a new one is a natural moment.
     await this.options.store.sessions.prune();
-    return cookie(SESSION_COOKIE, secret, { maxAgeSeconds: SESSION_MS / 1000, secure: this.secure });
+    return cookie(SESSION_COOKIE, secret, { maxAgeSeconds: lasts / 1000, secure: this.secure });
+  }
+
+  /**
+   * Every panel login that has not expired, the most recently seen first, with the name of whom it is (the guests of
+   * listening links apart: they end with their link). For the host, who may end any of them (endSessions).
+   */
+  async listSessions(caller: Caller): Promise<SessionInfo[]> {
+    const { store } = this.options;
+    const rows = await store.sessions.list();
+    const people = await store.users.many(rows.flatMap((row) => (row.userId === null ? [] : [row.userId])));
+    return rows.map((row) => {
+      const principal = principalOf(row);
+      const userId =
+        principal?.kind === 'user' ? principal.userId : principal?.kind === 'member' ? principal.memberId : null;
+      return {
+        id: row.idHash.slice(0, SESSION_ID_DIGITS),
+        // A host's and a friend's login came from a login link; a linked one through the provider.
+        way:
+          principal?.kind === 'member'
+            ? principal.provider
+            : principal?.kind === 'user'
+              ? principal.level
+                ? 'oidc'
+                : 'discord'
+              : 'link',
+        kind:
+          principal?.kind === 'member' || principal?.kind === 'friend' || principal?.kind === 'user'
+            ? principal.kind
+            : 'host',
+        userId,
+        name: userId === null ? null : (people.get(userId)?.name ?? null),
+        scope: row.scope,
+        createdAt: row.createdAt,
+        seenAt: row.seenAt,
+        expiresAt: row.expiresAt,
+        current: row.idHash === caller.sessionHash,
+      };
+    });
+  }
+
+  /**
+   * Ends the panel logins of this ID (see listSessions), whoever's they are: the hashes of those ended, so their live
+   * connections can be ended too; none for an ID of no login.
+   */
+  async endSessions(id: string): Promise<string[]> {
+    if (!new RegExp(`^[0-9a-f]{${SESSION_ID_DIGITS}}$`).test(id)) return [];
+    const rows = await this.options.store.sessions.withPrefix(id);
+    for (const row of rows) await this.options.store.sessions.remove(row.idHash);
+    return rows.map((row) => row.idHash);
   }
 
   /** Ends the caller's session (if it is one) and returns the Set-Cookie value that removes the cookie. */

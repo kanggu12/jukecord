@@ -65,6 +65,8 @@ export interface HandlerInput<S extends OperationSpec> {
   readonly deps: HandlerDeps;
   /** Aborted when the caller goes away before the answer (a search for words typed over already). */
   readonly signal: AbortSignal;
+  /** The live connections of the panel, to end those of a login that ends (on every edge of a split jukecord). */
+  readonly live: { endSession(sessionHash: string, reason?: string): void };
 }
 
 export type Handler<S extends OperationSpec> = (
@@ -241,6 +243,15 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'token-revoke': async ({ caller, params, deps }) => {
     if (!(await deps.auth.revokeToken(who(caller), params.id)))
       throw new ActionError('not-found', 'there is no such token of yours');
+    return OK;
+  },
+
+  sessions: async ({ caller, deps }) => (await deps.auth.listSessions(who(caller))).map((session) => ({ ...session })),
+  'session-end': async ({ params, deps, live }) => {
+    const ended = await deps.auth.endSessions(params.id);
+    if (ended.length === 0) throw new ActionError('not-found', 'there is no such login');
+    // Its browser's live updates end with it, and the panel there goes to the login page.
+    for (const hash of ended) live.endSession(hash, 'the host ended this login');
     return OK;
   },
 

@@ -1839,6 +1839,29 @@ export class SessionRepository {
   async prune(): Promise<number> {
     return (await this.store.sql.run('DELETE FROM sessions WHERE expires_at <= ?', [this.now()])).changes;
   }
+
+  /** The logins that have not expired, the most recently seen first: at most `limit` of them. */
+  async list(limit = 500): Promise<SessionRow[]> {
+    const rows = await this.store.sql.all(
+      'SELECT * FROM sessions WHERE expires_at > ? ORDER BY seen_at DESC, created_at DESC, id_hash LIMIT ?',
+      [this.now(), limit],
+    );
+    return rows.map(sessionFrom);
+  }
+
+  /**
+   * The logins, not expired, whose hash starts with `prefix` (lower-case hex, as a login's ID in the API is the start
+   * of its hash). A range of the key, the same on every database: every hash that starts so sorts from the prefix up
+   * to the prefix followed by "g", the letter after the last hex digit.
+   */
+  async withPrefix(prefix: string): Promise<SessionRow[]> {
+    if (!/^[0-9a-f]+$/.test(prefix)) return [];
+    const rows = await this.store.sql.all(
+      'SELECT * FROM sessions WHERE id_hash >= ? AND id_hash < ? AND expires_at > ?',
+      [prefix, `${prefix}g`, this.now()],
+    );
+    return rows.map(sessionFrom);
+  }
 }
 
 function sessionFrom(row: Row): SessionRow {
