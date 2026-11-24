@@ -12,6 +12,7 @@ import path from 'node:path';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { hostLike, personOf } from '../app/access.ts';
 import { ActionError, likesOwner } from '../app/actions.ts';
 import type { Bus } from '../core/bus.ts';
 import { steadyNow } from '../core/clock.ts';
@@ -243,6 +244,12 @@ function forbiddenFor(access: Permission, caller: Caller): string {
       ? "a friend cannot change the server's settings or tokens"
       : 'a friend who may only look and listen cannot change the music';
   }
+  // A member's level is their groups' word: said so, with who can change it.
+  if (caller.principal.kind === 'member') {
+    return access === 'admin'
+      ? "your groups let you change the music, not the server's settings or tokens"
+      : 'your groups let you look and listen, not change the music';
+  }
   return `this needs ${access === 'admin' ? 'an' : 'a'} ${access} token`;
 }
 
@@ -252,7 +259,8 @@ function permission(access: Permission, caller: Caller | null): 'ok' | 'unauthor
   if (access === 'read') return 'ok';
   if (access === 'control') return caller.scope === 'read' ? 'forbidden' : 'ok';
   if (access === 'admin') return caller.scope === 'admin' ? 'ok' : 'forbidden';
-  return caller.principal.kind === 'host' && caller.scope === 'admin' ? 'ok' : 'forbidden';
+  // What only the host may do: the host, and a login whose groups gave it the admin level (src/app/access.ts).
+  return hostLike(caller.principal) && caller.scope === 'admin' ? 'ok' : 'forbidden';
 }
 
 export async function createWebServer(options: WebServerOptions): Promise<WebServer> {
@@ -621,8 +629,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         // (a household, an office, Docker's bridge, a proxy not trusted): counted by it, fifteen panels opening at
         // once behind one were refused, and a refused /me shows the panel's start-failed page.
         if (spec.method === 'GET' && caller?.principal.kind !== 'host') {
+          const person = caller ? personOf(caller.principal) : null;
           const keys = caller
-            ? [caller.principal.kind === 'user' ? `person ${caller.principal.userId}` : `login ${loginKey(caller)}`]
+            ? [person !== null ? `person ${person}` : `login ${loginKey(caller)}`]
             : [`address ${addressKey(request.ip)}`];
           // A search, which starts yt-dlp, is held to its own rate as well, by the same keys (both must have a token).
           const searching = name === 'search';

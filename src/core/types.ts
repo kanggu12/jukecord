@@ -81,6 +81,14 @@ export interface Playlist {
  */
 export const AUTOPLAY = 'autoplay';
 
+/**
+ * A person's ID when it is a Discord user's (17 to 20 digits); null for anyone else's: a member of the host's identity
+ * provider or directory has a key of their own (`oidc:…`, `ldap:…`), the host and autoplay none that Discord knows.
+ */
+export function discordUserId(id: string | null): string | null {
+  return id !== null && /^\d{17,20}$/.test(id) ? id : null;
+}
+
 /** A track someone liked, with when. */
 export interface LikedTrack {
   readonly track: Track;

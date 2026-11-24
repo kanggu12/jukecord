@@ -331,9 +331,19 @@ export const ScopeSchema = Type.Union([Type.Literal('read'), Type.Literal('contr
 
 export const MeSchema = Type.Object(
   {
-    kind: Type.Union([Type.Literal('host'), Type.Literal('user'), Type.Literal('friend'), Type.Literal('guest')], {
-      description: 'friend: let in by the host with a login link; guest: in with a listening link',
-    }),
+    kind: Type.Union(
+      [
+        Type.Literal('host'),
+        Type.Literal('user'),
+        Type.Literal('friend'),
+        Type.Literal('member'),
+        Type.Literal('guest'),
+      ],
+      {
+        description:
+          "friend: let in by the host with a login link; member: logged in through the host's identity provider (OIDC) or directory (LDAP); guest: in with a listening link",
+      },
+    ),
     id: Nullable(Type.String()),
     name: Type.String(),
     avatar: Nullable(Type.String()),
@@ -344,6 +354,18 @@ export const MeSchema = Type.Object(
       Type.Object(
         { guildId: Type.String(), expiresAt: Type.Integer() },
         { description: "A guest's server, and when its listening link stops working" },
+      ),
+    ),
+    member: Nullable(
+      Type.Object(
+        {
+          provider: Type.Union([Type.Literal('oidc'), Type.Literal('ldap')]),
+          level: ScopeSchema,
+        },
+        {
+          description:
+            'For a member, and a Discord user who logged in through OIDC: where they logged in, and the level their groups gave (admin: what the host may; control: change the music everywhere; read: look and listen); it changes at their next login',
+        },
       ),
     ),
   },

@@ -1368,8 +1368,12 @@ export class UserRepository {
 /** Whose login or token it is: the host (the machine running jukecord) or a Discord user. */
 export type PrincipalKind = 'host' | 'user';
 
-/** Whose panel login it is: the host's, a Discord user's, or a friend's the host let in with a login link. */
-export type SessionKind = PrincipalKind | 'friend';
+/**
+ * Whose panel login it is: the host's, a Discord user's, a friend's the host let in with a login link, a member's of
+ * the host's identity provider or directory (user_id: their person key, scope: the level their groups gave), or an
+ * OIDC login that is a Discord user (user_id: the Discord ID, scope: the level).
+ */
+export type SessionKind = PrincipalKind | 'friend' | 'member' | 'linked';
 
 /** One panel login. */
 export interface SessionRow {
@@ -1439,8 +1443,8 @@ function sessionFrom(row: Row): SessionRow {
   const scope = text(row, 'scope');
   return {
     idHash: text(row, 'id_hash'),
-    // Anything but "host" or "friend" is read as a user: a stored row cannot widen itself into host rights.
-    kind: kind === 'host' || kind === 'friend' ? kind : 'user',
+    // Anything but the kinds there are is read as a user: a stored row cannot widen itself into host rights.
+    kind: kind === 'host' || kind === 'friend' || kind === 'member' || kind === 'linked' ? kind : 'user',
     userId: textOrNull(row, 'user_id'),
     csrf: text(row, 'csrf'),
     // An unknown scope (a hand edit) is read as the narrowest one, as a token's is; a friend's is never wider than

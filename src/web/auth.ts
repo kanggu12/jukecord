@@ -18,11 +18,12 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { MemberPrincipal, Principal } from '../app/access.ts';
+import { hostLike, type MemberPrincipal, type Principal, type Provider } from '../app/access.ts';
 import type { Cache } from '../cache/cache.ts';
+import { discordUserId } from '../core/types.ts';
 import type { Logger } from '../log.ts';
 import { type Counter, type Metrics, NO_METRICS } from '../metrics/registry.ts';
-import type { Person, Store, TokenRow, TokenScope } from '../store/store.ts';
+import type { Person, SessionRow, Store, TokenRow, TokenScope } from '../store/store.ts';
 
 /** Who is calling and how. */
 export interface Caller {
@@ -319,14 +320,19 @@ export class Auth {
     if (!session) return null;
     // Noted at most once a minute, like tokens.
     if (this.now() - session.seenAt > SEEN_EVERY_MS) await this.options.store.sessions.touch(hash);
-    // A friend's login is a friend's whatever else the row says: never the host's, never wider than control.
-    const principal: Principal =
-      session.kind === 'friend'
-        ? { kind: 'friend', scope: session.scope === 'control' ? 'control' : 'read' }
-        : session.kind === 'host' || session.userId === null
-          ? { kind: 'host' }
-          : { kind: 'user', userId: session.userId };
-    const scope = principal.kind === 'friend' ? principal.scope : session.scope;
+    const principal = principalOf(session);
+    // A row that names nobody it could be (a member without a key of theirs) logs nobody in.
+    if (!principal) return null;
+    // What the login may call: a friend's view or control, a member's level, and for everyone else all their login
+    // may (an OIDC login that is a Discord user too: its level only adds to its Discord rights, in Access).
+    const scope =
+      principal.kind === 'friend'
+        ? principal.scope
+        : principal.kind === 'member'
+          ? principal.level
+          : principal.kind === 'user' && principal.level
+            ? 'admin'
+            : session.scope;
     return { principal, scope, via: 'session', sessionHash: hash, csrf: session.csrf, tokenId: null };
   }
 
@@ -375,11 +381,18 @@ export class Auth {
     const secret = newSecret();
     await this.options.store.sessions.create({
       idHash: hashSecret(secret),
-      kind: principal.kind,
-      userId: principal.kind === 'user' ? principal.userId : null,
+      // An OIDC login that is a Discord user is a row of its own kind, so its level comes back with it.
+      kind: principal.kind === 'user' && principal.level ? 'linked' : principal.kind,
+      userId: principal.kind === 'user' ? principal.userId : principal.kind === 'member' ? principal.memberId : null,
       csrf: newSecret(),
-      // The host's and a Discord user's panel logins may do all their login may; a friend's, its view or control.
-      scope: principal.kind === 'friend' ? principal.scope : 'admin',
+      // The host's and a Discord user's panel logins may do all their login may; a friend's, its view or control; a
+      // member's and a linked login's, the level their groups gave at this login.
+      scope:
+        principal.kind === 'friend'
+          ? principal.scope
+          : principal.kind === 'member' || principal.kind === 'user'
+            ? (principal.level ?? 'admin')
+            : 'admin',
       expiresAt: this.now() + SESSION_MS,
     });
     // Old logins are cleared now and then; the start of a new one is a natural moment.
@@ -561,6 +574,10 @@ export class Auth {
     const principal = caller.principal;
     // A friend and a guest have no token of their own: a token made by one would be read as the host's.
     if (principal.kind === 'friend' || principal.kind === 'guest') throw new Error('this login cannot make tokens');
+    // Nor a login through the host's provider or directory: a token would outlast what its groups say at the next
+    // login (a person taken out of the groups would keep their token).
+    if (principal.kind === 'member' || (principal.kind === 'user' && principal.level))
+      throw new Error('a login through SSO or a directory cannot make tokens');
     const rank = { read: 0, control: 1, admin: 2 } as const;
     if (rank[scope] > rank[caller.scope]) throw new Error(`a ${caller.scope} token cannot make a ${scope} token`);
     const token = newSecret(TOKEN_PREFIX);
@@ -574,24 +591,60 @@ export class Auth {
     return { token, info };
   }
 
-  /** The caller's tokens; the host sees everyone's, a friend and a guest none. */
+  /** The caller's tokens; the host (and an admin member) sees everyone's, a friend, a guest and other members none. */
   async listTokens(caller: Caller): Promise<TokenRow[]> {
     const principal = caller.principal;
-    if (principal.kind === 'friend' || principal.kind === 'guest') return [];
-    return principal.kind === 'host'
-      ? this.options.store.tokens.list()
-      : this.options.store.tokens.list(principal.userId);
+    if (hostLike(principal)) return this.options.store.tokens.list();
+    if (principal.kind !== 'user') return [];
+    return this.options.store.tokens.list(principal.userId);
   }
 
-  /** Revokes a token the caller owns (the host may revoke any); false when there is no such token of theirs. */
+  /** Revokes a token the caller owns (the host and an admin member may revoke any); false when there is no such token
+   * of theirs. */
   async revokeToken(caller: Caller, id: number): Promise<boolean> {
     const row = await this.options.store.tokens.get(id);
     if (!row) return false;
     const principal = caller.principal;
-    if (principal.kind === 'friend' || principal.kind === 'guest') return false;
-    if (principal.kind === 'user' && (row.kind !== 'user' || row.userId !== principal.userId)) return false;
+    if (!hostLike(principal)) {
+      if (principal.kind !== 'user') return false;
+      if (row.kind !== 'user' || row.userId !== principal.userId) return false;
+    }
     return this.options.store.tokens.remove(id);
   }
+}
+
+/**
+ * A member's key in jukecord's data, from where they logged in and who the provider says they are: `oidc:` or `ldap:`
+ * and 15 hex digits of SHA-256 over both. Twenty characters, never a Discord ID (digits only), "host" or "autoplay",
+ * the same at every login, and the subject itself is not kept.
+ */
+export function memberKey(provider: Provider, subject: string): string {
+  return `${provider}:${createHash('sha256').update(`${provider}\n${subject}`).digest('hex').slice(0, 15)}`;
+}
+
+/** The provider of a member's key; null for anything that is not one. */
+export function memberProvider(key: string | null): Provider | null {
+  const found = /^(oidc|ldap):[0-9a-f]{15}$/.exec(key ?? '');
+  return found ? (found[1] as Provider) : null;
+}
+
+// The login a session row is. A friend's is a friend's whatever else the row says: never the host's, never wider than
+// control. A member's needs a member's key, and a linked login a Discord ID: a row that has neither is nobody's.
+function principalOf(session: SessionRow): Principal | null {
+  if (session.kind === 'friend') return { kind: 'friend', scope: session.scope === 'control' ? 'control' : 'read' };
+  if (session.kind === 'member') {
+    const provider = memberProvider(session.userId);
+    if (provider === null || session.userId === null) return null;
+    return { kind: 'member', memberId: session.userId, provider, level: session.scope };
+  }
+  if (session.kind === 'linked') {
+    const userId = discordUserId(session.userId);
+    return userId === null ? null : { kind: 'user', userId, level: session.scope };
+  }
+  // As 0.3 read them: a host's row, or a user's without a user (none is written so), is the host's.
+  return session.kind === 'host' || session.userId === null
+    ? { kind: 'host' }
+    : { kind: 'user', userId: session.userId };
 }
 
 // Only paths on this site may be the place to go after logging in: "//evil.example", "/<tab>/evil.example" and full

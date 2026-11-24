@@ -159,11 +159,12 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   me: async ({ caller, deps }) => {
     const { principal, scope, csrf } = who(caller);
     const bot = deps.directory()?.self() ?? null;
+    const none = { guest: null, member: null };
     if (principal.kind === 'host')
-      return { kind: 'host' as const, id: null, name: 'Host', avatar: null, scope, csrf, bot, guest: null };
+      return { kind: 'host' as const, id: null, name: 'Host', avatar: null, scope, csrf, bot, ...none };
     // A friend and a guest have no name of their own (the panel says which they are in the person's language).
     if (principal.kind === 'friend')
-      return { kind: 'friend' as const, id: null, name: 'Friend', avatar: null, scope, csrf, bot, guest: null };
+      return { kind: 'friend' as const, id: null, name: 'Friend', avatar: null, scope, csrf, bot, ...none };
     if (principal.kind === 'guest') {
       return {
         kind: 'guest' as const,
@@ -174,6 +175,22 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
         csrf,
         bot,
         guest: { guildId: principal.guildId, expiresAt: principal.expiresAt },
+        member: null,
+      };
+    }
+    // A member is named by what their provider said at their last login (kept with their key in the users table).
+    if (principal.kind === 'member') {
+      const person = await deps.store.users.get(principal.memberId);
+      return {
+        kind: 'member' as const,
+        id: principal.memberId,
+        name: person?.name ?? principal.memberId,
+        avatar: null,
+        scope,
+        csrf,
+        bot,
+        guest: null,
+        member: { provider: principal.provider, level: principal.level },
       };
     }
     const person = await deps.store.users.get(principal.userId);
@@ -186,6 +203,8 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       csrf,
       bot,
       guest: null,
+      // A Discord user who logged in through OIDC: the level their groups gave them, too.
+      member: principal.level ? { provider: 'oidc' as const, level: principal.level } : null,
     };
   },
   guilds: async ({ caller, deps }) => (await deps.access.guilds(who(caller).principal)).map((guild) => ({ ...guild })),
