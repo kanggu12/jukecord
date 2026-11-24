@@ -18,6 +18,9 @@ const front = env('JUKECORD_E2E_FRONT');
 const edges = [env('JUKECORD_E2E_EDGE1'), env('JUKECORD_E2E_EDGE2')] as const;
 const core = env('JUKECORD_E2E_CORE');
 const restartCore = env('JUKECORD_E2E_RESTART');
+// The database the services share (postgres or mysql), and a login link `jukecord link` made in edge 1.
+const database = env('JUKECORD_E2E_DATABASE');
+const loginLink = env('JUKECORD_E2E_LINK');
 // The one server of browser-only mode, and the track's address on the test's file server.
 const GUILD = 'local';
 const TRACK = 'http://media/tone.ogg';
@@ -70,6 +73,7 @@ function live(edge: string) {
 }
 
 type Player = { status: string; track: { id: number; title: string } | null; version: number };
+type Readiness = { ready: boolean; parts: Record<string, { state: string; required: boolean; kind?: string }> };
 
 async function main(): Promise<void> {
   says('every edge is ready, with its core, and the core with its database and bus');
@@ -79,8 +83,24 @@ async function main(): Promise<void> {
       return ready?.ready ? ready : null;
     });
   }
-  const coreReady = (await json(`${core}/readyz`)).body as { parts: Record<string, string> };
-  assert.deepEqual(coreReady.parts, { database: 'ok', bus: 'ok' });
+  const coreReady = (await json(`${core}/readyz`)).body as Readiness;
+  for (const part of ['database', 'bus', 'cache']) assert.equal(coreReady.parts[part]?.state, 'ok', part);
+  assert.equal(coreReady.parts.database?.kind, database);
+  assert.equal(coreReady.parts.bus?.kind, 'redis');
+  const edgeReady = (await json(`${edges[1]}/readyz`)).body as Readiness;
+  for (const part of ['database', 'bus', 'cache', 'core']) assert.equal(edgeReady.parts[part]?.state, 'ok', part);
+
+  says('a login link made in edge 1 logs a browser in at edge 2, once (the links are on the shared cache)');
+  const code = loginLink.split('/auth/link/')[1] ?? '';
+  assert.ok(code, `a login link: ${loginLink}`);
+  const opened = await fetch(`${edges[1]}/auth/link/${code}`, { redirect: 'manual' });
+  assert.equal(opened.status, 302);
+  assert.equal(opened.headers.get('location'), '/');
+  const cookie = (opened.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+  const me = await fetch(`${front}/api/v1/me`, { headers: { cookie } });
+  assert.equal(me.status, 200, 'the session works through the front');
+  const spent = await fetch(`${edges[0]}/auth/link/${code}`, { redirect: 'manual' });
+  assert.equal(spent.headers.get('location'), '/login?error=link');
 
   says('the front answers for the edges, the same answers as one process');
   const status = (await json(`${front}/api/v1/status`)).body as { mode: string };
@@ -126,7 +146,7 @@ async function main(): Promise<void> {
   assert.equal(await panel.closed, 1012);
   for (const edge of edges) {
     await until(`${edge} ready again`, async () => {
-      const ready = (await json(`${edge}/readyz`)).body as { ready: boolean } | null;
+      const ready = (await json(`${edge}/readyz`)).body as Readiness | null;
       return ready?.ready ? ready : null;
     });
   }

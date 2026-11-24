@@ -19,6 +19,7 @@ import type { DoctorReport } from '../app/doctor.ts';
 import type { Health } from '../app/health.ts';
 import type { CoreBeat } from '../bus/beat.ts';
 import { type CommandHandler, CommandServer } from '../bus/commands.ts';
+import { reportingEdges } from '../bus/metrics.ts';
 import { Presence } from '../bus/presence.ts';
 import { EventSender } from '../bus/relay.ts';
 import type { BusNames, BusTransport } from '../bus/transport.ts';
@@ -158,10 +159,7 @@ export async function startCoreServices(options: CoreServicesOptions): Promise<C
     },
   });
   // How many edges report who listens in their browsers: every running edge does, every few seconds.
-  const edges = options.registry.gauge(
-    'jukecord_edges',
-    'Edges of a split jukecord that report who listens in their browsers (each one does every few seconds).',
-  );
+  const edges = reportingEdges(options.registry);
   options.registry.collect(() => edges.set(presence.edgeCount));
   let internal: InternalServer | null = null;
   let health: HealthServer | null = null;

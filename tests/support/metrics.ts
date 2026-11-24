@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Health } from '../../src/app/health.ts';
+import { busEvents, reportingEdges, servedCommands } from '../../src/bus/metrics.ts';
 import type { Players } from '../../src/core/players.ts';
 import type { QueueService } from '../../src/core/queue.ts';
 import { createLogger } from '../../src/log.ts';
@@ -69,6 +70,10 @@ export function everyFamily(): EveryFamily {
   databaseReport(registry).connections(() => ({ busy: 0, idle: 1, waiting: 0 }));
   busReport(registry, OPERATIONS).command('skip', 0.01, 'ok');
   sharedCacheReport(registry).entries(() => 0);
+  // A split jukecord's own: the commands its core ran, the events on its bus, the edges reporting.
+  servedCommands(registry);
+  busEvents(registry);
+  reportingEdges(registry).set(2);
   // Readiness, by parts.
   new Health({ parts: [], discord: () => true, metrics: registry });
   return {

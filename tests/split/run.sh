@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # jukecord split into services, end to end with Docker Compose (deploy/compose/split.yaml): a core, two edges, the
-# database, Valkey and Caddy, under a throwaway project name, browser-only (no Discord). It adds a track through one
-# edge and sees the change arrive on a live connection of the other, plays the track's audio through an edge (a Range
-# request too, and through the front), restarts the core and sees the edges and their panels recover, then removes
-# everything it started: the containers, their network and volumes, the throwaway files, and the image it built.
+# database, Valkey and Caddy, under a throwaway project name, browser-only (no Discord). It opens a login link made in
+# one edge at the other, adds a track through one edge and sees the change arrive on a live connection of the other,
+# plays the track's audio through an edge (a Range request too, and through the front), restarts the core and sees
+# the edges and their panels recover, then removes everything it started: the containers, their network and volumes,
+# the throwaway files, and the image it built.
 #
 #   tests/split/run.sh [postgres|mysql] [image]
 #
@@ -73,8 +74,13 @@ say "a token for the checks, made inside an edge as the host does (a row every e
 token=$("${compose[@]}" exec -T edge1 jukecord token create e2e --scope admin | head -n 1)
 test "${token#jkc_}" != "$token"
 
+say "a login link, made inside an edge as \`jukecord link\` does (kept on the shared cache, opened at the other)"
+link=$("${compose[@]}" exec -T edge1 jukecord link | head -n 1)
+
 say "the checks"
 JUKECORD_E2E_TOKEN=$token \
+  JUKECORD_E2E_LINK=$link \
+  JUKECORD_E2E_DATABASE=$database \
   JUKECORD_E2E_FRONT=http://127.0.0.1:18795 \
   JUKECORD_E2E_EDGE1=http://127.0.0.1:18796 \
   JUKECORD_E2E_EDGE2=http://127.0.0.1:18797 \

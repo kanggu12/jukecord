@@ -18,6 +18,7 @@ import type { Logger } from '../log.ts';
 import { type Counter, type Metrics, NO_METRICS } from '../metrics/registry.ts';
 import { type BusReport, type CommandOutcome, NO_BUS_REPORT } from '../metrics/services.ts';
 import { decode, decodeArgs, encode, encodeArgs, fromWire, toWire } from './codec.ts';
+import { servedCommands } from './metrics.ts';
 import type { BusNames, BusTransport } from './transport.ts';
 
 /** How long a command may take unless its table says otherwise: what any change or read of one server takes. */
@@ -259,11 +260,7 @@ export class CommandServer {
   private constructor(options: CommandServerOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
-    this.served = (options.metrics ?? NO_METRICS).counter(
-      'jukecord_bus_commands_served_total',
-      'Commands the core ran for the edges, by outcome.',
-      ['command', 'outcome'],
-    );
+    this.served = servedCommands(options.metrics ?? NO_METRICS);
   }
 
   /** Starts taking commands. */

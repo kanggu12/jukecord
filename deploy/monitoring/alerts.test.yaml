@@ -160,3 +160,51 @@ tests:
               description: >-
                 a:8795 has been behind for over a quarter of the time for five minutes: its event loop is too busy,
                 so it turns away changes and audio for browsers. Give it more processor, or fewer panels.
+
+  # A split's core that hears no edge for ten minutes; one with its edges back stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_edges{job="jukecord-core", instance="core:8795"}'
+        values: "2 2 0x15"
+      - series: 'jukecord_edges{job="jukecord-core", instance="other:8795"}'
+        values: "2 0x5 2x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: JukecordNoEdges
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: JukecordNoEdges
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: jukecord-core
+              instance: "core:8795"
+            exp_annotations:
+              summary: the core hears from no edge
+              description: >-
+                The core core:8795 has heard from none of its edges for ten minutes, so no browser reaches jukecord:
+                the edges are down, or cannot reach the bus (JUKECORD_BUS_URL). Their logs and /readyz say why.
+
+  # An edge whose commands mostly go unanswered; a quiet edge's few unanswered ones are no trend.
+  - interval: 1m
+    input_series:
+      - series: 'jukecord_bus_commands_total{job="jukecord", instance="edge1:8795", command="actions.queue", outcome="ok"}'
+        values: "0+10x30"
+      - series: 'jukecord_bus_commands_total{job="jukecord", instance="edge1:8795", command="actions.queue", outcome="unavailable"}'
+        values: "0+30x30"
+      - series: 'jukecord_bus_commands_total{job="jukecord", instance="edge2:8795", command="actions.queue", outcome="timeout"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: JukecordCoreNotAnswering
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: jukecord
+              instance: "edge1:8795"
+            exp_annotations:
+              summary: an edge gets no answers from the core
+              description: >-
+                More than half of what edge1:8795 asked of the core in the last ten minutes went unanswered (not in
+                time, or no core to hear it), so people see "try again in a moment". The core's log says whether it
+                restarts or falls behind; jukecord_bus_command_duration_seconds says how long its answers take.

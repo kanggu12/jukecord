@@ -16,6 +16,7 @@ import type { Bus, BusEvents } from '../core/bus.ts';
 import type { Logger } from '../log.ts';
 import { type Counter, type Metrics, NO_METRICS } from '../metrics/registry.ts';
 import { decode, encode } from './codec.ts';
+import { busEvents } from './metrics.ts';
 import type { BusNames, BusTransport } from './transport.ts';
 
 /** The core's events that edges need: what their panels show. The rest are for the core's own parts. */
@@ -35,12 +36,9 @@ export interface RelayOptions {
   readonly metrics?: Metrics;
 }
 
-// Counts what went out and what was lost, by event.
+// Counts what went out, what was lost and what was heard, by event (bus/metrics.ts).
 function counter(metrics: Metrics | undefined): Counter {
-  return (metrics ?? NO_METRICS).counter('jukecord_bus_events_total', 'Events on the bus, by what happened to them.', [
-    'event',
-    'outcome',
-  ]);
+  return busEvents(metrics ?? NO_METRICS);
 }
 
 /**

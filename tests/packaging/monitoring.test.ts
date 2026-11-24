@@ -357,6 +357,9 @@ describe('the alert rules', () => {
         'JukecordFetchFailuresClimbing',
         'JukecordCacheFull',
         'JukecordEventLoopStalling',
+        // A split's: a core that hears no edge, an edge that gets no answers from the core.
+        'JukecordNoEdges',
+        'JukecordCoreNotAnswering',
       ],
     );
     for (const rule of found) {
