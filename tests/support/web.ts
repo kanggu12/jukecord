@@ -15,6 +15,7 @@ import {
   type VoiceControl,
 } from '../../src/app/actions.ts';
 import { SkipVotes } from '../../src/app/votes.ts';
+import { MemoryCache } from '../../src/cache/memory.ts';
 import { Bus } from '../../src/core/bus.ts';
 import { GuildLanes } from '../../src/core/lanes.ts';
 import { Players } from '../../src/core/players.ts';
@@ -280,11 +281,14 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
   });
   if (!options.browserOnly) actions.setVoice(voice, () => true, directory);
   const access = new Access({ settings: store.settings, directory: () => (options.browserOnly ? null : directory) });
+  const loginCache = new MemoryCache();
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
     secureCookies: false,
     oauth: options.oauth ?? null,
+    // The login links and failed logins in memory, as one jukecord keeps them (each test server its own).
+    cache: loginCache,
     log,
     // Real time for logins: the session repository uses the store's clock, which the tests keep fixed.
     ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -370,6 +374,7 @@ export async function testServer(options: TestServerOptions = {}): Promise<TestS
     url,
     close: async () => {
       await web.close();
+      await loginCache.close();
       await store.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
     },

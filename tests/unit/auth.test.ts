@@ -3,14 +3,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { MemoryCache } from '../../src/cache/memory.ts';
 import { createLogger } from '../../src/log.ts';
+import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import {
   Auth,
+  addressFailures,
   addressKey,
   cookie,
   ensureHostToken,
-  FailureLimiter,
   hashSecret,
+  LoginLimiter,
+  nameFailures,
   parseCookies,
   SESSION_COOKIE,
   safeNext,
@@ -24,10 +28,13 @@ async function setup(options: { fetch?: typeof fetch; now?: () => number } = {})
   let now = Date.UTC(2026, 10, 11);
   const clock = options.now ?? (() => now);
   const store = await memoryStore(clock);
+  // The cache on the same clock, so the ten minutes of a login link pass when the test says.
+  const cache = new MemoryCache({ now: clock });
   const auth = new Auth({
     store,
     hostToken: HOST_TOKEN,
     secureCookies: false,
+    cache,
     log,
     now: clock,
     oauth: {
@@ -39,7 +46,7 @@ async function setup(options: { fetch?: typeof fetch; now?: () => number } = {})
     },
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
-  return { store, auth, advance: (ms: number) => (now += ms) };
+  return { store, cache, auth, advance: (ms: number) => (now += ms) };
 }
 
 describe('cookies', () => {
@@ -143,28 +150,77 @@ describe('Auth sessions', () => {
   });
 
   it('turns a login link into one login within ten minutes', async () => {
-    const { auth, advance } = await setup();
-    const first = auth.createLink();
+    const { auth, cache, advance } = await setup();
+    const first = await auth.createLink();
     // The host's own, unless made for a friend.
-    assert.equal(auth.useLink(first.code), 'admin');
-    assert.equal(auth.useLink(first.code), null);
-    const second = auth.createLink();
+    assert.equal(await auth.useLink(first.code), 'admin');
+    assert.equal(await auth.useLink(first.code), null);
+    const friend = await auth.createLink('control');
+    // The cache holds the code's hash, never the code itself.
+    assert.equal(await cache.get(`auth:link:${friend.code}`), null);
+    assert.notEqual(await cache.get(`auth:link:${hashSecret(friend.code)}`), null);
+    assert.equal(await auth.useLink(friend.code), 'control');
+    const second = await auth.createLink();
     advance(10 * 60_000);
-    assert.equal(auth.useLink(second.code), null);
+    assert.equal(await auth.useLink(second.code), null);
+  });
+
+  it('lets two browsers bringing one link at once log in once between them', async () => {
+    const { auth } = await setup();
+    const link = await auth.createLink();
+    const both = await Promise.all([auth.useLink(link.code), auth.useLink(link.code)]);
+    assert.deepEqual(both.sort(), ['admin', null].sort());
+  });
+
+  it('takes a link made by another process sharing the cache', async () => {
+    const { store, cache, auth } = await setup();
+    // A second jukecord over the same cache: what one makes, the other takes (an edge to another edge).
+    const other = new Auth({ store, hostToken: HOST_TOKEN, secureCookies: false, oauth: null, cache, log });
+    const link = await auth.createLink('read');
+    assert.equal(await other.useLink(link.code), 'read');
+    assert.equal(await auth.useLink(link.code), null);
   });
 });
 
-describe('FailureLimiter', () => {
-  it('blocks an address after 20 failures in 10 minutes and lets it in again after', () => {
+describe('LoginLimiter', () => {
+  it('blocks an address after 20 failures in 10 minutes and lets it in again after', async () => {
     let now = 0;
-    const limiter = new FailureLimiter({ now: () => now });
-    for (let i = 0; i < 19; i += 1) limiter.fail('10.0.0.1');
-    assert.equal(limiter.blocked('10.0.0.1'), false);
-    limiter.fail('10.0.0.1');
-    assert.equal(limiter.blocked('10.0.0.1'), true);
-    assert.equal(limiter.blocked('10.0.0.2'), false);
+    const limiter = new LoginLimiter(new MemoryCache({ now: () => now }));
+    const here = addressFailures('10.0.0.1');
+    for (let i = 0; i < 19; i += 1) assert.equal(await limiter.fail([here]), false);
+    assert.equal(await limiter.blocked([here]), false);
+    // The twentieth failure is not refused itself; the try after it is the first one that is.
+    assert.equal(await limiter.fail([here]), false);
+    assert.equal(await limiter.blocked([here]), true);
+    assert.equal(await limiter.fail([here]), true);
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.2')]), false);
     now += 10 * 60_000 + 1;
-    assert.equal(limiter.blocked('10.0.0.1'), false);
+    assert.equal(await limiter.blocked([here]), false);
+  });
+
+  it('blocks on any of its keys: an address, or a name tried from many addresses', async () => {
+    const limiter = new LoginLimiter(new MemoryCache(), { limit: 3 });
+    const alice = nameFailures('ldap', 'Alice');
+    // The name as the directory compares it: one count whatever the case and the spaces around it.
+    assert.equal(nameFailures('ldap', ' ALICE '), alice);
+    assert.notEqual(nameFailures('oidc', 'alice'), alice);
+    for (const address of ['10.0.0.1', '10.0.0.2', '10.0.0.3']) await limiter.fail([addressFailures(address), alice]);
+    // Each address failed once; the name three times.
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.4')]), false);
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.4'), alice]), true);
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.4'), nameFailures('ldap', 'bob')]), false);
+  });
+
+  it('counts the logins by way and outcome', async () => {
+    const { store, cache } = await setup();
+    const metrics = new MetricsRegistry();
+    const auth = new Auth({ store, hostToken: HOST_TOKEN, secureCookies: false, oauth: null, cache, log, metrics });
+    auth.counted('ldap', 'failed');
+    auth.counted('ldap', 'failed');
+    auth.counted('oidc', 'ok');
+    const text = metrics.render();
+    assert.match(text, /^jukecord_logins_total\{method="ldap",outcome="failed"\} 2$/m);
+    assert.match(text, /^jukecord_logins_total\{method="oidc",outcome="ok"\} 1$/m);
   });
 });
 
@@ -226,7 +282,7 @@ describe('Discord login', () => {
 });
 
 describe('addressKey and the limiter under a scan', () => {
-  it('counts an IPv6 /56 as one address, IPv4 written as IPv6 as the IPv4 address, and no address as one', () => {
+  it('counts an IPv6 /56 as one address, IPv4 written as IPv6 as the IPv4 address, and no address as one', async () => {
     assert.equal(addressKey('2001:db8:1:2:3:4:5:6'), '2001:db8:1:0::/56');
     assert.equal(addressKey('2001:db8:1:2::9'), '2001:db8:1:0::/56');
     assert.equal(addressKey('2001:db8:1:1ff::9'), '2001:db8:1:100::/56');
@@ -234,29 +290,30 @@ describe('addressKey and the limiter under a scan', () => {
     assert.equal(addressKey('::ffff:192.0.2.7'), '192.0.2.7');
     assert.equal(addressKey('192.0.2.7'), '192.0.2.7');
     assert.equal(addressKey(undefined), 'unknown');
-    const limiter = new FailureLimiter();
-    for (let i = 0; i < 20; i += 1) limiter.fail(`2001:db8:1:${(i % 4).toString(16)}::${i.toString(16)}`);
+    const limiter = new LoginLimiter(new MemoryCache());
+    for (let i = 0; i < 20; i += 1)
+      await limiter.fail([addressFailures(`2001:db8:1:${(i % 4).toString(16)}::${i.toString(16)}`)]);
     // Every /64 of that /56 is blocked; the next /56 is not.
-    assert.equal(limiter.blocked('2001:db8:1:ff:ffff::1'), true);
-    assert.equal(limiter.blocked('2001:db8:1:100::1'), false);
+    assert.equal(await limiter.blocked([addressFailures('2001:db8:1:ff:ffff::1')]), true);
+    assert.equal(await limiter.blocked([addressFailures('2001:db8:1:100::1')]), false);
   });
 
-  it('keeps at most its capacity, forgetting the addresses that failed longest ago', () => {
-    const limiter = new FailureLimiter({ capacity: 3, limit: 2 });
-    limiter.fail('10.0.0.1');
-    limiter.fail('10.0.0.1');
-    assert.equal(limiter.blocked('10.0.0.1'), true);
-    for (const address of ['10.0.0.2', '10.0.0.3', '10.0.0.4']) limiter.fail(address);
+  it('keeps at most what the cache holds, forgetting the addresses that failed longest ago', async () => {
+    const limiter = new LoginLimiter(new MemoryCache({ capacity: 3 }), { limit: 2 });
+    await limiter.fail([addressFailures('10.0.0.1')]);
+    await limiter.fail([addressFailures('10.0.0.1')]);
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), true);
+    for (const address of ['10.0.0.2', '10.0.0.3', '10.0.0.4']) await limiter.fail([addressFailures(address)]);
     // The first address was pushed out by three newer ones.
-    assert.equal(limiter.blocked('10.0.0.1'), false);
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), false);
   });
 
-  it('keeps no more failures for one address than it takes to block it', () => {
-    const limiter = new FailureLimiter({ limit: 20 });
-    for (let i = 0; i < 5000; i += 1) limiter.fail('10.0.0.9');
-    const kept = (limiter as unknown as { failures: Map<string, number[]> }).failures.get('10.0.0.9');
-    assert.equal(kept?.length, 20);
-    assert.equal(limiter.blocked('10.0.0.9'), true);
+  it('keeps one counter for an address however often it fails', async () => {
+    const cache = new MemoryCache();
+    const limiter = new LoginLimiter(cache, { limit: 20 });
+    for (let i = 0; i < 5000; i += 1) await limiter.fail([addressFailures('10.0.0.9')]);
+    assert.equal(cache.size, 1);
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.9')]), true);
   });
 });
 

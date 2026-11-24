@@ -214,9 +214,9 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
       },
       deps.logFiles,
     ).map((record) => ({ ...record })),
-  'login-link': ({ query, deps }) => {
+  'login-link': async ({ query, deps }) => {
     const scope = query.scope ?? 'admin';
-    const link = deps.auth.createLink(scope);
+    const link = await deps.auth.createLink(scope);
     return { url: `${deps.publicUrl}/auth/link/${link.code}`, expiresAt: link.expiresAt, scope };
   },
   backup: async ({ deps }) => {

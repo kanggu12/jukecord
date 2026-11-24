@@ -9,12 +9,19 @@
  *
  * A session cookie alone never changes anything: every change must also carry the session's CSRF token in a header,
  * which another site cannot read or send. Tokens are sent as a header by programs, which are not exposed to that.
+ *
+ * What a login needs only for a moment lives on the cache port (src/cache/cache.ts), not in this process: the login
+ * links not used yet and the failed logins of an address. With several processes serving browsers, a link made by one
+ * works on another and a guess spread over them is counted once; in one process the memory cache keeps them as the
+ * maps here did. Sessions and tokens stay rows of the database.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MemberPrincipal, Principal } from '../app/access.ts';
+import type { Cache } from '../cache/cache.ts';
 import type { Logger } from '../log.ts';
+import { type Counter, type Metrics, NO_METRICS } from '../metrics/registry.ts';
 import type { Person, Store, TokenRow, TokenScope } from '../store/store.ts';
 
 /** Who is calling and how. */
@@ -149,55 +156,61 @@ export function addressKey(address: string | undefined): string {
   return `${[a, b, c, (d ?? 0) & 0xff00].map((group) => (group ?? 0).toString(16)).join(':')}::/56`;
 }
 
+/** The key an address's failed logins are counted under (see addressKey). */
+export function addressFailures(address: string | undefined): string {
+  return `address:${addressKey(address)}`;
+}
+
 /**
- * Turns failed logins from one address into a short ban, so a link or token cannot be guessed at speed.
- *
- * It remembers at most 10,000 addresses, the ones that failed most recently: a scan from many addresses pushes out
- * the oldest instead of growing the map or making every failure walk it.
+ * The key a name's failed logins at the directory form are counted under: the provider and the name as the directory
+ * compares it (LDAP and Active Directory match user names regardless of case), so "Alice" and "alice" are one count.
  */
-export class FailureLimiter {
-  // Insertion order is the order of each address's latest failure, oldest first.
-  private readonly failures = new Map<string, number[]>();
+export function nameFailures(provider: string, name: string): string {
+  return `name:${provider}:${name.trim().normalize('NFC').toLowerCase()}`;
+}
+
+/**
+ * Turns failed logins into a short ban, so a link, a token or a password cannot be guessed at speed: an address (and,
+ * at the directory form, a name) that failed `limit` times is refused until `windowMs` after its first failure of
+ * those. Counted on the cache, so every process serving browsers counts the same failures; the memory cache keeps at
+ * most its capacity of keys, the ones used most recently, so a scan from many addresses costs a few evictions.
+ *
+ * The window starts at an address's first failure and closes by itself (the cache's counter): 0.3 counted the last ten
+ * minutes instead. Either way an address gets at most twenty tries before it waits, and never waits longer than ten
+ * minutes from its last refused try.
+ */
+export class LoginLimiter {
+  private readonly cache: Cache;
   private readonly limit: number;
   private readonly windowMs: number;
-  private readonly now: () => number;
-  private readonly capacity: number;
 
-  constructor(options: { limit?: number; windowMs?: number; now?: () => number; capacity?: number } = {}) {
+  constructor(cache: Cache, options: { limit?: number; windowMs?: number } = {}) {
+    this.cache = cache;
     this.limit = options.limit ?? 20;
     this.windowMs = options.windowMs ?? 10 * 60_000;
-    this.now = options.now ?? Date.now;
-    this.capacity = options.capacity ?? 10_000;
   }
 
-  /** Whether this address has failed too often lately. */
-  blocked(address: string | undefined): boolean {
-    return this.recent(addressKey(address)).length >= this.limit;
+  /** Whether any of these keys has failed too often lately; nothing is counted. */
+  async blocked(keys: readonly string[]): Promise<boolean> {
+    const counts = await Promise.all(keys.map((key) => this.cache.get(`auth:fail:${key}`)));
+    return counts.some((count) => Number(count ?? 0) >= this.limit);
   }
 
-  fail(address: string | undefined): void {
-    const key = addressKey(address);
-    const recent = this.recent(key);
-    recent.push(this.now());
-    // Only the latest `limit` failures matter (that many block), so no more are kept: an address failing without end
-    // costs the same little each time.
-    if (recent.length > this.limit) recent.splice(0, recent.length - this.limit);
-    // Moved to the end: it is now the most recent.
-    this.failures.delete(key);
-    this.failures.set(key, recent);
-    while (this.failures.size > this.capacity) {
-      const oldest = this.failures.keys().next().value;
-      if (oldest === undefined) break;
-      this.failures.delete(oldest);
-    }
-  }
-
-  // The failures of a key inside the window.
-  private recent(key: string): number[] {
-    const since = this.now() - this.windowMs;
-    return (this.failures.get(key) ?? []).filter((at) => at > since);
+  /**
+   * Counts one failure for each key, and says whether any of them was blocked already before this one: the try after
+   * the twentieth failure is the first one refused, as before.
+   */
+  async fail(keys: readonly string[]): Promise<boolean> {
+    const counts = await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs)));
+    return counts.some((count) => count > this.limit);
   }
 }
+
+/** How a login went, for the metrics: let in, refused by a rule, failed, held back, or the other side not answering. */
+export type LoginOutcome = 'ok' | 'denied' | 'failed' | 'blocked' | 'unavailable';
+
+/** The ways of logging in, for the metrics. */
+export type LoginMethod = 'discord' | 'link' | 'listen' | 'oidc' | 'ldap';
 
 export interface AuthOptions {
   readonly store: Store;
@@ -207,7 +220,11 @@ export interface AuthOptions {
   readonly secureCookies: boolean;
   /** Discord login, or null when the application's secret is not set. */
   readonly oauth: OAuthConfig | null;
+  /** Where the login links not used yet and the failure counts live (shared by every process serving browsers). */
+  readonly cache: Cache;
   readonly log: Logger;
+  /** Where the logins are counted, by way and outcome; nowhere by default. */
+  readonly metrics?: Metrics;
   readonly now?: () => number;
   /** The fetch used to talk to Discord (tests pass a fake). */
   readonly fetch?: typeof fetch;
@@ -217,19 +234,28 @@ export class Auth {
   private readonly options: AuthOptions;
   private readonly now: () => number;
   private readonly hostHash: Buffer;
-  // Login links not used yet: the hash of the code, when it stops working, and what the login it makes may do (the
-  // host's own, or a friend's view or control).
-  private readonly links = new Map<string, { until: number; scope: TokenScope }>();
   // When each token was last noted as used, so a script calling every second does not write every second.
   private readonly touched = new Map<number, number>();
-  /** Failed logins per address. */
-  readonly limiter: FailureLimiter;
+  // The logins, by way and outcome.
+  private readonly logins: Counter;
+  /** Failed logins per address (and per name at the directory form). */
+  readonly limiter: LoginLimiter;
 
   constructor(options: AuthOptions) {
     this.options = options;
     this.now = options.now ?? Date.now;
     this.hostHash = Buffer.from(hashSecret(options.hostToken), 'hex');
-    this.limiter = new FailureLimiter({ now: this.now });
+    this.limiter = new LoginLimiter(options.cache);
+    this.logins = (options.metrics ?? NO_METRICS).counter(
+      'jukecord_logins_total',
+      'Logins tried, by way (discord, link, listen, oidc, ldap) and outcome (ok, denied, failed, blocked, unavailable).',
+      ['method', 'outcome'],
+    );
+  }
+
+  /** Counts a login by its way and how it went. */
+  counted(method: LoginMethod, outcome: LoginOutcome): void {
+    this.logins.inc({ method, outcome });
   }
 
   /** Whether logging in with Discord is set up. */
@@ -372,24 +398,25 @@ export class Auth {
 
   /**
    * A one-time login link code (see `jukecord open`): for the host itself (admin, the default), or for a friend who
-   * may only look (read) or also change the music (control).
+   * may only look (read) or also change the music (control). Kept on the cache by the code's hash for ten minutes, so
+   * the cache never holds the code itself, and any process serving browsers takes the link.
    */
-  createLink(scope: TokenScope = 'admin'): { code: string; expiresAt: number } {
+  async createLink(scope: TokenScope = 'admin'): Promise<{ code: string; expiresAt: number }> {
     const code = newSecret();
     const expiresAt = this.now() + LINK_MS;
-    // Expired codes are dropped whenever a new one is made, so unused links do not pile up.
-    for (const [hash, link] of this.links) if (link.until <= this.now()) this.links.delete(hash);
-    this.links.set(hashSecret(code), { until: expiresAt, scope });
+    // The cache drops it by itself when the ten minutes are up, so unused links do not pile up.
+    await this.options.cache.set(`auth:link:${hashSecret(code)}`, JSON.stringify({ scope }), LINK_MS);
     return { code, expiresAt };
   }
 
   /** Uses up a login link code: what the login it makes may do, or null when the code was not valid. */
-  useLink(code: string): TokenScope | null {
-    const hash = hashSecret(code);
-    const link = this.links.get(hash);
-    // Gone either way: a code works once.
-    this.links.delete(hash);
-    return link !== undefined && link.until > this.now() ? link.scope : null;
+  async useLink(code: string): Promise<TokenScope | null> {
+    // Taken in one step, gone either way: a code works once, even when two browsers bring it at the same moment.
+    const saved = await this.options.cache.take(`auth:link:${hashSecret(code)}`);
+    if (saved === null) return null;
+    const scope = (JSON.parse(saved) as { scope?: unknown }).scope;
+    // Only the three scopes there are: anything else in the cache (another version's entry) makes no login.
+    return scope === 'admin' || scope === 'control' || scope === 'read' ? scope : null;
   }
 
   /** The login a used login link makes: the host's own for admin, a friend's for view or control. */

@@ -17,6 +17,7 @@ import { BackupSchedule } from './app/backups.ts';
 import { runDoctor } from './app/doctor.ts';
 import { Rest } from './app/rest.ts';
 import { SkipVotes } from './app/votes.ts';
+import { MemoryCache } from './cache/memory.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { Bus } from './core/bus.ts';
 import { systemClock } from './core/clock.ts';
@@ -322,11 +323,15 @@ async function main(): Promise<number> {
   const publicUrl = config.publicUrl ?? `http://localhost:${config.publishedPort}`;
   const access = new Access({ settings: store.settings, directory });
   const { clientId, clientSecret } = config.discord;
+  // Short-lived login state (src/cache/cache.ts): in memory, with its size and age limits.
+  const loginCache = new MemoryCache();
   const auth = new Auth({
     store,
     hostToken: ensureHostToken(config.dataDir),
     secureCookies: publicUrl.startsWith('https://'),
     oauth: clientId && clientSecret ? { clientId, clientSecret, redirectUri: `${publicUrl}/auth/callback` } : null,
+    // The login links not used yet and the failed logins: this process's memory, all one process needs.
+    cache: loginCache,
     log: log.child('auth'),
   });
   const web: WebServer = await createWebServer({

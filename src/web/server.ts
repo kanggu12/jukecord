@@ -26,7 +26,7 @@ import type { CoverFile, Covers, Pictured } from '../media/covers.ts';
 import { StoreError } from '../store/store.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
-import { addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
+import { addressFailures, addressKey, type Caller, CSRF_HEADER, SESSION_COOKIE } from './auth.ts';
 import { DEFAULT_LIVE_LIMITS, EventHub, type LiveLimits } from './events.ts';
 import { HANDLERS, type HandlerDeps, type HandlerInput } from './handlers.ts';
 import { Buckets, CHANGES, COVERS, FETCHES, Pressure, type Rate, READS, SEARCHES } from './limits.ts';
@@ -556,9 +556,9 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const session = request.headers.cookie?.includes(`${SESSION_COOKIE}=`) ?? false;
     // A request without any credential is not a failed login (a public page, or a "log in first").
     if (caller || (!request.headers.authorization && !session)) return { caller, blocked: false };
-    // Asked before this failure counts, as before: the attempt after the twentieth is the first one refused.
-    const blocked = auth.limiter.blocked(request.ip);
-    auth.limiter.fail(request.ip);
+    // Counted, and whether the address was blocked before this failure, as before: the attempt after the twentieth is
+    // the first one refused.
+    const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
     if (reply && session) reply.header('set-cookie', await auth.endSession(null));
     return { caller: null, blocked };
   };
@@ -865,7 +865,10 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       if (error || !code || !state) return reply.redirect('/login?error=cancelled');
       // Refused before Discord is asked: whether this login works is only known from Discord's answer, and a blocked
       // address must not be able to make jukecord ask Discord over and over (Discord limits how often it may).
-      if (auth.limiter.blocked(request.ip)) return reply.redirect('/login?error=too-many');
+      if (await auth.limiter.blocked([addressFailures(request.ip)])) {
+        auth.counted('discord', 'blocked');
+        return reply.redirect('/login?error=too-many');
+      }
       try {
         const { person, next } = await auth.oauthFinish(code, state, request.headers.cookie);
         await deps.store.users.upsert(person);
@@ -873,18 +876,25 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
         deps.access.forget(person.id);
         // Only people in a server the bot is in get in: the panel is for those servers.
         const guilds = await deps.access.guilds({ kind: 'user', userId: person.id });
-        if (guilds.length === 0) return reply.redirect('/login?error=not-a-member');
+        if (guilds.length === 0) {
+          auth.counted('discord', 'denied');
+          return reply.redirect('/login?error=not-a-member');
+        }
         reply.header('set-cookie', [
           auth.clearOAuthCookie(),
           await auth.startSession({ kind: 'user', userId: person.id }),
         ]);
+        auth.counted('discord', 'ok');
         log.info('logged in with Discord', { user: person.name });
         return reply.redirect(next);
       } catch (failure) {
         // Just started and not connected to Discord yet: not the person's failure, and not counted as one.
-        if (failure instanceof ActionError && failure.code === 'unavailable')
+        if (failure instanceof ActionError && failure.code === 'unavailable') {
+          auth.counted('discord', 'unavailable');
           return reply.redirect('/login?error=connecting');
-        auth.limiter.fail(request.ip);
+        }
+        await auth.limiter.fail([addressFailures(request.ip)]);
+        auth.counted('discord', 'failed');
         log.info('a Discord login failed', { reason: failure instanceof Error ? failure.message : String(failure) });
         return reply.redirect('/login?error=failed');
       }
@@ -895,12 +905,13 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
   app.get<{ Params: { code: string } }>('/auth/link/:code', async (request, reply) => {
     // A link that works logs in even from a blocked address (it was made by the host a moment ago); one that does not
     // counts as a failure, and from a blocked address says so.
-    const scope = auth.useLink(request.params.code);
+    const scope = await auth.useLink(request.params.code);
     if (scope === null) {
-      const blocked = auth.limiter.blocked(request.ip);
-      auth.limiter.fail(request.ip);
+      const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('link', blocked ? 'blocked' : 'failed');
       return reply.redirect(blocked ? '/login?error=too-many' : '/login?error=link');
     }
+    auth.counted('link', 'ok');
     log.info(scope === 'admin' ? 'logged in with a login link' : 'a friend logged in with a login link', { scope });
     return reply.header('set-cookie', await auth.startLinkSession(scope)).redirect('/');
   });
@@ -916,14 +927,18 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
     const used = await auth.useListenLink(code, caller);
     if (used.kind === 'invalid') {
       // A code that does not work is a failed login like any other (a guess at the codes is held back).
-      const blocked = auth.limiter.blocked(request.ip);
-      auth.limiter.fail(request.ip);
+      const blocked = await auth.limiter.fail([addressFailures(request.ip)]);
+      auth.counted('listen', blocked ? 'blocked' : 'failed');
       return blocked
         ? failure(reply, 'too-many', 'too many failed logins; wait ten minutes')
         : failure(reply, 'not-found', 'this listening link has ended or does not exist');
     }
-    if (used.kind === 'full') return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    if (used.kind === 'full') {
+      auth.counted('listen', 'denied');
+      return failure(reply, 'conflict', 'this listening link has as many guests as it allows');
+    }
     if (used.kind === 'already') return reply.send({ ok: true });
+    auth.counted('listen', 'ok');
     log.info('a guest came in with a listening link', { link: used.linkId, guild: used.guildId });
     return reply.header('set-cookie', used.cookie).send({ ok: true });
   });
