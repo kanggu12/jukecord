@@ -102,6 +102,11 @@ export interface LdapOptions {
   readonly log: Logger;
   /** Opens a connection (tests pass their own); ldapts' Client by default. */
   readonly connect?: (options: ClientOptions) => DirectoryClient;
+  /**
+   * The authorities a test's connection trusts in place of the default list when JUKECORD_LDAP_CA_FILE names none:
+   * the settings page's, not saved yet (src/settings/authorities.ts trustedWith).
+   */
+  readonly trust?: readonly string[];
 }
 
 /**
@@ -241,8 +246,10 @@ export class LdapLogin {
     const { settings } = this.options;
     // The host the URL names (an address in brackets without them).
     const host = new URL(settings.url).hostname.replace(/^\[|\]$/g, '');
+    const trust = this.options.trust;
     const tlsOptions: tls.ConnectionOptions = {
-      ...(settings.ca ? { ca: settings.ca } : {}),
+      // The directory's own CA file decides alone; a test's list stands in for the default without one.
+      ...(settings.ca ? { ca: settings.ca } : trust ? { ca: [...trust] } : {}),
       // The name the certificate must carry: the host's name, sent too (SNI); an address is checked as an address,
       // and never sent (SNI takes names only, and Node is to ignore an address there).
       ...(isIP(host) === 0 ? { servername: host } : { host }),

@@ -15,7 +15,7 @@ import type { Logger } from '../log.ts';
 import type { DiscordLoginTest } from './discord.ts';
 import type { DatabaseTest, MoveFailure, MoveState } from './move.ts';
 import type { ServerTest, ServerUse } from './servers.ts';
-import type { ChangedSetting, HostSettings, HostSettingsPort, HostSettingsView } from './service.ts';
+import type { AuthoritiesView, ChangedSetting, HostSettings, HostSettingsPort, HostSettingsView } from './service.ts';
 
 /** The commands an edge sends the core for the page's calls (each answered by the core's settings service). */
 export const SETTINGS_COMMANDS = [
@@ -26,6 +26,9 @@ export const SETTINGS_COMMANDS = [
   'settings.test-database',
   'settings.test-server',
   'settings.test-discord-login',
+  'settings.authorities',
+  'settings.authorities-import',
+  'settings.authorities-remove',
   'settings.move-start',
   'settings.move-state',
   'settings.move-cancel',
@@ -121,9 +124,15 @@ export function remoteSettings(client: CommandClient): HostSettingsPort {
     reset: (names: readonly string[], revisions?: Readonly<Record<string, number>>) =>
       client.call<{ changed: ChangedSetting[]; view: HostSettingsView }>('settings.reset', [names, revisions ?? null]),
     restartNow: () => client.call<{ supervisor: Supervisor }>('settings.restart', []),
-    testDatabase: (url: string) => client.call<DatabaseTest>('settings.test-database', [url]),
+    testDatabase: (url: string, ca?: string) => client.call<DatabaseTest>('settings.test-database', [url, ca ?? null]),
     // Tried from the core, as one process tries it: the server the services would share is the core's to reach too.
-    testServer: (url: string, use: ServerUse) => client.call<ServerTest>('settings.test-server', [url, use]),
+    testServer: (url: string, use: ServerUse, ca?: string) =>
+      client.call<ServerTest>('settings.test-server', [url, use, ca ?? null]),
+    authorities: () => client.call<AuthoritiesView>('settings.authorities', []),
+    importAuthorities: (pem: string) =>
+      client.call<{ changed: ChangedSetting[]; view: HostSettingsView }>('settings.authorities-import', [pem]),
+    removeAuthorities: () =>
+      client.call<{ changed: ChangedSetting[]; view: HostSettingsView }>('settings.authorities-remove', []),
     testDiscordLogin: (values?: Readonly<Record<string, string>>) =>
       client.call<DiscordLoginTest>('settings.test-discord-login', [values ?? {}]),
     startMove: (url: string, replace: boolean) => client.call<MoveState>('settings.move-start', [url, replace]),
@@ -139,6 +148,8 @@ export function remoteSettings(client: CommandClient): HostSettingsPort {
 export function settingsCommands(settings: HostSettings): Map<string, (args: readonly unknown[]) => unknown> {
   const record = (value: unknown): Record<string, string | null> =>
     typeof value === 'object' && value !== null ? (value as Record<string, string | null>) : {};
+  // A PEM given with a test, or none.
+  const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
   const revisions = (value: unknown): Record<string, number> | undefined =>
     typeof value === 'object' && value !== null ? (value as Record<string, number>) : undefined;
   return new Map<string, (args: readonly unknown[]) => unknown>([
@@ -149,8 +160,14 @@ export function settingsCommands(settings: HostSettings): Map<string, (args: rea
       ([names, read]) => settings.reset(Array.isArray(names) ? names.map(String) : [], revisions(read)),
     ],
     ['settings.restart', () => settings.restartNow()],
-    ['settings.test-database', ([url]) => settings.testDatabase(String(url ?? ''))],
-    ['settings.test-server', ([url, use]) => settings.testServer(String(url ?? ''), use === 'bus' ? 'bus' : 'cache')],
+    ['settings.test-database', ([url, ca]) => settings.testDatabase(String(url ?? ''), text(ca))],
+    [
+      'settings.test-server',
+      ([url, use, ca]) => settings.testServer(String(url ?? ''), use === 'bus' ? 'bus' : 'cache', text(ca)),
+    ],
+    ['settings.authorities', () => settings.authorities()],
+    ['settings.authorities-import', ([pem]) => settings.importAuthorities(String(pem ?? ''))],
+    ['settings.authorities-remove', () => settings.removeAuthorities()],
     [
       'settings.test-discord-login',
       ([values]) =>

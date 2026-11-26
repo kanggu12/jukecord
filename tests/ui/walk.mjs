@@ -1428,7 +1428,7 @@ await sweep('settings', FEW, async (page) => {
     locked: document.querySelectorAll('.setting .setting-state .icon').length,
     move: Boolean(document.querySelector('[data-key="move"]:not([hidden])')),
   }));
-  if (look.cards !== 8) throw new Error(`${look.cards} sections, not 8`);
+  if (look.cards !== 9) throw new Error(`${look.cards} sections, not 9`);
   if (look.locked < 3) throw new Error(`${look.locked} locked values, not 3 or more`);
   if (!look.move) throw new Error('no key to move the database');
 });
@@ -1592,6 +1592,101 @@ await sweep('settings-move-stopped', FEW, async (page) => {
   await movePage(page, 3);
   await page.click('.dialog .wizard-tools .key');
   await page.waitForSelector('.dialog .dialog-notes .toast');
+});
+// The host's certificate authorities: none yet (the place to add them), saved from the page, set by the environment
+// (made up over the walk's answer) and a paste refused for the key in it. The two certificates were made for the walk
+// with made-up names, their keys thrown away at once; they are public by nature, and trust nothing real.
+const WALK_AUTHORITIES = `-----BEGIN CERTIFICATE-----
+MIIBwjCCAWegAwIBAgIUN4NzcD4dUHi6FQuWbm2PClzQhYEwCgYIKoZIzj0EAwIw
+NjEdMBsGA1UEAwwURXhhbXBsZSBIb21lIFJvb3QgQ0ExFTATBgNVBAoMDEV4YW1w
+bGUgSG9tZTAeFw0yNjExMjYwMzQzNTlaFw0zNjExMjMwMzQzNTlaMDYxHTAbBgNV
+BAMMFEV4YW1wbGUgSG9tZSBSb290IENBMRUwEwYDVQQKDAxFeGFtcGxlIEhvbWUw
+WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARJeSr0fw3aFZr3fC2JhpTUB44cCymf
+ngGhUaWjoh23oBOkUm8vn8PPikbxmq1Q5p5TC7adTRXJ0AahKAKkYqGko1MwUTAd
+BgNVHQ4EFgQUdBWxgiSLofnCHsNpY58CQEtFCZgwHwYDVR0jBBgwFoAUdBWxgiSL
+ofnCHsNpY58CQEtFCZgwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNJADBG
+AiEA/tGf7aGKUvRYCIoFzS1v5Fu8buNHF7JiodCNgIseRVICIQD7c1MNGXrXgOKZ
+k/6zmOAqy4nxWeHts9HSRaB5NWf56g==
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIBxDCCAWmgAwIBAgIUObQcBWszfskrmlwrj9RL6lOK/nswCgYIKoZIzj0EAwIw
+NzEfMB0GA1UEAwwWRXhhbXBsZSBMYWIgSXNzdWluZyBDQTEUMBIGA1UECgwLRXhh
+bXBsZSBMYWIwHhcNMjYxMTI2MDM0MzU5WhcNMzYxMTIzMDM0MzU5WjA3MR8wHQYD
+VQQDDBZFeGFtcGxlIExhYiBJc3N1aW5nIENBMRQwEgYDVQQKDAtFeGFtcGxlIExh
+YjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJajD0yjqDAuvXYQBH7ET7W276j8
+uAEaxkOZdMPHq73Dy7ikZpuxQYx0mWeQPTX70gYou80gAsXYIfBPoiACgPKjUzBR
+MB0GA1UdDgQWBBRRu81INf6y/sRFwFh5igvzNZTCljAfBgNVHSMEGDAWgBRRu81I
+Nf6y/sRFwFh5igvzNZTCljAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0kA
+MEYCIQCph/GPJUAH4ZOvApM0k21gLeoIBBhR5E2NQZrSWquQbAIhAPk5zFwsTGXZ
+5AlhI9Ca0Oo3Q6/ftlE47zwxxF5dVhbH
+-----END CERTIFICATE-----
+`;
+// The page, the authorities' section in sight.
+async function authoritiesPage(page) {
+  await settingsPage(page);
+  await page.locator('#settings-authorities').scrollIntoViewIfNeeded();
+}
+await sweep('settings-ca-none', FEW, authoritiesPage);
+if (!ONLY || ONLY.has('settings-ca-saved')) {
+  await api('PUT', '/settings/authorities', { pem: WALK_AUTHORITIES });
+  await sweep('settings-ca-saved', FEW, async (page) => {
+    await authoritiesPage(page);
+    await page.waitForSelector('#settings-authorities .cert');
+  });
+  await api('DELETE', '/settings/authorities');
+}
+await sweep('settings-ca-environment', FEW, async (page) => {
+  await page.route(/\/api\/v1\/settings$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    const file = '/run/jukecord-ca/ca.crt';
+    const setting = view.settings.find((entry) => entry.name === 'JUKECORD_CA_FILE');
+    Object.assign(setting, { source: 'environment', variable: setting.name, locked: 'environment', editable: false });
+    Object.assign(setting, { value: file });
+    const year = new Date().getFullYear();
+    view.authorities = {
+      file,
+      source: 'environment',
+      variable: 'JUKECORD_CA_FILE',
+      locked: 'environment',
+      kept: false,
+      certificates: [
+        {
+          subject: 'CN=Example Cluster Root CA, O=Example Cluster',
+          issuer: 'CN=Example Cluster Root CA, O=Example Cluster',
+          validFrom: `${year - 1}-03-01T00:00:00.000Z`,
+          validTo: `${year + 9}-03-01T00:00:00.000Z`,
+          authority: true,
+          fingerprint:
+            '00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF',
+        },
+        {
+          subject: 'CN=Example Cluster Services CA, O=Example Cluster',
+          issuer: 'CN=Example Cluster Root CA, O=Example Cluster',
+          validFrom: `${year - 1}-03-01T00:00:00.000Z`,
+          validTo: `${year + 4}-03-01T00:00:00.000Z`,
+          authority: true,
+          fingerprint:
+            'FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00:FF:EE:DD:CC:BB:AA:99:88:77:66:55:44:33:22:11:00',
+        },
+      ],
+      problem: null,
+      pending: false,
+      inUse: 2,
+      revision: 0,
+    };
+    return route.fulfill({ json: view });
+  });
+  await authoritiesPage(page);
+  await page.waitForSelector('#settings-authorities .cert');
+});
+await sweep('settings-ca-refused', FEW, async (page) => {
+  page.expectedErrors = [/status of 400/];
+  await authoritiesPage(page);
+  // A private key pasted with the certificates (made up: its lines alone): refused, said under the place it came from.
+  await page.fill('#ca-paste', `${WALK_AUTHORITIES}-----BEGIN PRIVATE KEY-----\nMADEUP\n-----END PRIVATE KEY-----\n`);
+  await page.click('[data-key="ca-save"]');
+  await page.waitForSelector('.ca-add .setting-problem:not([hidden])');
 });
 // A change that waits for a restart: the bar at the top with its key, and the question the key asks (never answered:
 // the walk's server keeps running). The pool goes back to its default after.

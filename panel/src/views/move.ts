@@ -29,8 +29,15 @@ export async function waitForRestart(asked: number, still: () => boolean): Promi
   return false;
 }
 
-/** Opens the move's dialog; `finished` runs when it closes (the page reads the settings again). */
-export function moveWizard(view: HostSettingsView, finished: () => void): void {
+/**
+ * Opens the move's dialog; `finished` runs when it closes (the page reads the settings again). `ca` gives the
+ * authorities the page has not saved yet, which the test of an address trusts too.
+ */
+export function moveWizard(
+  view: HostSettingsView,
+  finished: () => void,
+  ca: () => string | undefined = () => undefined,
+): void {
   const words = t();
   const content = h('div', { class: 'wizard' });
   const { keys, close, done } = pagedDialog(words.move, content);
@@ -208,7 +215,7 @@ export function moveWizard(view: HostSettingsView, finished: () => void): void {
       test.disabled = true;
       fill(test, icon('loader-circle', 'spin'), words.setTesting);
       try {
-        tested = { url, result: await api['settings-test-database'](url) };
+        tested = { url, result: await api['settings-test-database'](url, ca()) };
         replace = false;
       } catch (error) {
         tested = null;

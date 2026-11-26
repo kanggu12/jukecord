@@ -7,6 +7,7 @@
  *
  * The secret goes to Discord's own address alone, never one a request names.
  */
+import { withAuthorityHint } from '../authorities.ts';
 
 /** One finding of a login test, as the identity provider's and the directory's tests say theirs. */
 export interface LoginCheck {
@@ -73,9 +74,14 @@ async function application(options: DiscordLoginOptions): Promise<LoginCheck> {
       signal: AbortSignal.timeout(WAIT_MS),
     });
   } catch (error) {
-    // Not reached: the network's words (no route, no name, too slow).
+    // Not reached: the network's words (no route, no name, too slow; a certificate no trusted authority signed, as
+    // behind a proxy that reads TLS, with what to do about it).
     const reason = error instanceof Error ? error.message || error.name : String(error);
-    return { name: 'application', status: 'fail', detail: `Discord could not be reached (${reason})` };
+    return {
+      name: 'application',
+      status: 'fail',
+      detail: `Discord could not be reached (${withAuthorityHint(reason, error)})`,
+    };
   }
   // Discord's answer in its own word for the error, when it gave one.
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;

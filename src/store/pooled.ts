@@ -56,6 +56,11 @@ export interface PoolOptions extends ExecutorOptions {
   readonly answerTimeoutMs?: number;
   /** How long an unused connection stays open (30 s by default; tests that open many pools close them sooner). */
   readonly idleMs?: number;
+  /**
+   * The authorities this pool's TLS trusts in place of Node's default list, when the address names none of its own
+   * (the settings page's test of an address with authorities not saved yet: src/settings/authorities.ts).
+   */
+  readonly trust?: readonly string[];
 }
 
 /** How long an unused connection stays open by default: a quiet jukecord holds none open for long. */

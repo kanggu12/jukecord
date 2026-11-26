@@ -700,6 +700,21 @@ const EN = {
   moveLastFailed: (where: string, why: string) => `The last switch to ${where} did not finish: ${why}`,
   wizardBack: 'Back',
   wizardNext: 'Next',
+  // The host's certificate authorities.
+  caNone: 'Node’s own authorities only',
+  caFrom: (file: string) => `From ${file}`,
+  caSignedBy: (issuer: string) => `signed by ${issuer}`,
+  caSelf: 'signed by itself',
+  caUntil: (day: string) => `until ${day}`,
+  caExpired: (day: string) => `expired ${day}`,
+  caNotAuthority: 'not an authority',
+  caInUse: (n: number) => (n === 1 ? '1 is in use until a restart' : `${n} are in use until a restart`),
+  caAdd: 'Add authorities',
+  caPasteLabel: 'Certificates in PEM',
+  caPasteHint: 'The tests on this page trust what is here until it is saved',
+  caPlaceholder: '-----BEGIN CERTIFICATE-----',
+  caSaved: 'Saved; a restart applies them',
+  caRemoved: 'Removed; a restart applies it',
 } as const;
 
 // The English table's shape with its literal strings widened, so the Korean table can say other things.
@@ -1286,6 +1301,20 @@ const KO: Strings = {
   moveLastFailed: (where: string, why: string) => `지난번 전환을 끝내지 못함(${where}): ${why}`,
   wizardBack: '이전',
   wizardNext: '다음',
+  caNone: 'Node 자체 인증 기관만',
+  caFrom: (file: string) => `파일: ${file}`,
+  caSignedBy: (issuer: string) => `서명한 곳: ${issuer}`,
+  caSelf: '스스로 서명함',
+  caUntil: (day: string) => `${day}까지`,
+  caExpired: (day: string) => `${day}에 만료됨`,
+  caNotAuthority: '인증 기관이 아님',
+  caInUse: (n: number) => `다시 시작할 때까지 ${n}개를 씀`,
+  caAdd: '인증 기관 더하기',
+  caPasteLabel: 'PEM 인증서',
+  caPasteHint: '저장하기 전까지 이 페이지의 확인도 여기 있는 것을 믿음',
+  caPlaceholder: '-----BEGIN CERTIFICATE-----',
+  caSaved: '저장함. 다시 시작하면 적용',
+  caRemoved: '지움. 다시 시작하면 적용',
 };
 
 /**

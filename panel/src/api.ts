@@ -90,6 +90,8 @@ export const PANEL_ACTIONS = [
   'database-move-switch',
   'database-move-cancel',
   'restart',
+  'settings-authorities-import',
+  'settings-authorities-remove',
 ] as const;
 
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
@@ -428,6 +430,29 @@ export interface HostSettingsView {
   strays: string[];
   move: { state: MoveState | null; lastFailure: MoveFailure | null };
   services: ServiceInfo[];
+  authorities: Authorities;
+}
+/** One certificate of the host's authorities. */
+export interface Certificate {
+  subject: string;
+  issuer: string;
+  validFrom: string;
+  validTo: string;
+  authority: boolean;
+  fingerprint: string;
+}
+/** The host's certificate authorities: where they come from, and what their file holds. */
+export interface Authorities {
+  file: string | null;
+  source: 'environment' | 'saved' | 'default';
+  variable: string | null;
+  locked: 'environment' | 'split' | 'start' | null;
+  kept: boolean;
+  certificates: Certificate[];
+  problem: string | null;
+  pending: boolean;
+  inUse: number;
+  revision: number;
 }
 /** A change's answer: what it changed (a secret's values never), and the settings after it. */
 export interface SettingsChanged {
@@ -645,14 +670,23 @@ export const api = {
   'host-settings': () => request<HostSettingsView>('GET', '/settings'),
   'host-settings-change': (values: Record<string, string | null>, revisions: Record<string, number>) =>
     request<SettingsChanged>('PATCH', '/settings', { values, revisions }),
-  'settings-test-database': (url: string) => request<DatabaseTest>('POST', '/settings/test-database', { url }),
-  'settings-test-cache': (url: string) => request<ServerTest>('POST', '/settings/test-cache', { url }),
-  'settings-test-bus': (url: string) => request<ServerTest>('POST', '/settings/test-bus', { url }),
+  // Each test of an address may take the authorities the page has not saved yet (`ca`, a PEM).
+  'settings-test-database': (url: string, ca?: string) =>
+    request<DatabaseTest>('POST', '/settings/test-database', { url, ...(ca ? { ca } : {}) }),
+  'settings-test-cache': (url: string, ca?: string) =>
+    request<ServerTest>('POST', '/settings/test-cache', { url, ...(ca ? { ca } : {}) }),
+  'settings-test-bus': (url: string, ca?: string) =>
+    request<ServerTest>('POST', '/settings/test-bus', { url, ...(ca ? { ca } : {}) }),
   'auth-test-discord': (settings: Record<string, string>) =>
     request<LoginTest>('POST', '/auth/test-discord', { settings }),
-  'auth-test-oidc': (settings: Record<string, string>) => request<LoginTest>('POST', '/auth/test-oidc', { settings }),
-  'auth-test-ldap': (settings: Record<string, string>, username?: string) =>
-    request<LoginTest>('POST', '/auth/test-ldap', { settings, ...(username ? { username } : {}) }),
+  'auth-test-oidc': (settings: Record<string, string>, ca?: string) =>
+    request<LoginTest>('POST', '/auth/test-oidc', { settings, ...(ca ? { ca } : {}) }),
+  'auth-test-ldap': (settings: Record<string, string>, username?: string, ca?: string) =>
+    request<LoginTest>('POST', '/auth/test-ldap', {
+      settings,
+      ...(username ? { username } : {}),
+      ...(ca ? { ca } : {}),
+    }),
   'database-move': (url: string, replace: boolean) =>
     request<MoveState>('POST', '/settings/database-move', { url, replace }),
   'database-move-status': () =>
@@ -661,6 +695,8 @@ export const api = {
     request<{ supervisor: string; restarts: boolean }>('POST', '/settings/database-move/switch'),
   'database-move-cancel': () => request<unknown>('DELETE', '/settings/database-move'),
   restart: () => request<{ supervisor: string; restarts: boolean }>('POST', '/restart'),
+  'settings-authorities-import': (pem: string) => request<SettingsChanged>('PUT', '/settings/authorities', { pem }),
+  'settings-authorities-remove': () => request<SettingsChanged>('DELETE', '/settings/authorities'),
 } satisfies Record<PanelAction, (...args: never[]) => Promise<unknown>>;
 
 /**

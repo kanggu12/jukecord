@@ -136,7 +136,7 @@ export class DatabaseMove {
   }
 
   /** Tries an address without saving or changing anything: whether it answers, its version, its schema, its rows. */
-  async test(text: string): Promise<DatabaseTest> {
+  async test(text: string, trust?: readonly string[]): Promise<DatabaseTest> {
     const address = addressOf(text, this.options.dataDir);
     const where = describeAddress(address);
     const inUse = sameDatabase(address, this.options.current);
@@ -159,7 +159,8 @@ export class DatabaseMove {
     let store: Store | null = null;
     try {
       // Tried once: a test is a question asked now, and the one asking can ask again.
-      const sql = await openExecutor(address, { pool: 1, waitMs: 0 });
+      // Trusting, with the authorities in use, those the page has not saved yet when it gives some.
+      const sql = await openExecutor(address, { pool: 1, waitMs: 0, ...(trust ? { trust } : {}) });
       const health = await healthOf(sql);
       const schema = health.schema;
       // Read without changing it: at this jukecord's schema only, as a copy's source would be.

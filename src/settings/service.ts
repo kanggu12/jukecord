@@ -11,12 +11,24 @@
  * the database for the rest. A change to both writes the database first (one transaction) and settings.json after; if
  * the file cannot be written, the database's part is put back, so a change is kept whole or not at all.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { ActionError } from '../app/actions.ts';
+import { readAuthorities } from '../authorities.ts';
 import type { Config, ConfigFiles, Supervisor } from '../config.ts';
 import type { Logger } from '../log.ts';
 import { ConnectionError } from '../store/network.ts';
 import { RevisionConflict, type SavedSetting, type SettingWrite, type Store } from '../store/store.ts';
 import { Lock } from '../util/lock.ts';
+import {
+  type CertificateFacts,
+  certificateFacts,
+  checkAuthorities,
+  forgetAuthorities,
+  keepAuthorities,
+  keptByThePage,
+  trustedWith,
+} from './authorities.ts';
 import {
   findDefinition,
   GROUPS,
@@ -143,6 +155,31 @@ export interface HostSettingsView {
   readonly move: { readonly state: MoveState | null; readonly lastFailure: MoveFailure | null };
   /** The services of a split jukecord (the core and each edge); none in one process. */
   readonly services: readonly ServiceInfo[];
+  /** The host's certificate authorities: where they come from and what the file holds. */
+  readonly authorities: AuthoritiesView;
+}
+
+/** The host's certificate authorities as the page, the API and the command show them. */
+export interface AuthoritiesView {
+  /** The file JUKECORD_CA_FILE names, as it reads after a restart (the environment's, the saved one); null for none. */
+  readonly file: string | null;
+  readonly source: 'environment' | 'saved' | 'default';
+  /** The variable that sets it, when the environment does. */
+  readonly variable: string | null;
+  /** Why it cannot be changed here (set by the environment, a split's), or null. */
+  readonly locked: LockReason | null;
+  /** Whether the file is one the page keeps in the data folder (its Remove removes the file too). */
+  readonly kept: boolean;
+  /** What the file holds now, certificate by certificate. */
+  readonly certificates: readonly CertificateFacts[];
+  /** Why the file cannot be read now (moved, emptied), or null. */
+  readonly problem: string | null;
+  /** Whether they differ from the ones this process trusts (since its start): a restart applies them. */
+  readonly pending: boolean;
+  /** How many authorities this process trusts besides Node's own (read at its start). */
+  readonly inUse: number;
+  /** The setting's saved revision (0: never saved). */
+  readonly revision: number;
 }
 
 /** One setting a change touched, as the change's summary shows it (a secret's values never). */
@@ -200,6 +237,9 @@ type PortMethod =
   | 'testDatabase'
   | 'testServer'
   | 'testDiscordLogin'
+  | 'authorities'
+  | 'importAuthorities'
+  | 'removeAuthorities'
   | 'startMove'
   | 'moveState'
   | 'cancelMove'
@@ -289,11 +329,34 @@ export class HostSettings {
       throw error;
     }
     const services = (await this.options.services?.()) ?? [];
-    return { ...this.viewOf(layers), services };
+    const shown = this.viewOf(layers);
+    return { ...shown, services, authorities: this.authoritiesOf(shown) };
+  }
+
+  // The authorities as the view's setting has them, with what the file holds now.
+  private authoritiesOf(shown: Omit<HostSettingsView, 'services' | 'authorities'>): AuthoritiesView {
+    const setting = shown.settings.find((entry) => entry.name === CA_FILE);
+    const dataDir = this.options.started.dataDir;
+    const named = setting?.value ?? null;
+    // The file as the start would read it (a path from the working folder), and what it holds now.
+    const read = readAuthorities(named, this.options.cwd);
+    const file = read.authorities?.file ?? (named === null ? null : path.resolve(this.options.cwd, named));
+    return {
+      file,
+      source: setting?.source ?? 'default',
+      variable: setting?.variable ?? null,
+      locked: setting?.locked ?? null,
+      kept: keptByThePage(dataDir, file),
+      certificates: read.authorities ? certificateFacts(read.authorities.certificates) : [],
+      problem: read.problem,
+      pending: setting?.pending ?? false,
+      inUse: this.options.started.ca?.certificates.length ?? 0,
+      revision: setting?.revision ?? 0,
+    };
   }
 
   // The view over layers already read (the services are added by view()).
-  private viewOf(layers: SavedLayers): Omit<HostSettingsView, 'services'> {
+  private viewOf(layers: SavedLayers): Omit<HostSettingsView, 'services' | 'authorities'> {
     const { env, rules, started } = this.options;
     const usable = this.usable(layers);
     // As it would read after a restart; when that cannot be read (a saved value refused meanwhile), what runs.
@@ -533,9 +596,66 @@ export class HostSettings {
     }
   }
 
-  /** Tries a database's address without saving or changing anything (see DatabaseMove.test). */
-  testDatabase(url: string): Promise<DatabaseTest> {
-    return this.mover().test(url);
+  /**
+   * Tries a database's address without saving or changing anything (see DatabaseMove.test); with `ca`, trusting the
+   * authorities of that PEM too (the page's, not saved yet).
+   */
+  testDatabase(url: string, ca?: string): Promise<DatabaseTest> {
+    return this.mover().test(url, this.trustFor(ca));
+  }
+
+  /**
+   * The authorities a test's connection trusts for a PEM the page gives (its certificates and the ones in use), or
+   * none when it gives none. A PEM that is no authority's is refused, as importing it would be.
+   */
+  trustFor(ca?: string | null): readonly string[] | undefined {
+    if (ca === undefined || ca === null || ca.trim() === '') return undefined;
+    const checked = checkAuthorities(ca);
+    if ('problem' in checked)
+      throw new SettingsRefused([{ names: [CA_FILE], message: `${CA_FILE}: ${checked.problem}` }]);
+    return trustedWith(checked.certificates);
+  }
+
+  /** The host's certificate authorities as the page shows them (see AuthoritiesView). */
+  async authorities(): Promise<AuthoritiesView> {
+    return (await this.view()).authorities;
+  }
+
+  /**
+   * Takes a PEM of certificate authorities from the page or the command: checked (an authority's certificate at
+   * least, never a key), kept in the data folder as a file of its own (0600), and JUKECORD_CA_FILE saved to name it in
+   * settings.json; a restart applies it. The files the page kept before go once the new one is saved.
+   */
+  async importAuthorities(pem: string): Promise<{ changed: ChangedSetting[]; view: HostSettingsView }> {
+    this.changeable(CA_FILE);
+    const checked = checkAuthorities(pem);
+    if ('problem' in checked)
+      throw new SettingsRefused([{ names: [CA_FILE], message: `${CA_FILE}: ${checked.problem}` }]);
+    const dataDir = this.options.started.dataDir;
+    const before = (await this.answered(this.layers())).file.get(CA_FILE)?.value ?? null;
+    const file = keepAuthorities(dataDir, checked.certificates);
+    let result: { changed: ChangedSetting[]; view: HostSettingsView };
+    try {
+      result = await this.change({ [CA_FILE]: file });
+    } catch (error) {
+      // Not saved: the file made for it goes, unless the setting named it already (the same certificates again).
+      if (file !== before) fs.rmSync(file, { force: true });
+      throw error;
+    }
+    forgetAuthorities(dataDir, file);
+    this.options.log.info('the certificate authorities were saved; a restart applies them', {
+      file,
+      count: checked.certificates.length,
+    });
+    return result;
+  }
+
+  /** Puts the authorities away (JUKECORD_CA_FILE back to none): the page's files go; a file named by hand stays. */
+  async removeAuthorities(): Promise<{ changed: ChangedSetting[]; view: HostSettingsView }> {
+    this.changeable(CA_FILE);
+    const result = await this.change({ [CA_FILE]: null });
+    forgetAuthorities(this.options.started.dataDir);
+    return result;
   }
 
   /**
@@ -579,8 +699,8 @@ export class HostSettings {
   }
 
   /** Tries an address for the shared cache or the bus without saving or changing anything (src/settings/servers.ts). */
-  testServer(url: string, use: ServerUse): Promise<ServerTest> {
-    return testServer(url, use);
+  testServer(url: string, use: ServerUse, ca?: string): Promise<ServerTest> {
+    return testServer(url, use, this.trustFor(ca));
   }
 
   /**
@@ -754,6 +874,9 @@ export function secretsMoved(
   }
   return problems;
 }
+
+// The host's certificate authorities' setting, which the page keeps a file for.
+const CA_FILE = 'JUKECORD_CA_FILE';
 
 // How long a page waits for the settings' database (see HostSettings.answered): far more than a server that answers
 // takes (a save is milliseconds), and short enough that a page says the database is silent rather than hang.

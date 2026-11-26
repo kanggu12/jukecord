@@ -4,6 +4,7 @@
  * the same rules as at start, then tried against the provider or the directory.
  */
 
+import { trustingFetch } from '../authorities.ts';
 import { MemoryCache } from '../cache/memory.ts';
 import { type ConfigFiles, diskFiles } from '../config.ts';
 import type { Logger } from '../log.ts';
@@ -115,8 +116,11 @@ export class LoginChecks {
     return typeof env === 'function' ? await env() : env;
   }
 
-  /** Tests logging in through the identity provider: its document, its keys, the client and its secret. */
-  async oidc(values: Readonly<Record<string, string>> = {}): Promise<TestAnswer> {
+  /**
+   * Tests logging in through the identity provider: its document, its keys, the client and its secret. With `trust`,
+   * its connections trust that list of authorities (the settings page's, not saved yet, with the ones in use).
+   */
+  async oidc(values: Readonly<Record<string, string>> = {}, trust?: readonly string[]): Promise<TestAnswer> {
     const { settings, problems, withheld } = this.settingsWith(values, await this.environment());
     if (problems.length > 0) return { ok: false, checks: problemsAsChecks(problems) };
     if (!settings.oidc) {
@@ -132,7 +136,8 @@ export class LoginChecks {
       // A cache of its own: a test starts no login, and leaves nothing behind.
       cache: new MemoryCache(),
       log: this.options.log,
-      ...(this.options.fetch ? { fetch: this.options.fetch } : {}),
+      // A fetch that trusts the list given, or the tests' own, or the process's.
+      ...(trust ? { fetch: trustingFetch(trust) } : this.options.fetch ? { fetch: this.options.fetch } : {}),
     });
     // Without the secret in use (another issuer or client): its document and keys, and the client not tried.
     const checks = await login.test({ secretWithheld: withheld.includes('JUKECORD_OIDC_CLIENT_SECRET') });
@@ -146,6 +151,7 @@ export class LoginChecks {
   async ldap(
     username?: string,
     values: Readonly<Record<string, string>> = {},
+    trust?: readonly string[],
   ): Promise<TestAnswer & { groups: string[] | null; level: MemberLevel | null }> {
     const { settings, problems, withheld } = this.settingsWith(values, await this.environment());
     if (problems.length > 0) return { ok: false, checks: problemsAsChecks(problems), groups: null, level: null };
@@ -180,6 +186,8 @@ export class LoginChecks {
       settings: ldap,
       log: this.options.log,
       ...(this.options.connect ? { connect: this.options.connect } : {}),
+      // The page's authorities not saved yet, with the ones in use, when it gives some.
+      ...(trust ? { trust } : {}),
     });
     const { checks, groups } = await login.test(username);
     const level = groups === null ? null : levelOf(groups, ldap.groups, sameLdapGroup);

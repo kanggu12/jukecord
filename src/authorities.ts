@@ -14,6 +14,8 @@
  */
 import { X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import tls from 'node:tls';
 
@@ -130,6 +132,65 @@ export function describeAuthorities(authorities: Authorities | null): string {
   if (authorities === null) return "Node's own";
   const count = authorities.certificates.length;
   return `${count} extra ${count === 1 ? 'authority' : 'authorities'} from ${authorities.file}, besides Node's own`;
+}
+
+/**
+ * A fetch whose TLS trusts `ca` in place of the default list, for a test of an identity provider with authorities the
+ * settings page has not saved yet (the process's own fetch trusts what the start trusted, and no more). Enough of
+ * fetch for openid-client and jukecord's own requests: a method, headers, a body of text, a form or bytes, an abort
+ * signal; the answer read whole, and redirects not followed (none of those requests follows one).
+ */
+export function trustingFetch(ca: readonly string[]): typeof fetch {
+  return (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const method = init.method ?? (input instanceof Request ? input.method : 'GET');
+    const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
+    // The body as bytes: text, a form (with its type when none was said), or bytes as they are.
+    const raw = init.body;
+    let body: Buffer | undefined;
+    if (typeof raw === 'string') body = Buffer.from(raw);
+    else if (raw instanceof URLSearchParams) {
+      body = Buffer.from(raw.toString());
+      if (!headers.has('content-type')) headers.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8');
+    } else if (raw instanceof ArrayBuffer) body = Buffer.from(raw);
+    else if (ArrayBuffer.isView(raw)) body = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
+    else if (raw !== undefined && raw !== null) throw new TypeError('this fetch sends text, a form or bytes only');
+    if (body) headers.set('content-length', String(body.length));
+    const transport = url.protocol === 'https:' ? https : http;
+    return await new Promise<Response>((resolve, reject) => {
+      const request = transport.request(
+        url,
+        {
+          method,
+          headers: Object.fromEntries(headers),
+          // The authorities given, for an https address only (a plain one has nothing to check).
+          ...(url.protocol === 'https:' ? { ca: [...ca] } : {}),
+          ...(init.signal ? { signal: init.signal } : {}),
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('error', reject);
+          response.on('end', () => {
+            const answer = new Headers();
+            for (const [name, value] of Object.entries(response.headers))
+              for (const one of [value ?? []].flat()) answer.append(name, one);
+            const status = response.statusCode ?? 502;
+            // A status that has no body (204, 205, 304) is given none.
+            resolve(
+              new Response([204, 205, 304].includes(status) ? null : Buffer.concat(chunks), {
+                status,
+                statusText: response.statusMessage ?? '',
+                headers: answer,
+              }),
+            );
+          });
+        },
+      );
+      request.on('error', reject);
+      request.end(body);
+    });
+  }) as typeof fetch;
 }
 
 // "first", "second" ... for the message about one certificate of several.

@@ -733,6 +733,35 @@ export const MoveStateSchema = Type.Object(
 );
 
 /** Every host setting, the restart that waits, and the database move. */
+/** The host's certificate authorities: where they come from and what their file holds. */
+export const AuthoritiesSchema = Type.Object(
+  {
+    file: Nullable(Type.String({ description: 'The file JUKECORD_CA_FILE names, as it reads after a restart' })),
+    source: Type.Union([Type.Literal('environment'), Type.Literal('saved'), Type.Literal('default')]),
+    variable: Nullable(Type.String({ description: 'The variable that sets it, when the environment does' })),
+    locked: Nullable(Type.Union([Type.Literal('environment'), Type.Literal('split'), Type.Literal('start')])),
+    kept: Type.Boolean({ description: 'A file the settings keep in the data folder (removed with the setting)' }),
+    certificates: Type.Array(
+      Type.Object(
+        {
+          subject: Type.String(),
+          issuer: Type.String(),
+          validFrom: Type.String({ description: 'ISO time' }),
+          validTo: Type.String({ description: 'ISO time' }),
+          authority: Type.Boolean({ description: 'An authority’s certificate (CA:TRUE)' }),
+          fingerprint: Type.String({ description: 'SHA-256' }),
+        },
+        { title: 'Certificate' },
+      ),
+    ),
+    problem: Nullable(Type.String({ description: 'Why the file cannot be read now' })),
+    pending: Type.Boolean({ description: 'They differ from the ones in use: a restart applies them' }),
+    inUse: Type.Integer({ description: 'How many this process trusts besides Node’s own' }),
+    revision: Type.Integer(),
+  },
+  { title: 'Authorities' },
+);
+
 export const SettingsViewSchema = Type.Object(
   {
     groups: Type.Array(
@@ -767,6 +796,7 @@ export const SettingsViewSchema = Type.Object(
       ),
       { description: 'The services of a split jukecord: the core and each edge (none in one process)' },
     ),
+    authorities: AuthoritiesSchema,
   },
   { title: 'HostSettings' },
 );

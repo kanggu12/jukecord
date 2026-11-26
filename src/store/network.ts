@@ -45,9 +45,13 @@ function certificate(file: string | null, what: string): string | undefined {
  */
 export function tlsOptions(
   address: ServerAddress,
+  trust?: readonly string[],
 ): { readonly options: ConnectionOptions; readonly verify: 'none' | 'chain' | 'full' } | null {
   if (address.tls === 'disable') return null;
-  const ca = certificate(address.tlsFiles.ca, 'root certificate (sslrootcert)');
+  // The address's own root certificate decides alone; without one, a list given for a test (the default list and the
+  // authorities the settings page has not saved yet) stands in for the default.
+  const own = certificate(address.tlsFiles.ca, 'root certificate (sslrootcert)');
+  const ca = own ?? (trust ? [...trust] : undefined);
   const cert = certificate(address.tlsFiles.cert, 'certificate (sslcert)');
   const key = certificate(address.tlsFiles.key, 'key (sslkey)');
   // Only the files that were given, and no `ca` at all without a root certificate: Node's default authorities check
@@ -59,7 +63,9 @@ export function tlsOptions(
     ...(key === undefined ? {} : { key }),
   };
   const verify =
-    address.tls === 'verify-full' ? 'full' : address.tls === 'verify-ca' || ca !== undefined ? 'chain' : 'none';
+    // A root certificate of the address's own makes `require` check the chain (libpq's verify-ca); a test's list does
+    // not change what the address asks for.
+    address.tls === 'verify-full' ? 'full' : address.tls === 'verify-ca' || own !== undefined ? 'chain' : 'none';
   if (verify === 'none') return { options: { ...files, rejectUnauthorized: false }, verify };
   // The chain checked; the name too only for verify-full (an address by IP, or a certificate made out to another name,
   // passes verify-ca).

@@ -432,6 +432,38 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
     'JUKECORD_LDAP_STARTTLS is for ldap://; ldaps:// is encrypted already',
     'JUKECORD_LDAP_STARTTLS는 ldap://에만 씀. ldaps://는 이미 암호화됨',
   ],
+  // The host's certificate authorities: the file the settings name (src/authorities.ts), and a PEM the page or the
+  // command gives (src/settings/authorities.ts).
+  [/^JUKECORD_CA_FILE: (.+) cannot be read$/, 'JUKECORD_CA_FILE: 읽을 수 없는 파일($1)'],
+  [
+    /^JUKECORD_CA_FILE: (.+) has no certificate in PEM form \(-----BEGIN CERTIFICATE-----\)$/,
+    'JUKECORD_CA_FILE: PEM 형식의 인증서가 없는 파일($1)',
+  ],
+  [
+    /^JUKECORD_CA_FILE: (.+) has a certificate that cannot be read \(the (\w+): (.+)\)$/,
+    'JUKECORD_CA_FILE: 읽을 수 없는 인증서가 든 파일($1, $3)',
+  ],
+  [
+    'JUKECORD_CA_FILE: it holds a private key: give only the authorities’ certificates, never a key',
+    'JUKECORD_CA_FILE: 개인 키가 들어 있음. 인증 기관의 인증서만 넣으세요',
+  ],
+  [
+    /^JUKECORD_CA_FILE: it holds something other than certificates \((.+)\)$/,
+    'JUKECORD_CA_FILE: 인증서가 아닌 것이 들어 있음($1)',
+  ],
+  [
+    'JUKECORD_CA_FILE: it has no certificate in PEM form (-----BEGIN CERTIFICATE-----)',
+    'JUKECORD_CA_FILE: PEM 형식의 인증서가 없음(-----BEGIN CERTIFICATE-----)',
+  ],
+  [
+    /^JUKECORD_CA_FILE: it has a certificate that cannot be read \(the (\w+): (.+)\)$/,
+    'JUKECORD_CA_FILE: 읽을 수 없는 인증서가 있음($2)',
+  ],
+  [
+    'JUKECORD_CA_FILE: it has no authority’s certificate (CA:TRUE): a server’s or a person’s certificate signs nothing',
+    'JUKECORD_CA_FILE: 인증 기관의 인증서(CA:TRUE)가 없음. 서버나 사람의 인증서는 다른 인증서에 서명하지 않음',
+  ],
+  ['JUKECORD_CA_FILE: the certificates are larger than 1 MiB', 'JUKECORD_CA_FILE: 인증서가 1MiB보다 큼'],
   [
     /^JUKECORD_LDAP_CA_FILE: (.+) has no certificate in PEM form$/,
     'JUKECORD_LDAP_CA_FILE: PEM 형식의 인증서가 없는 파일($1)',

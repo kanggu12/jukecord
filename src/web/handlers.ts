@@ -5,6 +5,7 @@
  * in src/web/api.ts and, for a server, by Access); what is allowed in a server is decided inside the action. That is
  * what makes the API do exactly what the panel, the slash commands and the CLI do.
  */
+
 import type { Static, TSchema } from 'typebox';
 import { type ActionContext, ActionError, type SettingsView } from '../app/actions.ts';
 import { KEEP_BACKUPS, makeBackup } from '../app/backups.ts';
@@ -13,6 +14,7 @@ import type { LoginChecks } from '../auth/check.ts';
 import type { AuthSettings } from '../auth/settings.ts';
 import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import { searchWords } from '../media/search.ts';
+import { checkAuthorities, trustedWith } from '../settings/authorities.ts';
 import type { HostSettingsPort, HostSettingsView, SettingState } from '../settings/service.ts';
 import type { Store } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
@@ -96,6 +98,23 @@ function unsaved(caller: Caller | null, values: Readonly<Record<string, string>>
   if (caller?.principal.kind !== 'host')
     throw new ActionError('forbidden', 'only the host can test settings not saved yet');
   return { ...values };
+}
+
+/**
+ * The authorities a login test's connections trust with a PEM not saved yet (the settings page's): checked as an
+ * import is, the host's only as unsaved values are; none without one. Made here, where the test runs (an edge of a
+ * split tests its logins itself).
+ */
+function trustOf(caller: Caller | null, ca: string | undefined): readonly string[] | undefined {
+  if (ca === undefined || ca.trim() === '') return undefined;
+  if (caller?.principal.kind !== 'host')
+    throw new ActionError('forbidden', 'only the host can test settings not saved yet');
+  const checked = checkAuthorities(ca);
+  if ('problem' in checked)
+    throw new ActionError('invalid', `JUKECORD_CA_FILE: ${checked.problem}`, {
+      problems: [{ names: ['JUKECORD_CA_FILE'], message: `JUKECORD_CA_FILE: ${checked.problem}` }],
+    });
+  return trustedWith(checked.certificates);
 }
 
 /** Every operation's handler; a missing one fails the type check. */
@@ -298,13 +317,13 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
   'auth-test-oidc': async ({ caller, body, deps }) => {
     const checks = deps.loginChecks;
     if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
-    const answer = await checks.oidc(unsaved(caller, body.settings));
+    const answer = await checks.oidc(unsaved(caller, body.settings), trustOf(caller, body.ca));
     return { ok: answer.ok, checks: answer.checks.map((check) => ({ ...check })) };
   },
   'auth-test-ldap': async ({ caller, body, deps }) => {
     const checks = deps.loginChecks;
     if (!checks) throw new ActionError('unavailable', 'the login settings cannot be tested here');
-    const answer = await checks.ldap(body.username, unsaved(caller, body.settings));
+    const answer = await checks.ldap(body.username, unsaved(caller, body.settings), trustOf(caller, body.ca));
     return {
       ok: answer.ok,
       checks: answer.checks.map((check) => ({ ...check })),
@@ -331,18 +350,27 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
   },
   'settings-test-database': async ({ caller, body, deps }) => ({
-    ...(await hostSettings(deps, caller).testDatabase(body.url)),
+    ...(await hostSettings(deps, caller).testDatabase(body.url, body.ca)),
   }),
   'auth-test-discord': async ({ caller, body, deps }) => {
     const found = await hostSettings(deps, caller).testDiscordLogin(body.settings ?? {});
     return { ok: found.ok, checks: found.checks.map((check) => ({ ...check })) };
   },
   'settings-test-cache': async ({ caller, body, deps }) => ({
-    ...(await hostSettings(deps, caller).testServer(body.url, 'cache')),
+    ...(await hostSettings(deps, caller).testServer(body.url, 'cache', body.ca)),
   }),
   'settings-test-bus': async ({ caller, body, deps }) => ({
-    ...(await hostSettings(deps, caller).testServer(body.url, 'bus')),
+    ...(await hostSettings(deps, caller).testServer(body.url, 'bus', body.ca)),
   }),
+  'settings-authorities': async ({ caller, deps }) => plainAuthorities(await hostSettings(deps, caller).authorities()),
+  'settings-authorities-import': async ({ caller, body, deps }) => {
+    const { changed, view } = await hostSettings(deps, caller).importAuthorities(body.pem);
+    return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
+  },
+  'settings-authorities-remove': async ({ caller, deps }) => {
+    const { changed, view } = await hostSettings(deps, caller).removeAuthorities();
+    return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
+  },
   'database-move': async ({ caller, body, deps }) => ({
     ...(await hostSettings(deps, caller).startMove(body.url, body.replace ?? false)),
   }),
@@ -465,7 +493,13 @@ function plainView(view: HostSettingsView) {
     strays: [...view.strays],
     move: plainMove(view.move),
     services: view.services.map((service) => ({ ...service })),
+    authorities: plainAuthorities(view.authorities),
   };
+}
+
+// The authorities as the API sends them (the list as an array of its own).
+function plainAuthorities(authorities: HostSettingsView['authorities']) {
+  return { ...authorities, certificates: authorities.certificates.map((certificate) => ({ ...certificate })) };
 }
 
 // The move's state as the API sends it.

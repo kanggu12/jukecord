@@ -125,7 +125,7 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
    * certificate fails here, with its reason in words (ConnectionError), not at the first statement.
    */
   static async open(address: ServerAddress, options: PoolOptions = {}): Promise<PostgresExecutor> {
-    const tls = tlsOptions(address);
+    const tls = tlsOptions(address, options.trust);
     // The driver, loaded now: a jukecord on SQLite never loads it.
     const { default: pg } = await import('pg');
     // Whole numbers (BIGINT, as every one is in jukecord's tables) and sums (NUMERIC) as JavaScript numbers: they

@@ -12,6 +12,7 @@ import type { ActionName } from '../app/actions.ts';
 import {
   AddResultSchema,
   AuthMethodsSchema,
+  AuthoritiesSchema,
   DatabaseTestSchema,
   DiscordTestSchema,
   DoctorSchema,
@@ -83,6 +84,9 @@ export const ACCOUNT_OPERATIONS = [
   'settings-test-database',
   'settings-test-cache',
   'settings-test-bus',
+  'settings-authorities',
+  'settings-authorities-import',
+  'settings-authorities-remove',
   'database-move',
   'database-move-status',
   'database-move-switch',
@@ -147,6 +151,13 @@ const SettingName = Type.String({
 });
 // A database's address as JUKECORD_DATABASE_URL takes it.
 const DatabaseUrl = Type.String({ minLength: 1, maxLength: 4000, description: 'As JUKECORD_DATABASE_URL takes it' });
+// Certificate authorities in PEM a test trusts besides the ones in use (the settings page's, not saved yet).
+const TestAuthorities = Type.Optional(
+  Type.String({
+    maxLength: 1024 * 1024,
+    description: 'Certificate authorities in PEM the test also trusts (ones not saved yet)',
+  }),
+);
 // A Redis or Valkey server's address as the shared cache's and the bus's settings take it.
 const ServerUrl = (name: string) =>
   Type.String({ minLength: 1, maxLength: 4000, description: `As ${name} takes it, its own password in it` });
@@ -589,7 +600,7 @@ export const API = {
       'Test logging in through the identity provider (OIDC) without logging anyone in: its document, its keys, the client and its secret; with settings not saved yet, or the ones in use',
     tag: 'host',
     access: 'host',
-    body: Type.Object({ settings: Type.Optional(LoginSettingsSchema) }, strict),
+    body: Type.Object({ settings: Type.Optional(LoginSettingsSchema), ca: TestAuthorities }, strict),
     response: OidcTestSchema,
   }),
   'auth-test-ldap': op({
@@ -603,6 +614,7 @@ export const API = {
       {
         username: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: 'A name to look up' })),
         settings: Type.Optional(LoginSettingsSchema),
+        ca: TestAuthorities,
       },
       strict,
     ),
@@ -682,7 +694,7 @@ export const API = {
       'Try a database’s address without saving it: whether it answers, its version and round trip, its schema and rows',
     tag: 'host',
     access: 'host',
-    body: Type.Object({ url: DatabaseUrl }, strict),
+    body: Type.Object({ url: DatabaseUrl, ca: TestAuthorities }, strict),
     response: DatabaseTestSchema,
   }),
   'settings-test-cache': op({
@@ -692,7 +704,7 @@ export const API = {
       'Try an address for the shared cache without saving it (memory, or a Redis or Valkey server): its version and round trip',
     tag: 'host',
     access: 'host',
-    body: Type.Object({ url: ServerUrl('JUKECORD_CACHE_URL') }, strict),
+    body: Type.Object({ url: ServerUrl('JUKECORD_CACHE_URL'), ca: TestAuthorities }, strict),
     response: ServerTestSchema,
   }),
   'settings-test-bus': op({
@@ -701,8 +713,38 @@ export const API = {
     summary: 'Try an address for the bus without saving it (a Redis or Valkey server): its version and round trip',
     tag: 'host',
     access: 'host',
-    body: Type.Object({ url: ServerUrl('JUKECORD_BUS_URL') }, strict),
+    body: Type.Object({ url: ServerUrl('JUKECORD_BUS_URL'), ca: TestAuthorities }, strict),
     response: ServerTestSchema,
+  }),
+  'settings-authorities': op({
+    method: 'GET',
+    path: '/settings/authorities',
+    summary:
+      'The certificate authorities every TLS connection trusts besides Node’s own: where they come from, each one',
+    tag: 'host',
+    access: 'host',
+    response: AuthoritiesSchema,
+  }),
+  'settings-authorities-import': op({
+    method: 'PUT',
+    path: '/settings/authorities',
+    summary:
+      'Save certificate authorities from a PEM: checked (an authority’s certificate, never a key), kept in the data folder, applied after a restart',
+    tag: 'host',
+    access: 'host',
+    body: Type.Object(
+      { pem: Type.String({ minLength: 1, maxLength: 1024 * 1024, description: 'The certificates in PEM' }) },
+      strict,
+    ),
+    response: SettingsChangedSchema,
+  }),
+  'settings-authorities-remove': op({
+    method: 'DELETE',
+    path: '/settings/authorities',
+    summary: 'Put the certificate authorities away: Node’s own only, after a restart',
+    tag: 'host',
+    access: 'host',
+    response: SettingsChangedSchema,
   }),
   'database-move': op({
     method: 'POST',

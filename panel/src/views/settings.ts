@@ -44,16 +44,19 @@ const SECRET_WAYS: readonly { secret: string; to: readonly string[] }[] = [
 const DISCORD_LOGIN_TOO = ['JUKECORD_PUBLIC_URL', 'JUKECORD_PUBLISHED_PORT'];
 
 // Each way of logging in's test, by its part of the Logins group.
-const LOGIN_TESTS: Readonly<Record<string, (values: Record<string, string>, name: string) => Promise<LoginTest>>> = {
+// (The provider's and the directory's take the authorities the page has not saved yet; Discord's are the world's.)
+const LOGIN_TESTS: Readonly<
+  Record<string, (values: Record<string, string>, name: string, ca: string | undefined) => Promise<LoginTest>>
+> = {
   'discord-login': (values) => api['auth-test-discord'](values),
-  sso: (values) => api['auth-test-oidc'](values),
-  directory: (values, name) => api['auth-test-ldap'](values, name || undefined),
+  sso: (values, _name, ca) => api['auth-test-oidc'](values, ca),
+  directory: (values, name, ca) => api['auth-test-ldap'](values, name || undefined, ca),
 };
 
 // The addresses that can be tried before they are saved, and the test of each.
-const SERVER_TESTS: Readonly<Record<string, (url: string) => Promise<ServerTest>>> = {
-  JUKECORD_CACHE_URL: (url) => api['settings-test-cache'](url),
-  JUKECORD_BUS_URL: (url) => api['settings-test-bus'](url),
+const SERVER_TESTS: Readonly<Record<string, (url: string, ca: string | undefined) => Promise<ServerTest>>> = {
+  JUKECORD_CACHE_URL: (url, ca) => api['settings-test-cache'](url, ca),
+  JUKECORD_BUS_URL: (url, ca) => api['settings-test-bus'](url, ca),
 };
 
 /** A control of one setting: its element, and what it holds now (undefined: what is saved, untouched). */
@@ -75,6 +78,9 @@ export function settingsPage(): HTMLElement {
   const foots = new Map<string, () => void>();
   // A restart asked for and not answered yet: the bar says so instead of offering it again.
   let restarting = false;
+  // The certificates pasted in the authorities' section and not saved yet: every test of the page trusts them too.
+  let caText = '';
+  const pendingCa = (): string | undefined => (caText.trim() === '' ? undefined : caText);
 
   const title = h('h1');
   const bar = h('section', { class: 'card restart-bar', hidden: true, role: 'status' });
@@ -146,6 +152,11 @@ export function settingsPage(): HTMLElement {
       fill(card, head, ...parts.map((part) => partBlock(part.id, say(part.label))));
       return card;
     }
+    // The authorities: what is trusted and from where, and a place to add or remove them (not a field of a path).
+    if (group === 'authorities') {
+      fill(card, head, ...authoritiesBody());
+      return card;
+    }
     // The database's card has its move; the services' card its list of services above the settings that say them.
     fill(
       card,
@@ -192,7 +203,7 @@ export function settingsPage(): HTMLElement {
       }
       await busy(test, words.setTesting, async () => {
         try {
-          const result = await (LOGIN_TESTS[part] ?? LOGIN_TESTS.sso)?.(values, name?.value.trim() ?? '');
+          const result = await (LOGIN_TESTS[part] ?? LOGIN_TESTS.sso)?.(values, name?.value.trim() ?? '', pendingCa());
           if (result) showChecks(found, result);
         } catch (error) {
           showFailure(found, error);
@@ -492,7 +503,7 @@ export function settingsPage(): HTMLElement {
       move ? words.moveOpen : words.move,
     );
     key.hidden = setting.locked !== null;
-    key.onclick = () => moveWizard(shown, () => void reread('database'));
+    key.onclick = () => moveWizard(shown, () => void reread('database'), pendingCa);
     const failure = shown.move.lastFailure;
     return h(
       'div',
@@ -530,6 +541,171 @@ export function settingsPage(): HTMLElement {
       ),
       h('div', { class: 'setting-control' }, key),
     );
+  };
+
+  // The authorities' section: the file in use and where it comes from (locked where the environment sets it), each
+  // certificate it holds, and, where the page may change it, a place to paste or pick a PEM with Save, and Remove.
+  const authoritiesBody = (): Node[] => {
+    const words = t();
+    const shown = view;
+    const setting = shown?.settings.find((item) => item.name === 'JUKECORD_CA_FILE');
+    if (!shown || !setting) return [];
+    const authorities = shown.authorities;
+    const locked = authorities.locked !== null;
+    // Where they come from, and whether a restart applies them: as every setting's state line says it.
+    const state = h('p', { class: `setting-state ${authorities.pending ? 'tone-pause' : ''}`.trim() });
+    const parts = [
+      authorities.locked === 'environment'
+        ? words.setByEnv(authorities.variable ?? setting.name)
+        : authorities.locked === 'split'
+          ? words.setBySplit
+          : authorities.source === 'saved'
+            ? words.setSaved
+            : words.setDefault,
+      ...(authorities.pending
+        ? [words.setWaits, ...(authorities.inUse > 0 ? [words.caInUse(authorities.inUse)] : [])]
+        : []),
+      words.setAfterRestart,
+    ];
+    fill(
+      state,
+      locked ? icon('lock') : authorities.pending ? icon('rotate-ccw') : null,
+      h('span', null, parts.join('\u00a0· ')),
+    );
+    const remove = h('button', { class: 'key', type: 'button', dataset: { key: 'ca-remove' } }, words.setRemove);
+    remove.hidden = locked || authorities.source !== 'saved';
+    remove.onclick = () => void changeAuthorities(remove, () => api['settings-authorities-remove'](), words.caRemoved);
+    const row = h(
+      'div',
+      { class: 'setting' },
+      h(
+        'div',
+        { class: 'setting-text' },
+        h(
+          'div',
+          { class: 'setting-name' },
+          h('span', null, authorities.file ? words.caFrom(authorities.file) : words.caNone),
+        ),
+        h('p', { class: 'setting-help' }, say(setting.help)),
+        state,
+        authorities.problem
+          ? h('p', { class: 'setting-problem' }, icon('circle-alert'), h('span', null, foundText(authorities.problem)))
+          : null,
+      ),
+      h('div', { class: 'setting-control' }, remove),
+    );
+    // Each certificate: whose, who signed it, until when (an expired one in the problem's tone).
+    const certificates =
+      authorities.certificates.length > 0
+        ? h(
+            'ul',
+            { class: 'cert-list' },
+            ...authorities.certificates.map((certificate) => {
+              const until = new Date(certificate.validTo);
+              const day = words.dayOf(until.getMonth() + 1, until.getDate(), String(until.getFullYear()));
+              const expired = until.getTime() < Date.now();
+              return h(
+                'li',
+                { class: 'cert' },
+                h('b', { class: 'cert-name', title: certificate.subject, 'data-clip': 'ok' }, certificate.subject),
+                h(
+                  'span',
+                  { class: 'faint' },
+                  [
+                    certificate.issuer === certificate.subject ? words.caSelf : words.caSignedBy(certificate.issuer),
+                    ...(certificate.authority ? [] : [words.caNotAuthority]),
+                  ].join('\u00a0· '),
+                ),
+                h(
+                  'span',
+                  { class: expired ? 'text-bad' : 'faint' },
+                  expired ? words.caExpired(day) : words.caUntil(day),
+                ),
+              );
+            }),
+          )
+        : null;
+    if (locked) return certificates ? [row, certificates] : [row];
+    // Adding: pasted, or read from a file into the same place; saved with its own key. What is here is trusted by the
+    // page's tests until it is saved (see pendingCa).
+    const paste = h('textarea', {
+      class: 'paste',
+      rows: '6',
+      id: 'ca-paste',
+      spellcheck: 'false',
+      placeholder: words.caPlaceholder,
+    });
+    paste.value = caText;
+    const problemLine = h('p', { class: 'setting-problem', hidden: true });
+    paste.oninput = () => {
+      caText = paste.value;
+      problemLine.hidden = true;
+    };
+    const picker = h('input', { type: 'file', accept: '.pem,.crt,.cer,.txt', hidden: true });
+    const choose = h('button', { class: 'key', type: 'button' }, icon('folder-open'), words.chooseFile);
+    choose.onclick = () => picker.click();
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      if (file.size > 1024 * 1024) {
+        toast(words.fileTooLarge, 'bad', 'circle-alert');
+        return;
+      }
+      paste.value = await file.text();
+      caText = paste.value;
+      problemLine.hidden = true;
+    };
+    const save = h(
+      'button',
+      { class: 'key primary', type: 'button', dataset: { key: 'ca-save' } },
+      icon('save'),
+      words.save,
+    );
+    save.onclick = () => {
+      if (!caText.trim()) {
+        paste.focus();
+        return;
+      }
+      void changeAuthorities(save, () => api['settings-authorities-import'](caText), words.caSaved, problemLine);
+    };
+    const add = h(
+      'div',
+      { class: 'ca-add' },
+      h('label', { class: 'field-label', for: 'ca-paste' }, words.caAdd),
+      paste,
+      h('p', { class: 'setting-help' }, words.caPasteHint),
+      problemLine,
+      h('div', { class: 'ca-keys' }, choose, save),
+      picker,
+    );
+    return certificates ? [row, certificates, add] : [row, add];
+  };
+
+  // Saves or removes the authorities: the section and the bar drawn anew from the answer; a refusal said under the
+  // place it came from (a key in the PEM, no certificate), and once in a toast.
+  const changeAuthorities = async (
+    key: HTMLButtonElement,
+    work: () => Promise<{ view: HostSettingsView }>,
+    done: string,
+    problemLine?: HTMLElement,
+  ): Promise<void> => {
+    try {
+      await busy(key, t().setTesting, async () => {
+        const answer = await work();
+        view = answer.view;
+      });
+    } catch (error) {
+      if (problemLine) {
+        problemLine.hidden = false;
+        fill(problemLine, icon('circle-alert'), h('span', null, messageOf(error)));
+      }
+      problem(error);
+      return;
+    }
+    caText = '';
+    toast(done);
+    redraw('authorities');
+    cards.querySelector<HTMLElement>('#settings-authorities')?.focus?.();
   };
 
   // The services of a split jukecord: the core and each edge, with their version, how long they have run and whether
@@ -646,7 +822,10 @@ export function settingsPage(): HTMLElement {
   }
 
   // A key that opens a field to try an address with, which is never saved.
-  function tryAnother(setting: HostSetting, test: (url: string) => Promise<ServerTest>): HTMLElement {
+  function tryAnother(
+    setting: HostSetting,
+    test: (url: string, ca: string | undefined) => Promise<ServerTest>,
+  ): HTMLElement {
     const words = t();
     const key = h('button', { class: 'key', type: 'button' }, words.setTestAnother);
     key.onclick = () => {
@@ -730,14 +909,14 @@ export function settingsPage(): HTMLElement {
     key: HTMLButtonElement,
     found: HTMLElement,
     url: () => string,
-    test: (url: string) => Promise<ServerTest>,
+    test: (url: string, ca: string | undefined) => Promise<ServerTest>,
   ): Promise<void> {
     const words = t();
     const address = url();
     if (!address) return;
     await busy(key, words.setTesting, async () => {
       try {
-        const result = await test(address);
+        const result = await test(address, pendingCa());
         found.hidden = false;
         found.className = `setting-found ${result.ok ? '' : 'tone-bad'}`.trim();
         const text = result.ok

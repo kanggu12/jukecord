@@ -5345,7 +5345,8 @@ button.lyric {
 /* The restart's bar: what waits, in words, and the key that restarts, on one line at the cards' inset. */
 .restart-bar {
   flex-direction: row;
-  align-items: center;
+  /* The key on the line of what waits (its words' first line is as tall as the key), the names under them. */
+  align-items: flex-start;
   gap: var(--s-12);
   padding: var(--s-12) var(--pad);
 }
@@ -5356,6 +5357,8 @@ button.lyric {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(var(--control), auto) auto;
+  align-items: center;
   column-gap: var(--s-6);
 }
 .restart-mark {
@@ -5679,4 +5682,46 @@ button.lyric {
 }
 .dialog-keys .key[hidden] {
   display: none;
+}
+/* The authorities' certificates, under the file's row: each one's name on a line, who signed it and until when under
+   it. */
+.cert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--pad) var(--s-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+}
+.cert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2) var(--s-12);
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+.cert-name {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  line-height: var(--lh-md);
+  font-weight: 500;
+}
+/* Adding authorities: the PEM's place across the card, under a rule, its keys at the end under it. */
+.ca-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+  padding: var(--s-12) var(--pad) var(--pad);
+  border-top: 1px solid var(--line);
+}
+.ca-keys {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-8);
 }

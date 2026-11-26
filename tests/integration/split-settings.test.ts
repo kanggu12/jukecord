@@ -93,6 +93,11 @@ for (const { name, make } of testBuses()) {
       assert.equal(token.status, 409);
       const view = (await ask(one, 'GET', '/settings')).body.settings as { name: string; locked: string | null }[];
       assert.equal(view.find((setting) => setting.name === 'JUKECORD_PORT')?.locked, 'split');
+      // The authorities too: a bootstrap setting, shown as the environment has it, never saved from a page.
+      const authorities = (await ask(one, 'GET', '/settings/authorities')).body;
+      assert.deepEqual([authorities.locked, authorities.file], ['split', null]);
+      const pem = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n';
+      assert.equal((await ask(two, 'PUT', '/settings/authorities', { pem })).status, 409);
     });
 
     it('asks every service to restart: the core, and each edge after it heard so', async () => {

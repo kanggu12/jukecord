@@ -14,6 +14,7 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { SETTINGS_FILE } from '../../src/settings/file.ts';
 import { RESTART_EXIT_CODE } from '../../src/settings/restart.ts';
+import { haveOpenssl, httpsServer, testAuthority } from '../support/tls.ts';
 
 const folders: string[] = [];
 const running = new Set<ChildProcess>();
@@ -176,5 +177,51 @@ describe('jukecord with saved settings', () => {
     );
     second.child.kill('SIGTERM');
     assert.equal(await second.exited, 0);
+  });
+
+  it('trusts authorities saved from the page once it restarts: a provider on them refused before, reached after', {
+    skip: !haveOpenssl() && 'openssl is not installed',
+  }, async () => {
+    const authority = testAuthority('jukecord-test-start-root');
+    // An identity provider on a certificate the authority signed (its document a stub: what matters is TLS).
+    const provider = await httpsServer(authority, (_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end('{}');
+    });
+    try {
+      const dataDir = folder();
+      const port = await freePort();
+      const env = { JUKECORD_PORT: String(port), JUKECORD_SUPERVISOR: 'docker' };
+      const first = start(dataDir, env);
+      await said(first, 'the panel and the API are up');
+      const api = client(port, dataDir);
+      const settings = {
+        JUKECORD_OIDC_ISSUER: `https://127.0.0.1:${provider.port}`,
+        JUKECORD_OIDC_CLIENT_ID: 'jukecord',
+        JUKECORD_OIDC_READ_GROUPS: '*',
+      };
+      const tls = async () =>
+        JSON.stringify(((await api('POST', '/auth/test-oidc', { settings })).json as { checks: unknown }).checks);
+      // Before: no authority this process trusts signed the provider's certificate.
+      assert.match(await tls(), /name its certificate in JUKECORD_CA_FILE/);
+      const saved = await api('PUT', '/settings/authorities', { pem: authority.ca });
+      assert.equal(saved.status, 200);
+      // Saved, not trusted yet: the same answer until the restart.
+      assert.match(await tls(), /name its certificate in JUKECORD_CA_FILE/);
+      await api('POST', '/restart');
+      assert.equal(await first.exited, RESTART_EXIT_CODE);
+      // After: the start trusts them, says so, and the provider is reached over TLS.
+      const second = start(dataDir, env);
+      await said(second, 'the panel and the API are up');
+      assert.match(second.output(), /authorities="?1 extra authority from .*authorities-[0-9a-f]{16}\.pem/);
+      assert.doesNotMatch(await tls(), /JUKECORD_CA_FILE|certificate/i);
+      const shown = (await api('GET', '/settings/authorities')).json;
+      assert.deepEqual([shown.source, shown.pending, shown.inUse], ['saved', false, 1]);
+      second.child.kill('SIGTERM');
+      assert.equal(await second.exited, 0);
+    } finally {
+      await provider.close();
+      authority.remove();
+    }
   });
 });

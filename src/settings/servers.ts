@@ -6,6 +6,8 @@
  * The address is tried as typed, whole: its own user and password, never one saved for another address (a saved secret
  * goes only where it was saved for).
  */
+
+import { withAuthorityHint } from '../authorities.ts';
 import { type RedisConnection, redisAddress, shownAddress } from '../bus/redis.ts';
 import { REDIS_SCHEMES } from '../config.ts';
 
@@ -30,7 +32,7 @@ export interface ServerTest {
 const WAIT_MS = 5000;
 
 /** Tries an address for the shared cache or the bus. */
-export async function testServer(url: string, use: ServerUse): Promise<ServerTest> {
+export async function testServer(url: string, use: ServerUse, trust?: readonly string[]): Promise<ServerTest> {
   const text = url.trim();
   // The cache in this process's memory: nothing to reach, so nothing that can fail.
   if (use === 'cache' && text.toLowerCase() === 'memory')
@@ -60,8 +62,13 @@ export async function testServer(url: string, use: ServerUse): Promise<ServerTes
       name: 'jukecord-test',
       disableOfflineQueue: true,
       commandOptions: { timeout: WAIT_MS },
-      socket: { connectTimeout: WAIT_MS, reconnectStrategy: false },
-    }) as unknown as RedisConnection;
+      socket: {
+        connectTimeout: WAIT_MS,
+        reconnectStrategy: false,
+        // Over TLS, with authorities the page has not saved yet: those and the ones in use (see trustedWith).
+        ...(trust && /^(rediss|valkeys):/i.test(text) ? { tls: true, ca: [...trust] } : {}),
+      },
+    } as Parameters<typeof createClient>[0]) as unknown as RedisConnection;
     // The client reports its failures as events too; without a listener Node would end the process on one.
     client.on('error', () => {});
     await client.connect();
@@ -79,7 +86,14 @@ export async function testServer(url: string, use: ServerUse): Promise<ServerTes
   } catch (error) {
     // The exact failure: the client's or the server's own words ("WRONGPASS invalid username-password pair ..."),
     // after which address.
-    return { ok: false, where, server: null, roundTripMs: null, problem: `${where}: ${reason(error)}` };
+    // A certificate no trusted authority signed says what to do about it in jukecord's own setting.
+    return {
+      ok: false,
+      where,
+      server: null,
+      roundTripMs: null,
+      problem: `${where}: ${withAuthorityHint(reason(error), error)}`,
+    };
   } finally {
     // The test's connection is gone after it, whatever it found (one never made closes nothing).
     if (client?.isReady) await client.close().catch(() => client?.destroy());

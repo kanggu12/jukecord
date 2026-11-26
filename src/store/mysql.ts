@@ -137,7 +137,7 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
    * its first connection up, so a wrong address, password or certificate fails here, with its reason in words.
    */
   static async open(address: ServerAddress, options: PoolOptions = {}): Promise<MysqlExecutor> {
-    const tls = tlsOptions(address);
+    const tls = tlsOptions(address, options.trust);
     // The driver, loaded now: a jukecord on SQLite never loads it.
     const { default: mysql } = await import('mysql2/promise');
     const size = options.pool ?? DEFAULT_POOL;

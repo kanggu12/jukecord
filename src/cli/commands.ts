@@ -514,6 +514,43 @@ function showChanged(answer: unknown): string {
   return lines.join('\n');
 }
 
+// A test's --ca: a PEM file of authorities the test trusts besides the ones in use (ones not saved yet).
+function authoritiesOf(words: Words): { ca?: string } {
+  const file = words.flags.get('ca');
+  if (file === undefined) return {};
+  if (file === true) throw new UsageError('--ca takes a PEM file of certificate authorities');
+  return { ca: readImport(file) };
+}
+
+/** The certificate authorities: where they come from, each one, and whether a restart applies them. */
+function showAuthorities(answer: unknown): string {
+  const found = answer as {
+    file: string | null;
+    source: string;
+    variable: string | null;
+    certificates: { subject: string; issuer: string; validTo: string; authority: boolean }[];
+    problem: string | null;
+    pending: boolean;
+    inUse: number;
+  };
+  if (found.file === null)
+    return `Node’s own only${found.inUse > 0 ? ` (${found.inUse} more in use until a restart)` : ''}`;
+  const from =
+    found.source === 'environment'
+      ? `set by the environment (${found.variable})`
+      : found.source === 'saved'
+        ? 'saved'
+        : '';
+  const lines = [`${found.file}${from ? `, ${from}` : ''}${found.pending ? '; a restart applies it' : ''}`];
+  if (found.problem) lines.push(`  ${found.problem}`);
+  for (const certificate of found.certificates)
+    lines.push(
+      `  ${certificate.subject}${certificate.authority ? '' : ' (not an authority)'}`,
+      `    signed by ${certificate.issuer}, until ${certificate.validTo.slice(0, 10)}`,
+    );
+  return lines.join('\n');
+}
+
 /** A test of an address for the cache or the bus: what answered there, or why it cannot be used. */
 function showServerTest(answer: unknown): string {
   const test = answer as {
@@ -1039,18 +1076,18 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'auth-test-oidc': {
     name: 'auth test-oidc',
-    usage: '',
+    usage: '[--ca <file>]',
     summary: 'Test logging in through the identity provider (OIDC), logging no one in',
-    request: () => ({ body: {} }),
+    request: (words) => ({ body: { ...authoritiesOf(words) } }),
     show: (answer) => showChecks(answer),
   },
   'auth-test-ldap': {
     name: 'auth test-ldap',
-    usage: '[username]',
+    usage: '[username] [--ca <file>]',
     summary: 'Test logging in with a directory account (LDAP), and look a name up (no password)',
     request: (words) => {
       const username = words.args.join(' ').trim();
-      return { body: username ? { username } : {} };
+      return { body: { ...(username ? { username } : {}), ...authoritiesOf(words) } };
     },
     show: (answer) => showChecks(answer),
   },
@@ -1364,10 +1401,13 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'settings-test-database': {
     name: 'settings test-database',
-    usage: '<address>',
+    usage: '<address> [--ca <file>]',
     summary: 'Try a database’s address without saving it',
     request: (words) => ({
-      body: { url: rest(words, 'a database’s address (postgres://..., mysql://..., sqlite:...)') },
+      body: {
+        url: rest(words, 'a database’s address (postgres://..., mysql://..., sqlite:...)'),
+        ...authoritiesOf(words),
+      },
     }),
     show: (answer) => {
       const test = answer as {
@@ -1396,19 +1436,45 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'settings-test-cache': {
     name: 'settings test-cache',
-    usage: '<address>',
+    usage: '<address> [--ca <file>]',
     summary: 'Try an address for the shared cache without saving it (memory, or redis://...)',
     request: (words) => ({
-      body: { url: rest(words, 'an address for the cache (memory, redis://..., rediss://...)') },
+      body: {
+        url: rest(words, 'an address for the cache (memory, redis://..., rediss://...)'),
+        ...authoritiesOf(words),
+      },
     }),
     show: showServerTest,
   },
   'settings-test-bus': {
     name: 'settings test-bus',
-    usage: '<address>',
+    usage: '<address> [--ca <file>]',
     summary: 'Try an address for the bus without saving it (redis://...)',
-    request: (words) => ({ body: { url: rest(words, 'an address for the bus (redis://..., rediss://...)') } }),
+    request: (words) => ({
+      body: { url: rest(words, 'an address for the bus (redis://..., rediss://...)'), ...authoritiesOf(words) },
+    }),
     show: showServerTest,
+  },
+  'settings-authorities': {
+    name: 'settings ca',
+    usage: '',
+    summary: 'The certificate authorities every TLS connection trusts besides Node’s own, and where they come from',
+    request: () => ({}),
+    show: showAuthorities,
+  },
+  'settings-authorities-import': {
+    name: 'settings ca import',
+    usage: '<file>',
+    summary: 'Save certificate authorities from a PEM file (- reads the standard input); a restart applies them',
+    request: (words) => ({ body: { pem: readImport(rest(words, 'a PEM file of certificate authorities')) } }),
+    show: showChanged,
+  },
+  'settings-authorities-remove': {
+    name: 'settings ca remove',
+    usage: '',
+    summary: 'Put the certificate authorities away (Node’s own only, after a restart)',
+    request: () => ({}),
+    show: showChanged,
   },
   'database-move': {
     name: 'settings move-database',
