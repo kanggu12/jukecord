@@ -8,6 +8,7 @@
  * of everybody. An empty password is refused before anything is sent: a directory takes a bind with a name and no
  * password as an anonymous bind (RFC 4513, 5.1.2) and says yes to it.
  */
+
 import { isIP } from 'node:net';
 import type tls from 'node:tls';
 import {
@@ -26,6 +27,7 @@ import {
   SizeLimitExceededError,
   StrongAuthRequiredError,
 } from 'ldapts';
+import { withAuthorityHint } from '../authorities.ts';
 import type { Logger } from '../log.ts';
 import { normalDn } from './levels.ts';
 import type { Check } from './oidc.ts';
@@ -201,9 +203,10 @@ function subjectOf(entry: Record<string, unknown>, dn: string): string {
   return `dn:${normalDn(dn)}`;
 }
 
-// What a failure of the connection or the directory says, in a few words.
+// What a failure of the connection or the directory says, in a few words; a certificate from an authority jukecord
+// does not trust says the setting that adds one (src/authorities.ts).
 function said(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? withAuthorityHint(error.message, error) : String(error);
 }
 
 // What a directory that takes binds over an encrypted connection only (Active Directory with LDAP signing required,

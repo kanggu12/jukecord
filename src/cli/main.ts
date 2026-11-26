@@ -16,7 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { readAuthorities, trustAuthorities } from '../authorities.ts';
+import { readAuthorities, trustAuthorities, withAuthorityHint } from '../authorities.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec } from '../web/api.ts';
 import { type FieldSchema, GuildId, misfit } from '../web/schemas.ts';
@@ -257,9 +257,12 @@ export class Client {
         signal: AbortSignal.timeout(180_000),
       });
     } catch (error) {
-      throw new Unreachable(
-        `jukecord is not answering at ${this.base} (${error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : String(error)})`,
-      );
+      // The cause (fetch wraps it), with a certificate from an authority of the host's own said in jukecord's setting.
+      const reason =
+        error instanceof Error
+          ? withAuthorityHint(error.cause instanceof Error ? error.cause.message : error.message, error)
+          : String(error);
+      throw new Unreachable(`jukecord is not answering at ${this.base} (${reason})`);
     }
     const text = await response.text();
     let json: unknown = null;
