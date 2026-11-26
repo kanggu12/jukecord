@@ -115,20 +115,37 @@ try { saved = JSON.parse(fs.readFileSync("/data/settings.json", "utf8")).setting
 process.exit(saved ? 0 : 1);' >/dev/null 2>&1
 }
 
-# Runs the jukecord command inside with these words, and an import's file with them: its words that are not options
-# start with "playlist import" and the fourth is the file, wherever the options are (before the command too, as the
-# help shows them: "jukecord [--guild ID] <command>"). The file is on this machine, where the command was typed, and
-# the command inside the container cannot see it there: it gets the text on its standard input instead ("-"), at most
-# a byte over 1 MiB (it says when the file is larger). The words are read as the command reads them (parseLine in
-# src/cli/main.ts): these options take the word after them as their value, and after -- every word is one.
+# Runs the jukecord command inside with these words, and a file of this machine's with them: a playlist's to import
+# (the fourth word of "playlist import"), the certificate authorities to import (the fourth of "settings ca import"),
+# or the ones a test trusts (--ca's value), wherever the options are (before the command too, as the help shows them:
+# "jukecord [--guild ID] <command>"). The file is where the command was typed, and the command inside the container
+# cannot see it there: it gets the text on its standard input instead ("-"), at most a byte over 1 MiB (it says when
+# the file is larger). One file at a time, and not with a password read from the standard input too (--password -).
+# The words are read as the command reads them (parseLine in src/cli/main.ts): these options take the word after them
+# as their value, and after -- every word is one.
 pass_on() {
-  local valued=' --url --token --guild --limit --level --component --days --scope --year --month --format '
-  local words=() file='' found=0 value=0 rest=0 first='' second='' word
+  local valued=' --url --token --guild --limit --level --component --days --scope --year --month --format --ca --password '
+  local words=() file='' found=0 value=0 rest=0 first='' second='' third='' word option='' piped=0
+  # A file to hand in, given as one of these words: the first only (the standard input carries one).
+  handed() {
+    if [ -n "$file" ]; then
+      say "one file at a time goes in from here: $file and $1"
+      exit 2
+    fi
+    file=$1
+  }
   for word in "$@"; do
-    # The value of the option before it, as it is.
+    # The value of the option before it: a test's --ca is a file to hand in; any other value as it is.
     if [ "$value" = 1 ]; then
-      words+=("$word")
       value=0
+      if [ "$option" = --ca ] && [ "$word" != - ]; then
+        handed "$word"
+        words+=(-)
+      else
+        # The password on the standard input: nothing else can come on it.
+        if [ "$option" = --password ] && [ "$word" = - ]; then piped=1; fi
+        words+=("$word")
+      fi
       continue
     fi
     if [ "$rest" = 0 ]; then
@@ -138,22 +155,43 @@ pass_on() {
           words+=("$word")
           continue
           ;;
+        --ca=-)
+          words+=("$word")
+          continue
+          ;;
+        --ca=*)
+          handed "${word#--ca=}"
+          words+=(--ca=-)
+          continue
+          ;;
+        --password=-)
+          piped=1
+          words+=("$word")
+          continue
+          ;;
         --*=*)
           words+=("$word")
           continue
           ;;
         --*)
-          case "$valued" in *" $word "*) value=1 ;; esac
+          case "$valued" in *" $word "*)
+            value=1
+            option=$word
+            ;;
+          esac
           words+=("$word")
           continue
           ;;
       esac
     fi
-    # A word: the first two name the command, the fourth of an import is its file ("-" is the standard input given).
+    # A word: the first three name the command, the fourth of an import is its file ("-" is the standard input given).
     found=$((found + 1))
-    case "$found" in 1) first=$word ;; 2) second=$word ;; esac
-    if [ "$found" = 4 ] && [ "$first" = playlist ] && [ "$second" = import ] && [ "$word" != - ]; then
-      file=$word
+    case "$found" in 1) first=$word ;; 2) second=$word ;; 3) third=$word ;; esac
+    if [ "$found" = 4 ] && [ "$word" != - ] && {
+      { [ "$first" = playlist ] && [ "$second" = import ]; } ||
+        { [ "$first" = settings ] && [ "$second" = ca ] && [ "$third" = import ]; }
+    }; then
+      handed "$word"
       words+=(-)
     else
       words+=("$word")
@@ -162,6 +200,10 @@ pass_on() {
   if [ -z "$file" ]; then
     inside "$@"
     return
+  fi
+  if [ "$piped" = 1 ]; then
+    say "--password - and $file would both come on the standard input from here: give the password in the address"
+    exit 2
   fi
   # A relative name is taken from where the command was typed, as for a restore.
   case "$file" in /*) ;; *) file="$caller/$file" ;; esac
@@ -541,9 +583,10 @@ mv jukecord.db.restoring jukecord.db'
       inside --help
     fi
     ;;
-  playlist | --*)
-    # The playlist commands, and the jukecord command's options typed before its command: an import's file goes over
-    # on the standard input (pass_on above).
+  playlist | settings | auth | --*)
+    # The playlist commands, the host's settings and the logins' tests, and the jukecord command's options typed
+    # before its command: an import's file, or the authorities a test trusts, go over on the standard input (pass_on
+    # above).
     pass_on "$@"
     ;;
   *)

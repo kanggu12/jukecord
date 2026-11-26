@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import { busiestHour, busiestWeekday, hasSong, hourSpan } from '../core/facts.ts';
 import { type Length, withLongest } from '../core/lengths.ts';
 import { sayFailure, sayNotice } from '../core/say.ts';
+import type { SettingDefinition } from '../settings/definitions.ts';
+import { inUseWords, writtenWords } from '../settings/words.ts';
 import { formatDuration, parseTimestamp } from '../util/time.ts';
 import { API, type OperationName } from '../web/api.ts';
 import { Snowflake } from '../web/schemas.ts';
@@ -419,6 +421,8 @@ interface SettingJson {
   running: string | null;
   refused: string | null;
   defaultNote: { en: string } | null;
+  kind: SettingDefinition['kind'];
+  off: string | null;
 }
 interface SettingsJson {
   groups: { id: string; label: { en: string }; parts?: { id: string; label: { en: string } }[] }[];
@@ -443,7 +447,8 @@ function settingValue(setting: SettingJson): string {
   if (setting.secret) return setting.shown ?? (setting.set ? 'set' : 'not set');
   if (setting.value === null || setting.value === '')
     return setting.defaultNote ? `(${setting.defaultNote.en})` : '(none)';
-  return setting.value;
+  // In its unit ("5 min", "2 GiB"), as the page says it.
+  return writtenWords(setting, setting.value) ?? setting.value;
 }
 
 // Where a setting's value comes from, and whether it waits for a restart.
@@ -455,7 +460,7 @@ function settingSource(setting: SettingJson): string {
         ? 'saved'
         : 'default';
   const waits = setting.pending
-    ? `, after a restart${setting.running !== null ? ` (now ${setting.running})` : ''}`
+    ? `, after a restart${setting.running !== null ? ` (now ${inUseWords(setting, setting.running)})` : ''}`
     : '';
   const refused = setting.refused ? `, the saved value was refused: ${setting.refused}` : '';
   return `${from}${waits}${refused}`;
@@ -506,12 +511,23 @@ function showChanged(answer: unknown): string {
   };
   if (result.changed.length === 0) return 'Nothing changed: the settings already were so';
   const lines = result.changed.map((entry) => {
-    const values =
-      entry.from === null && entry.to === null ? '' : `: ${entry.from ?? '(none)'} -> ${entry.to ?? '(none)'}`;
+    // In the setting's unit, as the values in use come (milliseconds, bytes).
+    const setting = result.view.settings.find((each) => each.name === entry.name);
+    const words = (raw: string | null) => (setting ? inUseWords(setting, raw) : raw) ?? '(none)';
+    const values = entry.from === null && entry.to === null ? '' : `: ${words(entry.from)} -> ${words(entry.to)}`;
     return `${entry.name}${values}${entry.applies === 'now' ? ', applied' : ', after a restart'}`;
   });
   lines.push(...restartLines(result.view));
   return lines.join('\n');
+}
+
+// A database's --password, apart from its address: "-" reads it from the standard input, so it stays out of the
+// shell's history and the address.
+function passwordOf(words: Words): { password?: string } {
+  const given = words.flags.get('password');
+  if (given === undefined) return {};
+  if (given === true) throw new UsageError('--password takes the password, or - to read it from the standard input');
+  return { password: given === '-' ? readImport('-').replace(/\r?\n$/, '') : given };
 }
 
 // A test's --ca: a PEM file of authorities the test trusts besides the ones in use (ones not saved yet).
@@ -1401,11 +1417,12 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'settings-test-database': {
     name: 'settings test-database',
-    usage: '<address> [--ca <file>]',
+    usage: '<address> [--password -] [--ca <file>]',
     summary: 'Try a database’s address without saving it',
     request: (words) => ({
       body: {
         url: rest(words, 'a database’s address (postgres://..., mysql://..., sqlite:...)'),
+        ...passwordOf(words),
         ...authoritiesOf(words),
       },
     }),
@@ -1478,10 +1495,14 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
   },
   'database-move': {
     name: 'settings move-database',
-    usage: '<address> [--replace]',
+    usage: '<address> [--replace] [--password -]',
     summary: 'Copy every row into another database while jukecord runs',
     request: (words) => ({
-      body: { url: rest(words, 'a database’s address'), ...(words.flags.has('replace') ? { replace: true } : {}) },
+      body: {
+        url: rest(words, 'a database’s address'),
+        ...passwordOf(words),
+        ...(words.flags.has('replace') ? { replace: true } : {}),
+      },
     }),
     show: showMove,
   },

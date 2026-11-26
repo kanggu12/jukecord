@@ -379,6 +379,44 @@ describe('the host’s settings in the jukecord command', () => {
     );
   });
 
+  it('says sizes and durations in their units: a change, a value, and the one in use until a restart', () => {
+    // The API carries what jukecord holds (bytes, milliseconds) and what was written ("5m", "300" seconds).
+    const cache = { name: 'JUKECORD_CACHE_MAX', kind: 'size', off: null, applies: 'now' };
+    const idle = { name: 'JUKECORD_VOICE_IDLE', kind: 'duration', off: '0', applies: 'now' };
+    const timeout = { name: 'JUKECORD_FETCH_TIMEOUT', kind: 'duration', off: null, applies: 'restart' };
+    const view = {
+      groups: [{ id: 'media', label: { en: 'Playback' } }],
+      settings: [
+        { ...cache, group: 'media', value: '3GiB', source: 'saved', pending: false, running: null },
+        { ...idle, group: 'media', value: '0', source: 'saved', pending: false, running: null },
+        { ...timeout, group: 'media', value: '300', source: 'saved', pending: true, running: '60000' },
+      ].map((setting) => ({ ...setting, secret: false, set: true, shown: null, variable: null, refused: null })),
+      restart: { pending: ['JUKECORD_FETCH_TIMEOUT'], supervisor: 'docker', refusal: null },
+    };
+    assert.equal(
+      COMMANDS['host-settings-change'].show({
+        changed: [
+          { name: 'JUKECORD_CACHE_MAX', from: '2147483648', to: '3221225472', applies: 'now' },
+          { name: 'JUKECORD_VOICE_IDLE', from: '300000', to: '0', applies: 'now' },
+          { name: 'JUKECORD_FETCH_TIMEOUT', from: '60000', to: '300000', applies: 'restart' },
+        ],
+        view,
+      }),
+      [
+        'JUKECORD_CACHE_MAX: 2 GiB -> 3 GiB, applied',
+        'JUKECORD_VOICE_IDLE: 5 min -> off, applied',
+        'JUKECORD_FETCH_TIMEOUT: 1 min -> 5 min, after a restart',
+        '',
+        'Waiting for a restart: JUKECORD_FETCH_TIMEOUT (jukecord restart)',
+      ].join('\n'),
+    );
+    assert.deepEqual(COMMANDS['host-settings'].show(view).split('\n').slice(1, 4), [
+      '  JUKECORD_CACHE_MAX      3 GiB  [saved]',
+      '  JUKECORD_VOICE_IDLE     off  [saved]',
+      '  JUKECORD_FETCH_TIMEOUT  5 min  [saved, after a restart (now 1 min)]',
+    ]);
+  });
+
   it('lists the settings by group, a secret as set, what waits for a restart at the end', () => {
     const shown = COMMANDS['host-settings'].show({
       groups: [

@@ -39,8 +39,11 @@ class Unreachable extends Error {
   override name = 'Unreachable';
 }
 
-// Options that take a value, and the switches; anything else starting with -- is a typing mistake.
-const VALUED = new Set([
+/**
+ * Options that take a value, and the switches; anything else starting with -- is a typing mistake. Every option a
+ * command's usage names is one of them (tests/integration/cli.test.ts checks each usage against both).
+ */
+export const VALUED: ReadonlySet<string> = new Set([
   'url',
   'token',
   'guild',
@@ -52,8 +55,20 @@ const VALUED = new Set([
   'year',
   'month',
   'format',
+  // A test's certificate authorities not saved yet (a PEM file), and a database's password apart from its address.
+  'ca',
+  'password',
 ]);
-const SWITCHES = new Set(['json', 'help', 'version', 'next', 'last', 'synced', 'after-track', 'replace']);
+export const SWITCHES: ReadonlySet<string> = new Set([
+  'json',
+  'help',
+  'version',
+  'next',
+  'last',
+  'synced',
+  'after-track',
+  'replace',
+]);
 
 // What people type from Discord's names, to the command it means here.
 const ALIASES: readonly (readonly [readonly string[], readonly string[]])[] = [

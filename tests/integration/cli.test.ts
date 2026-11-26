@@ -6,7 +6,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { parseLine, run } from '../../src/cli/main.ts';
+import { LoginChecks } from '../../src/auth/check.ts';
+import { COMMANDS } from '../../src/cli/commands.ts';
+import { parseLine, run, SWITCHES, VALUED } from '../../src/cli/main.ts';
+import { testLog } from '../support/bus.ts';
 import { exampleTrack, GUILD, HOST_TOKEN, type TestServer, testServer } from '../support/web.ts';
 
 describe('parseLine', () => {
@@ -21,6 +24,65 @@ describe('parseLine', () => {
         ['scope', 'read'],
       ],
     );
+  });
+});
+
+describe('the options every command names', () => {
+  it('takes each option a usage names: one with a value as a value, a switch as a switch', () => {
+    // "[--limit 20]", "[--ca <file>]", "[--password -]": an option and its value; "[--next]": a switch.
+    const named: string[] = [];
+    for (const command of Object.values(COMMANDS)) {
+      for (const [, name, value] of command.usage.matchAll(/\[--([a-z][a-z-]*)( [^\]]+)?\]/g)) {
+        named.push(name ?? '');
+        if (value) assert.ok(VALUED.has(name ?? ''), `${command.name}: --${name} takes a value nothing reads`);
+        else assert.ok(SWITCHES.has(name ?? ''), `${command.name}: --${name} is a switch nothing reads`);
+      }
+    }
+    assert.ok(named.includes('ca') && named.includes('password') && named.includes('replace'));
+  });
+
+  it('hands --ca to jukecord from each test that names it', async () => {
+    // A server with the host's settings and the login checks; a file that is no PEM of authorities, which jukecord
+    // refuses by name: what it says is proof the file reached it.
+    const server = await testServer({
+      listen: true,
+      hostSettings: {},
+      loginChecks: new LoginChecks({
+        env: {},
+        cwd: '/srv',
+        redirectUri: 'http://localhost:8795/auth/sso/callback',
+        afterLogout: 'http://localhost:8795/login',
+        log: testLog().log,
+      }),
+    });
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-cli-ca-'));
+    try {
+      fs.writeFileSync(path.join(dataDir, 'host-token'), `${HOST_TOKEN}\n`);
+      const file = path.join(dataDir, 'not-authorities.pem');
+      fs.writeFileSync(file, 'not a certificate at all\n');
+      for (const line of [
+        ['settings', 'test-database', 'sqlite:elsewhere.db'],
+        ['settings', 'test-cache', 'rediss://127.0.0.1:1'],
+        ['settings', 'test-bus', 'rediss://127.0.0.1:1'],
+        ['auth', 'test-oidc'],
+        ['auth', 'test-ldap'],
+      ]) {
+        const out: string[] = [];
+        const code = await run(
+          [...line, '--ca', file],
+          { JUKECORD_URL: server.url, JUKECORD_DATA_DIR: dataDir },
+          (text) => out.push(text),
+        );
+        assert.deepEqual(
+          [code, /it has no certificate in PEM form/.test(out.join('\n'))],
+          [1, true],
+          `${line.join(' ')}: ${out.join('\n')}`,
+        );
+      }
+    } finally {
+      await server.close();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });
 

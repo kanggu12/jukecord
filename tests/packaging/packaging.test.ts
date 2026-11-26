@@ -342,8 +342,8 @@ describe('the front door with jukecord running', () => {
           '      version) echo v2.30.0 ;;',
           '      ps) echo 0123456789ab ;;',
           // exec [-T|-it] -e TZ=... jukecord jukecord ARGS: what follows the service and the command, and what came on
-          // its standard input when a word of it is "-".
-          '      exec) shift 7; echo "inside: $*"; case " $* " in *" - "*) cat ;; esac ;;',
+          // its standard input when a word of it is "-" (or an option's value is: --ca=-).
+          '      exec) shift 7; echo "inside: $*"; case " $* " in *" - "* | *"=- "*) cat ;; esac ;;',
           '    esac ;;',
           'esac',
           'exit 0',
@@ -388,6 +388,35 @@ describe('the front door with jukecord running', () => {
           first.stdout,
           'inside: --guild 1234 --json playlist import Friday night -\n#EXTM3U\nhttps://example.com/a\n',
         );
+        // The certificate authorities to import, and the ones a test trusts, likewise; one file at a time, and not
+        // with a password that comes on the standard input as well.
+        fs.writeFileSync(
+          path.join(typed, 'home-root.pem'),
+          '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n',
+        );
+        const pem = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
+        const authorities = fromHere('settings', 'ca', 'import', 'home-root.pem');
+        assert.equal(authorities.status, 0, authorities.stderr);
+        assert.equal(authorities.stdout, `inside: settings ca import -\n${pem}`);
+        for (const option of [['--ca', 'home-root.pem'], ['--ca=home-root.pem']]) {
+          const tested = fromHere('settings', 'test-cache', 'rediss://cache.example.net:6380', ...option);
+          assert.equal(tested.status, 0, tested.stderr);
+          assert.equal(
+            tested.stdout,
+            `inside: settings test-cache rediss://cache.example.net:6380 ${option.length === 2 ? '--ca -' : '--ca=-'}\n${pem}`,
+          );
+        }
+        const both = fromHere(
+          'settings',
+          'test-database',
+          'postgres://db.example.net/j',
+          '--password',
+          '-',
+          '--ca',
+          'home-root.pem',
+        );
+        assert.equal(both.status, 2);
+        assert.match(both.stderr, /--password - and .*home-root\.pem would both come on the standard input from here/);
         // A file that is not there is a typing mistake here; nothing reaches the command.
         const missing = fromHere('playlist', 'import', 'Friday', 'gone.m3u');
         assert.equal(missing.status, 2);
@@ -406,7 +435,7 @@ describe('the front door with jukecord running', () => {
   it("reads the options that take a value as the jukecord command does, to find an import's file", () => {
     // The front door's list and the command's own (src/cli/main.ts VALUED) must be the same words.
     const door = /valued=' ([^']*) '/.exec(read('jukecord'))?.[1]?.split(' ') ?? [];
-    const own = /const VALUED = new Set\(\[([^\]]*)\]\)/.exec(read('src/cli/main.ts'))?.[1] ?? '';
+    const own = /const VALUED: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(read('src/cli/main.ts'))?.[1] ?? '';
     const words = [...own.matchAll(/'([a-z-]+)'/g)].map((match) => `--${match[1]}`);
     assert.ok(words.length > 5);
     assert.deepEqual([...door].sort(), [...words].sort());
