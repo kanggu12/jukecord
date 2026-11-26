@@ -23,7 +23,10 @@ describe('testing a Redis or Valkey address', { skip: !TEST_BUS_URL && 'JUKECORD
   });
 
   it('says the server’s own words when it refuses the password, and leaves no connection behind', async () => {
+    // A user the server does not have, with a made-up password: refused whether the server has a password or not (one
+    // without lets its default user in on any password).
     const wrong = new URL(url);
+    wrong.username = 'nobody-made-up';
     wrong.password = 'not-the-password-made-up';
     const refused = await testServer(wrong.href, 'bus');
     assert.equal(refused.ok, false);

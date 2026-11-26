@@ -690,7 +690,7 @@ export function settingsPage(): HTMLElement {
     problemLine?: HTMLElement,
   ): Promise<void> => {
     try {
-      await busy(key, t().setTesting, async () => {
+      await busy(key, t().setSaving, async () => {
         const answer = await work();
         view = answer.view;
       });
@@ -705,7 +705,6 @@ export function settingsPage(): HTMLElement {
     caText = '';
     toast(done);
     redraw('authorities');
-    cards.querySelector<HTMLElement>('#settings-authorities')?.focus?.();
   };
 
   // The services of a split jukecord: the core and each edge, with their version, how long they have run and whether
