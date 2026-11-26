@@ -22,6 +22,7 @@ import { busNames } from '../../src/bus/transport.ts';
 import { sayError } from '../../src/core/say.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
 import { busReport } from '../../src/metrics/services.ts';
+import { ConnectionError, DATABASE_DOWN, DATABASE_RETRY_MS } from '../../src/store/network.ts';
 import { StoreError } from '../../src/store/sql.ts';
 import { eventually, memoryBus, settle, testBuses, testLog } from '../support/bus.ts';
 
@@ -116,6 +117,24 @@ for (const { name, make } of testBuses()) {
       await assert.rejects(client.call('store', []), (error: unknown) => {
         assert.ok(error instanceof StoreError);
         assert.equal(error.message, 'position 9 is outside the queue (0-3)');
+        return true;
+      });
+      await Promise.all([server.close(), client.close()]);
+    });
+
+    it("tells the edge the core's database does not answer as a refusal to ask again, not as a failure", async () => {
+      const { server, client } = await pair({
+        // What a statement meets when the database went away under it (the address never crosses the bus).
+        outage: () => {
+          throw new ConnectionError('PostgreSQL at db.example.internal:5432 closed the connection', true);
+        },
+      });
+      await assert.rejects(client.call('outage', []), (error: unknown) => {
+        assert.ok(error instanceof ActionError);
+        assert.equal(error.code, 'unavailable');
+        assert.equal(error.message, DATABASE_DOWN);
+        assert.equal(error.retryAfterMs, DATABASE_RETRY_MS);
+        assert.doesNotMatch(error.message, /db\.example\.internal/);
         return true;
       });
       await Promise.all([server.close(), client.close()]);

@@ -151,21 +151,24 @@ the panel's QR codes against one that a separate decoder read back.
 `tests/perf/measure.sh` starts a throwaway jukecord with a server used every day for a year (a thousand different
 tracks, all of them queued, 10,000 plays and three playlists: `tests/perf/seed.ts`), under the limits `compose.yaml`
 sets (1 GiB of memory, read-only, no capabilities) and on two processor cores unless told otherwise. Nothing reaches
-the internet or Discord. On two cores of a desktop processor, jukecord 0.2.1 gave:
+the internet or Discord. On two cores of a desktop processor, while other work kept the machine busy, jukecord 0.4.0
+gave:
 
 | What                                                                 | Measured                                                                               |
 | :------------------------------------------------------------------- | :------------------------------------------------------------------------------------- |
-| Memory at rest, and after the reads below                            | 78 MiB, 93 MiB                                                                         |
+| Memory at rest, and after the reads below                            | 90 MiB, 102 MiB                                                                        |
 | The player, the playlists, the status, recently played (50)          | about 1 ms each (the median of 20)                                                     |
-| The queue, a thousand tracks (328 KiB)                               | 5 ms                                                                                   |
-| Statistics over 30 days, over a year                                 | 2 ms, 19 ms                                                                            |
+| The queue, a thousand tracks (328 KiB)                               | 7 ms                                                                                   |
+| Statistics over 30 days, over a year                                 | 3 ms, 15 ms                                                                            |
 | The live state a panel gets for that queue                           | 329 KiB of JSON, sent as 42 KiB (gzip)                                                 |
-| A four-minute track, its loudness evened out and encoded             | 3.4 s                                                                                  |
-| A thousand panels connected while the queue changes 3 times a second | all stay connected; a change reaches a panel in 29 ms (the median; the slowest 105 ms) |
-| The server during that crowd                                         | up to 71 % of one core, 112 MiB                                                        |
+| A four-minute track, its loudness evened out and encoded             | 4.1 s                                                                                  |
+| A thousand panels connected while the queue changes 3 times a second | all stay connected; a change reaches a panel in 74 ms (the median; the slowest 159 ms) |
+| The server during that crowd                                         | up to 77 % of one core, 125 MiB                                                        |
 
-jukecord 0.3.0 and 0.2.1, measured back to back on the same machine while other work kept it busier, took the same
-times, and 0.3.0 rested at 85 MiB, 6 MiB more.
+Another run gave the same within 2 MiB and 15 ms (4.4 s for the encoding). 0.3.4, measured right before on the same
+machine, rested at 88 MiB and took the same times, but for a year's statistics: 24 ms, where 0.4.0's SQL takes 15.
+Measured while the machine was quieter, 0.2.1 rested at 78 MiB and its crowd saw a change in 29 ms (the median; the
+slowest 105 ms): the crowd's times follow how busy the machine is.
 
 The crowd is `tests/perf/crowd.ts` in a container of its own, so its thousand panels come from one address as they do
 through a reverse proxy (the server is told it is behind one): each panel asks for gzip frames as a browser does, and

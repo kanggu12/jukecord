@@ -70,9 +70,10 @@ search words. A link pasted anywhere on the page, or dropped on it, is added too
 - **Invite** (in the voice card and the menu) makes a listening link for guests and, for the host, a login link for
   a friend, each with a QR code ([friends and guests](#friends-and-guests)).
 - **The menu** (your name, top right) has the theme, language, motion, API tokens and keyboard shortcuts, and for
-  people who can manage the server, its settings. The host's menu has **Settings** too: every setting of jukecord
-  itself ([settings](#settings)). A member's name says how they logged in: **SSO login** or
-  **Directory account**.
+  people who can manage the server, its settings. The host's menu also has **Settings**, every setting of jukecord
+  itself ([settings](#settings)), and **Logins**: every panel login that has not ended, the most recently seen first,
+  each with **End**, which logs that browser out at once (a member at the admin level sees **Logins** too). A
+  member's name says how they logged in: **SSO login** or **Directory account**.
 - **Log** (the host only) is jukecord's log, filtered by level and part.
 - **As an app**: where the browser offers it (Chrome's or Edge's install button, Safari's **Add to Home Screen**), the
   panel installs and opens in its own window, also when jukecord cannot be reached, saying so. On Android it is then
@@ -98,17 +99,22 @@ A host can let people log in through the host's own identity provider (OpenID Co
 Okta, Google) or with an account of the host's directory (LDAP, Active Directory)
 ([setting it up](INSTALL.md#logging-in-through-your-own-accounts)). Their groups give them a level at each login:
 
-| Level   | May                                                                                |
-| :------ | :--------------------------------------------------------------------------------- |
-| admin   | what the host may: every server and its settings, the log, login links and backups |
-| control | change the music in every server, never settings or tokens                         |
-| read    | look and listen                                                                    |
+| Level   | May                                                                                                                                 |
+| :------ | :---------------------------------------------------------------------------------------------------------------------------------- |
+| admin   | what the host may in every server and its settings, the log, backups, the self-check, and every login and API token, to see and end |
+| control | change the music in every server, never settings or tokens                                                                          |
+| read    | look and listen                                                                                                                     |
 
+- Login links and jukecord's own **Settings** stay the host's: a member at the admin level makes no login link and does
+  not see the settings page.
 - Someone in none of the host's groups is refused, and the login page says to ask the host.
 - What a member adds, likes and saves shows their name.
-- Members make no API tokens. A level changes at the person's next login.
-- A login through SSO that names the person's Discord account is that Discord user, with their roles in each server,
-  and the level where it gives more.
+- A member's login lasts eight hours; the host (and a member at the admin level) can end any login sooner, under the
+  menu's **Logins**. A level changes at the person's next login.
+- Members make no API tokens.
+- A login through SSO whose provider names the person's Discord account becomes that Discord user, with their roles in
+  each server and the level where it gives more, once the person has proved it at Discord a first time. Until then, and
+  without Discord login, they come in as a member.
 - Logging out of jukecord logs out of the host's sign-in too, when it offers that.
 
 ### Voting to skip
@@ -273,6 +279,10 @@ the host's own sign-in and directory without logging anyone in
 ./jukecord auth test-ldap mina                # also looks a person up: their groups and level, no password
 ```
 
+`jukecord session list` shows every panel login that has not ended, and `jukecord session end <login ID>` logs one out;
+`jukecord settings list` and the commands after it show and change jukecord's own settings
+([the command](#the-command)).
+
 ## Health and metrics
 
 For a monitoring system, without a login: `/healthz` answers while jukecord runs, `/readyz` says part by part
@@ -282,18 +292,76 @@ for Prometheus, for a scraper on jukecord's own network or one that shows the me
 
 ## Settings
 
-Every setting has a default, so each one is optional. The host sees and changes them on the panel's **Settings** page
-(the menu's **Settings**), with `jukecord settings` (`list`, `get`, `set`, `reset`; `test-database`, `test-cache` and
-`test-bus` try an address without saving it, `--ca <file>` trusting more authorities for the test; `move-database`
-copies everything into another database and switches to it; `ca`, `ca import <file>` and `ca remove` show and change
-the certificate authorities every TLS connection trusts) and `jukecord restart`, or through the API; a value set as an environment variable wins over a saved one and shows
-as set by the environment. With Docker Compose the variables go in `.env`. jukecord checks every setting when it
-starts and when one is saved, and lists every problem at once. `jukecord doctor` shows the settings in effect, secrets
-only as set or not set. A setting marked "at once" takes effect when it is saved; the others when jukecord restarts.
-
-Installing explains the groups that take more than a line: [the database](INSTALL.md#the-database),
+Every setting has a default, so each one is optional. A value set as an environment variable (with Docker Compose, a
+line of `.env`) wins over a value saved from the panel, the command or the API, which wins over the default. jukecord
+checks every setting when it starts and when one is saved, and lists every problem at once. `jukecord doctor` shows the
+settings in effect, secrets only as set or not set. Installing explains
+[where they are kept and how a restart comes back](INSTALL.md#settings-and-restarts), and the groups that take more
+than a line: [the database](INSTALL.md#the-database),
 [logins through your own accounts](INSTALL.md#logging-in-through-your-own-accounts),
+[certificate authorities](INSTALL.md#your-own-certificate-authorities),
 [a split into services](INSTALL.md#split-into-services) and [monitoring](INSTALL.md#monitoring).
+
+### The settings page
+
+**Settings**, in the menu of the host itself (a login link from `jukecord open`, or the host's token), shows every
+setting of jukecord, one section to a group: Server and network, Discord, Logins, Database, Cache and bus, Certificate
+authorities, Media and limits, Backups, and Logging and monitoring. A member at the admin level does not see it.
+
+- **Each row** is a setting: its name, what it does, and a line that says where its value comes from (the default, a
+  saved value, or the environment, with the variable's name), its limits, and whether a change applies at once or
+  after a restart. A value the environment sets is locked, with its variable; so are the data folder and the
+  **Services** group's settings, which only the start can set.
+- **Secrets** show as set or not set, never as their value, with **Change** and **Remove**.
+- **Saving**: a section shows **Undo** and **Save** while it holds a change. **Save** lists what changes and when each
+  applies, then saves that section alone, all of it or none. A value the start would refuse is refused at its row,
+  with the reason; a setting someone changed meanwhile is refused too, and the page shows the new values.
+- **Logins** has three parts, Discord login, SSO (OIDC) and Directory (LDAP, Active Directory), each with **Test**,
+  which logs nobody in. **Cache and bus** tries an address before it is saved.
+- **The restart bar**: while a saved change waits for a restart, a bar under the title says how many do and what
+  starts jukecord again (Docker, Kubernetes, systemd or the program's launcher), with **Restart**; each row that waits
+  says so. jukecord stops as it does on SIGTERM, the music stops for a few seconds, and the page waits for jukecord and
+  comes back with it. Where nothing would start jukecord again, the bar says so and offers no restart.
+- **The database**: its row names the database in use, and **Move to another database** opens a dialog of four
+  steps. **Kind**: SQLite, PostgreSQL, or MySQL and MariaDB. **Address**: tested before going on; a database that
+  already holds jukecord's data is emptied first only when asked. **Copy**: every row, while jukecord plays on, with
+  the copy's progress, which can be stopped. **Switch**: jukecord stops, copies what changed since, saves the new
+  address and starts again on it; the old database stays as it was.
+- **Certificate authorities**: the file every TLS connection trusts besides Node.js's own, where it comes from, and each
+  certificate in it (who it is, who signed it, until when). A PEM pasted or picked there is checked, kept as a file of
+  the data folder (0600) and applied at the next restart; **Remove** puts it away. The page's tests trust what is
+  pasted before it is saved.
+- **Services**, in a split only: the core and each edge, with its version, how long it has run and whether it is
+  ready. What each service reads from its own environment (the addresses, the port, the secrets) is locked there.
+
+A saved value is kept in `settings.json` in the data folder (0600) when jukecord needs it before the database opens
+(where it listens, the database's address, the shared cache, the certificate authorities) or when it is a secret:
+secrets never go into the database, so a backup or a copy of the database never carries them. Every other saved
+value is kept in the database.
+
+### The command
+
+`jukecord settings` with a word after it is the same page, for the host on the command line (`jukecord settings`
+alone stays the server's own settings: [above](#the-servers-settings)). A name is the variable's, with or without
+`JUKECORD_`, in any case:
+
+```bash
+./jukecord settings list                              # every setting by group, its value and where it is from
+./jukecord settings get queue-max
+./jukecord settings set queue-max 2000 log-level debug   # all or nothing; - reads a value from the standard input
+./jukecord settings reset log-level
+./jukecord settings test-database postgres://jukecord:...@db.example.internal/jukecord   # also test-cache, test-bus
+./jukecord settings ca                                # the certificate authorities; ca import <file>, ca remove
+./jukecord settings move-database postgres://jukecord:...@db.example.internal/jukecord
+./jukecord settings move-status                       # then move-switch, or move-cancel
+./jukecord restart                                    # with Compose, the script restarts the container itself
+```
+
+The tests (`test-database`, `test-cache`, `test-bus`, and `auth test-oidc` and `test-ldap`) take `--ca <file>`, more
+authorities to trust for that test alone. `move-database` takes `--replace` to empty a target that holds data. The
+[API](API.md#the-hosts-settings) offers the same.
+
+### Every setting
 
 <!-- settings:start -->
 

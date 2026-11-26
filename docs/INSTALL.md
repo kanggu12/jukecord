@@ -1,9 +1,9 @@
 # Installing jukecord
 
 For the person who hosts jukecord: Docker Compose step by step, an address for friends, logging in with Discord,
-starting with the machine, a Raspberry Pi, the release's programs without Docker, running from source, the database,
-logins through your own accounts, a split into services, monitoring, updates and backups.
-[Kubernetes](KUBERNETES.md) has the Helm chart.
+starting with the machine, a Raspberry Pi, the release's programs without Docker, running from source, settings and
+restarts, the database, logins through your own accounts, your own certificate authorities, a split into services,
+monitoring, updates and backups. [Kubernetes](KUBERNETES.md) has the Helm chart.
 
 ## Docker Compose
 
@@ -207,10 +207,13 @@ cd jukecord-0.3.4-windows-x64; .\jukecord start
 `./jukecord add <address or words>`.
 
 - **Settings**: copy `.env.example` to `.env` in the folder. It takes the settings of Compose's `.env`
-  (`JUKECORD_DISCORD_TOKEN` for the bot); `JUKECORD_HOST=0.0.0.0` opens the panel to the network.
-- **Data**: the database, the cache, the logs and the backups are in `~/.local/share/jukecord` on Linux,
-  `~/Library/Application Support/jukecord` on macOS and `%LOCALAPPDATA%\jukecord` on Windows. `JUKECORD_DATA_DIR`
-  puts them elsewhere, and `JUKECORD_DATABASE_URL` puts the database on a server ([the database](#the-database)).
+  (`JUKECORD_DISCORD_TOKEN` for the bot); `JUKECORD_HOST=0.0.0.0` opens the panel to the network. The panel's
+  **Settings** page changes the others while jukecord runs, and `jukecord start` starts it again when it restarts
+  ([settings and restarts](#settings-and-restarts)).
+- **Data**: the database, the saved settings, the cache, the logs and the backups are in `~/.local/share/jukecord` on
+  Linux, `~/Library/Application Support/jukecord` on macOS and `%LOCALAPPDATA%\jukecord` on Windows.
+  `JUKECORD_DATA_DIR` puts them elsewhere, and `JUKECORD_DATABASE_URL` puts the database on a server
+  ([the database](#the-database)).
 - **Updating**: unpack the newer release beside the folder and copy `.env` into it. It finds the same data, and the
   database moves to the newer schema on the first start, as with Compose.
 - **Downloaded with a browser**, macOS keeps the programs in the folder from starting until they are let through:
@@ -285,10 +288,46 @@ Without the token it runs browser-only. The data goes to `./data`, with the host
 `node src/cli/main.ts link` in the same folder makes a login link. yt-dlp needs a JavaScript runtime for YouTube:
 jukecord passes it its own Node.
 
+## Settings and restarts
+
+Each setting is taken from the first of three places that has it:
+
+1. **The environment**: `.env` with Compose and with the release's programs, a systemd unit's `Environment=`, a pod's
+   variables. The panel's **Settings** page shows such a setting with its variable and does not change it. An empty
+   variable (`NAME=`, as `.env.example` leaves the defaults) counts as unset.
+2. **A saved value**, from the **Settings** page ([the guide](README.md#the-settings-page)), `jukecord settings set`
+   or the API.
+3. **Its default** ([every setting](README.md#every-setting)).
+
+The saved values jukecord needs before its database opens (where it listens, the database's address and pool, the
+shared cache, the certificate authorities) are kept in `settings.json` in the data folder, and so is every saved
+secret, so that no backup or copy of the database carries one. Only jukecord's user may read the file (0600), and
+jukecord writes it whole before putting it in place. The other saved values are kept in the database. A
+`settings.json` that cannot be read keeps jukecord from starting (exit code 2), naming the file and what is wrong; a
+saved value that the start refuses is left out, the page saying why, and its default applies meanwhile.
+
+A change marked "at once" applies when it is saved; the others wait for a restart, and the page says which. Restarting
+from the page, with `jukecord restart` or through the API stops jukecord as SIGTERM does (each server's place saved,
+the panels told) and exits with code 75, for what runs jukecord to start it again. The music stops for a few seconds.
+
+| Where jukecord runs                          | What starts it again                                                             |
+| :------------------------------------------- | :------------------------------------------------------------------------------- |
+| Docker Compose                               | Docker, by the restart policy (`compose.yaml` sets `JUKECORD_SUPERVISOR=docker`) |
+| Kubernetes                                   | the kubelet, as it does any container that ends                                  |
+| A systemd unit                               | systemd, when the unit has `Restart=on-failure` or `Restart=always`              |
+| The release's programs                       | `jukecord start`, which starts jukecord again when it ends with code 75          |
+| A terminal (`npm start`, `node src/main.ts`) | nothing: the restart is refused, saying to stop jukecord and start it again      |
+
+jukecord tells which from where it runs. Where it cannot, `JUKECORD_SUPERVISOR` (`docker`, `kubernetes`, `systemd`,
+`launcher` or `none`) says it: a plain `docker run --restart unless-stopped`, say, takes
+`-e JUKECORD_SUPERVISOR=docker`. In a split, a restart restarts every service: the core, and each edge a few seconds
+apart from the others, so the front always has an edge to send browsers to.
+
 ## The database
 
 jukecord keeps the queues, the history, the playlists, the logins and the tokens in one database. By default it is a
-SQLite file in the data folder, `jukecord.db`, which needs nothing set up. A host who already runs PostgreSQL or
+SQLite file in the data folder, `jukecord.db`, which needs nothing set up (only jukecord's user may read it, 0600, as
+every SQLite file jukecord makes: a copy's target, a backup). A host who already runs PostgreSQL or
 MySQL/MariaDB, wants the data on a database server with its own backups, or [splits jukecord into
 services](#split-into-services) points `JUKECORD_DATABASE_URL` at one instead. The media cache, the logs and the
 backups stay in the data folder either way.
@@ -336,7 +375,10 @@ JUKECORD_DATABASE_URL=mysql://jukecord:choose-a-password@db.example.internal:330
 ```
 
 `mariadb://` names a MariaDB the same way. jukecord sets each connection up itself (its SQL mode, utf8mb4 with names
-that differ only by case or accent kept apart, serializable transactions), whatever the server's defaults are.
+that differ only by case or accent kept apart, transactions at `READ COMMITTED`), whatever the server's defaults are.
+A server that keeps a binary log (MySQL 8 does by default) needs `binlog_format` at `ROW` or `MIXED`, the defaults of
+MySQL and MariaDB: at `STATEMENT` the server refuses jukecord's writes
+([troubleshooting](TROUBLESHOOTING.md#impossible-to-write-to-binary-log)).
 
 ### The address
 
@@ -367,10 +409,11 @@ that differ only by case or accent kept apart, serializable transactions), whate
   | `verify-full`           | `VERIFY_IDENTITY` | that, and made out to the host name in the address                |
 
   `sslrootcert=/path/to/ca.crt` (or `ssl-ca=`) names the authority of a certificate no public authority signed, a file
-  in the volume with Compose (`sslrootcert=/data/db-ca.pem`); without it the authorities Node.js trusts are the ones
-  checked. `sslcert=` and `sslkey=` give jukecord a certificate of its own,
-  for a server that asks for one. A mode that may fall back to no encryption (`prefer`, `allow`) is refused: the address
-  says whether it wants TLS.
+  in the volume with Compose (`sslrootcert=/data/db-ca.pem`), and the connection then trusts that authority alone.
+  Without it the server's certificate is checked against Node.js's authorities and
+  [your own](#your-own-certificate-authorities) (`JUKECORD_CA_FILE`). `sslcert=` and `sslkey=` give jukecord a
+  certificate of its own, for a server that asks for one. A mode that may fall back to no encryption (`prefer`,
+  `allow`) is refused: the address says whether it wants TLS.
 - `connect_timeout=` (seconds, 10 by default), `schema=` (PostgreSQL), `host=` for PostgreSQL's socket folder
   (`postgres://jukecord@/jukecord?host=/run/postgresql`) and `socket=` for MySQL's socket are the other parameters.
   Any other is refused, so a misspelt one does not pass unseen.
@@ -384,6 +427,13 @@ started beside it, a name a cluster's DNS learns a moment late), and logs each t
 waiting cannot mend (a wrong password, no such database, a certificate refused) ends the wait at once. It then logs
 `jukecord cannot reach its database`, with the reason, and exits 1; Docker's restart policy or Kubernetes starts it
 again.
+
+While jukecord runs, a database server that goes away (a restart, a network cut) turns away the requests that needed
+it (the API answers 503 with `Retry-After`) and `/readyz` answers 503; jukecord keeps running, and opens new connections once the server
+answers again. Connections send TCP keep-alives after 10 seconds of quiet, so one cut on the way (a NAT, a firewall)
+is noticed in seconds. A statement may run for 30 seconds; on PostgreSQL, one whose answer has not come 10 seconds
+after that fails, and its connection is closed. Text with the NUL character (U+0000) is refused on every database
+(400), since PostgreSQL cannot keep it.
 
 ### A database beside jukecord, with Compose
 
@@ -426,9 +476,17 @@ same way with its own image and variables, as `deploy/split/compose.mysql.yaml` 
 
 ### Moving to another database
 
+While jukecord runs, the host can move it from the panel: **Settings**, **Database**, **Move to another database**,
+or `jukecord settings move-database <address>` ([the guide](README.md#the-settings-page)). It copies every row while
+the music plays; the switch then stops jukecord, copies what changed since, saves the new address in `settings.json`
+and starts again on it, by what runs jukecord ([settings and restarts](#settings-and-restarts)). The old database
+stays as it was. A database address set in the environment stays in charge, so the move is refused then: change it
+there, with the copy below.
+
 `jukecord db copy <from> [<to>]` copies every row of one database into another, of the same kind or not. It reads the
-source as one moment's view, so jukecord may keep running on it, and writes the target in one transaction: a copy that
-fails changes nothing. A target that holds data is refused, unless `--replace` empties it first in the same
+source as one moment's view and never writes to it (a SQLite file is opened read-only), so jukecord may keep running
+on it, and writes the target in one transaction: a copy that fails changes nothing, and a target file it made is
+removed. A target that holds data is refused, unless `--replace` empties it first in the same
 transaction. Without `<to>`, or with the word `configured`, the target is the database jukecord is set to use. Copy
 into a database jukecord uses only while it is stopped.
 
@@ -465,8 +523,8 @@ was.
 ```
 Database: PostgreSQL (database:5432, database jukecord, without TLS)
 Server: PostgreSQL 18.7
-Schema: 8, this jukecord's
-Size: 3.2 MiB
+Schema: 10, this jukecord's
+Size: 3.3 MiB
 Round trip: 0.85 ms
 Rows: 12571 (1000 tracks, 10000 plays, 1000 queued, 3 playlists)
 ```
@@ -484,15 +542,20 @@ are set up.
 
 Someone who logs in this way is a **member**, at the level their groups give them at that login:
 
-| Level     | May                                                                                |
-| :-------- | :--------------------------------------------------------------------------------- |
-| `admin`   | what the host may: every server and its settings, the log, login links and backups |
-| `control` | change the music in every server, as a friend with control                         |
-| `read`    | look and listen                                                                    |
+| Level     | May                                                                                                   |
+| :-------- | :---------------------------------------------------------------------------------------------------- |
+| `admin`   | every server and its settings, the log, backups, the self-check, and everyone's logins and API tokens |
+| `control` | change the music in every server, as a friend with control                                            |
+| `read`    | look and listen                                                                                       |
 
 - The groups decide every login: someone in none of the three lists is refused, and `*` in a list gives its level to
   everyone the provider or the directory lets in. Someone in several gets the widest.
-- A level changes at the person's next login.
+- Login links and jukecord's own **Settings** page stay the host's: an `admin` member makes no login link and does
+  not see jukecord's settings.
+- A member's login lasts eight hours, and a level changes at the person's next login. The host and `admin` members
+  see every login under the menu's **Logins** (or with `jukecord session list`) and end any of them there (or with
+  `jukecord session end <ID>`): its browser is logged out at once. A member's login also ends when its way of logging
+  in is turned off.
 - What a member adds, likes and saves shows their name. jukecord keeps that name and the time of their last login,
   nothing else of theirs.
 - Members make no API tokens, since a token would outlast what their groups say at the next login. An admin member
@@ -503,22 +566,34 @@ Someone who logs in this way is a **member**, at the level their groups give the
 Register jukecord with the provider as a client whose redirect is `<JUKECORD_PUBLIC_URL>/auth/sso/callback`, and whose
 address after logging out is `<JUKECORD_PUBLIC_URL>/login`. Then set:
 
-| Setting                                                                                   | What it is                                                                                                                                    |
-| :---------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JUKECORD_OIDC_ISSUER`                                                                    | the issuer, exactly as the provider names itself (`https://sso.example.com/realms/home`)                                                      |
-| `JUKECORD_OIDC_CLIENT_ID`                                                                 | the client's ID                                                                                                                               |
-| `JUKECORD_OIDC_CLIENT_SECRET` (or `_FILE`)                                                | the client's secret; none for a public client, which proves itself with PKCE alone                                                            |
-| `JUKECORD_OIDC_SCOPES`                                                                    | the scopes asked for (`openid profile`)                                                                                                       |
-| `JUKECORD_OIDC_GROUPS_CLAIM`                                                              | the claim with the groups or roles: `groups`, or a dotted path such as `realm_access.roles`                                                   |
-| `JUKECORD_OIDC_ADMIN_GROUPS`, `JUKECORD_OIDC_CONTROL_GROUPS`, `JUKECORD_OIDC_READ_GROUPS` | the groups of each level, separated by commas                                                                                                 |
-| `JUKECORD_OIDC_LABEL`                                                                     | the words on the login key (`Log in with SSO`), 40 characters at most                                                                         |
-| `JUKECORD_OIDC_DISCORD_CLAIM`                                                             | a claim with a Discord user ID: such a login is that Discord user, with their Discord rights in each server and the level where it gives more |
+| Setting                                                                                   | What it is                                                                                                                                                             |
+| :---------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JUKECORD_OIDC_ISSUER`                                                                    | the issuer, exactly as the provider names itself (`https://sso.example.com/realms/home`)                                                                               |
+| `JUKECORD_OIDC_CLIENT_ID`                                                                 | the client's ID                                                                                                                                                        |
+| `JUKECORD_OIDC_CLIENT_SECRET` (or `_FILE`)                                                | the client's secret; none for a public client, which proves itself with PKCE alone                                                                                     |
+| `JUKECORD_OIDC_SCOPES`                                                                    | the scopes asked for (`openid profile`)                                                                                                                                |
+| `JUKECORD_OIDC_GROUPS_CLAIM`                                                              | the claim with the groups or roles: `groups`, or a dotted path such as `realm_access.roles`                                                                            |
+| `JUKECORD_OIDC_ADMIN_GROUPS`, `JUKECORD_OIDC_CONTROL_GROUPS`, `JUKECORD_OIDC_READ_GROUPS` | the groups of each level, separated by commas                                                                                                                          |
+| `JUKECORD_OIDC_LABEL`                                                                     | the words on the login key (`Log in with SSO`), 40 characters at most                                                                                                  |
+| `JUKECORD_OIDC_DISCORD_CLAIM`                                                             | a claim with the person's Discord user ID, which makes the login that Discord user once the person has proved it at Discord ([below](#an-sso-login-as-a-discord-user)) |
 
 jukecord finds the provider from the issuer's discovery document, sends the browser there with the authorization code
 flow (PKCE, state and nonce), and checks the ID token's signature against the issuer's keys, with its issuer, audience,
 expiry and nonce; it asks the provider's userinfo when the token carries too little. Nothing of the provider's is kept
 once the person is in. Logging out of jukecord logs out at the provider too, when the provider offers it. Groups are
 compared regardless of case, and a leading `/` (Keycloak's full group path) is the same as none.
+
+#### An SSO login as a Discord user
+
+With `JUKECORD_OIDC_DISCORD_CLAIM`, an SSO login whose claim names a Discord user ID can be that Discord user, with
+their roles in each server and the level where it gives more. The first such login of a person goes on to Discord
+([logging in with Discord](#logging-in-with-discord) must be set up), and jukecord links the two only when Discord says
+the person is that user; anyone else, or a person who turns back, comes in as a member. From then on, that person's SSO
+logins are that Discord user at once.
+
+The claim must come from an attribute people cannot change on their own account, one only the provider's
+administrators set: a claim they could edit would let them name anyone's ID. Without Discord login the claim links
+nobody, and `./jukecord doctor` says so.
 
 #### Keycloak, step by step
 
@@ -564,22 +639,27 @@ jukecord's service account finds the person under the base DN with the user filt
 directory checks the person's password, by a bind as them. The login page's form sends the name and the password to
 jukecord, which never logs or keeps either.
 
-| Setting                                                                                   | What it is                                                                                                                         |
-| :---------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
-| `JUKECORD_LDAP_URL`                                                                       | `ldaps://host` (encrypted) or `ldap://host`, with a port when not the usual                                                        |
-| `JUKECORD_LDAP_STARTTLS`                                                                  | `yes` encrypts an `ldap://` connection before anything is sent                                                                     |
-| `JUKECORD_LDAP_CA_FILE`                                                                   | the certificates (PEM) of a private authority that signed the directory's                                                          |
-| `JUKECORD_LDAP_BIND_DN`, `JUKECORD_LDAP_BIND_PASSWORD` (or `_FILE`)                       | the service account: a DN, or for Active Directory `jukecord@corp.example.com` or `CORP\jukecord`; neither for an anonymous search |
-| `JUKECORD_LDAP_BASE_DN`                                                                   | where people are looked for                                                                                                        |
-| `JUKECORD_LDAP_USER_FILTER`                                                               | the filter that finds one person, `{username}` where the typed name goes (`(uid={username})`)                                      |
-| `JUKECORD_LDAP_GROUP_FILTER`, `JUKECORD_LDAP_GROUP_BASE_DN`                               | groups from a search, `(member={dn})` say, in place of the person's `memberOf`                                                     |
-| `JUKECORD_LDAP_NESTED_GROUPS`                                                             | `yes`: Active Directory's nested groups, a group inside a group counting too                                                       |
-| `JUKECORD_LDAP_ADMIN_GROUPS`, `JUKECORD_LDAP_CONTROL_GROUPS`, `JUKECORD_LDAP_READ_GROUPS` | the groups of each level, by DN or by name, separated by semicolons                                                                |
-| `JUKECORD_LDAP_TIMEOUT`                                                                   | how long each request may take (`10s`)                                                                                             |
-| `JUKECORD_LDAP_LABEL`                                                                     | the words on the form's key, 40 characters at most                                                                                 |
+| Setting                                                                                   | What it is                                                                                                                           |
+| :---------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
+| `JUKECORD_LDAP_URL`                                                                       | `ldaps://host` (encrypted) or `ldap://host`, with a port when not the usual                                                          |
+| `JUKECORD_LDAP_STARTTLS`                                                                  | `yes` encrypts an `ldap://` connection before anything is sent                                                                       |
+| `JUKECORD_LDAP_CA_FILE`                                                                   | the certificates (PEM) the directory's alone is checked against, in place of [every connection's](#your-own-certificate-authorities) |
+| `JUKECORD_LDAP_BIND_DN`, `JUKECORD_LDAP_BIND_PASSWORD` (or `_FILE`)                       | the service account: a DN, or for Active Directory `jukecord@corp.example.com` or `CORP\jukecord`; neither for an anonymous search   |
+| `JUKECORD_LDAP_BASE_DN`                                                                   | where people are looked for                                                                                                          |
+| `JUKECORD_LDAP_USER_FILTER`                                                               | the filter that finds one person, `{username}` where the typed name goes (`(uid={username})`)                                        |
+| `JUKECORD_LDAP_GROUP_FILTER`, `JUKECORD_LDAP_GROUP_BASE_DN`                               | groups from a search, `(member={dn})` say, in place of the person's `memberOf`                                                       |
+| `JUKECORD_LDAP_NESTED_GROUPS`                                                             | `yes`: Active Directory's nested groups, a group inside a group counting too                                                         |
+| `JUKECORD_LDAP_ADMIN_GROUPS`, `JUKECORD_LDAP_CONTROL_GROUPS`, `JUKECORD_LDAP_READ_GROUPS` | the groups of each level, by DN or by name, separated by semicolons                                                                  |
+| `JUKECORD_LDAP_TIMEOUT`                                                                   | how long each request may take (`10s`)                                                                                               |
+| `JUKECORD_LDAP_LABEL`                                                                     | the words on the form's key, 40 characters at most                                                                                   |
 
 The typed name is escaped before it goes into a filter, and an empty password is refused before the directory is
-asked. Failed logins count against the address and against the name: twenty block them for ten minutes.
+asked. Failed logins count against the address, against the name (compared as directories compare names) and against
+the account it finds: twenty block them for ten minutes.
+
+A group in the lists is a DN or a plain name. A DN matches that group alone; a plain name matches a group of that name
+anywhere in the directory. Where others can make groups (the admins of an Active Directory OU, say), write DNs: with a
+plain name, anyone who can make a group of the same name elsewhere and join it gets that level.
 
 OpenLDAP, with groups read from the person's `memberOf` (its memberof overlay keeps it):
 
@@ -609,21 +689,51 @@ JUKECORD_LDAP_BASE_DN=OU=People,DC=corp,DC=example,DC=com
 JUKECORD_LDAP_USER_FILTER=(sAMAccountName={username})
 JUKECORD_LDAP_NESTED_GROUPS=yes
 JUKECORD_LDAP_ADMIN_GROUPS=CN=Music Admins,OU=Groups,DC=corp,DC=example,DC=com
-JUKECORD_LDAP_CONTROL_GROUPS=DJs
+JUKECORD_LDAP_CONTROL_GROUPS=CN=DJs,OU=Groups,DC=corp,DC=example,DC=com
 JUKECORD_LDAP_READ_GROUPS=*
 ```
 
 - A domain controller that requires LDAP signing (Samba does by default) takes passwords over an encrypted connection
   only: `ldaps://`, or `ldap://` with `JUKECORD_LDAP_STARTTLS=yes`. Its certificate is usually signed by the domain's
-  own authority, whose certificate `JUKECORD_LDAP_CA_FILE` names; with Compose it goes into the volume, readable:
+  own authority. `JUKECORD_LDAP_CA_FILE` names that authority's certificate for the directory alone, or
+  `JUKECORD_CA_FILE` for every connection ([your own certificate authorities](#your-own-certificate-authorities));
+  with Compose the file goes into the volume, readable:
   `chmod 644 corp-ca.pem && docker compose cp corp-ca.pem jukecord:/data/corp-ca.pem`.
-- The login page tells an expired password, or one that must be changed first, from an account that is turned off or
-  locked.
+- A right password that Active Directory refuses (expired, to be changed first, or the account turned off, expired or
+  locked) gets the answer a wrong one gets, so the form tells nobody which accounts exist. The log says why: `a
+  directory login did not go through`, with `reason=expired` or `reason=disabled`.
 - `JUKECORD_LDAP_NESTED_GROUPS` is Active Directory's rule; OpenLDAP answers it with no groups at all.
 
 `./jukecord auth test-ldap` connects, binds as the service account and reads the base DN;
 `./jukecord auth test-ldap mina` also finds that person and says their groups and the level those give, without their
 password.
+
+## Your own certificate authorities
+
+A database, a Redis or Valkey, an identity provider or a directory whose certificate a private authority signed (a
+company's, a cluster's, your own) is reached once jukecord trusts that authority. `JUKECORD_CA_FILE` names a PEM file
+with the certificates of one or more authorities, and every TLS connection jukecord makes then trusts them besides the
+ones Node.js ships with. The file is read when jukecord starts, so a change applies at the next start.
+
+- **The panel**, in one process: **Settings**, **Certificate authorities**, takes a PEM pasted or from a file and
+  shows each certificate in it: whom it names, who signed it, until when. A private key is refused. jukecord keeps it
+  as a file of the data folder that only its user may read (0600), names that file in `settings.json` and trusts it
+  after a restart. `jukecord settings ca import ca.pem` does the same, `jukecord settings ca` shows what is trusted,
+  and `jukecord settings ca remove` puts it away.
+- **Docker Compose**: the file goes into the volume, readable:
+  `chmod 644 ca.pem && docker compose cp ca.pem jukecord:/data/ca.pem`, then `JUKECORD_CA_FILE=/data/ca.pem` in
+  `.env` and `./jukecord up`.
+- **The Compose split**: the file goes in `deploy/split/ca/`, which the core and every edge mount at
+  `/run/jukecord-ca` (an edge's data folder lasts only as long as its container), and
+  `JUKECORD_CA_FILE=/run/jukecord-ca/ca.pem` in the checkout's `.env`.
+- **The release's programs**: `JUKECORD_CA_FILE=/path/to/ca.pem` in the folder's `.env`. Node.js's own
+  `NODE_EXTRA_CA_CERTS` has no effect from that file.
+- **Kubernetes**: the chart's `ca` ([Kubernetes](KUBERNETES.md#your-own-certificate-authorities)).
+
+A connection given an authority of its own trusts that one alone: the database's `sslrootcert=` and the directory's
+`JUKECORD_LDAP_CA_FILE`. yt-dlp and FFmpeg are programs of their own and trust what their builds trust. The start's
+first log line and `./jukecord doctor` say what was added:
+`1 extra authority from /data/ca.pem, besides Node's own`.
 
 ## Split into services
 
@@ -656,6 +766,15 @@ does, and the panels reconnect to the new one by themselves.
 The core's `JUKECORD_PORT` answers `/healthz`, `/readyz` and `/metrics` only, and its internal port only requests that
 carry the secret; an edge's `JUKECORD_PORT` is the panel's. One process may keep its cache on Redis or Valkey too, with
 `JUKECORD_CACHE_URL` alone: the searches and the matches of other services' links then outlast a restart.
+
+In a split, what `settings.json` would hold (where each service listens, the database's and the bus's addresses, the
+secrets, the certificate authorities) comes from each service's environment only, and the **Settings** page shows it
+locked. The other settings are saved in the database the services share, and each change reaches every service.
+
+A Redis or Valkey of your own wants a memory limit with `maxmemory-policy allkeys-lfu`, as the Compose split's Valkey
+has (256 MB): when it is full, the least often used keys go first, so a flood of keys each used once cannot push out a
+name's failed-login count, which every try adds to, or the core's lease, renewed every few seconds. Under
+`allkeys-lru` such a flood pushed the count out: 50,000 one-off keys did, in 2 MB.
 
 ### A split with Docker Compose
 
@@ -716,7 +835,8 @@ own figures ([every family](API.md#metrics)).
 
 It needs no login, so jukecord answers it only to a scraper on this machine or its private network that asks
 directly: a request that came through a reverse proxy (it carries a header a proxy adds: `X-Forwarded-For`,
-`Forwarded`, `X-Real-IP`, `Via`, `X-Forwarded-Host` or `X-Forwarded-Proto`), or from a public address, gets a 404. A Prometheus elsewhere shows a token instead:
+`Forwarded`, `X-Real-IP`, `Via`, `X-Forwarded-Host` or `X-Forwarded-Proto`), or from a public address, gets a 404. A
+Prometheus elsewhere shows a token instead:
 
 ```bash
 JUKECORD_METRICS_TOKEN=<openssl rand -hex 32>
@@ -795,14 +915,15 @@ PrometheusRule for the Prometheus Operator:
 
 ## Everyday use
 
-| To                   | With Docker Compose                                              |
-| :------------------- | :--------------------------------------------------------------- |
-| Open the panel       | `./jukecord open`                                                |
-| See how it runs      | `./jukecord status`, and `./jukecord doctor` to check every part |
-| Read the log         | `./jukecord logs`, or the **Log** page in the panel              |
-| Back up the database | `./jukecord backup`, into `./backups`                            |
-| Update               | `./jukecord backup && git pull && ./jukecord update`             |
-| Stop                 | `./jukecord down`; the data stays                                |
+| To                   | With Docker Compose                                                        |
+| :------------------- | :------------------------------------------------------------------------- |
+| Open the panel       | `./jukecord open`                                                          |
+| See how it runs      | `./jukecord status`, and `./jukecord doctor` to check every part           |
+| Read the log         | `./jukecord logs`, or the **Log** page in the panel                        |
+| Change a setting     | the panel's **Settings** page, or `./jukecord settings set <name> <value>` |
+| Back up the database | `./jukecord backup`, into `./backups`                                      |
+| Update               | `./jukecord backup && git pull && ./jukecord update`                       |
+| Stop                 | `./jukecord down`; the data stays                                          |
 
 Any other word goes to the `jukecord` command inside: `./jukecord np`, `./jukecord add <address or words>`
 ([the jukecord command](README.md#the-jukecord-command)). On Kubernetes it runs through `kubectl exec`.
@@ -823,8 +944,9 @@ Any other word goes to the `jukecord` command inside: `./jukecord np`, `./jukeco
 
 `./jukecord backup` writes a consistent copy of the database while the music and the panel go on, however big the
 database, and prints its whole path; when it cannot, it says why and ends with the jukecord command's
-[exit code](README.md#the-jukecord-command). The media cache stays out: tracks are fetched again when played. To put
-one back:
+[exit code](README.md#the-jukecord-command). The media cache stays out: tracks are fetched again when played. The
+settings saved in the database come with it, and `settings.json` does not, since it holds the secrets: to carry those,
+copy that file of the data folder too. To put one back:
 
 ```bash
 ./jukecord restore backups/jukecord-<time>.db

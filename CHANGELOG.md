@@ -6,11 +6,11 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
-jukecord on a database server, split into services, watched from outside and logged in to with your own accounts:
-PostgreSQL and MySQL/MariaDB beside SQLite, a core and its edges over Redis or Valkey, Prometheus metrics with
-readiness by parts, and logins through OpenID Connect (Keycloak and others) and LDAP or Active Directory. A host who
-sets none of it gets jukecord as it was: one process on its SQLite file, with the same logins and the same API, fields
-added.
+jukecord on a database server, split into services, watched from outside, logged in to with your own accounts and set
+up from the panel: PostgreSQL and MySQL/MariaDB beside SQLite, a core and its edges over Redis or Valkey, Prometheus
+metrics with readiness by parts, logins through OpenID Connect (Keycloak and others) and LDAP or Active Directory, and
+a Settings page with every setting of jukecord. A host who sets none of it gets jukecord as it was: one process on its
+SQLite file, with the same logins and the same API, fields added.
 
 ### Changed
 
@@ -24,7 +24,8 @@ added.
 - `/metrics` keeps 0.3's names. `jukecord_event_loop_delay_seconds` is now also `nodejs_eventloop_lag_p99_seconds`, the
   usual name, and goes in 0.5.
 - Failed logins count for ten minutes from an address's first one, where 0.3 counted the last ten minutes; the limit
-  (20) and the longest wait (ten minutes) are the same.
+  (20) and the longest wait (ten minutes) are the same. Each try is counted before it is made, so tries sent at once
+  cannot pass the limit, and a login that works takes its try back.
 - The image and the programs carry the drivers of the databases, of Redis and Valkey, and of the logins; a jukecord on
   SQLite loads none of the databases' drivers.
 
@@ -35,21 +36,26 @@ added.
   of values it adds take their defaults.
 - The database moves to the new schema at the first start, as before: an older jukecord refuses it afterwards, so back
   up first.
+- A setting your `.env` gives a value stays as `.env` says, and the new Settings page shows it locked. To change it
+  from the page, leave its line empty (`NAME=`), as the new `.env.example` does for every default.
 
 ### Added
 
 - **Databases.** PostgreSQL 14 or newer, MySQL 8.0 or newer and MariaDB 10.11 or newer beside SQLite, named by
   `JUKECORD_DATABASE_URL` (or its `_FILE`), TLS asked for in the address, connections set by `JUKECORD_DATABASE_POOL`;
-  jukecord waits up to a minute for a server at its start. `jukecord db status` says what a database holds, and
-  `jukecord db copy` copies every row of one database into another, of any kind, in one transaction. A backup of a
-  server is a SQLite file, which any kind of database takes back, and `./jukecord restore` puts one into the database
-  `.env` names. The chart takes the address as `database.url` or from a Secret. CI runs the store's tests on the oldest
-  and the newest release of each server.
+  jukecord waits up to a minute for a server at its start, and a connection lost later fails only the requests that
+  used it. MySQL and MariaDB that keep a binary log need `binlog_format` at `ROW` or `MIXED`, their defaults.
+  `jukecord db status` says what a database holds, and `jukecord db copy` copies every row of one database into
+  another, of any kind, in one transaction, never writing to its source. A backup of a server is a SQLite file, which
+  any kind of database takes back, and `./jukecord restore` puts one into the database `.env` names. Every SQLite file
+  jukecord makes is its user's alone (0600). The chart takes the address as `database.url` or from a Secret. CI runs
+  the store's tests on the oldest and the newest release of each server.
 - **A split into services.** `JUKECORD_ROLE=core` (one: Discord, the players and queues, the media) and `edge` (any
   number: the API, the panel, the live updates, the logins), from the same image, over a shared database and a Redis or
   Valkey server that carries the bus and the shared cache. `deploy/split/compose.yaml` runs a core, two edges,
   PostgreSQL or MySQL, Valkey and Caddy in front; the chart's `mode: split` runs a core and as many edges as you like,
-  with a HorizontalPodAutoscaler if you want one. One process may keep its cache on Redis or Valkey too
+  with a HorizontalPodAutoscaler if you want one. The split's Valkey drops the least often used keys when it is full
+  (`allkeys-lfu`), which a Redis or Valkey of your own wants too. One process may keep its cache on Redis or Valkey too
   (`JUKECORD_CACHE_URL`).
 - **Monitoring.** `/metrics` reports far more: HTTP answers by route and their times, live connections, fetches and the
   media programs' runs, the database's statements and connections, the shared cache, logins, Discord's gateway, the
@@ -59,10 +65,33 @@ added.
   ServiceMonitor and scrape annotations, with the token.
 - **Logins through your own accounts.** OpenID Connect (Keycloak, Authentik, Microsoft Entra ID, Okta, Google) and LDAP
   or Active Directory, set by `JUKECORD_OIDC_*` and `JUKECORD_LDAP_*`, or the chart's `auth` values. People log in as
-  members, at the level their groups give: admin (what the host may), control or read; an OIDC login can be a Discord
-  user's. `jukecord auth test-oidc` and `test-ldap` check the settings without logging anyone in, and
+  members for eight hours, at the level their groups give: admin (every server and its settings, the log, backups,
+  everyone's logins and tokens), control or read. Login links and jukecord's own settings stay the host's. An SSO login
+  becomes the Discord user its provider names once that person has proved it at Discord. Active Directory's refusals
+  of a right password (expired, an account turned off) answer as a wrong password, the reason in the log.
+  `jukecord auth test-oidc`, `test-ldap` and `test-discord` check the settings without logging anyone in, and
   `GET /api/v1/auth/methods` says which ways are set up.
-<!-- The settings page (stage 3) goes here: every host setting in the panel, the API and the CLI. -->
+- **Every login, listed and ended.** The menu's **Logins**, `jukecord session list` and `session end`, and the API
+  (`GET /api/v1/sessions`, `DELETE /api/v1/sessions/{id}`) show every panel login that has not ended, for the host and
+  admin members, and end any of them: its browser is logged out at once.
+- **Settings.** The host's **Settings** page shows every setting of jukecord by group: where its value comes from (the
+  environment, which locks it, a saved value or the default), when a change applies, and a bar with **Restart** while
+  one waits for it. A section saves all of its changes or none; addresses and logins are tested before they are saved;
+  the database moves to another, of any kind, while the music plays, in four steps. The same is
+  `jukecord settings list`, `get`, `set`, `reset`, the tests, `ca` and `move-database`, `jukecord restart`, and the
+  API's `/api/v1/settings`. Saved values the start needs, and saved secrets, are kept in `settings.json` in the data
+  folder (0600), never in the database; the rest in the database. A restart ends jukecord with code 75 for Docker, the
+  kubelet, systemd or the program's `jukecord start` to start it again (`JUKECORD_SUPERVISOR` says which where jukecord
+  cannot tell). In a split the services' addresses and secrets come from their environment, and the page lists the
+  core and each edge.
+- **Your own certificate authorities.** `JUKECORD_CA_FILE` names a PEM file of authorities that every TLS connection
+  jukecord makes trusts besides Node.js's own: the database, Redis or Valkey, the identity provider, the directory. The
+  Settings page and `jukecord settings ca import` take one and keep it in the data folder; the Compose split mounts
+  `deploy/split/ca/` in every service, and the chart's `ca` (a Secret or a ConfigMap) goes on every pod. A certificate
+  no trusted authority signed says to name its authority there.
+- **The chart's checksums are salted.** The annotations that restart the pods when a secret of the values changes hold
+  a salted hash, the salt kept in the Secret `<release>-checksum-salt`; `checksumSalt` gives one to tools that render
+  without the cluster (Argo CD, `helm template`).
 
 ## [0.3.4] - 2026-11-17
 

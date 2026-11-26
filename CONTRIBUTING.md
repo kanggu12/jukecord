@@ -28,6 +28,7 @@ npm start          # browser-only, with its data in ./data
 | `src/discord/`           | The bot: slash commands, cards and the voice channel                                           |
 | `src/store/`             | The store: SQLite's, PostgreSQL's and MySQL's executors, the dialects, the migrations, copying |
 | `src/auth/`              | Logging in through an identity provider (OIDC) or a directory (LDAP), and their settings       |
+| `src/settings/`          | Every setting's definition, their layers, `settings.json`, the restart and the database move   |
 | `src/bus/`, `src/cache/` | The bus between a core and its edges, and the shared cache, in memory or on Redis or Valkey    |
 | `src/roles/`             | The core's and an edge's own parts                                                             |
 | `src/metrics/`           | The metrics registry, each part's figures, and who may read `/metrics`                         |
@@ -44,6 +45,11 @@ The store's SQL is written once for the three databases, with what differs in `s
 migration goes at the end of `src/store/schema.ts` with SQLite's statements and PostgreSQL's and MySQL's beside them
 (a test fails one without both), and a released migration is never edited. A state that more than one process must see
 belongs in the database or the shared cache, and a call an edge makes of the core in `src/web/core.ts`.
+
+A new setting is a row of `src/settings/definitions.ts`: its name, group, kind, limits, default and when it applies.
+The start, the Settings page, the command and the API read it from there; `node scripts/settings-doc.ts` writes the
+guide's table from it, and a packaging test fails while the table is out of date. A new API operation's row in
+[API.md](docs/API.md) comes the same way from `node scripts/api-doc.ts`.
 
 ## Style
 

@@ -5,15 +5,15 @@ why.
 
 ## TypeScript run as it is
 
-Node 24 runs `.ts` files by stripping the types, so the server has no build step: a checkout runs as it is. Only
-syntax that can be stripped is used (no enums, namespaces or parameter properties), which `tsc` checks
-(`erasableSyntaxOnly`). The image carries the same source with the types already stripped, as `.js` files
-(`scripts/strip-types.ts`, with Node's own `stripTypeScriptTypes`). Stripping on every start loads Node's TypeScript
-parser into each process: in the image on two cores the server rested at 96 MiB that way and rests at 78 MiB now,
-and a `jukecord` command took 150 ms and takes 100 ms. The stripping leaves spaces where the types were, so every
-line and column of a `.js` file is the same place in its `.ts` file, and a stack trace from the image points into
-the source. A bundle, as the panel has, would have put the server into one file with other line numbers. Type checking is TypeScript 7; linting and formatting are Biome (typescript-eslint did not yet
-support TypeScript 7). The panel is bundled with esbuild, since browsers need JavaScript.
+Node 24 runs `.ts` files by stripping the types, so the server has no build step: a checkout runs as it is. Only syntax
+that can be stripped is used (no enums, namespaces or parameter properties), which `tsc` checks (`erasableSyntaxOnly`).
+The image carries the same source with the types already stripped, as `.js` files (`scripts/strip-types.ts`, with Node's
+own `stripTypeScriptTypes`). Stripping on every start loads Node's TypeScript parser into each process: in the image on
+two cores the server rested at 96 MiB that way and at 78 MiB stripped (0.2.1), and a `jukecord` command took 150 ms and
+100 ms. The stripping leaves spaces where the types were, so every line and column of a `.js` file is the same place in
+its `.ts` file, and a stack trace from the image points into the source. A bundle, as the panel has, would have put the
+server into one file with other line numbers. Type checking is TypeScript 7; linting and formatting are Biome
+(typescript-eslint did not yet support TypeScript 7). The panel is bundled with esbuild, since browsers need JavaScript.
 
 ## SQLite by default, Node's own
 
@@ -42,16 +42,34 @@ an index, which the servers key by its SHA-256 in a stored column. Each MySQL co
 repositories cut timestamps into whole days and hours by division and name the dates in TypeScript, so every database
 counts days alike.
 
-## Serializable transactions, run again when refused
+## Lanes at READ COMMITTED, and a turn for each check
 
 On SQLite one writer at a time made a check and the change after it (a login's thousand likes, a listening link's last
 place for a guest) safe inside a transaction. A server at its usual isolation would let two such transactions both
-pass the check. So every transaction on a server is serializable, and one the server refuses for another's sake
-(PostgreSQL's 40001 and 40P01, MySQL's 1213, MariaDB's 1020) runs again from the start, up to six times, 10 to 160 ms
-apart; a transaction a refusal doomed runs nothing more, even when its code caught the error. Transactions that only
-read several things (statistics, Wrapped, a copy) are snapshots instead, which never wait and are never refused. A
-test holds two transactions at a limit until both have read: one passes, on every database, and it fails with the
-servers' usual isolation.
+pass the check.
+
+The first answer was the serializable level for every transaction on a server, run again from the start when the server
+refused it for another's sake (PostgreSQL's 40001 and 40P01, MySQL's 1213, MariaDB's 1020). Measured, it refused work
+that never touched another's rows: PostgreSQL tracks what a transaction read by index pages and whole tables, and
+MariaDB locks the gaps between rows it read. Ten servers' queues at once, each in its own lane, for twelve rounds,
+still failed 9 to 11 times on PostgreSQL and 2 or 3 times on MariaDB after every try, and MySQL had 54 to 57 tries
+refused; fifty browsers at once at one listening link failed 2 of 50 on PostgreSQL 14 and MariaDB 11.8. So each
+transaction now says what keeps it in order:
+
+- A server's work runs in its lane already, one change at a time, and a row written and read back hangs on no check
+  of its own: both run at `READ COMMITTED`, which refuses nothing. Two of them only wait for a row both write.
+- A check and the write that hangs on it first take a turn on their key, a lock of the database's own
+  (`pg_advisory_xact_lock` on PostgreSQL, `GET_LOCK` on MySQL and MariaDB), then run at `READ COMMITTED`. The likes of
+  one login, or the places of one link, go one at a time; different keys never wait for each other.
+- Those waiting for a key's turn wait in line in jukecord's own process, holding no connection. A burst of 150
+  browsers at one link held all ten of the pool's connections before, and another server's statement waited 441 to
+  680 ms; in line, it waits 4 to 10 ms.
+- A transaction that says nothing is still serializable and run again when refused, up to six tries in all, 10 to
+  160 ms apart. Transactions that only read several things (statistics, Wrapped, a copy) are snapshots, which never
+  wait and are never refused.
+
+The same runs then failed nothing on any of the six servers CI tests. A test runs the checks of one key at once: they
+go one at a time, one passes at the limit, and keys apart never wait for each other.
 
 ## The servers start at schema 8
 
@@ -113,15 +131,15 @@ lookups in Kubernetes clusters, which the Helm chart is for.
 
 ## FFmpeg built for audio
 
-Debian's ffmpeg package brings the libraries of every codec and device FFmpeg supports: 451 MB of an 843 MB image,
-for a program that jukecord asks to read audio and write Opus and MP3. The image builds FFmpeg 7.1.5 from its signed
-release instead: every demuxer, decoder, parser, protocol and audio filter of FFmpeg's own (whatever yt-dlp hands
-over, from a pipe or over https), the Opus, MP3 and PCM encoders, and four libraries (Opus, LAME, OpenSSL, zlib). It is one
-21 MB program, LGPL with no GPL parts, and the image is 423 MB. The two were compared on sixteen kinds of file (audio
-alone, and the audio of video files) through jukecord's own commands: the same results, lengths and loudness. CI
-runs the three commands on each architecture's image and fails an image over 500 MB. Debian's security updates no
-longer reach FFmpeg by themselves: a weekly check (`.github/workflows/ffmpeg-release.yml`) fails when a newer release of
-the pinned line is out, and a patch release of jukecord brings it.
+Debian's ffmpeg package brings the libraries of every codec and device FFmpeg supports: 451 MB of an 843 MB image, for a
+program that jukecord asks to read audio and write Opus and MP3. The image builds FFmpeg 7.1.5 from its signed release
+instead: every demuxer, decoder, parser, protocol and audio filter of FFmpeg's own (whatever yt-dlp hands over, from a
+pipe or over https), the Opus, MP3 and PCM encoders, and four libraries (Opus, LAME, OpenSSL, zlib). It is one 21 MB
+program, LGPL with no GPL parts, and the image is 423 MB. The two were compared on sixteen kinds of file (audio alone,
+and the audio of video files) through jukecord's own commands: the same results, lengths and loudness. CI runs the three
+commands on each architecture's image and fails an image over 500 MB. Debian's security updates no longer reach FFmpeg
+by themselves: a weekly check (`.github/workflows/ffmpeg-release.yml`) fails when a newer release of the pinned line is
+out, and a patch release of jukecord brings it.
 
 ## One process by default, a core and edges when asked
 
@@ -147,6 +165,12 @@ protocol. The client is `@redis/client`, node-redis's core with no dependencies 
 it adds four module clients jukecord never calls. A call fails at once while the server is away instead of waiting in
 a queue, each has a two-second limit, and jukecord pings every three seconds: a connection the server left without
 closing it kept a call written to it waiting for ever.
+
+A full server should drop the least often used keys (`allkeys-lfu`), as the Compose split's Valkey does. With
+`allkeys-lru` and 2 MB, a flood of 50,000 keys each written once pushed out a name's failed-login count; with
+`allkeys-lfu` the flood went first and the count, added to on every try, read 20 after it.
+The core's lease, renewed every few seconds, stays the same way. The cache in jukecord's own memory keeps its counters
+apart from its entries, bounded on their own, so no number of entries pushes a count out there either.
 
 ## Rates that fail open
 
@@ -178,13 +202,72 @@ Active Directory's nested groups are a choice of the host's, since OpenLDAP answ
 that takes passwords over an encrypted connection only refuses a plain bind, and jukecord says to use `ldaps://` or
 StartTLS instead of calling the directory unreachable.
 
+A right password that Active Directory refuses (expired, to be changed first, the account off or locked) is answered
+as a wrong one, the reason only in the log, so the form tells nobody which accounts exist or are off. Each try is
+counted before the directory is asked, by the address, by the name as directories compare names (case, widths and
+invisible characters aside) and by the account found, and a login that works takes its try back: sixty tries sent at
+once cost twenty binds.
+
 ## Members are people of the data, by their groups
 
-A member has a key of their own in jukecord's data (`oidc:` or `ldap:` and 15 hex digits of a SHA-256 over the provider
-and the subject), never a Discord ID, so what they add, like and make shows their name, and the subject itself is not
-kept. Groups decide every login through a provider, the ones linked to a Discord account too: someone in none of the
-lists is refused, and a host who wants everyone in writes `*`. Members make no API tokens, since a token would outlast
-what the groups say at the next login.
+A member has a key of their own in jukecord's data (`oidc:` or `ldap:` and 15 hex digits of a SHA-256 over the
+provider, its issuer and the subject), never a Discord ID, so what they add, like and make shows their name, and the
+subject itself is not kept. Groups decide every login through a provider, the ones linked to a Discord account too:
+someone in none of the lists is refused, and a host who wants everyone in writes `*`. Members make no API tokens, and
+a member's login lasts eight hours: groups are read at a login, and a token or a long login would outlast what they
+say at the next one. The host, and an admin member, can end any login sooner.
+
+A claim that names a Discord account is only as good as whoever may edit the attribute behind it. So an SSO login
+becomes that Discord user only once the person has proved it at Discord, through Discord's own login, and the pair is
+then kept (`member_links`); until then, or without Discord login, the person comes in as a member.
+
+## The settings and the login links stay the host's
+
+A member at the admin level may do what the host may in every server, but neither sees nor changes jukecord's own
+settings, which hold the secrets and say where the database and the logins are, nor makes login links. A link makes a
+host's session, and from it a token that never expires, or a friend's of thirty days: either would outlive the level a
+member's groups gave them at their login.
+
+## Settings from the environment, then saved, then the default
+
+Every setting is defined once (`src/settings/definitions.ts`: its name, group, kind, limits, default, and whether it
+applies at once), and the start, the page, the command, the API and the guide's table all come from that table. A value
+in the environment wins, so a deployment that sets one (a Compose `.env`, a chart's values) stays in charge and the page
+shows it locked. An empty variable counts as unset, as Compose writes an empty line of `.env`; the examples leave the
+defaults empty, so a copied example locks nothing. A saved value is checked by the rules the start uses, a section's
+changes all or none, with the revision each was read at, so two people saving at once do not undo each other.
+
+What jukecord needs before its database opens (where it listens, the database's address, the shared cache, the
+certificate authorities) cannot come from that database, so it is kept in `settings.json` in the data folder. The
+saved secrets go there too, never into the database: a backup, a `db copy` or a database server's dump never carries
+one. In a split every service reads these from its own environment, where the deployment put them, and the database
+holds only what every service shares.
+
+## A restart is an exit for what runs jukecord
+
+A restart stops jukecord as SIGTERM does and exits with code 75, for what runs it to start it again: Docker's restart
+policy, the kubelet, systemd, or the program's launcher. 75 is `EX_TEMPFAIL`; 0 would leave a systemd unit with
+`Restart=on-failure` stopped. jukecord tells which runs it from its environment (`KUBERNETES_SERVICE_HOST`, systemd's
+`INVOCATION_ID`, `JUKECORD_SUPERVISOR` set by `compose.yaml` and the launcher). Where nothing would start it again, as
+in a terminal, the restart is refused, since it would only stop jukecord.
+
+## A database move copies twice
+
+The page moves jukecord to another database while the music plays. The copy reads from a connection of its own, as one
+moment's view (never the store's one SQLite connection, which a long read would hold), and shows its progress. The
+switch then stops jukecord, copies again once every part that writes has stopped, so nothing written after the first
+copy is left behind, writes the new address to `settings.json`, and starts again on it. A last copy that fails writes
+nothing, and jukecord starts again on the database it used, the page saying why. The address is no field of the page:
+a new address alone would leave the data behind.
+
+## One file of authorities for every connection
+
+A private authority (a company's, a cluster's) is trusted once, for every TLS connection jukecord makes:
+`JUKECORD_CA_FILE` is added to Node's default list at the start of every role and of the command, before any
+connection. Every client jukecord uses passes no authority of its own unless its own setting names one, so each
+trusts that list; a connection that names one (the database's `sslrootcert`, `JUKECORD_LDAP_CA_FILE`) trusts that
+alone, as before. Node's `NODE_EXTRA_CA_CERTS` does the same from the environment, but it has no effect from the
+`.env` file the programs read. yt-dlp and FFmpeg are programs of their own and keep their builds' authorities.
 
 ## The queue is the server's, not the voice channel's
 
@@ -440,16 +523,16 @@ combobox and listbox, so the keyboard and screen readers move through it from th
 ## Autoplay from the server's own plays
 
 When the queue runs out, a recommender service would know what plays and when; jukecord already knows what each server
-played and liked. "Past plays" draws a track from its history, more often the ones played more and liked by
-more people, none of the last thirty plays, so it sounds like that server and asks nobody; a server whose every track
-is among those plays (a new one) gets one of the older half of them, so its music goes on too. "Related to the last
-track" asks YouTube (through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a
-server that wants something new, and falls back to the history. One track is queued when the last one starts, so it is fetched in
-time; its row says Autoplay, people's tracks added at the end go before it, and statistics and Wrapped leave it out of
-whose picks played most. It is nobody's turn when people take turns (its tracks stay after people's), and the limit of tracks per
-person does not count it. A Stop ends it until a track starts again: the music does not start by itself after someone
-stopped it, and a stop asked for after this track is a Stop too. It picks only while the music goes on: a player paused
-by a person, or resting with nobody listening, gets its pick when it plays again.
+played and liked. "Past plays" draws a track from its history, more often the ones played more and liked by more people,
+none of the last thirty plays, so it sounds like that server and asks nobody; a server whose every track is among those
+plays (a new one) gets one of the older half of them, so its music goes on too. "Related to the last track" asks YouTube
+(through yt-dlp, which the tracks come through anyway) for its mix of the track playing, for a server that wants
+something new, and falls back to the history. One track is queued when the last one starts, so it is fetched in time;
+its row says Autoplay, people's tracks added at the end go before it, and statistics and Wrapped leave it out of whose
+picks played most. It is nobody's turn when people take turns (its tracks stay after people's), and the limit of tracks
+per person does not count it. A Stop ends it until a track starts again: the music does not start by itself after
+someone stopped it, and a stop asked for after this track is a Stop too. It picks only while the music goes on: a player
+paused by a person, or resting with nobody listening, gets its pick when it plays again.
 
 ## Likes belong to a login, and show only what a server shows
 

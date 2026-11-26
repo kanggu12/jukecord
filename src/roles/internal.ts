@@ -14,6 +14,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { ActionContext } from '../app/actions.ts';
 import { ActionError } from '../app/actions.ts';
 import type { Logger } from '../log.ts';
+import { ConnectionError, DATABASE_DOWN, DATABASE_RETRY_MS } from '../store/network.ts';
 import { StoreError } from '../store/store.ts';
 import { type Files, INTERNAL_PREFIX } from '../web/files.ts';
 import { BUSY, failure, later } from '../web/replies.ts';
@@ -91,6 +92,8 @@ export async function createInternalServer(options: InternalServerOptions): Prom
       return failure(reply, error.code, error.message);
     }
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);
+    // The database not answering: the edge's browser is told to ask again, as one process tells it (web/server.ts).
+    if (error instanceof ConnectionError) return later(reply, 'unavailable', DATABASE_DOWN, DATABASE_RETRY_MS);
     options.log.error("an edge's request failed", { url: request.url.split('?')[0], error });
     return reply
       .code(500)

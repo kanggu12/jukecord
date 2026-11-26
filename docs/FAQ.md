@@ -46,7 +46,7 @@ Yes. Each server has its own queue, player, history, playlists and DJ role, and 
 take turns across the servers, and a track somebody is waiting for always starts at once.
 
 **How many people can use it at once?**
-A thousand panels open at once still see each change within a tenth of a second on two processor cores. The limits
+A thousand panels open at once still see each change within a fifth of a second on two processor cores. The limits
 are there for accidents, and past one the panel says so and tries again by itself:
 
 | Limit                                    | Default |
@@ -119,9 +119,11 @@ jukecord; search results show YouTube's pictures, and people's pictures come fro
 
 **What does a database server, or Redis, hold?**
 A database server holds what the SQLite file would: the tracks and their lyrics, the queues, the history, the
-playlists, the settings, the people jukecord met (Discord names and IDs, members' names), and the logins, API tokens
-and listening links as SHA-256 hashes. Redis or Valkey holds what lasts minutes: rate counters by address and by login,
-failed logins by address and by name, login links and SSO logins under way under their hashes, and searches' results
+playlists, the servers' settings and the host's (no secret among them: those stay in the data folder's
+`settings.json`), the people jukecord met (Discord names and IDs, members' names, which SSO login is which Discord
+user), and the logins, API tokens and listening links as SHA-256 hashes. Redis or Valkey holds what lasts minutes: rate
+counters by address and by login, failed logins by address, by name and by account, login links and SSO logins under
+way under their hashes, and searches' results
 and the matches of other services' links; what the services tell each other passes through it without being kept. A
 database or a Redis on your own network keeps all of it there; a hosted one gives it to whoever runs it. A backup of a
 server is a SQLite file with the same.

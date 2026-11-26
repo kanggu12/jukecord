@@ -108,6 +108,8 @@ Discord account.
   them.
 - **Your own accounts, watched from outside:** logins through Keycloak or another OpenID Connect provider, or LDAP and
   Active Directory, at three levels by group; Prometheus metrics, readiness by parts and a Grafana dashboard.
+- **Set up from the panel:** every setting of jukecord on one [Settings page](docs/README.md#the-settings-page), each
+  saying where its value comes from, with a restart when a change needs one.
 
 ## How it works
 
@@ -119,16 +121,17 @@ Discord account.
 </p>
 
 Each Discord server has one queue and one player, and the player is the clock that the voice channel and every browser
-follow ([architecture](docs/ARCHITECTURE.md)). On two cores with a year of use in it, jukecord rests at about 85 MiB
-of memory, and a thousand open panels see each change within about a tenth of a second
+follow ([architecture](docs/ARCHITECTURE.md)). On two cores with a year of use in it, jukecord rests at about 90 MiB
+of memory, and a thousand open panels see each change within a fifth of a second
 ([measured](docs/TESTING.md#measurements)). Past that, the same image runs as one core, which plays the music, and any
 number of edges in front of it ([a split into services](docs/INSTALL.md#split-into-services)).
 
 ### Your data
 
-Everything stays in jukecord's data folder: a SQLite file and the tracks it fetched. A host may keep the database on a
-PostgreSQL or MySQL/MariaDB server of their own instead ([the database](docs/INSTALL.md#the-database)). Logins and
-tokens are kept as hashes, and nothing is sent as telemetry ([what leaves your computer](docs/FAQ.md#privacy)).
+Everything stays in jukecord's data folder: a SQLite file, the settings saved from the panel and the tracks it
+fetched. A host may keep the database on a PostgreSQL or MySQL/MariaDB server of their own instead
+([the database](docs/INSTALL.md#the-database)). Logins and tokens are kept as hashes, and nothing is sent as telemetry
+([what leaves your computer](docs/FAQ.md#privacy)).
 
 ## What it runs on
 

@@ -1,8 +1,8 @@
 # jukecord on Kubernetes
 
 For people who run jukecord on a cluster: installing the Helm chart, its values, the Ingress and the NetworkPolicy,
-security, memory, a database server, logins through your own accounts, monitoring, a split into services, upgrades,
-backups and k3s.
+security, memory, a database server, logins through your own accounts, your own certificate authorities, monitoring,
+a split into services, upgrades, backups and k3s.
 
 The chart runs one pod by default, with a Service, a volume for the database and the cache, and optionally an Ingress.
 It never runs a second replica of that pod: a bot token allows one Discord session. In split mode it runs one core and
@@ -55,7 +55,8 @@ as many edges as you like instead ([split into services](#split-into-services)).
 | `discord.clientId`                                                         |                                                     | the application's ID (`--set-string`: it is a long number)            |
 | `publicUrl`                                                                |                 the Ingress's host                  | the panel's address, for logins and the bot's links                   |
 | `database.url`, `database.existingSecret`                                  |                SQLite in the volume                 | [a database server](#a-database-server)                               |
-| `auth.oidc.*`, `auth.ldap.*`, `auth.ca`, `auth.egressTo`                   |                         off                         | [logins through your own accounts](#logins-through-your-own-accounts) |
+| `auth.oidc.*`, `auth.ldap.*`, `auth.egressTo`                              |                         off                         | [logins through your own accounts](#logins-through-your-own-accounts) |
+| `ca.secret` or `.configMap`, `.key`                                        |                      `ca.crt`                       | [your own certificate authorities](#your-own-certificate-authorities) |
 | `metrics.token`, `.existingSecret`, `.podAnnotations`, `.serviceMonitor.*` |                         off                         | [monitoring](#monitoring)                                             |
 | `mode`, `bus.*`, `split.*`                                                 |                      `single`                       | [split into services](#split-into-services)                           |
 | `env`                                                                      |                        `{}`                         | any [setting](README.md#settings) by name, as a string                |
@@ -68,6 +69,7 @@ as many edges as you like instead ([split into services](#split-into-services)).
 | `podLabels`, `podAnnotations`                                              |                        `{}`                         | more for the pod; the chart's own labels win                          |
 | `podSecurityContext`, `securityContext`                                    |       user 10001, read-only, no capabilities        | [security](#security)                                                 |
 | `nodeSelector`, `tolerations`, `affinity`                                  |                                                     | where the pod may run; helm test's pod follows the first two          |
+| `checksumSalt`                                                             |                    made and kept                    | the salt of the hashes the pods restart by ([security](#security))    |
 
 - The pod does not start without the Secret's `token`; its `clientSecret` is read when a client ID is set.
 - `publicUrl` defaults to the Ingress's host, with https when the Ingress has TLS.
@@ -77,6 +79,10 @@ as many edges as you like instead ([split into services](#split-into-services)).
   `extraEnv`.
 - `extraEnv` takes `name` with `value`, or `valueFrom` a ConfigMap: `NODE_OPTIONS`, `TZ`, `HTTPS_PROXY`.
 - Every value is checked against the chart's `values.schema.json`, so a misspelt key fails the install.
+- The panel's **Settings** page ([the guide](README.md#the-settings-page)) works in the pod. What the chart sets shows
+  there as set by the environment and stays as the values say. The rest is saved in the volume (`settings.json`) and
+  the database, outside the release's values, and a value in `env` wins over it. A restart from the page ends the
+  container with code 75, and the kubelet starts it again in the same pod.
 
 ## The Ingress
 
@@ -138,6 +144,12 @@ networkPolicy:
   jukecord's group only, and read through `JUKECORD_DISCORD_TOKEN_FILE` and `JUKECORD_DISCORD_CLIENT_SECRET_FILE`.
   So are the database's address, the metrics token and the logins' secrets. None of them is in the environment yt-dlp
   and ffmpeg start with.
+- A secret changed in the values restarts the pods, by an annotation that holds a hash of the values. The hash is
+  salted, so someone who may read pods but not Secrets cannot test guesses of a password against it. Installed
+  against a cluster, the chart makes a random salt and keeps it in the Secret `<release>-checksum-salt`. A tool that
+  renders the chart without the cluster (`helm template`, Argo CD) has nowhere to keep one: the salt is then made from
+  the namespace and the release's name, the same at every render, which anyone who knows them can make too. Give such
+  a tool a `checksumSalt` of your own, a long random text, to keep the hashes private.
 
 ## Memory and CPU
 
@@ -190,6 +202,9 @@ networkPolicy:
   values (`helm get values`) then hold the password too.
 - The pod reads the address as a file (`JUKECORD_DATABASE_URL_FILE`), and restarts when it changes.
 - The volume still keeps the media cache, the logs and the backups.
+- The panel's database move ([the guide](README.md#the-settings-page)) works in the pod too, when `database` is not
+  set: it keeps the new address in the volume's `settings.json`, outside the release's values, and the NetworkPolicy
+  must let the pod reach the server, as above. With `database` the address stays with the release.
 
 To move the SQLite file's data in, stop jukecord, copy the file into the database from a pod of the same image, then
 upgrade with the `database` values:
@@ -265,10 +280,6 @@ auth:
     adminGroups: [jukecord-admins]
     controlGroups: [jukecord-djs]
     readGroups: ["*"]
-  # The authority that signed the directory's certificate (and the provider's, when it is a private one).
-  ca:
-    configMap: home-ca
-    key: ca.crt
   # The directory is on the local network, in a private range.
   egressTo:
     - to:
@@ -276,6 +287,9 @@ auth:
             cidr: 10.20.0.5/32
       ports:
         - port: 636
+# The authority that signed the directory's certificate (and the provider's, when it is a private one).
+ca:
+  configMap: home-ca
 ```
 
 ```bash
@@ -286,13 +300,36 @@ kubectl -n jukecord create configmap home-ca --from-file=ca.crt=home-ca.pem
 
 - `auth.oidc.clientSecret` and `auth.ldap.bindPassword` take the two secrets in the values instead, kept by the chart
   in its Secret `<release>-auth`. Either way jukecord reads them as files.
-- `auth.ca` is a Secret or a ConfigMap of yours (`secret` or `configMap`), its `key` holding the certificates in PEM.
-  The directory's connection checks against it (`JUKECORD_LDAP_CA_FILE`), and so do the requests to the provider
-  (`NODE_EXTRA_CA_CERTS`, beside the public authorities).
+- `ca` holds the authority that signed a private provider's or directory's certificate, which every connection
+  jukecord makes then trusts ([your own certificate authorities](#your-own-certificate-authorities)).
 - A provider or a directory on the internet needs no rule; one in the cluster's private ranges needs its rule in
   `auth.egressTo`.
 - Only the pods that log people in get these settings: the one pod, or the edges in split mode, where
   `kubectl -n jukecord exec deploy/jukecord-edge -- jukecord auth test-oidc` (and `test-ldap <name>`) checks them.
+
+## Your own certificate authorities
+
+`ca` names a Secret or a ConfigMap of yours (`ca.secret` or `ca.configMap`, one of them) and the key that holds one or
+more authorities' certificates in PEM (`ca.key`, `ca.crt` by default). The chart mounts it read-only on every jukecord
+pod (the one pod; in split mode the core and every edge) at `/run/jukecord-ca/ca.crt` and sets `JUKECORD_CA_FILE` to
+it, so the database, the bus, the identity provider and the directory may have certificates that authority signed
+([what it covers](INSTALL.md#your-own-certificate-authorities)).
+
+```bash
+kubectl -n jukecord create configmap home-ca --from-file=ca.crt=home-ca.pem
+```
+
+```yaml
+ca:
+  configMap: home-ca
+```
+
+- A Secret or ConfigMap that is missing, or lacks the key, keeps the pod from starting, with an event that names it.
+- The pods restart when `ca` names another Secret, ConfigMap or key. New certificates under the same name apply at
+  the next start: `kubectl -n jukecord rollout restart deploy/jukecord` (in split mode, `deploy/jukecord-core` and
+  `deploy/jukecord-edge`).
+- `JUKECORD_CA_FILE` beside `ca`, and `JUKECORD_LDAP_CA_FILE`, are refused in `env` and `extraEnv`: every certificate
+  goes in the one bundle `ca` names. A database's own `sslrootcert` still decides alone for that connection.
 
 ## Monitoring
 
@@ -378,6 +415,12 @@ ingress:
   requests, by default). `split.core.resources` and `split.edge.resources` set each part's requests and limits.
 - A database and a bus in jukecord's namespace are let through by default (5432, 3306 and 6379); elsewhere they need
   their rules in `networkPolicy.egressTo`.
+- Give the Redis or Valkey a memory limit with `maxmemory-policy allkeys-lfu`, so a flood of keys each used once
+  cannot push out the failed-login counts or the core's lease ([why](INSTALL.md#split-into-services)).
+- Each service reads where it listens, the database's and the bus's addresses, the secrets and the certificate
+  authorities from the environment the chart gives it, and the **Settings** page shows those locked. It saves the
+  others in the database, and every service takes each change in. Its **Restart** restarts the core and every edge,
+  each edge a few seconds apart, and the kubelet starts them again.
 - The `jukecord` command runs in an edge, which asks the core: `kubectl -n jukecord exec deploy/jukecord-edge --
   jukecord link`. The ServiceMonitor scrapes the core and every edge.
 - A one-pod release moves to split mode with its data: [move the SQLite file](#a-database-server) into the database

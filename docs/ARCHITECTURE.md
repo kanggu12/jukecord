@@ -114,14 +114,14 @@ services:
 | Metrics   | one registry per process          | one per service                               | `src/metrics/`                             |
 | Health    | the parts of one process          | each role's own parts                         | `src/app/health.ts`, `src/roles/health.ts` |
 
-**The store.** Sixteen repositories (tracks, queues, history, playlists, sessions, tokens ...) write their SQL by
-hand, with `?` for each value, over an executor (`src/store/sql.ts`): `run`, `get`, `all`, and `transaction`, which
-the repositories' calls inside it join by themselves (the open transaction follows the call through
-`AsyncLocalStorage`). The executors are SQLite's (`sqlite.ts`: write-ahead log, prepared statements kept, one writer
-at a time), PostgreSQL's and MySQL's (`postgres.ts`, `mysql.ts`, over a pool and the shared transaction, retry and
-savepoint logic of `pooled.ts`). What differs between the three is in `dialect.ts`: upserts, the id of a row just made,
-null-safe comparisons, whole-number division, a long address as a unique key (its hash, on the servers). `schema.ts` holds the migrations; `copy.ts`
-copies every row of one database into another; `open.ts` opens the database an address names
+**The store.** Sixteen repositories (tracks, queues, history, playlists, sessions, tokens ...) write their SQL by hand,
+with `?` for each value, over an executor (`src/store/sql.ts`): `run`, `get`, `all`, and `transaction`, which the
+repositories' calls inside it join by themselves (the open transaction follows the call through `AsyncLocalStorage`).
+The executors are SQLite's (`sqlite.ts`: write-ahead log, prepared statements kept, one writer at a time), PostgreSQL's
+and MySQL's (`postgres.ts`, `mysql.ts`, over a pool and the shared transaction, retry and savepoint logic of
+`pooled.ts`). What differs between the three is in `dialect.ts`: upserts, the id of a row just made, null-safe
+comparisons, whole-number division, a long address as a unique key (its hash, on the servers). `schema.ts` holds the
+migrations; `copy.ts` copies every row of one database into another; `open.ts` opens the database an address names
 (`address.ts`), waiting for a server that is not up yet.
 
 **The bus.** In one process, the players' and queues' changes go to their listeners (the live updates, the Discord
@@ -179,41 +179,60 @@ the people jukecord has met (for names in the panel), panel logins and API token
 Migrations are numbered and recorded in the database. SQLite runs them from the first; PostgreSQL and MySQL start at a
 baseline that is schema 8 in one step, and every migration after it is written for the three. A server's migrations
 run under a lock of the server's own, so services starting at once on a new database wait for the first. On servers
-every transaction is serializable, and one the server refuses for another's sake is run again from the start.
+a server's work runs at `READ COMMITTED` in its lane, a check and the write that hangs on it take a turn on their key
+(a lock of the database's own), and a transaction that says neither is serializable, run again when refused
+([why](DECISIONS.md#lanes-at-read-committed-and-a-turn-for-each-check)). A connection lost while jukecord runs fails
+the requests that used it, and the pool opens another when the server answers.
 
 A backup is a consistent copy of the whole database as a SQLite file, while jukecord runs: SQLite's own `VACUUM INTO`,
 or for a server a copy read as one moment's view. So any backup goes back into any kind of database, with
 `jukecord db copy` or the front door's restore.
 
+## Settings
+
+Every setting is defined once, in `src/settings/definitions.ts`, and read through three layers: the environment, then a
+saved value, then the default. What the start needs before the database opens, and the saved secrets, are kept in
+`settings.json` in the data folder; the rest in the database (`host_settings`). The panel's **Settings** page, the
+`jukecord settings` commands and the API change them through one service, checked by the rules the start uses; what
+applies at once is applied in each part that holds it, and the rest waits for a restart, an exit with code 75 that
+Docker, the kubelet, systemd or the program's launcher answers by starting jukecord again. In a split the core keeps
+the settings, and its edges ask it over the bus, the way they ask for everything else; every service takes each change
+in. `JUKECORD_CA_FILE`, read at the start of every role, adds the host's certificate authorities to what every TLS
+connection trusts (`src/authorities.ts`).
+
 ## Logging in
 
-The host (the machine running jukecord) has a token in the data directory, readable by jukecord's user only; its
-command line uses it, and it can make one-time login links for a browser. People log in with Discord (OAuth2, the
-`identify` scope only); whether they are in a server, and with which roles, is asked through the bot and kept for a
-minute. A host can also let people in through an identity provider of its own (OpenID Connect, `src/auth/oidc.ts`) or
-a directory (LDAP, Active Directory, `src/auth/ldap.ts`): these are members, at the level their groups give at each
-login (`src/auth/levels.ts`). Programs use API tokens with a scope. A panel session changes nothing without its CSRF
-token in a header. Sessions, tokens and listening links are rows of the database; login links, failed logins and an
-SSO login under way wait in the shared cache, so they work across edges.
+The host (the machine running jukecord) has a token in the data directory, readable by jukecord's user only; its command
+line uses it, and it can make one-time login links for a browser. People log in with Discord (OAuth2, the `identify`
+scope only); whether they are in a server, and with which roles, is asked through the bot and kept for a minute. A host
+can also let people in through an identity provider of its own (OpenID Connect, `src/auth/oidc.ts`) or a directory
+(LDAP, Active Directory, `src/auth/ldap.ts`): these are members, at the level their groups give at each login
+(`src/auth/levels.ts`); a member's login lasts eight hours, and an SSO login becomes the Discord user its provider names
+only once the person has proved it at Discord. Programs use API tokens with a scope. A panel session changes nothing
+without its CSRF token in a header, and the host can list and end every login. Sessions, tokens and listening links are
+rows of the database; login links, failed logins and an SSO login under way wait in the shared cache, so they work
+across edges.
 
 ## Files
 
-| Path            | What is there                                                                         |
-| :-------------- | :------------------------------------------------------------------------------------ |
-| `src/main.ts`   | starts the parts of a role in order and stops them in order                           |
-| `src/config.ts` | the settings, every problem reported at once                                          |
-| `src/app/`      | the actions, who may do what, the self-check, readiness, the watches above            |
-| `src/core/`     | queue, player, lanes, clock, event bus                                                |
-| `src/media/`    | yt-dlp, ffmpeg, the cache, preparing and prefetching                                  |
-| `src/discord/`  | the bot, slash commands, cards, voice                                                 |
-| `src/web/`      | the API table, routes, logins, live updates, OpenAPI                                  |
-| `src/auth/`     | logging in through OIDC and LDAP, and their settings                                  |
-| `src/store/`    | the store, its executors and dialects, the migrations, copying a database             |
-| `src/bus/`      | the bus between services: transports, commands, events, presence, heartbeat           |
-| `src/cache/`    | the shared cache, in memory or on Redis or Valkey                                     |
-| `src/metrics/`  | the registry, the figures of each part, who may read `/metrics`                       |
-| `src/roles/`    | the core's and the edge's own parts, and the core's ports                             |
-| `src/cli/`      | the `jukecord` command, and `jukecord db`                                             |
-| `panel/`        | the browser app (TypeScript, bundled with esbuild)                                    |
-| `deploy/`       | the Dockerfile, the Helm chart, the split's Compose files, monitoring, the kind tests |
-| `tests/`        | unit, integration, packaging, UI, login, split and performance tests                  |
+| Path                 | What is there                                                                         |
+| :------------------- | :------------------------------------------------------------------------------------ |
+| `src/main.ts`        | starts the parts of a role in order and stops them in order                           |
+| `src/config.ts`      | the settings, every problem reported at once                                          |
+| `src/app/`           | the actions, who may do what, the self-check, readiness, the watches above            |
+| `src/core/`          | queue, player, lanes, clock, event bus                                                |
+| `src/media/`         | yt-dlp, ffmpeg, the cache, preparing and prefetching                                  |
+| `src/discord/`       | the bot, slash commands, cards, voice                                                 |
+| `src/web/`           | the API table, routes, logins, live updates, OpenAPI                                  |
+| `src/auth/`          | logging in through OIDC and LDAP, and their settings                                  |
+| `src/settings/`      | the settings' table, their layers, `settings.json`, the restart and the database move |
+| `src/authorities.ts` | the host's certificate authorities, trusted by every TLS connection                   |
+| `src/store/`         | the store, its executors and dialects, the migrations, copying a database             |
+| `src/bus/`           | the bus between services: transports, commands, events, presence, heartbeat           |
+| `src/cache/`         | the shared cache, in memory or on Redis or Valkey                                     |
+| `src/metrics/`       | the registry, the figures of each part, who may read `/metrics`                       |
+| `src/roles/`         | the core's and the edge's own parts, and the core's ports                             |
+| `src/cli/`           | the `jukecord` command, and `jukecord db`                                             |
+| `panel/`             | the browser app (TypeScript, bundled with esbuild)                                    |
+| `deploy/`            | the Dockerfile, the Helm chart, the split's Compose files, monitoring, the kind tests |
+| `tests/`             | unit, integration, packaging, UI, login, split and performance tests                  |
