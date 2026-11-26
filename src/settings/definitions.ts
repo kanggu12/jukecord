@@ -87,9 +87,10 @@ export interface SettingDefinition {
   readonly secret?: boolean;
   /**
    * Says where a saved secret goes (a directory's address, its encryption, its certificates, the account; a provider's
-   * issuer and client), or names a program or a file jukecord runs or reads: kept in settings.json, which only the
-   * host's own process writes, never in the database, whose rows another holder of its password could write (an
-   * edge, a copy from another jukecord). In a split it comes from each service's environment, as settings.json's do.
+   * issuer and client), names a program or a file jukecord runs or reads, or turns off a guard jukecord keeps (the
+   * refusal to fetch from private network addresses): kept in settings.json, which only the host's own process writes,
+   * never in the database, whose rows another holder of its password could write (an edge, a copy from another
+   * jukecord). In a split it comes from each service's environment, as settings.json's do.
    */
   readonly guarded?: boolean;
   /** Also read from the file <NAME>_FILE names (a Docker or Kubernetes secret). */
@@ -911,6 +912,9 @@ export const SETTINGS: readonly SettingDefinition[] = [
     words: ['true', 'false'],
     applies: 'restart',
     layer: 'runtime',
+    // It turns off the guard that keeps the fetches of tracks off the private networks jukecord's machine reaches:
+    // settings.json's alone (see guarded), never a row another holder of the database's password could write.
+    guarded: true,
     roles: CORE,
     label: { en: 'Private network addresses', ko: '사설망 주소' },
     help: {

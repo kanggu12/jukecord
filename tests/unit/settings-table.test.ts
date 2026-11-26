@@ -104,7 +104,9 @@ describe('the settings table', () => {
       (setting) => setting.name,
     );
     assert.ok(paths.includes('JUKECORD_YTDLP') && paths.includes('JUKECORD_LDAP_CA_FILE'));
-    for (const name of [...steering, ...paths]) {
+    // A guard turned off: fetching from private network addresses would let a row open them to every track's address.
+    const guards = ['JUKECORD_ALLOW_PRIVATE_ADDRESSES'];
+    for (const name of [...steering, ...paths, ...guards]) {
       const setting = definition(name);
       assert.notEqual(storedIn(setting), 'database', `${name} is kept in the database`);
       // Saved where settings.json is, the environment's alone in a split (as every one of settings.json's).
