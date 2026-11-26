@@ -12,6 +12,7 @@
  * The client (`@redis/client`, pure JavaScript) is loaded only when a bus address is set, so one process never loads
  * it. Valkey speaks the same protocol; `valkey://` and `valkeys://` are taken as `redis://` and `rediss://` (TLS).
  */
+import { withAuthorityHint } from '../authorities.ts';
 import type { Logger } from '../log.ts';
 import type { BusTransport } from './transport.ts';
 
@@ -280,7 +281,9 @@ export async function connectRedis(
       server: shown,
       connection: options.name,
       times: errors,
-      reason: error instanceof Error ? error.message || error.constructor.name : String(error),
+      // A certificate from an authority jukecord does not trust says the setting that adds one (src/authorities.ts).
+      reason:
+        error instanceof Error ? withAuthorityHint(error.message || error.constructor.name, error) : String(error),
     });
     errors = 0;
     toldAt = Date.now();
@@ -298,7 +301,9 @@ export async function connectRedis(
     await Promise.race([client.connect(), late]);
   } catch (error) {
     client.destroy();
-    throw new Error(`jukecord could not reach Redis at ${shown}: ${error instanceof Error ? error.message : error}`);
+    throw new Error(
+      `jukecord could not reach Redis at ${shown}: ${error instanceof Error ? withAuthorityHint(error.message, error) : error}`,
+    );
   } finally {
     clearTimeout(timer);
   }

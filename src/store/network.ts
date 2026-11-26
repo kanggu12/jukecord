@@ -3,8 +3,10 @@
  * failed in words a person can act on, and which failures are worth waiting out at a start (the database still
  * starting, its name not known yet in a cluster) and which are not (a wrong password).
  */
+
 import fs from 'node:fs';
 import type { ConnectionOptions } from 'node:tls';
+import { untrustedAuthority, withoutNodeAdvice } from '../authorities.ts';
 import type { ServerAddress } from './address.ts';
 
 /**
@@ -117,8 +119,11 @@ export function connectionFailure(error: unknown, address: ServerAddress): Conne
       `${code} ${message}`,
     )
   ) {
+    // Node's advice to run it with --use-system-ca left out; an authority of the host's own is named in the address
+    // (sslrootcert) for this database alone, or in JUKECORD_CA_FILE for every connection (src/authorities.ts).
+    const own = untrustedAuthority(error) ? ', or JUKECORD_CA_FILE for an authority of your own' : '';
     return new ConnectionError(
-      `TLS with ${where(address)} failed: ${message} (see sslmode and sslrootcert in the address)`,
+      `TLS with ${where(address)} failed: ${withoutNodeAdvice(message)} (see sslmode and sslrootcert in the address${own})`,
       false,
       { cause: error },
     );

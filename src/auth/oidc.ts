@@ -10,8 +10,10 @@
  * any process serving browsers. A cookie ties it to the browser that left: a link with someone else's state logs
  * nobody in. Nothing of the provider's (no token, no claim) is kept once the login is made.
  */
+
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as client from 'openid-client';
+import { withAuthorityHint } from '../authorities.ts';
 import type { Cache } from '../cache/cache.ts';
 import type { Logger } from '../log.ts';
 import { claimAt, claimValues } from './levels.ts';
@@ -105,8 +107,10 @@ function unreachable(error: unknown): boolean {
 function said(error: unknown): string {
   if (error instanceof client.ResponseBodyError || error instanceof client.AuthorizationResponseError)
     return error.error_description ? `${error.error}: ${error.error_description}` : error.error;
-  if (error instanceof Error && error.cause instanceof Error) return `${error.message} (${error.cause.message})`;
-  return error instanceof Error ? error.message : String(error);
+  // A certificate from an authority jukecord does not trust says the setting that adds one (src/authorities.ts).
+  if (error instanceof Error && error.cause instanceof Error)
+    return withAuthorityHint(`${error.message} (${error.cause.message})`, error);
+  return error instanceof Error ? withAuthorityHint(error.message, error) : String(error);
 }
 
 export class OidcLogin {

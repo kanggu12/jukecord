@@ -84,6 +84,47 @@ export function trustAuthorities(authorities: Authorities): number {
   return authorities.certificates.length;
 }
 
+// The codes Node gives a certificate it cannot trace to an authority it trusts: the failures JUKECORD_CA_FILE answers
+// (an expired certificate, or one made out to another name, is another matter, and is said as it is).
+const NO_AUTHORITY = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+]);
+
+// Node's own advice for such a certificate (Node 23.8 and later add it to the message): a flag of Node's, which a host
+// of jukecord does not pass; the setting that does the same is said in its place.
+const NODE_ADVICE = /; if the root CA is installed locally, try running Node\.js with --use-system-ca/g;
+
+/** Whether an error, or one that caused it (fetch's "fetch failed" wraps the TLS error), is such a certificate. */
+export function untrustedAuthority(error: unknown): boolean {
+  // Down the causes, a few deep at most: a wrapper's wrapper is as far as any client goes.
+  let at: unknown = error;
+  for (let depth = 0; at instanceof Error && depth < 5; depth += 1) {
+    const code = (at as Error & { code?: unknown }).code;
+    if (typeof code === 'string' && NO_AUTHORITY.has(code)) return true;
+    at = at.cause;
+  }
+  return false;
+}
+
+/** A failure's words without Node's advice to run it with --use-system-ca. */
+export function withoutNodeAdvice(text: string): string {
+  return text.replace(NODE_ADVICE, '');
+}
+
+/**
+ * A failure's words as jukecord says them: Node's advice taken out, and, for a certificate that leads to no authority
+ * jukecord trusts, what to do about it in jukecord's own setting.
+ */
+export function withAuthorityHint(text: string, error: unknown): string {
+  const plain = withoutNodeAdvice(text);
+  if (!untrustedAuthority(error)) return plain;
+  return `${plain}; to trust the authority that signed it, name its certificate in JUKECORD_CA_FILE`;
+}
+
 /** How the start and the self-check say it: "2 extra authorities from /run/jukecord-ca/ca.crt". */
 export function describeAuthorities(authorities: Authorities | null): string {
   if (authorities === null) return "Node's own";
