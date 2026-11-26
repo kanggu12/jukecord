@@ -26,6 +26,7 @@ import { SkipVotes } from './app/votes.ts';
 import { LoginChecks } from './auth/check.ts';
 import { LdapLogin } from './auth/ldap.ts';
 import { OidcLogin } from './auth/oidc.ts';
+import { describeAuthorities, trustAuthorities } from './authorities.ts';
 import { CoreBeat, type CoreFacts } from './bus/beat.ts';
 import { serviceId } from './bus/commands.ts';
 import { RedisTransport } from './bus/redis.ts';
@@ -112,6 +113,10 @@ async function main(): Promise<number> {
     ],
   });
   for (const warning of config.warnings) log.warn(warning);
+  // The host's own certificate authorities (JUKECORD_CA_FILE), trusted from here on by every TLS connection this
+  // process makes, in every role: the database's, the bus's, the identity provider's, the directory's, Discord's
+  // (src/authorities.ts). Before anything connects.
+  if (config.ca) trustAuthorities(config.ca);
   log.info(`starting jukecord ${VERSION}`, {
     data: config.dataDir,
     // Where the database is, never with its user or password.
@@ -119,6 +124,8 @@ async function main(): Promise<number> {
     // An edge never logs in to Discord: the core does.
     discord: config.role === 'edge' ? 'at the core' : config.discord.token ? 'yes' : 'browser-only',
     ...(config.role !== 'all' ? { role: config.role } : {}),
+    // How many authorities the host added, and from where.
+    ...(config.ca ? { authorities: describeAuthorities(config.ca) } : {}),
   });
 
   // Every number jukecord reports, for /metrics. A number that cannot be read is said in the log once per reason (a
