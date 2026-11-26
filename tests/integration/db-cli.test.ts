@@ -4,6 +4,8 @@
  * old backup copied without being changed, and no password in anything they print.
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,6 +31,23 @@ async function db(
     (error ? err : out).push(text),
   );
   return { code, out: out.join('\n'), err: err.join('\n') };
+}
+
+// Makes a file immutable (chattr +i) or writable again, as root or through sudo without a password; whether it could.
+function immutable(file: string, on: boolean): boolean {
+  const flag = on ? '+i' : '-i';
+  for (const [command, args] of [
+    ['chattr', [flag, file]],
+    ['sudo', ['-n', 'chattr', flag, file]],
+  ] as const) {
+    try {
+      execFileSync(command, args, { stdio: 'ignore' });
+      return true;
+    } catch {
+      // Not allowed this way (or not there): the next way, or none.
+    }
+  }
+  return false;
 }
 
 // A SQLite file at the latest schema with a row in every table.
@@ -113,6 +132,98 @@ describe('jukecord db', () => {
     );
   });
 
+  it('copies from a backup and looks at it without changing it: its bytes, its mode, its journal', async (t) => {
+    // A backup as jukecord writes one (VACUUM INTO: a rollback journal, no log beside it), kept read-only.
+    const live = await filled('source-live.db');
+    const store = await Store.open(live);
+    const backup = path.join(dir, 'source-backup.db');
+    await store.backup(backup);
+    await store.close();
+    fs.chmodSync(backup, 0o444);
+    const state = () => ({
+      bytes: crypto.createHash('sha256').update(fs.readFileSync(backup)).digest('hex'),
+      mode: fs.statSync(backup).mode & 0o777,
+      // Bytes 18 and 19 of the header: 1 and 1 for a rollback journal, 2 and 2 for a write-ahead log.
+      journal: [...fs.readFileSync(backup).subarray(18, 20)],
+      beside: fs.readdirSync(dir).filter((name) => name.startsWith('source-backup.db')),
+    });
+    const before = state();
+    assert.deepEqual([before.mode, before.journal, before.beside], [0o444, [1, 1], ['source-backup.db']]);
+    const copied = await db(['copy', `sqlite:${backup}`, `sqlite:${path.join(dir, 'source-copy.db')}`]);
+    assert.equal(copied.code, 0, copied.err);
+    assert.equal((await db(['status', `sqlite:${backup}`])).code, 0);
+    assert.deepEqual(state(), before);
+    // A backup nobody may write at all, not even root (immutable): copied all the same. Where the system lets this
+    // user make a file immutable: root, or sudo without a password (CI's runners), on a file system with the flag.
+    if (!immutable(backup, true)) {
+      t.diagnostic('chattr +i is not allowed here; the immutable backup is not tried');
+      return;
+    }
+    try {
+      const copiedAgain = await db(['copy', `sqlite:${backup}`, `sqlite:${path.join(dir, 'source-copy-2.db')}`]);
+      assert.equal(copiedAgain.code, 0, copiedAgain.err);
+      assert.deepEqual(state(), before);
+    } finally {
+      immutable(backup, false);
+    }
+  });
+
+  it('says a failure on one line with what it is about, and leaves no target file it made', async () => {
+    // A damaged source: a queued track that no track row has (written with the foreign keys off).
+    const broken = await filled('broken.db');
+    const raw = new DatabaseSync(broken);
+    raw.exec('PRAGMA foreign_keys = OFF');
+    raw.exec(
+      "INSERT INTO queue_items (guild_id, position, track_id, added_by, added_at) VALUES ('g', 99, 99999, NULL, 1)",
+    );
+    raw.close();
+    const target = path.join(dir, 'broken-copy.db');
+    const copied = await db(['copy', `sqlite:${broken}`, `sqlite:${target}`]);
+    assert.equal(copied.code, 1);
+    assert.match(copied.err, /^jukecord db: copying into SQLite \(.*broken-copy\.db\): .*FOREIGN KEY/);
+    assert.equal(copied.err.split('\n').length, 1);
+    assert.deepEqual(
+      fs.readdirSync(dir).filter((name) => name.startsWith('broken-copy.db')),
+      [],
+    );
+    // A file that is no database at all, looked at and copied from: its name and SQLite's reason, nothing made.
+    const junk = path.join(dir, 'junk.db');
+    fs.writeFileSync(junk, 'not a database at all, but long enough to be read as a header by SQLite\n'.repeat(4));
+    const looked = await db(['status', `sqlite:${junk}`]);
+    assert.deepEqual([looked.code, looked.err], [1, `jukecord db: SQLite (${junk}): file is not a database`]);
+    const fromJunk = await db(['copy', `sqlite:${junk}`, `sqlite:${path.join(dir, 'from-junk.db')}`]);
+    assert.equal(fromJunk.code, 1);
+    assert.match(fromJunk.err, /^jukecord db: the source, SQLite \(.*junk\.db\): file is not a database$/);
+    assert.equal(fs.existsSync(path.join(dir, 'from-junk.db')), false);
+  });
+
+  it('makes every SQLite file it writes this user’s alone, whatever the umask of the shell it runs in', async () => {
+    const was = process.umask(0o022);
+    try {
+      const from = await filled('modes-from.db');
+      const to = path.join(dir, 'modes-to.db');
+      const copied = await db(['copy', `sqlite:${from}`, `sqlite:${to}`]);
+      assert.equal(copied.code, 0, copied.err);
+      // The copy, and the log files beside it while it is open (SQLite gives them the database's mode).
+      for (const name of fs.readdirSync(dir).filter((entry) => entry.startsWith('modes-to.db'))) {
+        assert.equal((fs.statSync(path.join(dir, name)).mode & 0o777).toString(8), '600', name);
+      }
+      // Backups, the main thread's and the worker's.
+      const store = await Store.open(from);
+      try {
+        await store.backup(path.join(dir, 'modes-backup.db'));
+        await store.backupAside(path.join(dir, 'modes-backup-aside.db'));
+      } finally {
+        await store.close();
+      }
+      for (const name of ['modes-backup.db', 'modes-backup-aside.db']) {
+        assert.equal((fs.statSync(path.join(dir, name)).mode & 0o777).toString(8), '600', name);
+      }
+    } finally {
+      process.umask(was);
+    }
+  });
+
   it('says a typing mistake with 2, a database it cannot reach with 3, never with a password', async () => {
     const said = await Promise.all([
       db([]),
@@ -121,12 +232,17 @@ describe('jukecord db', () => {
       db(['status', '--replace']),
       db(['status', 'postgres://music:hunter2@db']),
       db(['status', '--frob']),
+      // Passwords not percent-encoded, with / (base64), ? and # in them: no address, and still no password said.
+      db(['status', 'postgres://music:hunt/er2@db/j']),
+      db(['status', 'mysql://music:hu?nt#er2@db/j']),
     ]);
     assert.deepEqual(
       said.map((answer) => answer.code),
-      [2, 2, 2, 2, 2, 2],
+      [2, 2, 2, 2, 2, 2, 2, 2],
     );
     assert.match(said[4]?.err ?? '', /"postgres:\/\/music:…@db" names no database/);
+    assert.match(said[6]?.err ?? '', /"postgres:\/\/music:…@db\/j"/);
+    for (const answer of said.slice(6)) assert.doesNotMatch(answer.err, /hunt|er2|hu\?nt/);
     // A certificate file that is not there: a database not reachable, said at once (waiting would not mend it).
     const unreachable = await db([
       'status',
@@ -162,6 +278,19 @@ eachDatabase('jukecord db on a database', (database) => {
     } finally {
       await a.close();
       await b.close();
+    }
+  });
+
+  it('writes a backup of the database this user’s alone, whatever the umask', async () => {
+    const tag = database.name.replace(/[^a-z0-9]+/gi, '-');
+    const was = process.umask(0o022);
+    try {
+      const store = await database.open();
+      const target = path.join(dir, `backup-mode-${tag}.db`);
+      await store.backupAside(target);
+      assert.equal((fs.statSync(target).mode & 0o777).toString(8), '600');
+    } finally {
+      process.umask(was);
     }
   });
 });

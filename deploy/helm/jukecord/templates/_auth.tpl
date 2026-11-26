@@ -306,9 +306,10 @@ misspelt name, keeps the pod from starting with an event that names it) and of t
 {{- end }}
 {{- end -}}
 
-{{/* A changed setting or secret of the values restarts the pods that log people in, which read them only at start. */}}
+{{/* A changed setting or secret of the values restarts the pods that log people in, which read them only at start
+(salted: see jukecord.checksumSalt). */}}
 {{- define "jukecord.authChecksum" -}}
-checksum/auth: {{ toJson .Values.auth | sha256sum | trunc 16 }}
+checksum/auth: {{ include "jukecord.saltedSum" (list . (toJson .Values.auth)) }}
 {{- end -}}
 
 {{/* The rules out to the identity provider and the directory, for the pods that log people in (auth.egressTo). */}}

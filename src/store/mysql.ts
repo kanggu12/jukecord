@@ -9,10 +9,12 @@
  * - sql_mode: ANSI_QUOTES (a double-quoted word is a name, as in SQLite and PostgreSQL), PIPES_AS_CONCAT (|| joins
  *   text instead of meaning OR), ONLY_FULL_GROUP_BY, and the strict modes (a value that does not fit is refused, not
  *   cut short);
- * - transactions at SERIALIZABLE (see src/store/pooled.ts), a wait for a row given up after 10 s, a statement after
+ * - statements at READ COMMITTED, as PostgreSQL runs them, and each transaction at SERIALIZABLE unless it asks for
+ *   READ COMMITTED or a snapshot (see src/store/pooled.ts); a wait for a row given up after 10 s, a statement after
  *   30 s (MySQL's max_execution_time, MariaDB's max_statement_time);
  * - the connection in utf8mb4 with the utf8mb4_bin collation, as jukecord's tables are.
  */
+import { createHash } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import type { ServerAddress } from './address.ts';
 import { connectionFailure, tlsOptions } from './network.ts';
@@ -24,6 +26,8 @@ import {
   PooledExecutor,
   type PoolOptions,
   STATEMENT_TIMEOUT_MS,
+  TURN_WAIT_MS,
+  type Turn,
 } from './pooled.ts';
 import type { DatabaseServer, SqlRow, SqlValue } from './sql.ts';
 
@@ -142,17 +146,8 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
       user: address.user,
       ...(address.password === null ? {} : { password: address.password }),
       database: address.database,
-      // TLS as the address asks: mysql2 checks the chain with rejectUnauthorized and the host's name with
-      // verifyIdentity (see src/store/network.ts for what each mode means).
-      ...(tls === null
-        ? {}
-        : {
-            ssl: {
-              ...pick(tls.options),
-              rejectUnauthorized: tls.verify !== 'none',
-              verifyIdentity: tls.verify === 'full',
-            },
-          }),
+      // TLS as the address asks (see mysqlSsl()).
+      ...(tls === null ? {} : { ssl: mysqlSsl(tls) }),
       connectionLimit: size,
       maxIdle: size,
       // An unused connection is closed after half a minute, so a quiet jukecord holds none open for long.
@@ -260,16 +255,28 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
 
   protected begin(mode: 'serializable' | 'snapshot' | 'latest'): readonly string[] {
     // A snapshot: REPEATABLE READ for this one transaction (plain reads under SERIALIZABLE would lock every row they
-    // read), its view taken at once, reads only. A migration: READ COMMITTED for it. Every other one: the
-    // connection's SERIALIZABLE.
+    // read), its view taken at once, reads only. READ COMMITTED: the connection's own level. Every other one:
+    // SERIALIZABLE for this one transaction (SET TRANSACTION without SESSION is for the next one only).
     if (mode === 'snapshot') {
       return [
         'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',
         'START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY',
       ];
     }
-    if (mode === 'latest') return ['SET TRANSACTION ISOLATION LEVEL READ COMMITTED', 'START TRANSACTION'];
-    return ['START TRANSACTION'];
+    if (mode === 'latest') return ['START TRANSACTION'];
+    return ['SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', 'START TRANSACTION'];
+  }
+
+  protected turn(key: string): Turn {
+    // A named lock, which is the connection's and outlives the transaction: given back after it ends. A name is 64
+    // characters at most: the key's SHA-256, cut short. GET_LOCK says 1 when it has the lock, 0 when it waited for
+    // it in vain.
+    const name = `jukecord.${createHash('sha256').update(key).digest('hex').slice(0, 40)}`;
+    return {
+      take: { sql: 'SELECT GET_LOCK(?, ?) AS turn', params: [name, Math.ceil(TURN_WAIT_MS / 1000)] },
+      taken: (answer) => Number(answer.rows[0]?.turn) === 1,
+      give: { sql: 'SELECT RELEASE_LOCK(?) AS given', params: [name] },
+    };
   }
 
   protected refused(error: unknown): boolean {
@@ -295,23 +302,33 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
   }
 }
 
-// The statements that set a connection up (see the module comment): MariaDB names the transaction isolation and the
-// statement time limit (in seconds) differently.
+// The statements that set a connection up (see the module comment): MariaDB names the statement time limit (in
+// seconds) differently. READ COMMITTED is the connection's level, for its statements outside a transaction (as
+// PostgreSQL's are: no locks on the gaps between rows, which another server's rows wait for) and for the transactions
+// that ask for it; a serializable one sets its own (see begin()).
 function setupStatements(mariadb: boolean, statementTimeoutMs: number): readonly string[] {
   const limit = mariadb
     ? `SESSION max_statement_time = ${statementTimeoutMs / 1000}`
     : `SESSION max_execution_time = ${Math.round(statementTimeoutMs)}`;
   return [
     `SET SESSION sql_mode = '${SQL_MODE}', SESSION innodb_lock_wait_timeout = ${Math.ceil(LOCK_TIMEOUT_MS / 1000)}, ${limit}`,
-    'SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE',
+    'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED',
   ];
 }
 
-// The certificate options of Node's TLS that mysql2 takes (ca, cert, key), without the checks it names its own way.
-function pick(options: { ca?: unknown; cert?: unknown; key?: unknown }): Record<string, unknown> {
+/**
+ * mysql2's TLS options for an address's (see src/store/network.ts for what each mode means): the certificate files
+ * that were given (ca, cert, key) and nothing in place of those that were not, so without a root certificate Node's
+ * default authorities check the server (with what JUKECORD_CA_FILE adds); the chain checked with
+ * rejectUnauthorized and the host's name with verifyIdentity, mysql2's words for them.
+ */
+export function mysqlSsl(tls: NonNullable<ReturnType<typeof tlsOptions>>): Record<string, unknown> {
+  const { ca, cert, key } = tls.options;
   return {
-    ...(options.ca === undefined ? {} : { ca: options.ca }),
-    ...(options.cert === undefined ? {} : { cert: options.cert }),
-    ...(options.key === undefined ? {} : { key: options.key }),
+    ...(ca === undefined ? {} : { ca }),
+    ...(cert === undefined ? {} : { cert }),
+    ...(key === undefined ? {} : { key }),
+    rejectUnauthorized: tls.verify !== 'none',
+    verifyIdentity: tls.verify === 'full',
   };
 }

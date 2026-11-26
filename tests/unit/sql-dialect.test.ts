@@ -4,10 +4,15 @@
  * What each statement does on each database is the store tests' part (tests/support/databases.ts).
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
+import * as tlsModule from 'node:tls';
 import type { ServerAddress } from '../../src/store/address.ts';
 import { mysqlDialect, POSTGRES, SQLITE } from '../../src/store/dialect.ts';
-import { splitStatements } from '../../src/store/mysql.ts';
+import { mysqlSsl, splitStatements } from '../../src/store/mysql.ts';
 import { ConnectionError, connectionFailure, tlsOptions } from '../../src/store/network.ts';
 import { numberPlaceholders } from '../../src/store/postgres.ts';
 import { isUniqueViolation, statementKind } from '../../src/store/sql.ts';
@@ -80,6 +85,17 @@ describe('the dialects', () => {
     assert.deepEqual(POSTGRES.bySource('t', 's').params, ['s', 's']);
     assert.match(POSTGRES.bySource('t', 's').where, /^t\.source_hash = sha256\(.*\) AND t\.source = \?$/);
     assert.equal(mysqlDialect(true).bySource('t', 's').where, 't.source_hash = UNHEX(SHA2(?, 256)) AND t.source = ?');
+  });
+
+  it('read an UPDATE’s table through the index it names on MySQL and MariaDB only', () => {
+    assert.equal(SQLITE.throughIndex('queue_items', 'queue_items_by_guild'), 'queue_items');
+    assert.equal(POSTGRES.throughIndex('queue_items', 'queue_items_by_guild'), 'queue_items');
+    for (const mariadb of [false, true]) {
+      assert.equal(
+        mysqlDialect(mariadb).throughIndex('queue_items', 'queue_items_by_guild'),
+        'queue_items FORCE INDEX (queue_items_by_guild)',
+      );
+    }
   });
 });
 
@@ -158,6 +174,20 @@ describe('the drivers’ errors', () => {
     assert.equal(said({ code: '57P03' })?.transient, true);
     assert.equal(said({ errno: 1045 })?.transient, false);
     assert.equal(said({}, 'self-signed certificate in certificate chain')?.transient, false);
+    // A connection lost in use: ended by the server (an administrator, a restart), cut, or one of the drivers' own
+    // words for a connection that failed before; and an answer that never came.
+    for (const [fields, message] of [
+      [{ code: '57P01' }, 'terminating connection due to administrator command'],
+      [{ code: '25P03' }, 'terminating connection due to idle-in-transaction timeout'],
+      [{ code: '08006' }, 'connection failure'],
+      [{ errno: 1927 }, 'Connection was killed'],
+      [{}, 'Connection terminated unexpectedly'],
+      [{}, 'Client has encountered a connection error and is not queryable'],
+      [{}, "Can't add new command when connection is in closed state"],
+      [{}, 'Query read timeout'],
+    ] as const) {
+      assert.ok(said(fields, message) instanceof ConnectionError, message);
+    }
     // A statement's own error is no connection failure.
     assert.equal(said({ code: '23505' }), null);
     // Nothing of it carries the password.
@@ -201,6 +231,17 @@ describe('the drivers’ errors', () => {
   });
 });
 
+// Whether a TLS server of a throwaway authority can be made and the default authorities set here: openssl to make
+// the certificates, and a Node that can set its default list.
+const TLS_PROBE = (() => {
+  try {
+    execFileSync('openssl', ['version'], { stdio: 'ignore' });
+  } catch {
+    return false;
+  }
+  return typeof (tlsModule as { setDefaultCACertificates?: unknown }).setDefaultCACertificates === 'function';
+})();
+
 describe('TLS from the address', () => {
   const at = (tls: ServerAddress['tls']): ServerAddress => ({
     kind: 'mysql',
@@ -232,4 +273,115 @@ describe('TLS from the address', () => {
     const address = { ...at('verify-full'), tlsFiles: { ca: '/nowhere/ca.pem', cert: null, key: null } };
     assert.throws(() => tlsOptions(address), /root certificate \(sslrootcert\) file \/nowhere\/ca\.pem/);
   });
+
+  it('passes no authority of its own without sslrootcert, to either driver, and the one named with it', () => {
+    // Without one, no `ca` at all (not even an empty or undefined one): Node's default authorities check the server,
+    // with what JUKECORD_CA_FILE adds to them (an empty list would replace them all).
+    for (const mode of ['require', 'verify-ca', 'verify-full'] as const) {
+      const tls = tlsOptions(at(mode));
+      assert.ok(tls);
+      assert.equal('ca' in tls.options, false, mode);
+      assert.equal('ca' in mysqlSsl(tls), false, mode);
+    }
+    // With one, that authority only, to both.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-ca-'));
+    try {
+      const file = path.join(dir, 'ca.pem');
+      fs.writeFileSync(file, '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n');
+      const tls = tlsOptions({ ...at('verify-full'), tlsFiles: { ca: file, cert: null, key: null } });
+      assert.ok(tls);
+      assert.match(String(tls.options.ca), /BEGIN CERTIFICATE/);
+      assert.equal(mysqlSsl(tls).ca, tls.options.ca);
+      assert.deepEqual([mysqlSsl(tls).rejectUnauthorized, mysqlSsl(tls).verifyIdentity], [true, true]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('checks a server against the default authorities, with one added at the start, when it passes none', {
+    skip: TLS_PROBE ? false : 'needs openssl and tls.setDefaultCACertificates (Node 24.5 and later)',
+  }, async () => {
+    // What each driver hands Node without sslrootcert: pg no `ca` at all, mysql2 `ca: undefined` (its own code). Both
+    // must reach the default list as tls.setDefaultCACertificates (JUKECORD_CA_FILE) leaves it.
+    const tls = tlsModule;
+    const defaults = tls.getCACertificates('default');
+    const { ca, key, cert } = testCertificates();
+    const server = tls.createServer({ key, cert }, (socket) => socket.end());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const reach = (options: tlsModule.ConnectionOptions) =>
+      new Promise<string>((resolve) => {
+        const socket = tls.connect({ host: '127.0.0.1', port, servername: 'localhost', ...options }, () => {
+          resolve(socket.authorized ? 'authorized' : 'not authorized');
+          socket.destroy();
+        });
+        socket.on('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? error.message));
+      });
+    try {
+      assert.equal(await reach({}), 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
+      tls.setDefaultCACertificates([...defaults, ca]);
+      assert.equal(await reach({}), 'authorized');
+      assert.equal(await reach({ secureContext: tls.createSecureContext({ ca: undefined }) }), 'authorized');
+    } finally {
+      tls.setDefaultCACertificates(defaults);
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
+
+// A throwaway authority and a certificate for "localhost" it signed, made with openssl (in a folder removed after).
+function testCertificates(): { ca: string; key: string; cert: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-tls-'));
+  const run = (...args: string[]) => execFileSync('openssl', args, { cwd: dir, stdio: 'ignore' });
+  try {
+    run(
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      'ca.key',
+      '-out',
+      'ca.pem',
+      '-days',
+      '1',
+      '-subj',
+      '/CN=jukecord test',
+    );
+    run(
+      'req',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      'server.key',
+      '-out',
+      'server.csr',
+      '-subj',
+      '/CN=localhost',
+    );
+    fs.writeFileSync(path.join(dir, 'ext.cnf'), 'subjectAltName=DNS:localhost\n');
+    run(
+      'x509',
+      '-req',
+      '-in',
+      'server.csr',
+      '-CA',
+      'ca.pem',
+      '-CAkey',
+      'ca.key',
+      '-CAcreateserial',
+      '-out',
+      'server.pem',
+      '-days',
+      '1',
+      '-extfile',
+      'ext.cnf',
+    );
+    const read = (name: string) => fs.readFileSync(path.join(dir, name), 'utf8');
+    return { ca: read('ca.pem'), key: read('server.key'), cert: read('server.pem') };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}

@@ -22,6 +22,20 @@ export class StoreError extends Error {
 /** A value bound to one of a statement's placeholders (`?`). */
 export type SqlValue = string | number | bigint | null | Uint8Array;
 
+/**
+ * Refuses a statement's text values that hold the NUL character (U+0000), as a StoreError (the panel's "invalid"),
+ * the same on every database: SQLite would keep the text only up to it, PostgreSQL refuses it with an error of its
+ * own (jukecord's trouble, a 500), MySQL keeps it whole. No text jukecord keeps (a name, a title, a token's label)
+ * has a use for it. Every executor asks this of each statement's values before it runs.
+ */
+export function refuseNul(params: readonly SqlValue[]): void {
+  for (const value of params) {
+    if (typeof value === 'string' && value.includes('\u0000')) {
+      throw new StoreError('text cannot hold the NUL character (U+0000)');
+    }
+  }
+}
+
 /** A row as the database returns it, by column name. */
 export type SqlRow = Readonly<Record<string, SqlValue>>;
 
@@ -52,12 +66,29 @@ export interface TransactionOptions {
    */
   readonly snapshot?: boolean;
   /**
-   * Each statement sees what other transactions committed before it (READ COMMITTED), not one moment's view: for the
-   * schema's migration, made under a lock, which must see the tables another jukecord made while this one waited for
-   * it (a serializable transaction's view is taken by its first statement, the wait for the lock). Ignored by SQLite,
-   * whose transactions take turns.
+   * Each statement sees what other transactions committed before it (READ COMMITTED), not one moment's view, and the
+   * database never refuses the transaction for another's sake (a serializable one may be, and is run again). For
+   * work whose writers take turns already, or that a check of its own does not hang on:
+   * - a server's own changes (its queue, history and player state), which its lane runs one at a time (see
+   *   src/core/lanes.ts; in a split, only the core runs them);
+   * - a row written and read back (an upsert, a new row), which one statement keeps whole;
+   * - the schema's migration, made under a lock, which must see the tables another jukecord made while this one
+   *   waited for it (a serializable transaction's view is taken by its first statement, the wait for the lock).
+   * A check and the write that hangs on it, where no lane orders the writers, takes a turn instead (see `turn`). Ignored
+   * by SQLite, whose transactions take turns.
    */
   readonly latest?: boolean;
+  /**
+   * A key the transaction takes turns on with every other transaction of the same key, on the database itself (so the
+   * jukecords of one database take turns too: a core and its edges): for a check and the write that hangs on it where
+   * no lane orders the writers, when everyone whose write could break the check takes the same turn (a login's likes
+   * at their limit, a listening link's last guest place). The transaction runs at READ COMMITTED: the turn keeps its
+   * check true until it ends, others of the same key wait for it in line, and those of other keys neither wait nor are
+   * refused. (The serializable level refused them for each other's sake: fifty browsers at once at one listening link
+   * used up the tries of some, and PostgreSQL refused two logins' likes at once because their rows shared an index
+   * page.) PostgreSQL's advisory lock, MySQL's named lock; ignored by SQLite, whose transactions take turns anyway.
+   */
+  readonly turn?: string;
 }
 
 /** What every executor may be given when it is opened. */

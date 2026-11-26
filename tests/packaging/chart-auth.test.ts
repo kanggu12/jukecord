@@ -183,9 +183,11 @@ describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' 
   it('restart the pods when a login setting or secret changes', () => {
     const checksum = (rendered: string) =>
       /checksum\/auth: (\w+)/.exec(object(rendered, 'Deployment', 't-jukecord'))?.[1];
-    const before = checksum(render('-f', logins));
-    assert.notEqual(checksum(render('-f', logins, '--set', 'auth.oidc.clientSecret=another')), before);
-    assert.equal(checksum(render('-f', logins)), before);
+    // One salt for the three renders (without a cluster the chart makes a new one each time: checksumSalt).
+    const salt = ['--set', 'checksumSalt=the-tests-salt'];
+    const before = checksum(render('-f', logins, ...salt));
+    assert.notEqual(checksum(render('-f', logins, ...salt, '--set', 'auth.oidc.clientSecret=another')), before);
+    assert.equal(checksum(render('-f', logins, ...salt)), before);
   });
 
   it("refuse every login setting in env or extraEnv (the list of src/auth/settings.ts), and the chart's CA variable", () => {

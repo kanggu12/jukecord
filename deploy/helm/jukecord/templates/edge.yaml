@@ -29,7 +29,7 @@ spec:
         {{- include "jukecord.partPodLabels" (list . "edge") | nindent 8 }}
       annotations:
         # As the core's: its secrets, its database, and where a Prometheus that finds its targets by annotation scrapes.
-        checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        checksum/secret: {{ include "jukecord.saltedSum" (list . (printf "%s/%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret)) }}
         {{- include "jukecord.databaseChecksum" . | nindent 8 }}
         {{- include "jukecord.authChecksum" . | nindent 8 }}
         {{- with include "jukecord.scrapeAnnotations" . }}

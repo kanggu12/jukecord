@@ -24,6 +24,11 @@ export interface OpenOptions extends PoolOptions {
   readonly log?: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** The store's clock (tests fix it). */
   readonly now?: () => number;
+  /**
+   * A SQLite file only to read, left exactly as it is (a copy's source, a look at a backup: see SqliteExecutor.open).
+   * A server's database is read by a copy in a transaction that only reads, whatever this says.
+   */
+  readonly readOnly?: boolean;
 }
 
 /** How long a start waits for a database server by default. */
@@ -43,7 +48,9 @@ export async function openExecutor(address: DatabaseAddress, options: OpenOption
     ...(options.report ? { report: options.report } : {}),
     ...(options.log ? { log: options.log } : {}),
   };
-  if (address.kind === 'sqlite') return SqliteExecutor.open(address.file, executor);
+  if (address.kind === 'sqlite') {
+    return SqliteExecutor.open(address.file, options.readOnly === true ? { ...executor, readOnly: true } : executor);
+  }
   const waitMs = options.waitMs ?? WAIT_MS;
   const started = Date.now();
   for (let attempt = 1; ; attempt += 1) {
