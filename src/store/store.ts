@@ -495,6 +495,63 @@ export async function hasTable(sql: SqlExecutor, name: string): Promise<boolean>
   return row !== undefined;
 }
 
+/**
+ * The tables (and views) of the database an executor reaches, in the schema jukecord uses, by name: a database for
+ * jukecord to make its own in has none (SQLite's own tables are not counted).
+ */
+export async function tablesIn(sql: SqlExecutor): Promise<string[]> {
+  if (sql.dialect === 'sqlite') {
+    const rows = await sql.all(
+      "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name",
+    );
+    return rows.map((row) => text(row, 'name'));
+  }
+  const where = sql.dialect === 'postgres' ? 'current_schema()' : 'DATABASE()';
+  const rows = await sql.all(
+    `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = ${where} ORDER BY table_name`,
+  );
+  return rows.map((row) => text(row, 'name'));
+}
+
+/**
+ * What the database an executor reaches is, as its server says it, for telling two addresses of one database apart
+ * from two databases (a host name and its address, a link to a file): a SQLite file's device and inode; PostgreSQL's
+ * start (to the microsecond), the database's id and the schema; MySQL's and MariaDB's start (the second, in the high
+ * bits of UUID_SHORT), host name, port, data folder and database. Null when it cannot be told (a database in memory,
+ * a server that would not say).
+ */
+export async function identityOf(sql: SqlExecutor): Promise<string | null> {
+  try {
+    if (sql instanceof SqliteExecutor) return fileIdentity(sql.file);
+    if (sql.dialect === 'postgres') {
+      const row = await sql.get(
+        `SELECT pg_postmaster_start_time()::text AS started, current_schema() AS schema,
+                (SELECT oid::text FROM pg_database WHERE datname = current_database()) AS id`,
+      );
+      return row ? `postgres ${String(row.started)} ${String(row.id)} ${String(row.schema)}` : null;
+    }
+    const row = await sql.get(
+      'SELECT UUID_SHORT() >> 24 AS started, @@hostname AS host, @@port AS port, @@datadir AS dir, DATABASE() AS db',
+    );
+    return row
+      ? `mysql ${String(row.started)} ${String(row.host)} ${String(row.port)} ${String(row.dir)} ${String(row.db)}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A SQLite file's identity (see identityOf) without opening it, or null when it is not there or in memory. */
+export function fileIdentity(file: string): string | null {
+  if (file === ':memory:') return null;
+  try {
+    const stat = fs.statSync(file);
+    return `sqlite ${stat.dev} ${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
 /** The schema version of the database an executor reaches, whatever it is (0: no jukecord schema yet). */
 export async function schemaVersionOf(sql: SqlExecutor): Promise<number> {
   if (sql.dialect === 'sqlite') {
@@ -2560,6 +2617,12 @@ export class HostSettingRepository {
   async all(): Promise<SavedSetting[]> {
     const rows = await this.store.sql.all('SELECT name, value, revision, updated_at FROM host_settings ORDER BY name');
     return rows.map(savedFrom);
+  }
+
+  /** Drops the rows of these settings (rows the database must not hold: see main.ts's start). */
+  async remove(names: readonly string[]): Promise<void> {
+    if (names.length === 0) return;
+    await this.store.sql.run(`DELETE FROM host_settings WHERE name IN (${names.map(() => '?').join(', ')})`, names);
   }
 
   /**

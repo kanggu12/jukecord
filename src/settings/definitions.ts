@@ -85,6 +85,13 @@ export interface SettingDefinition {
   readonly layer: 'bootstrap' | 'runtime' | 'environment';
   /** Never shown, never logged: only whether it is set. */
   readonly secret?: boolean;
+  /**
+   * Says where a saved secret goes (a directory's address, its encryption, its certificates, the account; a provider's
+   * issuer and client), or names a program or a file jukecord runs or reads: kept in settings.json, which only the
+   * host's own process writes, never in the database, whose rows another holder of its password could write (an
+   * edge, a copy from another jukecord). In a split it comes from each service's environment, as settings.json's do.
+   */
+  readonly guarded?: boolean;
   /** Also read from the file <NAME>_FILE names (a Docker or Kubernetes secret). */
   readonly file?: boolean;
   /** The services it changes something in. */
@@ -203,8 +210,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: EDGE,
     label: { en: 'Reverse proxy', ko: '리버스 프록시' },
     help: {
-      en: 'Behind a reverse proxy: how many proxies are in front (1 for one), or their addresses; false trusts none',
-      ko: '리버스 프록시 뒤에서 앞에 있는 프록시 수(하나면 1)나 그 주소. false면 아무것도 믿지 않음',
+      en: 'Behind a reverse proxy: how many stand in front of jukecord, or their addresses, whose word on a browser’s address is taken',
+      ko: '리버스 프록시 뒤에서 jukecord 앞에 선 프록시 수나 그 주소. 브라우저 주소에 대한 그 말을 믿음',
     },
   },
   {
@@ -285,8 +292,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: CORE,
     label: { en: 'Leave voice when alone after', ko: '혼자 남으면 나가기까지' },
     help: {
-      en: 'How long the bot stays alone in a voice channel before it leaves; 0 stays',
-      ko: '음성 채널에 혼자 남은 봇이 나가기까지 기다리는 시간. 0이면 나가지 않음',
+      en: 'How long the bot stays alone in a voice channel before it leaves; turned off, it stays',
+      ko: '음성 채널에 혼자 남은 봇이 나가기까지 기다리는 시간. 끄면 나가지 않음',
     },
   },
 
@@ -333,6 +340,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     default: null,
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: EDGE,
     label: { en: 'Issuer', ko: '발급자 주소' },
     help: {
@@ -348,6 +356,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     default: null,
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: EDGE,
     label: { en: 'Client ID', ko: '클라이언트 ID' },
     help: { en: 'The client jukecord is at the provider', ko: '제공자에 등록한 jukecord 클라이언트의 ID' },
@@ -478,6 +487,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     default: null,
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: EDGE,
     label: { en: 'Directory address', ko: '디렉터리 주소' },
     help: {
@@ -494,6 +504,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     words: ['yes', 'no'],
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: EDGE,
     label: { en: 'StartTLS', ko: 'StartTLS' },
     help: {
@@ -507,14 +518,17 @@ export const SETTINGS: readonly SettingDefinition[] = [
     part: 'directory',
     kind: 'text',
     default: null,
-    defaultNote: { en: "the system's", ko: '시스템의 인증서' },
+    // What the directory's connection trusts with none named: every connection's, the built-in authorities and
+    // the host's own (JUKECORD_CA_FILE).
+    defaultNote: { en: 'built-in and the host’s own', ko: '기본 인증 기관과 직접 더한 인증 기관' },
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: EDGE,
     label: { en: 'CA certificates file', ko: 'CA 인증서 파일' },
     help: {
-      en: "A file of the certificates (PEM) the directory's own is checked against",
-      ko: '디렉터리의 인증서를 확인할 CA 인증서(PEM) 파일',
+      en: "A file of the certificates (PEM) the directory's own is checked against, in place of every connection's",
+      ko: '디렉터리 인증서를 확인할 CA 인증서(PEM) 파일. 다른 연결이 쓰는 인증 기관 대신 씀',
     },
   },
   {
@@ -526,6 +540,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     defaultNote: { en: 'an anonymous search', ko: '익명 검색' },
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: EDGE,
     label: { en: 'Service account', ko: '서비스 계정' },
     help: {
@@ -763,8 +778,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: BOTH,
     label: { en: 'Shared cache', ko: '공유 캐시' },
     help: {
-      en: 'Where the rates, logins and searches are kept between requests: memory, or a Redis or Valkey address',
-      ko: '요청 사이에 속도 제한, 로그인, 검색 결과를 두는 곳: memory, 또는 Redis나 Valkey 주소',
+      en: 'Where the rates, logins and searches are kept between requests: in memory, or on a Redis or Valkey server',
+      ko: '요청 사이에 속도 제한, 로그인, 검색 결과를 두는 곳: 메모리, 또는 Redis나 Valkey 서버',
     },
   },
   {
@@ -792,14 +807,14 @@ export const SETTINGS: readonly SettingDefinition[] = [
     group: 'authorities',
     kind: 'text',
     default: null,
-    defaultNote: { en: 'Node’s own only', ko: 'Node 자체 목록만' },
+    defaultNote: { en: 'built-in only', ko: '기본 인증 기관만' },
     applies: 'restart',
     layer: 'bootstrap',
     roles: BOTH,
     label: { en: 'Certificate authorities', ko: '인증 기관' },
     help: {
-      en: 'A PEM file of certificate authorities every TLS connection trusts besides Node’s own: the database, the bus and cache, the identity provider, the directory',
-      ko: '모든 TLS 연결이 Node 자체 목록과 함께 믿는 인증 기관의 PEM 파일. 데이터베이스, 버스와 캐시, ID 공급자, 디렉터리에 씀',
+      en: 'A PEM file of certificate authorities every TLS connection trusts besides the built-in ones: the database, the bus and cache, the identity provider, the directory',
+      ko: '모든 TLS 연결이 기본 인증 기관과 함께 믿는 인증 기관의 PEM 파일. 데이터베이스, 버스와 캐시, ID 공급자, 디렉터리에 씀',
     },
   },
 
@@ -843,8 +858,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: CORE,
     label: { en: 'Pause with nobody listening after', ko: '아무도 안 들으면 멈추기까지' },
     help: {
-      en: 'How long a server nobody hears plays on before it pauses; 0 plays on',
-      ko: '아무도 듣지 않는 서버가 멈추기 전까지 재생하는 시간. 0이면 계속 재생',
+      en: 'How long a server nobody hears plays on before it pauses; turned off, it plays on',
+      ko: '아무도 듣지 않는 서버가 멈추기 전까지 재생하는 시간. 끄면 계속 재생',
     },
   },
   {
@@ -910,6 +925,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     default: null,
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: CORE,
     label: { en: 'Cookies file for yt-dlp', ko: 'yt-dlp 쿠키 파일' },
     help: {
@@ -924,6 +940,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     default: 'yt-dlp',
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: CORE,
     label: { en: 'yt-dlp program', ko: 'yt-dlp 프로그램' },
     help: { en: 'The yt-dlp program jukecord runs', ko: 'jukecord가 실행하는 yt-dlp 프로그램' },
@@ -935,6 +952,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     default: 'ffmpeg',
     applies: 'restart',
     layer: 'runtime',
+    guarded: true,
     roles: CORE,
     label: { en: 'FFmpeg program', ko: 'FFmpeg 프로그램' },
     help: { en: 'The ffmpeg program jukecord runs', ko: 'jukecord가 실행하는 ffmpeg 프로그램' },
@@ -950,7 +968,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: CORE,
     label: { en: 'Lyrics', ko: '가사' },
     help: {
-      en: 'Lyrics of the track playing, from LRCLIB; off asks LRCLIB nothing',
+      en: 'Lyrics of the track playing, from LRCLIB; turned off, LRCLIB is asked nothing',
       ko: '재생 중인 곡의 가사를 LRCLIB에서 찾음. 끄면 LRCLIB에 아무것도 묻지 않음',
     },
   },
@@ -1011,8 +1029,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: CORE,
     label: { en: 'Daily backup at', ko: '매일 백업하는 시각' },
     help: {
-      en: "A backup of the database every day at this time, in jukecord's time zone; off makes none",
-      ko: '매일 이 시각(jukecord의 시간대)에 데이터베이스를 백업함. off면 하지 않음',
+      en: 'A backup of the database every day at this time, in jukecord’s time zone; turned off, none is made',
+      ko: '매일 이 시각(jukecord의 시간대)에 데이터베이스를 백업함. 끄면 백업하지 않음',
     },
   },
   {
@@ -1041,8 +1059,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: BOTH,
     label: { en: 'Log level', ko: '로그 수준' },
     help: {
-      en: 'The least a record is to be written: debug, info, warn or error',
-      ko: '기록하는 로그의 가장 낮은 수준: debug, info, warn, error',
+      en: 'How much the log keeps: every detail, the usual, or warnings and errors only',
+      ko: '로그에 남길 만큼: 세부까지 모두, 보통, 또는 경고와 오류만',
     },
   },
   {
@@ -1057,7 +1075,7 @@ export const SETTINGS: readonly SettingDefinition[] = [
     label: { en: 'Console lines', ko: '콘솔 출력 형식' },
     help: {
       en: "The console's lines as text, or as JSON for a log shipper; the log files are JSON either way",
-      ko: '콘솔 줄을 text로, 또는 로그 수집기에 맞춰 JSON으로 씀. 로그 파일은 늘 JSON',
+      ko: '콘솔 줄을 글로, 또는 로그 수집기에 맞춰 JSON으로 씀. 로그 파일은 늘 JSON',
     },
   },
   {
@@ -1114,8 +1132,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
     roles: BOTH,
     label: { en: 'Role', ko: '역할' },
     help: {
-      en: 'all: one process does everything; core: Discord, the players and the media; edge: the panel and the API',
-      ko: 'all: 한 프로세스가 모두 맡음. core: 디스코드, 플레이어, 미디어. edge: 패널과 API',
+      en: 'One process does everything; or a core (Discord, the players and the media) and edges (the panel and the API)',
+      ko: '한 프로세스가 모두 맡거나, 코어(디스코드, 플레이어, 미디어)와 에지(패널과 API)로 나눔',
     },
   },
   {
@@ -1197,7 +1215,7 @@ export const KNOWN_VARIABLES: readonly string[] = [
 /** Where a saved value of a setting is kept: settings.json beside the data (bootstrap ones and secrets), or the database. */
 export function storedIn(setting: SettingDefinition): 'file' | 'database' | 'nowhere' {
   if (setting.layer === 'environment') return 'nowhere';
-  return setting.layer === 'bootstrap' || setting.secret ? 'file' : 'database';
+  return setting.layer === 'bootstrap' || setting.secret || setting.guarded ? 'file' : 'database';
 }
 
 /** The settings of one group, in the table's order. */

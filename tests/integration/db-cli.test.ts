@@ -94,6 +94,11 @@ describe('jukecord db', () => {
     assert.equal((await db(['copy', `sqlite:${from}`, `sqlite:${to}`, '--replace'])).code, 0);
     const itself = await db(['copy', `sqlite:${from}`, `sqlite:${from}`]);
     assert.deepEqual([itself.code, itself.err], [1, 'jukecord db: the source and the target are the same database']);
+    // Nor through a link to the same file, replaced or not: emptying the target would empty the source.
+    const link = path.join(dir, 'the-same.db');
+    fs.symlinkSync(from, link);
+    const linked = await db(['copy', `sqlite:${from}`, `sqlite:${link}`, '--replace']);
+    assert.deepEqual([linked.code, linked.err], [1, 'jukecord db: the source and the target are the same database']);
     // Into the configured database when no target is named.
     const configured = path.join(dir, 'into-configured.db');
     assert.equal((await db(['copy', `sqlite:${from}`], { JUKECORD_DATABASE_URL: `sqlite:${configured}` })).code, 0);
@@ -279,6 +284,22 @@ eachDatabase('jukecord db on a database', (database) => {
       await a.close();
       await b.close();
     }
+  });
+
+  it('never copies into the source under another host name', {
+    skip: database.kind === 'sqlite' && 'a file has no host name (its links are tested above)',
+  }, async () => {
+    const tag = database.name.replace(/[^a-z0-9]+/gi, '-');
+    const url = await database.url();
+    assert.equal((await db(['copy', `sqlite:${await filled(`alias-${tag}.db`)}`, url])).code, 0);
+    // The same server and database, by 127.0.0.1 and by localhost.
+    const alias = new URL(url);
+    alias.hostname = alias.hostname === '127.0.0.1' ? 'localhost' : '127.0.0.1';
+    const refused = await db(['copy', url, alias.href, '--replace']);
+    assert.deepEqual([refused.code, refused.err], [1, 'jukecord db: the source and the target are the same database']);
+    // Its rows are all there still.
+    const status = await db(['status', url]);
+    assert.match(status.out, /Rows: [1-9]/);
   });
 
   it('writes a backup of the database this user’s alone, whatever the umask', async () => {

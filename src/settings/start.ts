@@ -7,10 +7,10 @@
  */
 import path from 'node:path';
 import { type Config, ConfigError, type ConfigFiles, loadConfig } from '../config.ts';
-import { definition, SETTINGS } from './definitions.ts';
+import { definition, findDefinition, SETTINGS, storedIn } from './definitions.ts';
 import type { FileSettings } from './file.ts';
-import { type LayerRules, mergedEnvironment, NOTHING_SAVED, type SavedLayers } from './layers.ts';
-import { startingSettings } from './read.ts';
+import { environmentVariable, type LayerRules, mergedEnvironment, NOTHING_SAVED, type SavedLayers } from './layers.ts';
+import { problemsOf, startingSettings } from './read.ts';
 
 /** The data folder as loadConfig reads it (the environment's alone: settings.json is in it). */
 export function dataFolderOf(env: NodeJS.ProcessEnv, cwd: string): string {
@@ -53,6 +53,36 @@ export function firstSettings(
     throw error;
   }
   return first;
+}
+
+/**
+ * The problems of the environment and settings.json that no value saved in the database could mend: a value of their
+ * own that is wrong, alone or with others they set. Said before the start's first line, as one reading of the
+ * environment said them before there were saved settings; jukecord does not start. A problem that names a setting
+ * the database may hold (one half of a pair, the other saved there) waits for the second step, which knows.
+ */
+export function settledProblems(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  file: FileSettings,
+  rules: LayerRules,
+  files?: ConfigFiles,
+): readonly string[] {
+  const read = startingSettings(env, cwd, files, { file, database: new Map() }, rules);
+  if (read.config) return [];
+  // A setting the database may give a value: kept there, and set neither by the environment nor only by it.
+  const fromDatabase = (name: string): boolean => {
+    const setting = findDefinition(name);
+    return (
+      setting !== null &&
+      storedIn(setting) === 'database' &&
+      !rules.environmentOnly(setting) &&
+      environmentVariable(setting, env) === null
+    );
+  };
+  return problemsOf(read.problems)
+    .filter((problem) => !problem.names.some(fromDatabase))
+    .map((problem) => problem.message);
 }
 
 /** The second step: every setting over every layer (see startingSettings). */

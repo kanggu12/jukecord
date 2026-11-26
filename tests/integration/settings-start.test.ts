@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, describe, it } from 'node:test';
 import { SETTINGS_FILE } from '../../src/settings/file.ts';
 import { RESTART_EXIT_CODE } from '../../src/settings/restart.ts';
@@ -25,15 +26,19 @@ after(() => {
 });
 
 // A port nobody listens on now.
+// A port nothing listens on, for a jukecord to take a moment later. Not one the system hands out (listen on 0): those
+// come from its range for outgoing connections, and another test's connection can take one before jukecord binds it.
+// One below that range instead, tried first.
 async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 0));
+  for (;;) {
+    const port = 20_000 + Math.floor(Math.random() * 10_000);
+    const free = await new Promise<boolean>((resolve) => {
+      const server = net.createServer();
+      server.once('error', () => resolve(false));
+      server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
     });
-  });
+    if (free) return port;
+  }
 }
 
 // A jukecord started in a data folder: its output, and how it ended.
@@ -113,13 +118,26 @@ describe('jukecord with saved settings', () => {
     assert.deepEqual(restarted.json, { supervisor: 'docker', restarts: true });
     assert.equal(await first.exited, RESTART_EXIT_CODE);
     assert.match(first.output(), /restarting signal=restart/);
+    // A row the database must never hold, written by something else meanwhile (a program for yt-dlp of its own).
+    const database = new DatabaseSync(path.join(dataDir, 'jukecord.db'));
+    database
+      .prepare('INSERT INTO host_settings (name, value, revision, updated_at) VALUES (?, ?, 1, 1)')
+      .run('JUKECORD_YTDLP', '/opt/elsewhere/yt-dlp');
+    database.close();
     // Started again (as Docker would): the level saved in the database is in use from the start.
     const second = start(dataDir, { JUKECORD_SUPERVISOR: 'docker' });
     await said(second, 'the panel and the API are up');
     const level = await client(port, dataDir)('GET', '/settings/JUKECORD_LOG_LEVEL');
     assert.deepEqual([level.json.value, level.json.source, level.json.pending], ['debug', 'saved', false]);
+    // The row: not read, and dropped.
+    const program = await client(port, dataDir)('GET', '/settings/JUKECORD_YTDLP');
+    assert.deepEqual([program.json.value, program.json.source], ['yt-dlp', 'default']);
+    assert.match(second.output(), /the database held settings it never keeps; they were dropped unread/);
     second.child.kill('SIGTERM');
     assert.equal(await second.exited, 0);
+    const after = new DatabaseSync(path.join(dataDir, 'jukecord.db'), { readOnly: true });
+    assert.deepEqual(after.prepare("SELECT name FROM host_settings WHERE name = 'JUKECORD_YTDLP'").all(), []);
+    after.close();
   });
 
   it('refuses a restart where nothing would start it again, and does not start on a settings.json it cannot read', async () => {
@@ -135,6 +153,17 @@ describe('jukecord with saved settings', () => {
     const broken = start(dataDir, { JUKECORD_PORT: String(port) });
     assert.equal(await broken.exited, 2);
     assert.match(broken.output(), /jukecord cannot start with these settings:\n- .*settings\.json is not JSON/);
+  });
+
+  it('says a value it refuses and nothing else: no start line before the problems', async () => {
+    // A runtime setting of the environment's own, which the first step does not read: refused before the start line,
+    // as one reading of the environment refused it before there were saved settings.
+    const run = start(folder(), { JUKECORD_PORT: String(await freePort()), JUKECORD_QUEUE_MAX: 'abc' });
+    assert.equal(await run.exited, 2);
+    assert.equal(
+      run.output(),
+      'jukecord cannot start with these settings:\n- JUKECORD_QUEUE_MAX: "abc" is not a whole number\n',
+    );
   });
 
   it('moves to another database: copied while it runs, the last rows at the switch, started again on it', async () => {

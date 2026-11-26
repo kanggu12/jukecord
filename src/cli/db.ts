@@ -33,7 +33,7 @@ import { openExecutor } from '../store/open.ts';
 import { TABLES } from '../store/schema.ts';
 import { type SqlExecutor, StoreError } from '../store/sql.ts';
 import { SqliteExecutor } from '../store/sqlite.ts';
-import { healthOf, LATEST_SCHEMA, Store, schemaVersionOf, sizeOf } from '../store/store.ts';
+import { fileIdentity, healthOf, identityOf, LATEST_SCHEMA, Store, schemaVersionOf, sizeOf } from '../store/store.ts';
 import { formatSize } from '../util/units.ts';
 
 /** The help of the db commands, as `jukecord help db` prints it. */
@@ -224,7 +224,13 @@ async function countRows(sql: SqlExecutor): Promise<Record<string, number>> {
 
 // Copies every row of one database into another (see src/store/copy.ts), and says what it did.
 async function copy(from: DatabaseAddress, to: DatabaseAddress, replace: boolean, dataDir: string, json: boolean) {
-  if (sameDatabase(from, to)) throw new StoreError('the source and the target are the same database');
+  // The same database by its address, or under another one: a link to the file (asked of the files at once), a host
+  // name and its address (asked of the servers once both answer, below).
+  const same = new StoreError('the source and the target are the same database');
+  if (sameDatabase(from, to)) throw same;
+  if (from.kind === 'sqlite' && to.kind === 'sqlite' && fileIdentity(from.file) !== null) {
+    if (fileIdentity(from.file) === fileIdentity(to.file)) throw same;
+  }
   if (from.kind === 'sqlite' && !fs.existsSync(from.file)) throw new StoreError(`there is no database at ${from.file}`);
   const options = { waitMs: WAIT_MS, pool: 2 };
   // The source as it is: at this jukecord's schema, or (a SQLite file of an older jukecord, an old backup) a copy of
@@ -240,13 +246,20 @@ async function copy(from: DatabaseAddress, to: DatabaseAddress, replace: boolean
       for (const part of ['', '-wal', '-shm', '-journal']) fs.rmSync(`${made}${part}`, { force: true });
   };
   try {
-    let target: Store;
+    let opened: Store | null = null;
     try {
-      target = await Store.open(await openExecutor(to, options));
+      const sql = await openExecutor(to, options);
+      // What each server says it is, before anything is made in the target: emptying it for the copy would empty the
+      // source.
+      const theirs = to.kind === 'sqlite' || to.kind !== from.kind ? null : await identityOf(sql);
+      if (theirs !== null && theirs === (await identityOf(source.sql))) await sql.close();
+      else opened = await Store.open(sql);
     } catch (error) {
       unmake();
       throw about(`the target, ${describeAddress(to)}`, error);
     }
+    if (!opened) throw same;
+    const target = opened;
     try {
       const report = await copyStore(source, target, { replace }).catch(async (error: unknown) => {
         await target.close();

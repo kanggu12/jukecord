@@ -124,7 +124,8 @@ export function remoteSettings(client: CommandClient): HostSettingsPort {
     reset: (names: readonly string[], revisions?: Readonly<Record<string, number>>) =>
       client.call<{ changed: ChangedSetting[]; view: HostSettingsView }>('settings.reset', [names, revisions ?? null]),
     restartNow: () => client.call<{ supervisor: Supervisor }>('settings.restart', []),
-    testDatabase: (url: string, ca?: string) => client.call<DatabaseTest>('settings.test-database', [url, ca ?? null]),
+    testDatabase: (url: string, ca?: string, password?: string) =>
+      client.call<DatabaseTest>('settings.test-database', [url, ca ?? null, password ?? null]),
     // Tried from the core, as one process tries it: the server the services would share is the core's to reach too.
     testServer: (url: string, use: ServerUse, ca?: string) =>
       client.call<ServerTest>('settings.test-server', [url, use, ca ?? null]),
@@ -135,7 +136,8 @@ export function remoteSettings(client: CommandClient): HostSettingsPort {
       client.call<{ changed: ChangedSetting[]; view: HostSettingsView }>('settings.authorities-remove', []),
     testDiscordLogin: (values?: Readonly<Record<string, string>>) =>
       client.call<DiscordLoginTest>('settings.test-discord-login', [values ?? {}]),
-    startMove: (url: string, replace: boolean) => client.call<MoveState>('settings.move-start', [url, replace]),
+    startMove: (url: string, replace: boolean, password?: string) =>
+      client.call<MoveState>('settings.move-start', [url, replace, password ?? null]),
     moveState: () =>
       client.call<{ state: MoveState | null; lastFailure: MoveFailure | null }>('settings.move-state', []),
     cancelMove: () => client.call<undefined>('settings.move-cancel', []),
@@ -160,7 +162,10 @@ export function settingsCommands(settings: HostSettings): Map<string, (args: rea
       ([names, read]) => settings.reset(Array.isArray(names) ? names.map(String) : [], revisions(read)),
     ],
     ['settings.restart', () => settings.restartNow()],
-    ['settings.test-database', ([url, ca]) => settings.testDatabase(String(url ?? ''), text(ca))],
+    [
+      'settings.test-database',
+      ([url, ca, password]) => settings.testDatabase(String(url ?? ''), text(ca), text(password)),
+    ],
     [
       'settings.test-server',
       ([url, use, ca]) => settings.testServer(String(url ?? ''), use === 'bus' ? 'bus' : 'cache', text(ca)),
@@ -175,7 +180,10 @@ export function settingsCommands(settings: HostSettings): Map<string, (args: rea
           typeof values === 'object' && values !== null ? (values as Record<string, string>) : {},
         ),
     ],
-    ['settings.move-start', ([url, replace]) => settings.startMove(String(url ?? ''), replace === true)],
+    [
+      'settings.move-start',
+      ([url, replace, password]) => settings.startMove(String(url ?? ''), replace === true, text(password)),
+    ],
     ['settings.move-state', () => settings.moveState()],
     ['settings.move-cancel', () => settings.cancelMove()],
     ['settings.move-switch', () => settings.switchMove()],

@@ -350,7 +350,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
   },
   'settings-test-database': async ({ caller, body, deps }) => ({
-    ...(await hostSettings(deps, caller).testDatabase(body.url, body.ca)),
+    ...(await hostSettings(deps, caller).testDatabase(body.url, body.ca, body.password)),
   }),
   'auth-test-discord': async ({ caller, body, deps }) => {
     const found = await hostSettings(deps, caller).testDiscordLogin(body.settings ?? {});
@@ -372,7 +372,7 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     return { changed: changed.map((entry) => ({ ...entry })), view: plainView(view) };
   },
   'database-move': async ({ caller, body, deps }) => ({
-    ...(await hostSettings(deps, caller).startMove(body.url, body.replace ?? false)),
+    ...(await hostSettings(deps, caller).startMove(body.url, body.replace ?? false, body.password)),
   }),
   'database-move-status': async ({ caller, deps }) => plainMove(await hostSettings(deps, caller).moveState()),
   'database-move-switch': async ({ caller, deps }) => {

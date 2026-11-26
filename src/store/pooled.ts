@@ -61,6 +61,12 @@ export interface PoolOptions extends ExecutorOptions {
    * (the settings page's test of an address with authorities not saved yet: src/settings/authorities.ts).
    */
   readonly trust?: readonly string[];
+  /**
+   * A database only to read, left exactly as it is (a copy's source, a look at a backup, the settings page's test of
+   * an address): a SQLite file is opened read-only (see SqliteExecutor.open), and a server is made nothing on, not
+   * even the schema the address names. A server's database is read by a copy in a transaction that only reads.
+   */
+  readonly readOnly?: boolean;
 }
 
 /** How long an unused connection stays open by default: a quiet jukecord holds none open for long. */

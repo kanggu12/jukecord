@@ -24,11 +24,6 @@ export interface OpenOptions extends PoolOptions {
   readonly log?: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** The store's clock (tests fix it). */
   readonly now?: () => number;
-  /**
-   * A SQLite file only to read, left exactly as it is (a copy's source, a look at a backup: see SqliteExecutor.open).
-   * A server's database is read by a copy in a transaction that only reads, whatever this says.
-   */
-  readonly readOnly?: boolean;
 }
 
 /** How long a start waits for a database server by default. */

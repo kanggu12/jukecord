@@ -67,16 +67,17 @@ import { startEdge } from './roles/edge.ts';
 import { transportPart } from './roles/health.ts';
 import { applyLive, type LiveParts } from './settings/apply.ts';
 import { announceOnBus, announceRestart, remoteSettings, takeInFromBus } from './settings/bus.ts';
+import { findDefinition } from './settings/definitions.ts';
 import { type FileSettings, readSettingsFile, SettingsFile, SettingsFileError } from './settings/file.ts';
 import { type LayerRules, rulesFor } from './settings/layers.ts';
 import { DatabaseMove } from './settings/move.ts';
 import { RESTART_EXIT_CODE, supervisorOf } from './settings/restart.ts';
 import { HostSettings } from './settings/service.ts';
-import { allSettings, dataFolderOf, firstSettings } from './settings/start.ts';
+import { allSettings, dataFolderOf, firstSettings, settledProblems } from './settings/start.ts';
 import { describeAddress } from './store/address.ts';
 import { ConnectionError } from './store/network.ts';
 import { openStore } from './store/open.ts';
-import type { Store } from './store/store.ts';
+import type { SavedSetting, Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
 import { Auth, ensureHostToken } from './web/auth.ts';
@@ -123,6 +124,10 @@ async function main(): Promise<number> {
   // First what is needed before the database opens (src/settings/start.ts); the rest once it is open.
   const first = firstSettings(env, cwd, fileSettings, rules);
   if (!first.config) return refuseSettings(first.problems);
+  // What the environment and settings.json get wrong that no value saved in the database could mend, said before the
+  // start's line, alone, as jukecord always said a setting it refuses.
+  const settled = settledProblems(env, cwd, fileSettings, rules);
+  if (settled.length > 0) return refuseSettings(settled);
   const boot: Config = first.config;
 
   // The two sinks are kept: their format and rotation change when the settings say so.
@@ -254,10 +259,12 @@ async function main(): Promise<number> {
   }
   // Every setting now, with the values saved in the database too. A saved value the rules refuse now is left out and
   // said (the page shows it); a problem of the environment's own keeps jukecord from starting, as before.
+  const rows = await store.hostSettings.all();
+  await dropMisplaced(store, rows, log);
   const all = allSettings(
     env,
     cwd,
-    { file: fileSettings, database: new Map((await store.hostSettings.all()).map((row) => [row.name, row])) },
+    { file: fileSettings, database: new Map(rows.map((row) => [row.name, row])) },
     rules,
   );
   if (!all.config) {
@@ -1132,6 +1139,21 @@ function takeLog(
   log.setLevel(config.log.level);
   sinks.console.setFormat(config.log.format);
   sinks.file.setLimits(config.log);
+}
+
+// Drops the database's rows of settings it never holds (where a saved secret goes, the programs and files jukecord
+// runs or reads: settings.json's, which only the host's own process writes), written there by something else (a copy
+// of another jukecord's data, a holder of the database's password): never read (see storedIn), and gone, so the page
+// does not list them. A database that will not drop them keeps them, unread.
+async function dropMisplaced(store: Store, rows: readonly SavedSetting[], log: RootLogger): Promise<void> {
+  const names = rows.filter((row) => findDefinition(row.name)?.guarded === true).map((row) => row.name);
+  if (names.length === 0) return;
+  try {
+    await store.hostSettings.remove(names);
+    log.warn('the database held settings it never keeps; they were dropped unread', { settings: names });
+  } catch (error) {
+    log.warn('the database holds settings it never keeps; they stay unread', { settings: names, error });
+  }
 }
 
 // Says each saved setting the rules refuse now: its default or the environment's value is in use (the page says so).

@@ -17,7 +17,10 @@ import {
   KNOWN_VARIABLES,
   SETTINGS,
   type SettingDefinition,
+  storedIn,
 } from '../../src/settings/definitions.ts';
+import { SPLIT } from '../../src/settings/layers.ts';
+import { DESTINATIONS } from '../../src/settings/service.ts';
 import { parseDuration, parseSize } from '../../src/util/units.ts';
 
 // The least of each way of logging in that turns it on, so that one of its settings is read at all (alone, most of
@@ -88,6 +91,24 @@ describe('the settings table', () => {
         // The panel's rule for Korean: no em-dash.
         assert.doesNotMatch(`${words.en}${words.ko}`, /—/);
       }
+    }
+  });
+
+  it('keeps out of the database every setting that steers a saved secret, or names a program or file jukecord uses', () => {
+    // The database's rows can be written by another holder of its password (an edge, a copy of another jukecord's
+    // data): none may send a saved secret somewhere else at the next start, or name something for jukecord to run or
+    // read. Each is settings.json's, which only the host's own process writes, and in a split the environment's.
+    const steering = DESTINATIONS.flatMap(({ secret, to }) => [secret, ...to]);
+    // A path by its name: a file, a folder, a program (yt-dlp, FFmpeg), the cookies yt-dlp reads.
+    const paths = SETTINGS.filter((setting) => /_(FILE|DIR|COOKIES|YTDLP|FFMPEG)$/.test(setting.name)).map(
+      (setting) => setting.name,
+    );
+    assert.ok(paths.includes('JUKECORD_YTDLP') && paths.includes('JUKECORD_LDAP_CA_FILE'));
+    for (const name of [...steering, ...paths]) {
+      const setting = definition(name);
+      assert.notEqual(storedIn(setting), 'database', `${name} is kept in the database`);
+      // Saved where settings.json is, the environment's alone in a split (as every one of settings.json's).
+      if (setting.layer !== 'environment') assert.equal(SPLIT.environmentOnly(setting), true, name);
     }
   });
 

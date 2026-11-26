@@ -92,15 +92,25 @@ const KEPT = /^authorities-[0-9a-f]{16}\.pem$/;
  * a change of the setting that waits for a restart. Returns the file's path.
  */
 export function keepAuthorities(dataDir: string, certificates: readonly string[]): string {
-  const text = `${certificates.join('\n')}\n`;
-  const name = `authorities-${createHash('sha256').update(text).digest('hex').slice(0, 16)}.pem`;
-  const file = path.join(dataDir, name);
+  const text = fileText(certificates);
+  const file = authoritiesFile(dataDir, certificates);
   const temporary = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, text, { mode: 0o600 });
   // A file left from before with other permissions is put right as well.
   fs.chmodSync(temporary, 0o600);
   fs.renameSync(temporary, file);
   return file;
+}
+
+/** The path keepAuthorities keeps these certificates at (named by what is in them), without writing anything. */
+export function authoritiesFile(dataDir: string, certificates: readonly string[]): string {
+  const name = `authorities-${createHash('sha256').update(fileText(certificates)).digest('hex').slice(0, 16)}.pem`;
+  return path.join(dataDir, name);
+}
+
+// What a kept file holds: the certificates one after another, each as the import read it.
+function fileText(certificates: readonly string[]): string {
+  return `${certificates.join('\n')}\n`;
 }
 
 /** Removes the files the page kept in the data folder, but `keep` (the one the setting names now, when there is one). */

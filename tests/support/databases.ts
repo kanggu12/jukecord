@@ -55,6 +55,8 @@ export interface TestDatabase {
   url(): Promise<string>;
   /** An address of another database of this kind, empty and without tables, the test's alone. */
   another(): Promise<DatabaseAddress>;
+  /** The same as another(), written out as JUKECORD_DATABASE_URL takes it (with the test server's password). */
+  anotherUrl(): Promise<string>;
 }
 
 // The stores and executors opened during the test running now, closed when it ends.
@@ -126,6 +128,10 @@ function sqlite(): TestDatabase {
     another: async () => {
       others += 1;
       return { kind: 'sqlite', file: path.join(folder(), `another-${others}.db`) };
+    },
+    anotherUrl: async () => {
+      others += 1;
+      return `sqlite:${path.join(folder(), `another-${others}.db`)}`;
     },
   };
 }
@@ -288,6 +294,11 @@ function server(url: string): TestDatabase {
       // Dropped with the test: what it holds is the test's own.
       clearing.push(() => databases.drop(name));
       return databases.addressOf(name);
+    },
+    anotherUrl: async () => {
+      const name = await databases.blank();
+      clearing.push(() => databases.drop(name));
+      return databases.urlOf(name);
     },
   };
 }

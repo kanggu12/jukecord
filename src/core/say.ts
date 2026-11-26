@@ -333,12 +333,105 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ],
   ['the move was cancelled', '옮기기를 멈춤'],
   ['it is the database jukecord uses now', 'jukecord가 지금 쓰는 데이터베이스'],
+  [/^it holds tables that are not jukecord’s: (.+)$/, 'jukecord가 만들지 않은 테이블이 있음: $1'],
+  [
+    'jukecord is restarting; switch to the database once it is back',
+    'jukecord가 다시 시작하는 중. 돌아온 뒤에 데이터베이스를 바꾸세요',
+  ],
+  [
+    'jukecord is switching to another database; it starts again on it',
+    'jukecord가 다른 데이터베이스로 바꾸는 중. 바꾼 데이터베이스로 다시 시작함',
+  ],
   [/^it is at schema (\d+), newer than this jukecord's \((\d+)\)$/, '이 jukecord(스키마 $2)보다 새로운 스키마 $1'],
   [
     /^it is at schema (\d+), older than this jukecord's \((\d+)\); start a jukecord on it first$/,
     '이 jukecord(스키마 $2)보다 오래된 스키마 $1: 먼저 그 위에서 jukecord를 한 번 시작하세요',
   ],
   ['it does not answer', '응답하지 않음'],
+  // The settings page's tests of a login (src/auth/oidc.ts, src/auth/ldap.ts, src/auth/check.ts), finding by finding:
+  // the page shows each in the panel's language. A finding that starts with an address keeps it as it is.
+  [
+    /^(.+); to trust the authority that signed it, name its certificate in JUKECORD_CA_FILE$/,
+    '$1. 서명한 인증 기관을 믿으려면 그 인증서를 인증 기관 설정(JUKECORD_CA_FILE)에 넣으세요',
+  ],
+  [
+    /^(\S+) names itself as configured, with its authorization and token endpoints$/,
+    '$1: 설정과 같은 발급자이며 인증 엔드포인트와 토큰 엔드포인트가 있음',
+  ],
+  [/^1 key at (\S+)$/, '서명 키 1개($1)'],
+  [/^(\d+) keys at (\S+)$/, '서명 키 $1개($2)'],
+  [/^no keys at (.+)$/, '서명 키가 없음($1)'],
+  [
+    'not tried: give JUKECORD_OIDC_CLIENT_SECRET to test another issuer or client (the secret in use goes only where it goes now)',
+    '시도하지 않음: 다른 발급자나 클라이언트를 확인하려면 클라이언트 비밀 값도 입력하세요. 지금 쓰는 비밀 값은 지금 가는 곳에만 감',
+  ],
+  ['the provider took a made-up code', '공급자가 지어낸 코드를 받아들임'],
+  [/^the provider knows (.+) and its secret$/, '공급자가 이 클라이언트와 비밀 값을 알아봄($1)'],
+  [/^the provider refused the client ID or its secret \((.+)\)$/, '공급자가 클라이언트 ID나 비밀 값을 받지 않음($1)'],
+  [
+    /^the provider must list (\S+) among the client's redirects$/,
+    '공급자의 클라이언트 리디렉션 목록에 있어야 하는 주소: $1',
+  ],
+  ['the provider takes S256', '공급자가 S256을 받음'],
+  ['the provider does not list S256; jukecord sends it anyway', '공급자 목록에 S256이 없지만 jukecord는 보냄'],
+  [
+    /^logging out of jukecord logs out at the provider too, and comes back to (\S+)$/,
+    'jukecord에서 로그아웃하면 공급자에서도 로그아웃하고 이 주소로 돌아옴: $1',
+  ],
+  [
+    'the provider offers no logout: logging out ends the login here only',
+    '공급자에 로그아웃이 없음: 로그아웃하면 여기서만 끝남',
+  ],
+  ['JUKECORD_OIDC_ISSUER is not set: SSO is off', '발급자가 비어 있음: SSO가 꺼져 있음'],
+  ['JUKECORD_LDAP_URL is not set: directory accounts are off', '디렉터리 주소가 비어 있음: 디렉터리 계정이 꺼져 있음'],
+  [
+    'give JUKECORD_LDAP_BIND_PASSWORD to test another directory, connection or account: the password in use goes only where it goes now',
+    '다른 디렉터리나 연결, 계정을 확인하려면 서비스 계정 비밀번호도 입력하세요. 지금 쓰는 비밀번호는 지금 가는 곳에만 감',
+  ],
+  [/^(.+) would log in at the admin level$/, '$1: 관리 수준으로 로그인함'],
+  [/^(.+) would log in at the control level$/, '$1: 조작 수준으로 로그인함'],
+  [/^(.+) would log in at the read level$/, '$1: 보기 수준으로 로그인함'],
+  [/^(.+) is in none of the groups jukecord lets in$/, '$1: jukecord가 들이는 그룹에 속하지 않음'],
+  [/^(\S+) answered, over TLS$/, '$1 응답함, TLS로 연결'],
+  [/^(\S+) answered, with StartTLS$/, '$1 응답함, StartTLS로 연결'],
+  [/^(\S+) answered, unencrypted$/, '$1 응답함, 암호화 없이 연결'],
+  [/^bound as (.+)$/, '서비스 계정으로 바인드함($1)'],
+  ['none: people are found by an anonymous search', '없음: 익명 검색으로 사람을 찾음'],
+  // A base DN, which has an = in it (the finding of another test that ends so is not this one).
+  [/^(\S*=.*) is not in the directory$/, '$1: 디렉터리에 없음'],
+  [/^(\S*=.*) is there$/, '$1: 있음'],
+  ['none found', '찾지 못함'],
+  [/^no one is found by (.+)$/, '찾은 사람이 없음($1)'],
+  // A database's address tried (src/store/network.ts), its reason apart from the database it names.
+  [
+    /^nothing answers at (\S+) \(is the database running, and is that its port\?\)$/,
+    '응답이 없음: $1(데이터베이스가 켜져 있는지, 그 포트가 맞는지 보세요)',
+  ],
+  [
+    /^the host name (\S+) is not known \(a typo, or the database's host is not up yet\)$/,
+    '알 수 없는 호스트 이름: $1(오타이거나 데이터베이스 호스트가 아직 켜지지 않음)',
+  ],
+  [
+    /^the host name (\S+) could not be looked up just now \(the name server did not answer\)$/,
+    '지금은 찾을 수 없는 호스트 이름: $1(네임 서버가 응답하지 않음)',
+  ],
+  [
+    /^(\S+) did not answer in time \(a firewall, or the wrong address\)$/,
+    '제시간에 응답하지 않음: $1(방화벽이거나 주소가 틀림)',
+  ],
+  [/^(\S+) cut the connection(?: \((.+)\))?$/, '연결이 끊김: $1'],
+  [/^the user name or password was refused by (\S+)$/, '사용자 이름이나 비밀번호를 받지 않음: $1'],
+  [/^(\S+) has no database "(.+)" \(create it first\)$/, '없는 데이터베이스: "$2"($1, 먼저 만드세요)'],
+  [/^the database at (\S+) is starting up$/, '데이터베이스가 시작하는 중: $1'],
+  [/^(\S+) has no room for another connection \(max_connections\)$/, '연결을 더 받을 수 없음: $1(max_connections)'],
+  [
+    /^TLS with (\S+) failed: (.+) \(see sslmode and sslrootcert in the address, or JUKECORD_CA_FILE for an authority of your own\)$/,
+    'TLS 연결 실패: $1, $2(주소의 sslmode와 sslrootcert, 또는 내 인증 기관이면 인증 기관 설정을 보세요)',
+  ],
+  [
+    /^TLS with (\S+) failed: (.+) \(see sslmode and sslrootcert in the address\)$/,
+    'TLS 연결 실패: $1, $2(주소의 sslmode와 sslrootcert를 보세요)',
+  ],
   // Testing the Discord login's application (src/settings/discord.ts).
   ['no client ID (JUKECORD_DISCORD_CLIENT_ID)', '클라이언트 ID가 없음(JUKECORD_DISCORD_CLIENT_ID)'],
   ['no client secret (JUKECORD_DISCORD_CLIENT_SECRET)', '클라이언트 시크릿이 없음(JUKECORD_DISCORD_CLIENT_SECRET)'],

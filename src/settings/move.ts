@@ -23,8 +23,14 @@ import { copyStore } from '../store/copy.ts';
 import { ConnectionError } from '../store/network.ts';
 import { openExecutor, openStore } from '../store/open.ts';
 import { TABLES } from '../store/schema.ts';
+import type { SqlExecutor } from '../store/sql.ts';
 import { StoreError } from '../store/sql.ts';
-import { type Backend, healthOf, LATEST_SCHEMA, Store } from '../store/store.ts';
+import { type Backend, fileIdentity, healthOf, identityOf, LATEST_SCHEMA, Store, tablesIn } from '../store/store.ts';
+
+// Names in a line: the first three, and how many more.
+function listed(names: readonly string[]): string {
+  return names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} (+${names.length - 3})`;
+}
 
 /** What a test of a database's address found. */
 export interface DatabaseTest {
@@ -74,6 +80,23 @@ export interface MoveFailure {
   readonly at: number;
   readonly where: string;
   readonly reason: string;
+}
+
+/**
+ * A database's address with a password given apart from it (the page asks for the password in a field of its own,
+ * never shown): put in the address's place for it, in place of one the address had. A SQLite file has none to take,
+ * and an address that is no URL is left for the address's own reading to refuse.
+ */
+export function withPassword(text: string, password?: string | null): string {
+  if (password === undefined || password === null || password === '') return text;
+  if (/^\s*sqlite:/i.test(text)) return text;
+  try {
+    const url = new URL(text.trim());
+    url.password = password;
+    return url.href;
+  } catch {
+    return text;
+  }
 }
 
 /** The file a switch that failed leaves for the next start to say why. */
@@ -139,8 +162,9 @@ export class DatabaseMove {
   async test(text: string, trust?: readonly string[]): Promise<DatabaseTest> {
     const address = addressOf(text, this.options.dataDir);
     const where = describeAddress(address);
-    const inUse = sameDatabase(address, this.options.current);
-    const base = { where, latest: LATEST_SCHEMA, inUse };
+    // The database in use by its address, or (asked below, once it answers) by what its server says it is.
+    const named = sameDatabase(address, this.options.current);
+    const base = { where, latest: LATEST_SCHEMA, inUse: named };
     // A SQLite file not made yet: nothing to ask, only whether its folder can take it.
     if (address.kind === 'sqlite' && !fs.existsSync(address.file)) {
       const ok = writableFolder(address.file);
@@ -160,24 +184,32 @@ export class DatabaseMove {
     try {
       // Tried once: a test is a question asked now, and the one asking can ask again.
       // Trusting, with the authorities in use, those the page has not saved yet when it gives some.
-      const sql = await openExecutor(address, { pool: 1, waitMs: 0, ...(trust ? { trust } : {}) });
+      // Only read: a SQLite file is opened read-only (its journal and its mode stay as they are; a write would turn
+      // another program's file to WAL), and nothing is made on a server, not even the schema the address names.
+      const sql = await openExecutor(address, { pool: 1, waitMs: 0, readOnly: true, ...(trust ? { trust } : {}) });
       const health = await healthOf(sql);
       const schema = health.schema;
+      const inUse = named || (health.ok && (await this.isCurrent(address, sql)));
+      // A database jukecord has not made its tables in, holding tables: another program's, for jukecord to stay out of.
+      const theirs = health.ok && schema === 0 ? await tablesIn(sql) : [];
       // Read without changing it: at this jukecord's schema only, as a copy's source would be.
       store = schema === LATEST_SCHEMA ? await Store.open(sql, { migrate: false }) : null;
       if (!store) await sql.close();
       const rows = store ? await rowsIn(store) : null;
       const problem = inUse
         ? 'it is the database jukecord uses now'
-        : schema !== null && schema > LATEST_SCHEMA
-          ? `it is at schema ${schema}, newer than this jukecord's (${LATEST_SCHEMA})`
-          : schema !== null && schema > 0 && schema < LATEST_SCHEMA
-            ? `it is at schema ${schema}, older than this jukecord's (${LATEST_SCHEMA}); start a jukecord on it first`
-            : health.ok
-              ? null
-              : (health.error ?? 'it does not answer');
+        : theirs.length > 0
+          ? `it holds tables that are not jukecord’s: ${listed(theirs)}`
+          : schema !== null && schema > LATEST_SCHEMA
+            ? `it is at schema ${schema}, newer than this jukecord's (${LATEST_SCHEMA})`
+            : schema !== null && schema > 0 && schema < LATEST_SCHEMA
+              ? `it is at schema ${schema}, older than this jukecord's (${LATEST_SCHEMA}); start a jukecord on it first`
+              : health.ok
+                ? null
+                : (health.error ?? 'it does not answer');
       return {
         ...base,
+        inUse,
         ok: problem === null,
         kind: health.backend,
         server: health.server,
@@ -203,6 +235,25 @@ export class DatabaseMove {
       };
     } finally {
       await store?.close();
+    }
+  }
+
+  // Whether a database that answered is the one in use under another address (a host name and its address, a link to
+  // the file): what each server says it is, where both say. One not told apart is taken for another database.
+  private async isCurrent(address: DatabaseAddress, sql: SqlExecutor): Promise<boolean> {
+    const current = this.options.current;
+    if (address.kind !== current.kind) return false;
+    const theirs = await identityOf(sql);
+    if (theirs === null) return false;
+    if (current.kind === 'sqlite') return fileIdentity(current.file) === theirs;
+    let ours: SqlExecutor | null = null;
+    try {
+      ours = await openExecutor(current, { pool: 1, waitMs: 0, readOnly: true });
+      return (await identityOf(ours)) === theirs;
+    } catch {
+      return false;
+    } finally {
+      await ours?.close();
     }
   }
 

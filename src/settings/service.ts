@@ -21,6 +21,7 @@ import { ConnectionError } from '../store/network.ts';
 import { RevisionConflict, type SavedSetting, type SettingWrite, type Store } from '../store/store.ts';
 import { Lock } from '../util/lock.ts';
 import {
+  authoritiesFile,
   type CertificateFacts,
   certificateFacts,
   checkAuthorities,
@@ -49,7 +50,7 @@ import {
   sourceOf,
   strays,
 } from './layers.ts';
-import type { DatabaseMove, DatabaseTest, MoveFailure, MoveState } from './move.ts';
+import { type DatabaseMove, type DatabaseTest, type MoveFailure, type MoveState, withPassword } from './move.ts';
 import { problemsOf, readLayers, type SettingProblem, withoutNames } from './read.ts';
 import { restartRefusal } from './restart.ts';
 import { type ServerTest, type ServerUse, testServer } from './servers.ts';
@@ -260,6 +261,9 @@ export class HostSettings {
   // One change at a time in this process, and one take-in at a time: each applies in the order they were made.
   private readonly changing = new Lock();
   private readonly takingIn = new Lock();
+  // What this process stops for, once one is asked: a restart, or a move's switch. The stop honours its first caller
+  // only, so the other is refused instead of being dropped unsaid.
+  private stopping: 'restart' | 'switch' | null = null;
   // The settings in use: the start's, with every change that applies at once taken in since.
   private current: Config;
 
@@ -444,6 +448,7 @@ export class HostSettings {
   async change(
     values: Readonly<Record<string, string | null>>,
     revisions?: Readonly<Record<string, number>>,
+    steps: ChangeSteps = {},
   ): Promise<{ changed: ChangedSetting[]; view: HostSettingsView }> {
     // The change runs to its end whatever the page does: under the lock, one change after another in the order they
     // came, then taken in by every service. A database that stops answering holds it (its statements wait for the
@@ -452,8 +457,17 @@ export class HostSettings {
       const release = await this.changing.acquire();
       let changed: ChangedSetting[];
       try {
+        // What the change needs first (the file of authorities it names), under the lock with it.
+        steps.before?.();
         changed = await this.write(values, revisions);
       } finally {
+        // What the change leaves to put in order (the page's files of authorities), under the same lock, written or
+        // refused: no other change can name or drop a file meanwhile.
+        try {
+          steps.after?.();
+        } catch (error) {
+          this.options.log.warn('could not tidy up after a change of settings', { error });
+        }
         release();
       }
       // Every service takes the change in (here: what applies at once is applied, the rest waits for a restart).
@@ -540,6 +554,13 @@ export class HostSettings {
     // same directory unencrypted): the host types it again for the new place, or puts it away.
     const moved = secretsMoved(layers, changes);
     if (moved.length > 0) throw new SettingsRefused(moved);
+    // Authorities named by hand (a path typed, not a PEM given to the page) are held to what an import is: an
+    // authority's certificate at least, never a key, nothing else in the file.
+    const authorities = changes.find((change) => change.name === CA_FILE && change.value !== null);
+    if (authorities?.value) {
+      const checked = checkFile(path.resolve(this.options.cwd, authorities.value));
+      if (checked) throw new SettingsRefused([{ names: [CA_FILE], message: `${CA_FILE}: ${checked}` }]);
+    }
     // The settings as they would read with the change, by the start's rules, the other settings as they are: a
     // problem the change brings refuses it (one there before, a file gone meanwhile, is not this change's).
     const candidate = withChanges(layers, fileChanges, databaseChanges);
@@ -600,8 +621,8 @@ export class HostSettings {
    * Tries a database's address without saving or changing anything (see DatabaseMove.test); with `ca`, trusting the
    * authorities of that PEM too (the page's, not saved yet).
    */
-  testDatabase(url: string, ca?: string): Promise<DatabaseTest> {
-    return this.mover().test(url, this.trustFor(ca));
+  testDatabase(url: string, ca?: string, password?: string): Promise<DatabaseTest> {
+    return this.mover().test(withPassword(url, password), this.trustFor(ca));
   }
 
   /**
@@ -631,18 +652,14 @@ export class HostSettings {
     const checked = checkAuthorities(pem);
     if ('problem' in checked)
       throw new SettingsRefused([{ names: [CA_FILE], message: `${CA_FILE}: ${checked.problem}` }]);
+    // Named by what is in it (the same certificates are the same file), written under the change's lock just before
+    // the change names it; after it, the files the page kept that settings.json does not name go, under the same lock.
     const dataDir = this.options.started.dataDir;
-    const before = (await this.answered(this.layers())).file.get(CA_FILE)?.value ?? null;
-    const file = keepAuthorities(dataDir, checked.certificates);
-    let result: { changed: ChangedSetting[]; view: HostSettingsView };
-    try {
-      result = await this.change({ [CA_FILE]: file });
-    } catch (error) {
-      // Not saved: the file made for it goes, unless the setting named it already (the same certificates again).
-      if (file !== before) fs.rmSync(file, { force: true });
-      throw error;
-    }
-    forgetAuthorities(dataDir, file);
+    const file = authoritiesFile(dataDir, checked.certificates);
+    const result = await this.change({ [CA_FILE]: file }, undefined, {
+      before: () => keepAuthorities(dataDir, checked.certificates),
+      after: () => this.tidyAuthorities(),
+    });
     this.options.log.info('the certificate authorities were saved; a restart applies them', {
       file,
       count: checked.certificates.length,
@@ -653,9 +670,14 @@ export class HostSettings {
   /** Puts the authorities away (JUKECORD_CA_FILE back to none): the page's files go; a file named by hand stays. */
   async removeAuthorities(): Promise<{ changed: ChangedSetting[]; view: HostSettingsView }> {
     this.changeable(CA_FILE);
-    const result = await this.change({ [CA_FILE]: null });
-    forgetAuthorities(this.options.started.dataDir);
-    return result;
+    return this.change({ [CA_FILE]: null }, undefined, { after: () => this.tidyAuthorities() });
+  }
+
+  // The files of authorities the page kept, but the one settings.json names now (read again, under the change's lock,
+  // after its write): what an import or a removal leaves, whichever came last, without taking a file still named.
+  private tidyAuthorities(): void {
+    const named = this.options.file.read().get(CA_FILE)?.value ?? null;
+    forgetAuthorities(this.options.started.dataDir, named === null ? null : path.resolve(this.options.cwd, named));
   }
 
   /**
@@ -707,10 +729,11 @@ export class HostSettings {
    * Starts moving to another database: refused where the database's address is not this page's to change (set by
    * the environment, or a split's); the copy runs on, its state in moveState().
    */
-  async startMove(url: string, replace: boolean): Promise<MoveState> {
+  async startMove(url: string, replace: boolean, password?: string): Promise<MoveState> {
     this.changeable('JUKECORD_DATABASE_URL');
     const move = this.mover();
-    const state = await move.start(url, replace);
+    // The password given apart from the address goes into it here (see withPassword).
+    const state = await move.start(withPassword(url, password), replace);
     // A new move: the last one's failure is no news any more.
     move.clearFailure();
     this.options.log.info('moving to another database: copying', { to: state.where, replace });
@@ -740,7 +763,10 @@ export class HostSettings {
     const move = this.mover();
     const restart = this.options.restart;
     if (!restart) throw new ActionError('unavailable', 'jukecord cannot restart itself here');
+    if (this.stopping === 'restart')
+      throw new ActionError('conflict', 'jukecord is restarting; switch to the database once it is back');
     const { where } = move.switching();
+    this.stopping = 'switch';
     const restarts = restartRefusal(this.options.supervisor) === null;
     // The last copy may take as long as the first did, and then some: the stop waits for it.
     const copyMs = move.current?.ms ?? 0;
@@ -795,6 +821,13 @@ export class HostSettings {
     if (refusal) throw new ActionError('conflict', refusal);
     const restart = this.options.restart;
     if (!restart) throw new ActionError('unavailable', 'jukecord cannot restart itself here');
+    // A switch to another database restarts it already, on that database: a restart now would stop it without the
+    // switch's last copy.
+    if (this.stopping === 'switch')
+      throw new ActionError('conflict', 'jukecord is switching to another database; it starts again on it');
+    // Asked twice: the restart under way is the answer.
+    if (this.stopping === 'restart') return { supervisor: this.options.supervisor };
+    this.stopping = 'restart';
     // A moment later: the answer reaches whoever asked before the panels are told that jukecord is restarting.
     setTimeout(restart, 200);
     this.options.log.info('restarting, as asked', { supervisor: this.options.supervisor });
@@ -839,7 +872,7 @@ export class HostSettings {
 // The secrets that go to a place other settings name: the directory's service password goes to its address, over its
 // StartTLS, to the server its certificates prove, as its service account; the identity provider's client secret to
 // its issuer, as its client. The same as the login tests hold them to (src/auth/check.ts, SECRET_GOES).
-const DESTINATIONS: readonly { readonly secret: string; readonly to: readonly string[] }[] = [
+export const DESTINATIONS: readonly { readonly secret: string; readonly to: readonly string[] }[] = [
   {
     secret: 'JUKECORD_LDAP_BIND_PASSWORD',
     to: ['JUKECORD_LDAP_URL', 'JUKECORD_LDAP_STARTTLS', 'JUKECORD_LDAP_CA_FILE', 'JUKECORD_LDAP_BIND_DN'],
@@ -860,10 +893,10 @@ export function secretsMoved(
   for (const { secret, to } of DESTINATIONS) {
     const moving = to.filter((name) => changed.has(name));
     if (moving.length === 0) continue;
-    // The first of them is the way's address: put back to nothing, the way is off and the secret goes nowhere.
+    // The first of them is the way's address.
     const address = to[0] ?? '';
-    const addressAfter = changed.has(address) ? changed.get(address) : (layers.database.get(address)?.value ?? '');
-    if (changed.has(address) && addressAfter === null) continue;
+    // Put back to nothing by this change: the way is off and the secret goes nowhere.
+    if (changed.has(address) && changed.get(address) === null) continue;
     // Saved (in settings.json, where secrets are kept), and not given again or put away by this change.
     const saved = layers.file.get(secret)?.value ?? null;
     if (saved === null || changed.has(secret)) continue;
@@ -873,6 +906,25 @@ export function secretsMoved(
     });
   }
   return problems;
+}
+
+/** What a change does under its lock around its write: before it, and after it whatever came of it. */
+interface ChangeSteps {
+  readonly before?: () => void;
+  readonly after?: () => void;
+}
+
+// What is wrong with a file of authorities named by hand, by the import's checks, or null (a file that cannot be read
+// is the start's own problem, which the change's reading says).
+function checkFile(file: string): string | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  const checked = checkAuthorities(text);
+  return 'problem' in checked ? checked.problem : null;
 }
 
 // The host's certificate authorities' setting, which the page keeps a file for.

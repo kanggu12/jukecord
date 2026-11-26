@@ -12,18 +12,23 @@ import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { LoginChecks } from '../../src/auth/check.ts';
+import { loadConfig } from '../../src/config.ts';
 import {
   certificateFacts,
   checkAuthorities,
   forgetAuthorities,
   keepAuthorities,
 } from '../../src/settings/authorities.ts';
-import { SETTINGS_FILE } from '../../src/settings/file.ts';
+import { readSettingsFile, SETTINGS_FILE, SettingsFile } from '../../src/settings/file.ts';
+import { ONE_PROCESS } from '../../src/settings/layers.ts';
 import { testServer } from '../../src/settings/servers.ts';
+import { HostSettings, SettingsRefused } from '../../src/settings/service.ts';
 import { parseDatabaseAddress } from '../../src/store/address.ts';
 import { tlsOptions } from '../../src/store/network.ts';
+import type { Store } from '../../src/store/store.ts';
 import { API_PREFIX } from '../../src/web/api.ts';
 import { TEST_BUS_URL, testLog } from '../support/bus.ts';
+import { memoryStore, slowMemoryStore } from '../support/store.ts';
 import { haveOpenssl, httpsServer, type TestAuthority, testAuthority, tlsServer } from '../support/tls.ts';
 import { asHost, testServer as webServer } from '../support/web.ts';
 
@@ -170,6 +175,103 @@ describe('certificate authorities on the settings page', { skip }, () => {
     } finally {
       await server.close();
     }
+  });
+
+  // The host's settings over a store, in a data folder of their own; what settings.json names for the authorities,
+  // and the files the page keeps beside it.
+  async function service(store?: Store, answerMs?: number) {
+    const dataDir = fs.mkdtempSync(path.join(authority.dir, 'data-'));
+    const env = { JUKECORD_DATA_DIR: dataDir };
+    const settings = new HostSettings({
+      env,
+      cwd: dataDir,
+      store: store ?? (await memoryStore()),
+      file: new SettingsFile(dataDir),
+      rules: ONE_PROCESS,
+      started: loadConfig(env, dataDir),
+      supervisor: 'none',
+      log: testLog().log,
+      apply: () => {},
+      ...(answerMs !== undefined ? { answerMs } : {}),
+    });
+    return { settings, dataDir };
+  }
+  const named = (dataDir: string) => readSettingsFile(dataDir).get('JUKECORD_CA_FILE')?.value ?? null;
+  const kept = (dataDir: string) => fs.readdirSync(dataDir).filter((name) => name.startsWith('authorities-'));
+
+  it('keeps the file settings.json names when imports and a removal come at once', async () => {
+    const { settings, dataDir } = await service();
+    // Two imports at once: one after the other, the last one's file named, there, and the only one kept.
+    await Promise.all([settings.importAuthorities(authority.ca), settings.importAuthorities(other.ca)]);
+    const last = named(dataDir);
+    assert.ok(last !== null && fs.existsSync(last), `${last} is not there`);
+    assert.deepEqual(kept(dataDir), [path.basename(last)]);
+    // An import and a removal at once, in either order: what the last one leaves is what settings.json says.
+    await Promise.all([settings.importAuthorities(authority.ca), settings.removeAuthorities()]);
+    assert.deepEqual([named(dataDir), kept(dataDir)], [null, []]);
+    await Promise.all([settings.removeAuthorities(), settings.importAuthorities(other.ca)]);
+    const again = named(dataDir);
+    assert.ok(again !== null && fs.existsSync(again), `${again} is not there`);
+    assert.deepEqual(kept(dataDir), [path.basename(again)]);
+  });
+
+  it('keeps the file of an import whose save the database answers after the page stopped waiting', async () => {
+    // Every read of the saved settings held until let go (the change reads them first): the page is told the database
+    // does not answer.
+    let holding = true;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = await slowMemoryStore(undefined, (what) =>
+      holding && what.includes('FROM host_settings') ? gate : undefined,
+    );
+    const { settings, dataDir } = await service(store, 200);
+    await assert.rejects(settings.importAuthorities(authority.ca), /the database does not answer/);
+    holding = false;
+    release();
+    // The save lands later, naming the file, which is there.
+    for (let tries = 0; tries < 200 && named(dataDir) === null; tries += 1)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    const file = named(dataDir);
+    assert.ok(file !== null && fs.existsSync(file), `${file} is not there`);
+    assert.deepEqual(kept(dataDir), [path.basename(file)]);
+  });
+
+  it('holds authorities named by hand to the import’s checks: a key or no authority refused, nothing saved', async () => {
+    const { settings, dataDir } = await service();
+    const write = (name: string, text: string) => {
+      const file = path.join(dataDir, name);
+      fs.writeFileSync(file, text);
+      return file;
+    };
+    for (const [file, problem] of [
+      [
+        write('with-a-key.pem', `${authority.ca}\n${authority.key}`),
+        'JUKECORD_CA_FILE: it holds a private key: give only the authorities’ certificates, never a key',
+      ],
+      [
+        write('a-server-only.pem', authority.cert),
+        'JUKECORD_CA_FILE: it has no authority’s certificate (CA:TRUE): a server’s or a person’s certificate signs nothing',
+      ],
+    ] as const) {
+      const refused = await settings.change({ JUKECORD_CA_FILE: file }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      assert.ok(refused instanceof SettingsRefused, `${file} was taken`);
+      assert.deepEqual(
+        (refused.problems ?? []).map((entry) => entry.message),
+        [problem],
+      );
+    }
+    assert.equal(named(dataDir), null);
+    // An authority's certificate, named by hand: taken, and the page never removes it.
+    const mine = write('home-root.pem', authority.ca);
+    await settings.change({ JUKECORD_CA_FILE: mine });
+    assert.equal(named(dataDir), mine);
+    await settings.removeAuthorities();
+    assert.ok(fs.existsSync(mine));
   });
 
   it('leaves authorities the environment sets as they are: shown, never changed from the page', async () => {

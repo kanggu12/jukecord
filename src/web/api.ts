@@ -151,6 +151,10 @@ const SettingName = Type.String({
 });
 // A database's address as JUKECORD_DATABASE_URL takes it.
 const DatabaseUrl = Type.String({ minLength: 1, maxLength: 4000, description: 'As JUKECORD_DATABASE_URL takes it' });
+// A database's password given apart from its address, which it goes into (so the address need not show it).
+const DatabasePassword = Type.Optional(
+  Type.String({ maxLength: 1024, description: 'The password, in place of one in the address' }),
+);
 // Certificate authorities in PEM a test trusts besides the ones in use (the settings page's, not saved yet).
 const TestAuthorities = Type.Optional(
   Type.String({
@@ -694,7 +698,7 @@ export const API = {
       'Try a database’s address without saving it: whether it answers, its version and round trip, its schema and rows',
     tag: 'host',
     access: 'host',
-    body: Type.Object({ url: DatabaseUrl, ca: TestAuthorities }, strict),
+    body: Type.Object({ url: DatabaseUrl, password: DatabasePassword, ca: TestAuthorities }, strict),
     response: DatabaseTestSchema,
   }),
   'settings-test-cache': op({
@@ -753,7 +757,7 @@ export const API = {
       'Start moving to another database: every row copied into it while jukecord runs (replace empties one that holds data)',
     tag: 'host',
     access: 'host',
-    body: Type.Object({ url: DatabaseUrl, replace: Type.Optional(Type.Boolean()) }, strict),
+    body: Type.Object({ url: DatabaseUrl, password: DatabasePassword, replace: Type.Optional(Type.Boolean()) }, strict),
     response: MoveSchema,
   }),
   'database-move-status': op({

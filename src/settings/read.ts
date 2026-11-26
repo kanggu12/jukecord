@@ -49,6 +49,9 @@ export function readLayers(
   }
 }
 
+// The saved settings the start never leaves out when it refuses them (see startingSettings).
+const NEVER_LEFT_OUT: ReadonlySet<string> = new Set(['JUKECORD_DATABASE_URL']);
+
 /**
  * The settings at the start, over the saved values: a saved value that the rules refuse now (a file gone, a limit of a
  * newer jukecord) is left out, said in the log, and shown on the page, instead of keeping jukecord from starting; a
@@ -79,6 +82,9 @@ export function startingSettings(
       }
     }
     if (saved.size === 0) return { config: null, problems: read.problems, refused };
+    // Never the database's address: started without it, jukecord would open a new SQLite file, which looks like every
+    // track, playlist and play lost. The start refuses instead, as it does a settings.json it cannot read.
+    if ([...saved].some((name) => NEVER_LEFT_OUT.has(name))) return { config: null, problems: read.problems, refused };
     current = withoutNames(current, saved);
   }
   return { config: null, problems: ['the saved settings could not be read'], refused };

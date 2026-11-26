@@ -5,7 +5,8 @@
  *
  * - docker: Compose sets JUKECORD_SUPERVISOR=docker, its restart policy (unless-stopped) starts the container again;
  * - kubernetes: a pod's container is started again by its kubelet (KUBERNETES_SERVICE_HOST is in every pod);
- * - systemd: a unit with Restart=on-failure or always starts it again (INVOCATION_ID is in every unit's process);
+ * - systemd: a unit with Restart=on-failure or always starts it again, when it sets JUKECORD_SUPERVISOR=systemd (a
+ *   unit's own process cannot tell: systemd's default is Restart=no, which leaves it stopped);
  * - launcher: the program's `jukecord start` starts it again on that exit code (it sets JUKECORD_SUPERVISOR=launcher);
  * - none: nothing would, as in a terminal running it by hand; a restart is refused, saying so.
  */
@@ -17,10 +18,10 @@ export const RESTART_EXIT_CODE = 75;
 /** What starts jukecord again after it exits for a restart: as the setting says, or found out from where it runs. */
 export function supervisorOf(setting: Supervisor | null, env: NodeJS.ProcessEnv): Supervisor {
   if (setting !== null) return setting;
-  // Every pod has its cluster's API address in its environment.
+  // Every pod has its cluster's API address in its environment, and a pod's containers are started again by default.
   if (env.KUBERNETES_SERVICE_HOST) return 'kubernetes';
-  // systemd gives each run of a unit an ID of its own.
-  if (env.INVOCATION_ID) return 'systemd';
+  // Not systemd from its own variables: a unit starts jukecord again only when it says Restart=, which nothing in the
+  // process shows; the unit says JUKECORD_SUPERVISOR=systemd with it.
   return 'none';
 }
 

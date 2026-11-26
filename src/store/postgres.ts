@@ -200,7 +200,8 @@ export class PostgresExecutor extends PooledExecutor<PoolClient> {
           false,
         );
       }
-      if (address.schema !== null) await ensureSchema(pool, address.schema);
+      // Made when missing, but on a database only read: a schema that is not there reads as one with no tables.
+      if (address.schema !== null && options.readOnly !== true) await ensureSchema(pool, address.schema);
       return new PostgresExecutor(pool, address, { product: 'PostgreSQL', version }, options, failed);
     } catch (error) {
       await pool.end().catch(() => {});

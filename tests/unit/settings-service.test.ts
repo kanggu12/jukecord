@@ -15,12 +15,16 @@ import { createLogger, MemorySink } from '../../src/log.ts';
 import { SETTINGS } from '../../src/settings/definitions.ts';
 import { readSettingsFile, SETTINGS_FILE, SettingsFile } from '../../src/settings/file.ts';
 import { mergedEnvironment, ONE_PROCESS, SPLIT, sourceOf } from '../../src/settings/layers.ts';
-import { HostSettings, SettingsRefused, startingSettings } from '../../src/settings/service.ts';
+import { DatabaseMove } from '../../src/settings/move.ts';
+import { supervisorOf } from '../../src/settings/restart.ts';
+import { HostSettings, type RestartOptions, SettingsRefused, startingSettings } from '../../src/settings/service.ts';
+import { allSettings, firstSettings } from '../../src/settings/start.ts';
 import { valueIn } from '../../src/settings/values.ts';
 import { ConnectionError } from '../../src/store/network.ts';
 import type { Store } from '../../src/store/store.ts';
+import { Store as SqliteStore } from '../../src/store/store.ts';
 import { eachDatabase } from '../support/databases.ts';
-import { memoryStore } from '../support/store.ts';
+import { addTracks, memoryStore } from '../support/store.ts';
 
 // A made-up Discord token and Spotify secret, to look for in every answer and log line (put together here: a whole
 // token written in the source is what secret scanners stop at).
@@ -39,8 +43,9 @@ async function setup(
     env?: NodeJS.ProcessEnv;
     store?: Store;
     supervisor?: 'docker' | 'none';
-    restart?: () => void;
+    restart?: (options?: RestartOptions) => void;
     answerMs?: number;
+    move?: DatabaseMove;
   } = {},
 ) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-settings-'));
@@ -64,6 +69,7 @@ async function setup(
     apply: (names, next) => applied.push({ names, next }),
     ...(options.restart ? { restart: options.restart } : {}),
     ...(options.answerMs !== undefined ? { answerMs: options.answerMs } : {}),
+    ...(options.move ? { move: options.move } : {}),
   });
   return { settings, store, file, dataDir, sink, applied, env };
 }
@@ -374,7 +380,110 @@ describe('the settings service', () => {
   });
 });
 
+describe('a restart and a move’s switch', () => {
+  // A move whose copy is done: a SQLite file of a few tracks copied into another one in the same folder.
+  async function copiedMove(): Promise<DatabaseMove> {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-switch-'));
+    folders.push(dataDir);
+    const file = path.join(dataDir, 'jukecord.db');
+    const store = await SqliteStore.open(file);
+    await addTracks(store, 2, 'kept');
+    await store.close();
+    const move = new DatabaseMove({ dataDir, current: { kind: 'sqlite', file }, pool: 2 });
+    await move.start(`sqlite:${path.join(dataDir, 'moved.db')}`, false);
+    await eventually(() => move.current?.phase === 'copied');
+    return move;
+  }
+
+  it('counts systemd as what starts jukecord again only when the setting says so', () => {
+    // Every unit's process has an INVOCATION_ID, and systemd leaves it stopped unless the unit says Restart=.
+    assert.equal(supervisorOf(null, { INVOCATION_ID: '0123456789abcdef0123456789abcdef' }), 'none');
+    assert.equal(supervisorOf('systemd', { INVOCATION_ID: '0123456789abcdef0123456789abcdef' }), 'systemd');
+    // A pod's containers are started again by default.
+    assert.equal(supervisorOf(null, { KUBERNETES_SERVICE_HOST: '10.43.0.1' }), 'kubernetes');
+  });
+
+  it('refuses a switch while a restart is on its way, and a restart while a switch is', async () => {
+    // A restart first: the switch after it would be dropped by the stop under way, so it is refused, the move kept.
+    const restarts: (RestartOptions | undefined)[] = [];
+    const first = await setup({
+      supervisor: 'docker',
+      restart: (options) => restarts.push(options),
+      move: await copiedMove(),
+    });
+    first.settings.restartNow();
+    const refused = await refusal(Promise.resolve().then(() => first.settings.switchMove()));
+    assert.deepEqual(
+      [refused.code, refused.message],
+      ['conflict', 'jukecord is restarting; switch to the database once it is back'],
+    );
+    assert.equal(first.settings.moveState().state?.phase, 'copied');
+    // Asked again, the restart under way is the answer.
+    assert.deepEqual(first.settings.restartNow(), { supervisor: 'docker' });
+    await eventually(() => restarts.length === 1);
+    assert.equal(restarts[0], undefined);
+    // A switch first: a restart after it would stop jukecord without the switch's last copy.
+    const switched: (RestartOptions | undefined)[] = [];
+    const second = await setup({
+      supervisor: 'docker',
+      restart: (options) => switched.push(options),
+      move: await copiedMove(),
+    });
+    assert.equal(second.settings.switchMove().restarts, true);
+    const again = await refusal(Promise.resolve().then(() => second.settings.restartNow()));
+    assert.deepEqual(
+      [again.code, again.message],
+      ['conflict', 'jukecord is switching to another database; it starts again on it'],
+    );
+    // The stop that comes is the switch's, with its last copy.
+    await eventually(() => switched.length === 1);
+    assert.equal(typeof switched[0]?.last, 'function');
+  });
+});
+
 describe('the settings at the start', () => {
+  // A saved setting as settings.json or the database holds it.
+  const row = (name: string, value: string) => [name, { name, value, revision: 1, updatedAt: 1 }] as const;
+
+  it('reads nothing from the database that steers a saved secret or names a program for jukecord to run', () => {
+    // Rows another holder of the database's password could write: the directory moved elsewhere for the bind
+    // password saved in settings.json, a program of its own for yt-dlp. None of them is read.
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-rows-'));
+    folders.push(dataDir);
+    const env = { JUKECORD_DATA_DIR: dataDir };
+    const file = new Map([row('JUKECORD_LDAP_BIND_PASSWORD', 'a-made-up-bind-password')]);
+    const database = new Map([
+      row('JUKECORD_LDAP_URL', 'ldap://directory.example.net'),
+      row('JUKECORD_LDAP_BIND_DN', 'cn=reader,dc=example,dc=net'),
+      row('JUKECORD_LDAP_BASE_DN', 'dc=example,dc=net'),
+      row('JUKECORD_LDAP_READ_GROUPS', '*'),
+      row('JUKECORD_OIDC_ISSUER', 'https://sso.example.net/realms/home'),
+      row('JUKECORD_YTDLP', '/opt/elsewhere/yt-dlp'),
+      row('JUKECORD_FFMPEG', '/opt/elsewhere/ffmpeg'),
+    ]);
+    const all = allSettings(env, dataDir, { file, database }, ONE_PROCESS);
+    assert.ok(all.config, all.problems.join('; '));
+    const plain = loadConfig(env, dataDir);
+    assert.deepEqual(
+      [all.config.auth.ldap, all.config.auth.oidc, all.config.media.ytdlp, all.config.media.ffmpeg],
+      [plain.auth.ldap, plain.auth.oidc, plain.media.ytdlp, plain.media.ffmpeg],
+    );
+  });
+
+  it('never starts without a saved database address it refuses: it says why instead', () => {
+    // Left out, jukecord would start on a new SQLite file, which looks like every track and playlist lost.
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-address-'));
+    folders.push(dataDir);
+    const env = { JUKECORD_DATA_DIR: dataDir };
+    const file = new Map([row('JUKECORD_DATABASE_URL', 'postgres://db.example.net:5432/jukecord')]);
+    const first = firstSettings(env, dataDir, file, ONE_PROCESS);
+    assert.equal(first.config, null);
+    assert.deepEqual(first.problems, [
+      'JUKECORD_DATABASE_URL has no user name (postgres://user:password@host/database)',
+    ]);
+    assert.equal(allSettings(env, dataDir, { file, database: new Map() }, ONE_PROCESS).config, null);
+  });
+
   it('leaves out a saved value the rules refuse now, and says which and why', async () => {
     const layers = {
       file: new Map(),
