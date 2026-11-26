@@ -121,11 +121,12 @@ const NEXT_ENV = {
   JUKECORD_INTERNAL_SECRET: 'abcdefghijklmnopqrstuvwxyz0123456789',
 };
 // The settings NEXT_ENV cannot move off their default in the same Config (the directory's StartTLS takes ldap://, its
-// nested groups no group filter, its CA file a file to read, the cookies a file too).
+// nested groups no group filter, its CA file a file to read, the host's authorities and the cookies files too).
 const UNMOVED = new Set([
   'JUKECORD_LDAP_STARTTLS',
   'JUKECORD_LDAP_NESTED_GROUPS',
   'JUKECORD_LDAP_CA_FILE',
+  'JUKECORD_CA_FILE',
   'JUKECORD_YTDLP_COOKIES',
   'JUKECORD_CORE_URL',
 ]);

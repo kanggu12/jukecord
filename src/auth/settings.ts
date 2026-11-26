@@ -50,7 +50,7 @@ export interface LdapSettings {
   /** Whether a plain connection is upgraded with StartTLS before anything is sent (never with ldaps://). */
   readonly startTls: boolean;
   /** The certificates (PEM) the directory's certificate is checked against, read from JUKECORD_LDAP_CA_FILE; null for
-   * the system's. */
+   * every connection's (Node's own, and JUKECORD_CA_FILE's). */
   readonly ca: string | null;
   /** The service account that finds people; null for an anonymous search. */
   readonly bindDn: string | null;
@@ -404,7 +404,8 @@ export function describeAuth(settings: AuthSettings): Record<string, string> {
     ...(ldap
       ? {
           'directory encryption': ldapsUrl(ldap.url) ? 'ldaps' : ldap.startTls ? 'starttls' : 'none',
-          'directory certificates': ldap.ca === null ? "the system's" : 'JUKECORD_LDAP_CA_FILE',
+          // Without a file of its own, the authorities every connection trusts: Node's, and JUKECORD_CA_FILE's.
+          'directory certificates': ldap.ca === null ? "every connection's" : 'JUKECORD_LDAP_CA_FILE',
           'directory service account': ldap.bindDn ?? 'none (anonymous search)',
           'directory service password': set(ldap.bindPassword),
           'directory base': ldap.baseDn,

@@ -67,6 +67,7 @@ The last line prints a one-time login link for the host. Without a bot token juk
 | `publicUrl`                                                                                  |                                                     | the panel's address, for logins and the bot's links                           |
 | `database.url`                                                                               |                SQLite in the volume                 | a database server: `postgres://…`, `mysql://…`                                |
 | `database.existingSecret`                                                                    |                                                     | a Secret with that address under `url`                                        |
+| `ca.secret` or `.configMap`, `.key`                                                          |                      `ca.crt`                       | your own certificate authorities, trusted by every connection                 |
 | `auth.oidc.issuer`, `.clientId`                                                              |                         off                         | logging in through your identity provider (OIDC)                              |
 | `auth.oidc.clientSecret`, `.existingSecret`                                                  |                                                     | its secret, or a Secret holding it as `oidcClientSecret`                      |
 | `auth.oidc.scopes`, `.groupsClaim`, `.label`, `.discordClaim`                                |                                                     | what is asked of the provider, and the login key                              |
@@ -75,7 +76,6 @@ The last line prints a one-time login link for the host. Without a bot token juk
 | `auth.ldap.bindDn`, `.bindPassword`, `.existingSecret`                                       |                                                     | the service account; a Secret holds `ldapBindPassword`                        |
 | `auth.ldap.groupFilter`, `.groupBaseDn`, `.nestedGroups`, `.timeout`, `.label`               |                                                     | how groups are found, and the form's key                                      |
 | `auth.ldap.adminGroups`, `.controlGroups`, `.readGroups`                                     |                                                     | who may log in, as what (lists)                                               |
-| `auth.ca.secret` or `.configMap`, `.key`                                                     |                      `ca.crt`                       | a private CA's certificates, for both                                         |
 | `auth.egressTo`                                                                              |                                                     | NetworkPolicy rules to the provider and the directory                         |
 | `env`                                                                                        |                        `{}`                         | jukecord's settings by name, as strings                                       |
 | `extraEnv`                                                                                   |                        `[]`                         | more variables as Kubernetes writes them                                      |
@@ -105,6 +105,9 @@ The last line prints a one-time login link for the host. Without a bot token juk
 - helm test's pod follows the pull secrets, the node selector and the tolerations.
 - Every value is checked against the chart's schema, so a misspelt key fails the install. The settings jukecord reads
   are listed in [Using jukecord](https://github.com/kanggu12/jukecord/blob/main/docs/README.md#settings).
+- `ca` is mounted on every jukecord pod (the one pod; the core and the edges in split mode) as `JUKECORD_CA_FILE`:
+  the database, the bus, the identity provider and the directory may then have certificates your own authority
+  signed. A database's `sslrootcert` still decides alone for that connection.
 - The logins (`auth`) are given to the pods that serve browsers: the one pod, or the edges in split mode, where
   `jukecord auth test-oidc` and `test-ldap` run too (`exec deploy/<release>-edge`). Their settings are refused in `env`
   and `extraEnv`; a provider or a directory in a private range needs its rule in `auth.egressTo`.

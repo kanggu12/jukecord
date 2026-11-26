@@ -1,8 +1,8 @@
 {{/*
 Logging in through the host's identity provider (OIDC) and with directory accounts (LDAP): the values under auth,
 given to the pods that serve browsers (the one pod; in split mode the edges, where `jukecord auth test-*` runs too) as
-the JUKECORD_OIDC_* and JUKECORD_LDAP_* settings, the client secret and the bind password as files, and a private CA's
-certificates as a file that LDAP reads through JUKECORD_LDAP_CA_FILE and OIDC through NODE_EXTRA_CA_CERTS.
+the JUKECORD_OIDC_* and JUKECORD_LDAP_* settings, and the client secret and the bind password as files. A private
+authority of the provider's or the directory's is the chart's ca (jukecord.caEnv), which every connection trusts.
 */}}
 
 {{/* Whether each way of logging in is on: its address set. */}}
@@ -23,16 +23,6 @@ certificates as a file that LDAP reads through JUKECORD_LDAP_CA_FILE and OIDC th
 {{- if and (include "jukecord.ldapOn" .) (or .Values.auth.ldap.bindPassword .Values.auth.ldap.existingSecret) -}}true{{- end -}}
 {{- end -}}
 
-{{/* Whether a private CA's certificates are mounted: given, and for a way of logging in that is on. */}}
-{{- define "jukecord.authCa" -}}
-{{- if and (or .Values.auth.ca.secret .Values.auth.ca.configMap) (or (include "jukecord.oidcOn" .) (include "jukecord.ldapOn" .)) -}}true{{- end -}}
-{{- end -}}
-
-{{/* Whether the chart sets NODE_EXTRA_CA_CERTS: a CA for OIDC, which jukecord asks with Node's own requests. */}}
-{{- define "jukecord.setsExtraCa" -}}
-{{- if and (include "jukecord.authCa" .) (include "jukecord.oidcOn" .) -}}true{{- end -}}
-{{- end -}}
-
 {{/* The Secret the chart makes for the two secrets given in the values. */}}
 {{- define "jukecord.authSecretName" -}}
 {{- printf "%s-auth" (include "jukecord.fullname" .) | trunc 63 | trimSuffix "-" -}}
@@ -45,9 +35,8 @@ certificates as a file that LDAP reads through JUKECORD_LDAP_CA_FILE and OIDC th
 {{- end -}}
 {{- end -}}
 
-{{/* Where the two secrets and the CA are mounted. */}}
+{{/* Where the two secrets are mounted. */}}
 {{- define "jukecord.authDir" -}}/run/secrets/jukecord-auth{{- end -}}
-{{- define "jukecord.authCaDir" -}}/run/jukecord-auth-ca{{- end -}}
 
 {{/*
 Every variable the chart sets from auth, with the value it comes from: env and extraEnv may not set them (see
@@ -68,7 +57,6 @@ jukecord.validate). The packaging tests check this list against src/auth/setting
 {{- $_ := set $from "JUKECORD_OIDC_DISCORD_CLAIM" "auth.oidc.discordClaim" -}}
 {{- $_ := set $from "JUKECORD_LDAP_URL" "auth.ldap.url" -}}
 {{- $_ := set $from "JUKECORD_LDAP_STARTTLS" "auth.ldap.startTls" -}}
-{{- $_ := set $from "JUKECORD_LDAP_CA_FILE" "auth.ca" -}}
 {{- $_ := set $from "JUKECORD_LDAP_BIND_DN" "auth.ldap.bindDn" -}}
 {{- $_ := set $from "JUKECORD_LDAP_BIND_PASSWORD" "auth.ldap.bindPassword or auth.ldap.existingSecret" -}}
 {{- $_ := set $from "JUKECORD_LDAP_BIND_PASSWORD_FILE" "auth.ldap.bindPassword or auth.ldap.existingSecret" -}}
@@ -126,12 +114,6 @@ jukecord.validate). The packaging tests check this list against src/auth/setting
 {{- if and $ldap.bindPassword $ldap.existingSecret -}}
 {{- fail "auth.ldap.bindPassword and auth.ldap.existingSecret are both set; set one: the password in the values, or under the key ldapBindPassword of a Secret of yours." -}}
 {{- end -}}
-{{- if and .Values.auth.ca.secret .Values.auth.ca.configMap -}}
-{{- fail "auth.ca.secret and auth.ca.configMap are both set; set the one that holds the certificates." -}}
-{{- end -}}
-{{- if and (or .Values.auth.ca.secret .Values.auth.ca.configMap) (not (or $oidc.issuer $ldap.url)) -}}
-{{- fail "auth.ca is the private CA of the identity provider or the directory: set auth.oidc.issuer or auth.ldap.url too." -}}
-{{- end -}}
 {{- end -}}
 
 {{/* The settings of logging in, for the container's env (empty when both ways are off). */}}
@@ -177,11 +159,6 @@ jukecord.validate). The packaging tests check this list against src/auth/setting
 - name: JUKECORD_OIDC_DISCORD_CLAIM
   value: {{ . | quote }}
 {{- end }}
-{{- if include "jukecord.setsExtraCa" . }}
-# The provider's private CA, which Node's own requests (the provider's documents, the tokens) trust besides the system's.
-- name: NODE_EXTRA_CA_CERTS
-  value: {{ include "jukecord.authCaDir" . }}/ca.crt
-{{- end }}
 {{- end }}
 {{- if include "jukecord.ldapOn" . }}
 # Logging in with a directory account (auth.ldap).
@@ -190,10 +167,6 @@ jukecord.validate). The packaging tests check this list against src/auth/setting
 {{- if $ldap.startTls }}
 - name: JUKECORD_LDAP_STARTTLS
   value: "yes"
-{{- end }}
-{{- if include "jukecord.authCa" . }}
-- name: JUKECORD_LDAP_CA_FILE
-  value: {{ include "jukecord.authCaDir" . }}/ca.crt
 {{- end }}
 {{- with $ldap.bindDn }}
 - name: JUKECORD_LDAP_BIND_DN
@@ -245,23 +218,18 @@ jukecord.validate). The packaging tests check this list against src/auth/setting
 {{- end }}
 {{- end -}}
 
-{{/* Where the two secrets and the CA are mounted in the container (empty when there are none). */}}
+{{/* Where the two secrets are mounted in the container (empty when there are none). */}}
 {{- define "jukecord.authMounts" -}}
 {{- if or (include "jukecord.readsOidcSecret" .) (include "jukecord.readsLdapPassword" .) }}
 - name: auth
   mountPath: {{ include "jukecord.authDir" . }}
   readOnly: true
 {{- end }}
-{{- if include "jukecord.authCa" . }}
-- name: auth-ca
-  mountPath: {{ include "jukecord.authCaDir" . }}
-  readOnly: true
-{{- end }}
 {{- end -}}
 
 {{/*
-The volumes of the two secrets (readable by jukecord's group only; not optional: a Secret without the key, or a
-misspelt name, keeps the pod from starting with an event that names it) and of the CA (certificates are no secret).
+The volume of the two secrets: readable by jukecord's group only; not optional: a Secret without the key, or a
+misspelt name, keeps the pod from starting with an event that names it.
 */}}
 {{- define "jukecord.authVolumes" -}}
 {{- if or (include "jukecord.readsOidcSecret" .) (include "jukecord.readsLdapPassword" .) }}
@@ -285,24 +253,6 @@ misspelt name, keeps the pod from starting with an event that names it) and of t
               path: ldapBindPassword
           optional: false
       {{- end }}
-{{- end }}
-{{- if include "jukecord.authCa" . }}
-- name: auth-ca
-  {{- if .Values.auth.ca.secret }}
-  secret:
-    secretName: {{ .Values.auth.ca.secret }}
-    defaultMode: 0444
-    items:
-      - key: {{ .Values.auth.ca.key }}
-        path: ca.crt
-  {{- else }}
-  configMap:
-    name: {{ .Values.auth.ca.configMap }}
-    defaultMode: 0444
-    items:
-      - key: {{ .Values.auth.ca.key }}
-        path: ca.crt
-  {{- end }}
 {{- end }}
 {{- end -}}
 

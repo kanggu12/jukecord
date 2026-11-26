@@ -80,6 +80,16 @@ database:
 # Where people reach the panel (the Ingress's address, https://...). Login and the bot's links are built on it.
 publicUrl: ""
 
+# Certificate authorities of your own (a company's, a cluster's), which every TLS connection jukecord makes trusts
+# besides the ones Node.js ships with: the database, the bus, the identity provider, the directory, Discord's. A Secret
+# or a ConfigMap of yours (one of them), and the key that holds one or more certificates in PEM. Mounted read-only on
+# every jukecord pod (the one pod; in split mode the core and every edge) as JUKECORD_CA_FILE. A database's own
+# sslrootcert in its address still decides alone for that connection.
+ca:
+  secret: ""
+  configMap: ""
+  key: ca.crt
+
 # Logging in through your own identity provider (OIDC: Keycloak, Authentik, Entra ID, Okta, Google ...) and with
 # directory accounts (LDAP: OpenLDAP, FreeIPA, Active Directory), as jukecord's JUKECORD_OIDC_* and JUKECORD_LDAP_*
 # settings take them (docs/README.md, settings): each is off until its address is set. The pods that serve browsers
@@ -132,13 +142,6 @@ auth:
     # How long each request may take (empty: 10s), and the words on the directory form's key (empty: the panel's own).
     timeout: ""
     label: ""
-  # A private CA that signed the provider's or the directory's certificate: a Secret or a ConfigMap of yours (one of
-  # them), and the key that holds the certificates in PEM. Mounted read-only; the directory's connection checks against
-  # it (JUKECORD_LDAP_CA_FILE), and so do the requests to the provider (NODE_EXTRA_CA_CERTS, besides the system's).
-  ca:
-    secret: ""
-    configMap: ""
-    key: ca.crt
   # Where the provider and the directory are, as NetworkPolicy egress rules (to, ports), for the pods that log people
   # in: one on the internet needs none, one in the cluster's private ranges does (Keycloak in the cluster, a directory
   # on your network). For a directory at 10.20.0.5:

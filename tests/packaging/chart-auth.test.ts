@@ -33,7 +33,8 @@ const SPLIT = [
   'bus.url=redis://v:6379',
 ];
 
-// Both ways of logging in, as a host with a Keycloak and a directory on a private CA writes them.
+// Both ways of logging in, as a host with a Keycloak and a directory writes them (a private authority of theirs is the
+// chart's ca, which every connection trusts: tests/packaging/chart-ca.test.ts).
 const LOGINS = `auth:
   oidc:
     issuer: https://sso.example.com/realms/home
@@ -50,9 +51,6 @@ const LOGINS = `auth:
     baseDn: dc=example,dc=org
     groupFilter: (member={dn})
     controlGroups: ["cn=dj,ou=groups,dc=example,dc=org", listeners]
-  ca:
-    configMap: corp-ca
-    key: bundle.pem
   egressTo:
     - to:
         - ipBlock:
@@ -91,7 +89,7 @@ function variable(part: string, name: string): string | undefined {
   return new RegExp(`- name: ${name}\\n\\s+value: (.+)\\n`).exec(part)?.[1];
 }
 
-// What a pod that logs people in carries: every setting, the two secrets as files, the CA for both.
+// What a pod that logs people in carries: every setting, and the two secrets as files.
 function logsPeopleIn(part: string): void {
   assert.equal(variable(part, 'JUKECORD_OIDC_ISSUER'), '"https://sso.example.com/realms/home"');
   assert.equal(variable(part, 'JUKECORD_OIDC_SCOPES'), '"openid profile groups"');
@@ -99,27 +97,23 @@ function logsPeopleIn(part: string): void {
   assert.equal(variable(part, 'JUKECORD_OIDC_CLIENT_SECRET_FILE'), '/run/secrets/jukecord-auth/oidcClientSecret');
   assert.equal(variable(part, 'JUKECORD_LDAP_CONTROL_GROUPS'), '"cn=dj,ou=groups,dc=example,dc=org;listeners"');
   assert.equal(variable(part, 'JUKECORD_LDAP_BIND_PASSWORD_FILE'), '/run/secrets/jukecord-auth/ldapBindPassword');
-  assert.equal(variable(part, 'JUKECORD_LDAP_CA_FILE'), '/run/jukecord-auth-ca/ca.crt');
-  assert.equal(variable(part, 'NODE_EXTRA_CA_CERTS'), '/run/jukecord-auth-ca/ca.crt');
+  // No authority of their own: the chart's ca is every connection's.
+  assert.equal(variable(part, 'JUKECORD_LDAP_CA_FILE'), undefined);
+  assert.equal(variable(part, 'NODE_EXTRA_CA_CERTS'), undefined);
   // The secrets never as variables.
   assert.equal(variable(part, 'JUKECORD_OIDC_CLIENT_SECRET'), undefined);
   assert.equal(variable(part, 'JUKECORD_LDAP_BIND_PASSWORD'), undefined);
   assert.doesNotMatch(part, /the-client-secret|the-bind-password/);
   assert.match(part, /- name: auth\n\s+mountPath: \/run\/secrets\/jukecord-auth\n\s+readOnly: true/);
-  assert.match(part, /- name: auth-ca\n\s+mountPath: \/run\/jukecord-auth-ca\n\s+readOnly: true/);
   assert.match(part, /- key: oidcClientSecret\n\s+path: oidcClientSecret/);
   assert.match(part, /- key: ldapBindPassword\n\s+path: ldapBindPassword/);
-  assert.match(
-    part,
-    /configMap:\n\s+name: corp-ca\n\s+defaultMode: 0444\n\s+items:\n\s+- key: bundle\.pem\n\s+path: ca\.crt/,
-  );
   assert.match(part, /checksum\/auth: [0-9a-f]{16}\n/);
 }
 
 describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' }, () => {
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  it('give the one pod the settings, the two secrets as files from its Secret, and the CA', () => {
+  it('give the one pod the settings, and the two secrets as files from its Secret', () => {
     const rendered = render('-f', logins);
     logsPeopleIn(object(rendered, 'Deployment', 't-jukecord'));
     const secret = object(rendered, 'Secret', 't-jukecord-auth');
@@ -158,7 +152,7 @@ describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' 
     assert.match(pod, /name: my-sso\n\s+items:\n\s+- key: oidcClientSecret/);
     assert.match(pod, /name: my-directory\n\s+items:\n\s+- key: ldapBindPassword/);
     assert.doesNotMatch(theirs, /name: t-jukecord-auth\n/);
-    // A public client, an anonymous search, no CA: only the settings.
+    // A public client and an anonymous search: only the settings.
     const plain = render(
       '-f',
       logins,
@@ -168,13 +162,10 @@ describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' 
       'auth.ldap.bindDn=',
       '--set',
       'auth.ldap.bindPassword=',
-      '--set',
-      'auth.ca.configMap=',
     );
     const bare = object(plain, 'Deployment', 't-jukecord');
     assert.equal(variable(bare, 'JUKECORD_OIDC_CLIENT_SECRET_FILE'), undefined);
-    assert.equal(variable(bare, 'NODE_EXTRA_CA_CERTS'), undefined);
-    assert.doesNotMatch(bare, /name: auth\n|name: auth-ca\n/);
+    assert.doesNotMatch(bare, /name: auth\n/);
     // Both off (the default): no setting, no Secret, no checksum change from them.
     const off = render();
     assert.doesNotMatch(off, /JUKECORD_OIDC_|JUKECORD_LDAP_|t-jukecord-auth/);
@@ -190,7 +181,7 @@ describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' 
     assert.equal(checksum(render('-f', logins, ...salt)), before);
   });
 
-  it("refuse every login setting in env or extraEnv (the list of src/auth/settings.ts), and the chart's CA variable", () => {
+  it('refuse every login setting in env or extraEnv (the list of src/auth/settings.ts)', () => {
     for (const name of AUTH_VARIABLES) {
       assert.match(render('--set', `env.${name}=x`), new RegExp(`env: ${name} is not set here`), name);
     }
@@ -198,10 +189,14 @@ describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' 
       render('--set', 'extraEnv[0].name=JUKECORD_LDAP_BIND_PASSWORD', '--set', 'extraEnv[0].value=x'),
       /extraEnv: JUKECORD_LDAP_BIND_PASSWORD is not set here/,
     );
-    // NODE_EXTRA_CA_CERTS (extraEnv's: env takes JUKECORD_ names only) is the chart's only when it gives OIDC a CA.
+    // The directory's own authority file points at the chart's ca, which covers it.
+    assert.match(
+      render('--set', 'env.JUKECORD_LDAP_CA_FILE=/x'),
+      /in the chart's ca \(a Secret or a ConfigMap of yours\)/,
+    );
+    // NODE_EXTRA_CA_CERTS is not the chart's (extraEnv may set it: env takes JUKECORD_ names only).
     const extra = ['--set', 'extraEnv[0].name=NODE_EXTRA_CA_CERTS', '--set', 'extraEnv[0].value=/x'];
-    assert.match(render('-f', logins, ...extra), /NODE_EXTRA_CA_CERTS is set by the chart/);
-    assert.doesNotMatch(render(...extra), /^refused/);
+    assert.doesNotMatch(render('-f', logins, ...extra), /^refused/);
   });
 
   it('refuse values that cannot work together, saying what to change', () => {
@@ -223,8 +218,8 @@ describe("the chart's logins", { skip: !have('helm') && 'helm is not installed' 
         ['-f', logins, '--set', 'auth.ldap.existingSecret=s'],
         /auth\.ldap\.bindPassword and auth\.ldap\.existingSecret are both set/,
       ],
-      [['-f', logins, '--set', 'auth.ca.secret=s'], /auth\.ca\.secret and auth\.ca\.configMap are both set/],
-      [['--set', 'auth.ca.secret=s'], /auth\.ca is the private CA of the identity provider or the directory/],
+      // auth.ca is gone (the chart's ca is every connection's): the schema refuses it.
+      [['--set', 'auth.ca.secret=s'], /don't meet the specifications of the schema/],
       [['--set', 'auth.oidc.issuer=sso.example.com'], /don't meet the specifications of the schema/],
       [['--set', 'auth.ldap.url=https://ldap.example.com'], /don't meet the specifications of the schema/],
     ];

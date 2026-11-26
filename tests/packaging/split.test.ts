@@ -115,7 +115,16 @@ describe('the Compose split', () => {
         env,
         stdio: 'pipe',
       });
-    assert.match(config('deploy/split/compose.yaml'), /JUKECORD_DATABASE_URL: postgres:\/\/jukecord:x@database:5432/);
+    const postgres = config('deploy/split/compose.yaml');
+    assert.match(postgres, /JUKECORD_DATABASE_URL: postgres:\/\/jukecord:x@database:5432/);
+    // The host's certificate authorities: the split's ca folder, read-only, in the core and both edges (an edge's
+    // /data lasts as long as its container); the folder is there in every checkout, with only its README committed.
+    const authorities = [
+      ...postgres.matchAll(/source: \S+\/deploy\/split\/ca\n\s+target: \/run\/jukecord-ca\n\s+read_only: true/g),
+    ];
+    assert.equal(authorities.length, 3, 'the core and both edges mount the ca folder');
+    assert.ok(fs.existsSync('deploy/split/ca/README.md'));
+    assert.match(read('.gitignore'), /^\/deploy\/split\/ca\/\*\n!\/deploy\/split\/ca\/README\.md$/m);
     const mysql = config('deploy/split/compose.yaml', 'deploy/split/compose.mysql.yaml');
     assert.match(mysql, /JUKECORD_DATABASE_URL: mysql:\/\/jukecord:x@database:3306\/jukecord/);
     assert.doesNotMatch(mysql, /POSTGRES_PASSWORD/);

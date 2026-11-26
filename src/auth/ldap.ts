@@ -232,7 +232,8 @@ export class LdapLogin {
   }
 
   // A connection to the directory, upgraded with StartTLS when the settings say: certificates checked against the
-  // CA file when one is given (the system's otherwise), and nothing sent until the connection is encrypted.
+  // CA file when one is given (otherwise against every connection's: Node's own, and JUKECORD_CA_FILE's), and nothing
+  // sent until the connection is encrypted.
   private async open(): Promise<DirectoryClient> {
     const { settings } = this.options;
     // The host the URL names (an address in brackets without them).

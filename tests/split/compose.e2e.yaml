@@ -1,6 +1,8 @@
 # What tests/split/run.sh adds to deploy/split/compose.yaml: each edge and the core's own port published on this
 # machine, so a test can talk to one edge in particular; a file server in place of the sites tracks come from, with
-# private addresses allowed so the core may fetch from it; and nothing of the checkout's .env, so no Discord at all.
+# private addresses allowed so the core may fetch from it; nothing of the checkout's .env, so no Discord at all; and
+# the bus over TLS, with a certificate of an authority made for the run, which every jukecord service trusts only
+# because the split's ca folder (the run's, here) holds it and JUKECORD_CA_FILE names it.
 services:
   core:
     env_file: !reset []
@@ -9,20 +11,60 @@ services:
       JUKECORD_ALLOW_PRIVATE_ADDRESSES: "true"
       JUKECORD_LYRICS: "off"
       JUKECORD_LINK_SERVICES: none
+      JUKECORD_BUS_URL: rediss://valkey:6379
+      JUKECORD_CA_FILE: /run/jukecord-ca/ca.crt
+    volumes:
+      - ${JUKECORD_E2E_CA:?the folder with the run's authority}:/run/jukecord-ca:ro
     ports:
       - "127.0.0.1:${JUKECORD_E2E_CORE_PORT:-18798}:8795"
   edge1:
     env_file: !reset []
     environment:
       JUKECORD_DISCORD_TOKEN: ""
+      JUKECORD_BUS_URL: rediss://valkey:6379
+      JUKECORD_CA_FILE: /run/jukecord-ca/ca.crt
+    volumes:
+      - ${JUKECORD_E2E_CA:?the folder with the run's authority}:/run/jukecord-ca:ro
     ports:
       - "127.0.0.1:${JUKECORD_E2E_EDGE1_PORT:-18796}:8795"
   edge2:
     env_file: !reset []
     environment:
       JUKECORD_DISCORD_TOKEN: ""
+      JUKECORD_BUS_URL: rediss://valkey:6379
+      JUKECORD_CA_FILE: /run/jukecord-ca/ca.crt
+    volumes:
+      - ${JUKECORD_E2E_CA:?the folder with the run's authority}:/run/jukecord-ca:ro
     ports:
       - "127.0.0.1:${JUKECORD_E2E_EDGE2_PORT:-18797}:8795"
+  # The bus over TLS only (no plain port), with the run's certificate.
+  valkey:
+    command: !override
+      - valkey-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lfu
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /tls/server.crt
+      - --tls-key-file
+      - /tls/server.key
+      - --tls-ca-cert-file
+      - /tls/ca.crt
+      - --tls-auth-clients
+      - "no"
+    volumes:
+      - ${JUKECORD_E2E_TLS:?the folder with the bus's certificate}:/tls:ro
+    healthcheck:
+      test: [CMD, valkey-cli, --tls, --cacert, /tls/ca.crt, -h, localhost, ping]
   front:
     ports: !override
       - "127.0.0.1:${JUKECORD_E2E_FRONT_PORT:-18795}:80"

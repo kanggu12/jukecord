@@ -34,6 +34,7 @@ export type GroupId =
   | 'logins'
   | 'database'
   | 'cache'
+  | 'authorities'
   | 'media'
   | 'backups'
   | 'logging'
@@ -117,6 +118,7 @@ export const GROUPS: readonly GroupDefinition[] = [
   },
   { id: 'database', label: { en: 'Database', ko: '데이터베이스' } },
   { id: 'cache', label: { en: 'Cache and bus', ko: '캐시와 버스' } },
+  { id: 'authorities', label: { en: 'Certificate authorities', ko: '인증 기관' } },
   { id: 'media', label: { en: 'Media and limits', ko: '미디어와 제한' } },
   { id: 'backups', label: { en: 'Backups', ko: '백업' } },
   { id: 'logging', label: { en: 'Logging and monitoring', ko: '로그와 모니터링' } },
@@ -778,6 +780,26 @@ export const SETTINGS: readonly SettingDefinition[] = [
     help: {
       en: 'What every key and channel on that server goes under, so several jukecords can share one',
       ko: '그 서버에 두는 모든 키와 채널의 앞머리. 여러 jukecord가 한 서버를 함께 쓸 수 있음',
+    },
+  },
+
+  // The host's own certificate authorities: trusted by every connection jukecord makes over TLS (the database, the bus
+  // and the cache, the identity provider, the directory) besides Node's own, from the start on (src/authorities.ts).
+  // Needed before the database opens, so kept in settings.json; the page keeps a PEM pasted there as a file of the
+  // data folder and points this at it.
+  {
+    name: 'JUKECORD_CA_FILE',
+    group: 'authorities',
+    kind: 'text',
+    default: null,
+    defaultNote: { en: 'Node’s own only', ko: 'Node 자체 목록만' },
+    applies: 'restart',
+    layer: 'bootstrap',
+    roles: BOTH,
+    label: { en: 'Certificate authorities', ko: '인증 기관' },
+    help: {
+      en: 'A PEM file of certificate authorities every TLS connection trusts besides Node’s own: the database, the bus and cache, the identity provider, the directory',
+      ko: '모든 TLS 연결이 Node 자체 목록과 함께 믿는 인증 기관의 PEM 파일. 데이터베이스, 버스와 캐시, ID 공급자, 디렉터리에 씀',
     },
   },
 

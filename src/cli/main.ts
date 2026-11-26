@@ -16,6 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { readAuthorities, trustAuthorities } from '../authorities.ts';
 import { VERSION } from '../version.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec } from '../web/api.ts';
 import { type FieldSchema, GuildId, misfit } from '../web/schemas.ts';
@@ -514,10 +515,28 @@ async function chooseGuild(
   );
 }
 
+/**
+ * The host's own certificate authorities (JUKECORD_CA_FILE), trusted by what this command connects to: jukecord's API at
+ * an https:// address, a database (jukecord db), as jukecord itself trusts them (src/authorities.ts). Null when they
+ * were trusted (or none are set), or the problem with the file, said as the settings say it.
+ */
+export function trustHostAuthorities(env: NodeJS.ProcessEnv, cwd: string): string | null {
+  const file = env.JUKECORD_CA_FILE?.trim() || null;
+  const read = readAuthorities(file, cwd);
+  if (read.problem) return read.problem;
+  if (read.authorities) trustAuthorities(read.authorities);
+  return null;
+}
+
 // Run as a program (not imported by a test).
 if (import.meta.main) {
-  const code = await run(process.argv.slice(2), process.env, (text, error) =>
-    (error ? process.stderr : process.stdout).write(`${text}\n`),
-  );
-  process.exitCode = code;
+  const print = (text: string, error?: boolean) => (error ? process.stderr : process.stdout).write(`${text}\n`);
+  // Before anything connects; a file that cannot be used is a setting's mistake (exit 2), said before the command runs.
+  const problem = trustHostAuthorities(process.env, process.cwd());
+  if (problem) {
+    print(`jukecord: ${problem}`, true);
+    process.exitCode = 2;
+  } else {
+    process.exitCode = await run(process.argv.slice(2), process.env, print);
+  }
 }

@@ -83,6 +83,16 @@
       }
     },
     "publicUrl": { "type": "string", "pattern": "^(|https?://[^\\s/]+(/.*)?)$" },
+    "ca": {
+      "type": "object",
+      "description": "Certificate authorities (PEM) every TLS connection trusts besides Node's own: a Secret or a ConfigMap, and its key, on every pod",
+      "additionalProperties": false,
+      "properties": {
+        "secret": { "type": "string" },
+        "configMap": { "type": "string" },
+        "key": { "type": "string", "minLength": 1 }
+      }
+    },
     "auth": {
       "type": "object",
       "description": "Logging in through an identity provider (OIDC) and with directory accounts (LDAP), on the pods that serve browsers",
@@ -138,16 +148,6 @@
             "readGroups": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "timeout": { "type": "string", "pattern": "^(|\\s*\\d+(\\.\\d+)?\\s*[A-Za-z]*\\s*)$" },
             "label": { "type": "string", "maxLength": 40 }
-          }
-        },
-        "ca": {
-          "type": "object",
-          "description": "A private CA's certificates (PEM) for the provider and the directory: a Secret or a ConfigMap, and its key",
-          "additionalProperties": false,
-          "properties": {
-            "secret": { "type": "string" },
-            "configMap": { "type": "string" },
-            "key": { "type": "string", "minLength": 1 }
           }
         },
         "egressTo": {

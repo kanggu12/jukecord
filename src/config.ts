@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AUTH_VARIABLES, type AuthSettings, describeAuth, readAuthSettings } from './auth/settings.ts';
+import { type Authorities, describeAuthorities, readAuthorities } from './authorities.ts';
 import { LINK_SERVICES, type LinkService } from './media/links.ts';
 import { definition, KNOWN_VARIABLES } from './settings/definitions.ts';
 import { type DatabaseAddress, defaultSqliteFile, describeAddress, parseDatabaseAddress } from './store/address.ts';
@@ -114,6 +115,11 @@ export interface Config {
   };
   /** Settings that were read but look wrong without being fatal (an unknown JUKECORD_ variable, mostly typos). */
   readonly warnings: readonly string[];
+  /**
+   * The host's own certificate authorities (JUKECORD_CA_FILE), which every TLS connection trusts besides Node's own
+   * once the start has added them (src/authorities.ts); null when none are set.
+   */
+  readonly ca: Authorities | null;
   readonly metrics: {
     /**
      * The token a scraper shows (Authorization: Bearer) to read /metrics from outside the private network or through
@@ -505,6 +511,11 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     spotify: spotifyId && spotifySecret ? { clientId: spotifyId, clientSecret: spotifySecret } : null,
   };
 
+  // The host's own certificate authorities: read now, so a wrong path or a file without a certificate stops the start
+  // with its reason, as a secret's file does. They are trusted by the start itself (src/main.ts), before any connection.
+  const authorities = readAuthorities(get('JUKECORD_CA_FILE'), cwd, files);
+  if (authorities.problem) problems.push(authorities.problem);
+
   // The metrics token: a secret like the others (or its file), long enough that guessing it is hopeless, and one word,
   // as a bearer token is.
   const metricsToken = secret('JUKECORD_METRICS_TOKEN');
@@ -642,6 +653,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string, files: ConfigFil
     lyrics,
     log,
     warnings,
+    ca: authorities.authorities,
     metrics,
     links,
     auth: auth.settings,
@@ -706,6 +718,7 @@ export function describeConfig(config: Config): Record<string, string> {
     'spotify app': config.links.spotify?.clientId ?? 'not set',
     'spotify secret': secret(config.links.spotify?.clientSecret ?? null),
     'metrics token': secret(config.metrics.token),
+    'certificate authorities': describeAuthorities(config.ca),
     ...describeAuth(config.auth),
     role: config.role,
     // The servers without their passwords (an address may carry one).

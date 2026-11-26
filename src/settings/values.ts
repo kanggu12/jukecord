@@ -76,6 +76,8 @@ const READERS: Readonly<Record<string, (config: Config) => unknown>> = {
   JUKECORD_BUS_URL: (config) => config.bus.url,
   JUKECORD_CACHE_URL: (config) => config.cacheUrl,
   JUKECORD_KEY_PREFIX: (config) => config.bus.prefix,
+  // The file and what is in it: the same path with other certificates in it is a change too.
+  JUKECORD_CA_FILE: (config) => (config.ca ? { file: config.ca.file, certificates: config.ca.certificates } : null),
   JUKECORD_ROLE: (config) => config.role,
   JUKECORD_INTERNAL_PORT: (config) => config.internal.port,
   JUKECORD_INTERNAL_SECRET: (config) => config.internal.secret,
@@ -106,6 +108,8 @@ export function shownValue(config: Config, name: string): string | null {
   // The bus's and the shared cache's servers, without their user or password.
   if (name === 'JUKECORD_BUS_URL') return config.bus.url === null ? null : shownServer(config.bus.url);
   if (name === 'JUKECORD_CACHE_URL') return config.cacheUrl === 'memory' ? 'memory' : shownServer(config.cacheUrl);
+  // The authorities by their file (what is in it is the page's list of them).
+  if (name === 'JUKECORD_CA_FILE') return config.ca?.file ?? null;
   const value = valueIn(config, name);
   if (value === null || value === undefined) return null;
   if (Array.isArray(value)) return value.join(', ');

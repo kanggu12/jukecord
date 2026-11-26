@@ -32,6 +32,7 @@ spec:
         checksum/secret: {{ include "jukecord.saltedSum" (list . (printf "%s/%s/%s/%s/%s/%s" .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret)) }}
         {{- include "jukecord.databaseChecksum" . | nindent 8 }}
         {{- include "jukecord.authChecksum" . | nindent 8 }}
+        {{- include "jukecord.caChecksum" . | nindent 8 }}
         {{- with include "jukecord.scrapeAnnotations" . }}
         {{- . | nindent 8 }}
         {{- end }}
@@ -75,6 +76,10 @@ spec:
               value: "1"
             {{- end }}
             {{- include "jukecord.splitEnv" . | nindent 12 }}
+            {{- /* The host's certificate authorities (ca), when they are set. */}}
+            {{- with include "jukecord.caEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- /* Logging in through the identity provider and the directory (auth) happens in the edges. */}}
             {{- with include "jukecord.authEnv" . | trim }}
             {{- . | nindent 12 }}
@@ -123,6 +128,9 @@ spec:
             - name: database
               mountPath: {{ include "jukecord.databaseDir" . }}
               readOnly: true
+            {{- with include "jukecord.caMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- with include "jukecord.authMounts" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
@@ -140,6 +148,9 @@ spec:
             sizeLimit: 64Mi
         {{- include "jukecord.splitSecrets" . | nindent 8 }}
         {{- include "jukecord.databaseVolume" . | nindent 8 }}
+        {{- with include "jukecord.caVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- with include "jukecord.authVolumes" . | trim }}
         {{- . | nindent 8 }}
         {{- end }}

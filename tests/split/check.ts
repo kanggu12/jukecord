@@ -90,6 +90,14 @@ async function main(): Promise<void> {
   const edgeReady = (await json(`${edges[1]}/readyz`)).body as Readiness;
   for (const part of ['database', 'bus', 'cache', 'core']) assert.equal(edgeReady.parts[part]?.state, 'ok', part);
 
+  says("the bus runs over TLS, its certificate trusted only through the split's certificate authorities");
+  const doctor = (await json(`${edges[0]}/api/v1/doctor`)).body as { settings: Record<string, string> };
+  assert.equal(doctor.settings.bus, 'rediss://valkey:6379');
+  assert.equal(
+    doctor.settings['certificate authorities'],
+    "1 extra authority from /run/jukecord-ca/ca.crt, besides Node's own",
+  );
+
   says('a login link made in edge 1 logs a browser in at edge 2, once (the links are on the shared cache)');
   const code = loginLink.split('/auth/link/')[1] ?? '';
   assert.ok(code, `a login link: ${loginLink}`);

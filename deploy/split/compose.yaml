@@ -71,6 +71,9 @@ x-edge: &edge
     # log, which the console shows too.
     - /data:uid=10001,gid=10001,mode=0700,size=64m
     - /tmp:size=64m
+  volumes:
+    # Certificate authorities of your own, as in the core (see there).
+    - ./ca:/run/jukecord-ca:ro
   # The panel and the API for many browsers, without the media's yt-dlp and ffmpeg.
   mem_limit: 512m
   memswap_limit: 512m
@@ -126,6 +129,10 @@ services:
       JUKECORD_INTERNAL_PORT: "8796"
     volumes:
       - core-data:/data
+      # Certificate authorities of your own (a company's, a cluster's) for every service: the ca folder beside this
+      # file, read-only, named by JUKECORD_CA_FILE=/run/jukecord-ca/<file> in the checkout's .env. An edge's /data
+      # lasts as long as the container, so a file put there would not reach the edges.
+      - ./ca:/run/jukecord-ca:ro
     tmpfs:
       # Scratch space for yt-dlp and ffmpeg, bounded as in the checkout's compose.yaml.
       - /tmp:size=256m
