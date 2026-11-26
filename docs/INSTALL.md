@@ -428,8 +428,8 @@ waiting cannot mend (a wrong password, no such database, a certificate refused) 
 `jukecord cannot reach its database`, with the reason, and exits 1; Docker's restart policy or Kubernetes starts it
 again.
 
-While jukecord runs, a database server that goes away (a restart, a network cut) fails the requests that needed it
-(the API answers 500) and `/readyz` answers 503; jukecord keeps running, and opens new connections once the server
+While jukecord runs, a database server that goes away (a restart, a network cut) turns away the requests that needed
+it (the API answers 503 with `Retry-After`) and `/readyz` answers 503; jukecord keeps running, and opens new connections once the server
 answers again. Connections send TCP keep-alives after 10 seconds of quiet, so one cut on the way (a NAT, a firewall)
 is noticed in seconds. A statement may run for 30 seconds; on PostgreSQL, one whose answer has not come 10 seconds
 after that fails, and its connection is closed. Text with the NUL character (U+0000) is refused on every database

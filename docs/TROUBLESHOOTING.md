@@ -119,10 +119,11 @@ MariaDB that logs statements as they are: jukecord writes at `READ COMMITTED`, w
 
 ## The database went away while jukecord ran
 
-The requests that needed it fail (the API answers 500, the log says `a request failed` with the reason), `/readyz`
-answers 503 and the panel says jukecord is not ready. jukecord keeps running and opens new connections when the
-server answers again; nothing needs restarting. A connection that the server ended while idle is only a warning in the
-log: `a connection to the database was lost while idle; a new one is opened when needed`.
+The requests that needed it are refused for now (the API answers 503 `unavailable`, "the database does not answer;
+try again in a moment", with `Retry-After`), `/readyz` answers 503 and the panel says jukecord is not ready.
+jukecord keeps running and opens new connections when the server answers again; nothing needs restarting. A
+connection that the server ended while idle is only a warning in the log: `a connection to the database was lost
+while idle; a new one is opened when needed`.
 
 ## "the database is at schema N"
 

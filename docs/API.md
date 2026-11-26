@@ -88,18 +88,18 @@ Every error is the same shape, with the HTTP status that matches its code:
 { "error": { "code": "conflict", "message": "nothing is playing" } }
 ```
 
-| Status | Code           | Means                                                                          |
-| -----: | :------------- | :----------------------------------------------------------------------------- |
-|    400 | `invalid`      | the request is not valid (a missing field, a playlist name that is taken)      |
-|    401 | `unauthorized` | no login, or a token that is not valid                                         |
-|    403 | `forbidden`    | not allowed: the DJ role, the token's scope, the host only, no CSRF header     |
-|    404 | `not-found`    | no such server, queue item, playlist or token                                  |
-|    409 | `conflict`     | not possible now: nothing is playing, the queue is full                        |
-|    429 | `too-many`     | too many failed logins from this address                                       |
-|    429 | `rate-limited` | changes faster than the rates below; `Retry-After` says when to try again      |
-|    503 | `unavailable`  | a part jukecord needs is missing: no bot (browser-only), a feature turned off  |
-|    503 | `unavailable`  | a moment's trouble: lookups all taken, Discord or LRCLIB silent; `Retry-After` |
-|    503 | `busy`         | jukecord has fallen behind and turns away what can wait; `Retry-After` too     |
+| Status | Code           | Means                                                                                        |
+| -----: | :------------- | :------------------------------------------------------------------------------------------- |
+|    400 | `invalid`      | the request is not valid (a missing field, a playlist name that is taken)                    |
+|    401 | `unauthorized` | no login, or a token that is not valid                                                       |
+|    403 | `forbidden`    | not allowed: the DJ role, the token's scope, the host only, no CSRF header                   |
+|    404 | `not-found`    | no such server, queue item, playlist or token                                                |
+|    409 | `conflict`     | not possible now: nothing is playing, the queue is full                                      |
+|    429 | `too-many`     | too many failed logins from this address                                                     |
+|    429 | `rate-limited` | changes faster than the rates below; `Retry-After` says when to try again                    |
+|    503 | `unavailable`  | a part jukecord needs is missing: no bot (browser-only), a feature turned off                |
+|    503 | `unavailable`  | a moment's trouble: lookups all taken, Discord, LRCLIB or the database silent; `Retry-After` |
+|    503 | `busy`         | jukecord has fallen behind and turns away what can wait; `Retry-After` too                   |
 
 ### Rates and busy moments
 
