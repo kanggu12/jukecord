@@ -8,6 +8,7 @@
  * back as they were. A service that speaks another version of the protocol is not understood, and says so.
  */
 import { ActionError, type ActionErrorCode } from '../app/actions.ts';
+import { ConnectionError, DATABASE_DOWN, DATABASE_RETRY_MS } from '../store/network.ts';
 import { StoreError } from '../store/sql.ts';
 
 /** The protocol's version: raised when a message changes in a way an older service would misread. */
@@ -76,6 +77,17 @@ export function toWire(error: unknown): WireError {
     };
   }
   if (error instanceof StoreError) return { kind: 'store', message: error.message };
+  // The core's database not answering: carried as the refusal one process answers with (503, ask again), not as a
+  // failure of the core's own.
+  if (error instanceof ConnectionError) {
+    return {
+      kind: 'action',
+      code: 'unavailable',
+      message: DATABASE_DOWN,
+      spent: false,
+      retryAfterMs: DATABASE_RETRY_MS,
+    };
+  }
   return { kind: 'internal' };
 }
 

@@ -11,8 +11,9 @@ import type { ServerAddress } from './address.ts';
 
 /**
  * The database cannot be reached, or refuses this jukecord; the message says why without the password. Not a
- * StoreError, which means a request the data does not allow (the panel's "invalid"): this is jukecord's own trouble,
- * logged, and a 500 to whoever asked.
+ * StoreError, which means a request the data does not allow (the panel's "invalid"): this is jukecord's own trouble
+ * for now. A request that meets it is answered 503 with DATABASE_DOWN and when to ask again (DATABASE_RETRY_MS), on
+ * the panel's port, on the core's own port and over the bus alike, while /readyz says the database is down.
  */
 export class ConnectionError extends Error {
   override name = 'ConnectionError';
@@ -24,6 +25,12 @@ export class ConnectionError extends Error {
     this.transient = transient;
   }
 }
+
+/** What a request that met a ConnectionError is told: nothing about the address, only that it is worth asking again. */
+export const DATABASE_DOWN = 'the database does not answer; try again in a moment';
+
+/** How long such a request is told to wait (Retry-After): about one of the pool's tries to reconnect. */
+export const DATABASE_RETRY_MS = 5_000;
 
 // A certificate file named in the address, read now (a missing one is said with its name, not as a TLS failure).
 function certificate(file: string | null, what: string): string | undefined {

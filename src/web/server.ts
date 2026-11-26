@@ -35,6 +35,7 @@ import type { Covers } from '../media/covers.ts';
 import { MetricsGate, negotiate } from '../metrics/http.ts';
 import { MetricsRegistry } from '../metrics/registry.ts';
 import { httpMetrics, methodLabel, routeLabel, statusClass } from '../metrics/web.ts';
+import { ConnectionError, DATABASE_DOWN, DATABASE_RETRY_MS } from '../store/network.ts';
 import { StoreError } from '../store/store.ts';
 import { API, API_PREFIX, OPERATIONS, type OperationName, type OperationSpec, type Permission } from './api.ts';
 import {
@@ -580,6 +581,10 @@ export async function createWebServer(options: WebServerOptions): Promise<WebSer
       return failure(reply, error.code, error.message);
     }
     if (error instanceof StoreError) return failure(reply, 'invalid', error.message);
+    // The database not answering (gone, lost under the request, or past its time limit): jukecord's trouble for now,
+    // not the request's, so 503 with when to ask again rather than a 500. The pool and /readyz already say it, so it
+    // is not logged once per request.
+    if (error instanceof ConnectionError) return later(reply, 'unavailable', DATABASE_DOWN, DATABASE_RETRY_MS);
     const fastifyError = error as { validation?: unknown; statusCode?: number; message: string };
     if (fastifyError.validation) return failure(reply, 'invalid', unfit(fastifyError as Unfit, request));
     // Fastify's own refusals (bad JSON, body too large, wrong content type) carry a 4xx status.

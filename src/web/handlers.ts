@@ -16,7 +16,8 @@ import { LYRICS_SOURCE } from '../media/lyrics.ts';
 import { searchWords } from '../media/search.ts';
 import { checkAuthorities, trustedWith } from '../settings/authorities.ts';
 import type { HostSettingsPort, HostSettingsView, SettingState } from '../settings/service.ts';
-import type { Store } from '../store/store.ts';
+import { ConnectionError } from '../store/network.ts';
+import { type Store, StoreError } from '../store/store.ts';
 import type { API, OperationName, OperationSpec } from './api.ts';
 import type { Auth, Caller } from './auth.ts';
 import type { AccessPort, ActionsPort, BotAccount, HostJobs } from './core.ts';
@@ -259,6 +260,10 @@ export const HANDLERS: { readonly [K in OperationName]: Handler<(typeof API)[K]>
     try {
       return await deps.auth.createToken(who(caller), body.name, body.scope);
     } catch (error) {
+      // A name the store refuses (empty, too long, a NUL) is the request's mistake (400), and a database that does not
+      // answer is jukecord's trouble for now (503): the server answers both as such. Only a login that may not make
+      // this token is refused as forbidden.
+      if (error instanceof StoreError || error instanceof ConnectionError) throw error;
       throw new ActionError('forbidden', error instanceof Error ? error.message : String(error));
     }
   },
