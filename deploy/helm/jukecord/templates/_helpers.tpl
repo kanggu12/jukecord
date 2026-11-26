@@ -279,22 +279,44 @@ an event that names the key.
 {{- end -}}
 
 {{/*
+Whether the chart is rendered against a cluster (helm install or upgrade, Flux), where a Secret can be looked up and
+kept. Listing the release namespace's Secrets answers a list there, an empty one too (Helm keeps its own releases in
+Secrets, so whoever runs it may list them), and nothing at all without a cluster (helm template, Argo CD). Asked once
+per render and kept in .Values.
+*/}}
+{{- define "jukecord.seesCluster" -}}
+{{- if not (hasKey .Values "_seesCluster") -}}
+{{- $listed := lookup "v1" "Secret" .Release.Namespace "" | default dict -}}
+{{- $_ := set .Values "_seesCluster" (hasKey $listed "items") -}}
+{{- end -}}
+{{- if index .Values "_seesCluster" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 The salt of the checksum annotations the pods restart by. A hash of a secret is never written into a pod bare: someone
 who may read pods but not Secrets could test guesses of a weak password against it offline. It is hashed after this
-salt, which no pod shows: checksumSalt when the values give one, else the one kept in jukecord.checksumSaltName since
-the first install (looked up in the cluster), else a new one, which checksum-salt.yaml keeps (helm template, which
-sees no cluster, makes a new one each time). Chosen once per render and kept in .Values for the render's every
-template, so the Secret and the pods agree.
+salt, which no pod shows:
+- checksumSalt, when the values give one;
+- else, against a cluster, the one kept in jukecord.checksumSaltName since the first install, or a new one that
+  checksum-salt.yaml keeps from then on;
+- else (helm template, Argo CD: no cluster to keep one in) one made from the release's namespace and name, the same at
+  every render, so the pods still restart only when a secret changes; whoever knows those names can make it too, which
+  is why such a tool is better given checksumSalt.
+Chosen once per render and kept in .Values for the render's every template, so the Secret and the pods agree.
 */}}
 {{- define "jukecord.checksumSalt" -}}
 {{- if not (hasKey .Values "_checksumSalt") -}}
 {{- $salt := .Values.checksumSalt | default "" -}}
-{{- if not $salt -}}
+{{- if and (not $salt) (include "jukecord.seesCluster" .) -}}
 {{- $kept := lookup "v1" "Secret" .Release.Namespace (include "jukecord.checksumSaltName" .) | default dict -}}
 {{- $salt = dig "data" "salt" "" $kept | b64dec -}}
-{{- end -}}
+{{- /* The first install against this cluster (or one from before the salt): a new salt, kept from now on. */}}
 {{- if not $salt -}}
 {{- $salt = randAlphaNum 40 -}}
+{{- end -}}
+{{- end -}}
+{{- if not $salt -}}
+{{- $salt = printf "jukecord/%s/%s" .Release.Namespace .Release.Name | sha256sum -}}
 {{- end -}}
 {{- $_ := set .Values "_checksumSalt" $salt -}}
 {{- end -}}

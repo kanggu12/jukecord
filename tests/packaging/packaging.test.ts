@@ -814,14 +814,15 @@ describe('the Helm chart', () => {
     // What each annotation hashes (the values joined as the templates join them).
     const database = `${url}/`;
     const single = 'a-token////';
-    // Without a salt in the values: one made and kept in the chart's Secret, the annotations hashed after it.
+    // Without a cluster and without a salt in the values (helm template, Argo CD): nowhere to keep a salt, so none is
+    // made at random and no Secret for one is drawn. The salt comes from the release's namespace and name, the same at
+    // every render: rendering again changes nothing, so a tool that renders on every sync restarts nothing.
     const made = render(...secrets);
-    const kept = /name: t-jukecord-checksum-salt\n[\s\S]*?\n {2}salt: "([^"]+)"/.exec(made)?.[1];
-    assert.ok(kept, 'the salt is kept in a Secret');
-    const salt = Buffer.from(kept, 'base64').toString('utf8');
-    assert.ok(salt.length >= 32);
-    assert.deepEqual(annotation(made, 'database'), [sum(`${salt}\n${database}`)]);
-    assert.deepEqual(annotation(made, 'secret'), [sum(`${salt}\n${single}`)]);
+    assert.doesNotMatch(made, /t-jukecord-checksum-salt/);
+    assert.equal(render(...secrets), made);
+    const named = crypto.createHash('sha256').update('jukecord/default/t').digest('hex');
+    assert.deepEqual(annotation(made, 'database'), [sum(`${named}\n${database}`)]);
+    assert.deepEqual(annotation(made, 'secret'), [sum(`${named}\n${single}`)]);
     // No annotation is a bare hash of what it covers (what a reader of pods could test a guessed password against).
     for (const value of [...annotation(made, 'database'), ...annotation(made, 'secret')]) {
       assert.ok(![sum(database), sum(single)].includes(value ?? ''));
@@ -840,32 +841,44 @@ describe('the Helm chart', () => {
       'database.url=postgres://u:p@db/j',
     );
     assert.notDeepEqual(annotation(changed, 'database'), annotation(given, 'database'));
-    // Split mode: the core and the edges hashed after the same salt, the one the Secret keeps.
+    // Split mode: the core and the edges hashed after the same salt.
     const split = render('--set', 'mode=split', '--set', `database.url=${url}`, '--set', 'bus.url=redis://valkey:6379');
-    const splitSalt = Buffer.from(
-      /name: t-jukecord-checksum-salt\n[\s\S]*?\n {2}salt: "([^"]+)"/.exec(split)?.[1] ?? '',
-      'base64',
-    ).toString('utf8');
-    assert.deepEqual(annotation(split, 'database'), [
-      sum(`${splitSalt}\n${database}`),
-      sum(`${splitSalt}\n${database}`),
-    ]);
-    // An upgrade, where the cluster has the Secret: its salt is used and kept, so the same values give the same pods.
-    // (helm template has no cluster to look it up in; a copy of the chart finds it in place of the lookup.)
-    const upgraded = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-salt-'));
-    try {
-      fs.cpSync('deploy/helm/jukecord', upgraded, { recursive: true });
-      const helpers = path.join(upgraded, 'templates', '_helpers.tpl');
-      const lookup = 'lookup "v1" "Secret" .Release.Namespace (include "jukecord.checksumSaltName" .)';
+    assert.deepEqual(annotation(split, 'database'), [sum(`${named}\n${database}`), sum(`${named}\n${database}`)]);
+    // Against a cluster (helm install and upgrade, Flux): a copy of the chart whose lookups answer as a cluster would
+    // (helm template has none), first with no salt kept yet, then with one kept.
+    const listing = 'lookup "v1" "Secret" .Release.Namespace ""';
+    const keptSalt = 'lookup "v1" "Secret" .Release.Namespace (include "jukecord.checksumSaltName" .)';
+    const asCluster = (kept: string | null) => {
+      const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-salt-'));
+      fs.cpSync('deploy/helm/jukecord', copy, { recursive: true });
+      const helpers = path.join(copy, 'templates', '_helpers.tpl');
       const text = fs.readFileSync(helpers, 'utf8');
-      assert.ok(text.includes(lookup), 'the salt is looked up in the cluster');
-      const found = Buffer.from('the-kept-salt-0123456789abcdef0123456789').toString('base64');
-      fs.writeFileSync(helpers, text.replace(lookup, `(dict "data" (dict "salt" "${found}"))`));
+      assert.ok(text.includes(listing) && text.includes(keptSalt), 'the cluster is asked for its Secrets and the salt');
+      const answer = kept === null ? '(dict)' : `(dict "data" (dict "salt" "${Buffer.from(kept).toString('base64')}"))`;
+      fs.writeFileSync(
+        helpers,
+        text.replace(listing, '(dict "kind" "SecretList" "items" (list))').replace(keptSalt, answer),
+      );
+      return copy;
+    };
+    const fresh = asCluster(null);
+    const upgraded = asCluster('the-kept-salt-0123456789abcdef0123456789');
+    try {
+      // The first install: a new random salt, kept in the chart's Secret from now on, the annotations hashed after it.
+      const first = execFileSync('helm', ['template', 't', fresh, ...secrets], { encoding: 'utf8' });
+      const stored = /name: t-jukecord-checksum-salt\n[\s\S]*?\n {2}salt: "([^"]+)"/.exec(first)?.[1];
+      assert.ok(stored, 'the salt is kept in a Secret');
+      const salt = Buffer.from(stored, 'base64').toString('utf8');
+      assert.equal(salt.length, 40);
+      assert.notEqual(salt, named);
+      assert.deepEqual(annotation(first, 'database'), [sum(`${salt}\n${database}`)]);
+      // An upgrade, the Secret there: its salt used and kept, so the same values give the same pods.
       const again = execFileSync('helm', ['template', 't', upgraded, ...secrets], { encoding: 'utf8' });
       assert.deepEqual(annotation(again, 'database'), [sum(`the-kept-salt-0123456789abcdef0123456789\n${database}`)]);
-      assert.match(again, new RegExp(`\\n {2}salt: "${found}"\\n`));
+      assert.match(again, /name: t-jukecord-checksum-salt\n/);
       assert.equal(execFileSync('helm', ['template', 't', upgraded, ...secrets], { encoding: 'utf8' }), again);
     } finally {
+      fs.rmSync(fresh, { recursive: true, force: true });
       fs.rmSync(upgraded, { recursive: true, force: true });
     }
   });
