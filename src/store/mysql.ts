@@ -29,7 +29,7 @@ import {
   TURN_WAIT_MS,
   type Turn,
 } from './pooled.ts';
-import type { DatabaseServer, SqlRow, SqlValue } from './sql.ts';
+import { type DatabaseServer, type SqlRow, type SqlValue, StoreError } from './sql.ts';
 
 // The sql_mode of every connection (see the module comment).
 const SQL_MODE = [
@@ -93,6 +93,17 @@ export function splitStatements(sql: string): string[] {
   return statements
     .map((statement) => statement.trim())
     .filter((statement) => statement.replace(/--[^\n]*/g, '').trim() !== '');
+}
+
+/**
+ * Why a server cannot take jukecord's writes because of its binary log, or null when it can: a log kept statement by
+ * statement (binlog_format STATEMENT, with log_bin on) refuses every write made at READ COMMITTED, which jukecord's
+ * sessions read at (InnoDB logs those row by row only). ROW and MIXED, the defaults, take them.
+ */
+export function binlogRefusal(logBin: unknown, format: unknown, mariadb: boolean): string | null {
+  // log_bin answers 1 or 0 (a number, or the text of one); the format in any case.
+  if (Number(logBin) !== 1 || String(format).toUpperCase() !== 'STATEMENT') return null;
+  return `${mariadb ? 'MariaDB' : 'MySQL'} writes its binary log as STATEMENT, which refuses jukecord's writes: set binlog_format to ROW or MIXED (the default) on the server`;
 }
 
 export class MysqlExecutor extends PooledExecutor<PoolConnection> {
@@ -180,6 +191,13 @@ export class MysqlExecutor extends PooledExecutor<PoolConnection> {
         const version = said.split('-')[0] ?? said;
         const setup = setupStatements(mariadb, options.statementTimeoutMs ?? STATEMENT_TIMEOUT_MS);
         for (const statement of setup) await connection.query(statement);
+        // A server that writes its binary log statement by statement refuses every write jukecord makes, since its
+        // sessions read at READ COMMITTED (InnoDB logs those row by row only). Said once, before anything is written,
+        // with what to change, rather than as the first write's failure.
+        const [logging] = await connection.query('SELECT @@log_bin AS logBin, @@binlog_format AS format');
+        const binlog = (logging as { logBin?: unknown; format?: unknown }[])[0];
+        const refused = binlogRefusal(binlog?.logBin, binlog?.format, mariadb);
+        if (refused !== null) throw new StoreError(refused);
         ready.add(connection.connection);
         const server: DatabaseServer = { product: mariadb ? 'MariaDB' : 'MySQL', version };
         const typed = (mysql as unknown as { TypedParameter: { BIGINT: Typed } }).TypedParameter;

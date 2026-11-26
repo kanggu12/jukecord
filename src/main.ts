@@ -76,6 +76,7 @@ import { allSettings, dataFolderOf, firstSettings } from './settings/start.ts';
 import { describeAddress } from './store/address.ts';
 import { ConnectionError } from './store/network.ts';
 import { openStore } from './store/open.ts';
+import { StoreError } from './store/sql.ts';
 import type { Store } from './store/store.ts';
 import { VERSION } from './version.ts';
 import { startWatchdog, takeWatchdogMark } from './watchdog.ts';
@@ -238,8 +239,12 @@ async function main(): Promise<number> {
       report: databaseReport(registry),
     });
   } catch (error) {
-    if (!(error instanceof ConnectionError)) throw error;
-    log.error('jukecord cannot reach its database', { reason: error.message });
+    // A database that refuses jukecord (a schema newer than this jukecord's, a server set up so that jukecord cannot
+    // write) is said in one line too, as an unreachable one is: what to change, never a stack.
+    if (!(error instanceof ConnectionError) && !(error instanceof StoreError)) throw error;
+    log.error(error instanceof StoreError ? 'jukecord cannot use its database' : 'jukecord cannot reach its database', {
+      reason: error.message,
+    });
     // A core gives its lease back first: another core need not wait for it to run out.
     await beat?.release();
     await transport?.close();
@@ -902,8 +907,11 @@ async function runEdge(start: {
       report: databaseReport(registry),
     });
   } catch (error) {
-    if (!(error instanceof ConnectionError)) throw error;
-    log.error('jukecord cannot reach its database', { reason: error.message });
+    // As in main: a refusal said in one line, as an unreachable database is.
+    if (!(error instanceof ConnectionError) && !(error instanceof StoreError)) throw error;
+    log.error(error instanceof StoreError ? 'jukecord cannot use its database' : 'jukecord cannot reach its database', {
+      reason: error.message,
+    });
     await transport.close();
     return 1;
   }

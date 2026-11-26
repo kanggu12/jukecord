@@ -12,7 +12,7 @@ import { describe, it } from 'node:test';
 import * as tlsModule from 'node:tls';
 import type { ServerAddress } from '../../src/store/address.ts';
 import { mysqlDialect, POSTGRES, SQLITE } from '../../src/store/dialect.ts';
-import { mysqlSsl, splitStatements } from '../../src/store/mysql.ts';
+import { binlogRefusal, mysqlSsl, splitStatements } from '../../src/store/mysql.ts';
 import { ConnectionError, connectionFailure, tlsOptions } from '../../src/store/network.ts';
 import { numberPlaceholders } from '../../src/store/postgres.ts';
 import { isUniqueViolation, statementKind } from '../../src/store/sql.ts';
@@ -125,6 +125,24 @@ describe('a migration’s statements for MySQL', () => {
         'SELECT 1',
       ],
     );
+  });
+});
+
+describe('a MySQL or MariaDB binary log', () => {
+  it('kept statement by statement is refused at the open, with what to set, and every other one is taken', () => {
+    // log_bin on and STATEMENT: refused, the product named, binlog_format and its two good values said.
+    assert.match(binlogRefusal(1, 'STATEMENT', false) ?? '', /^MySQL writes its binary log as STATEMENT.*ROW or MIXED/);
+    assert.match(binlogRefusal('1', 'statement', true) ?? '', /^MariaDB writes its binary log as STATEMENT/);
+    // ROW and MIXED, or no binary log at all: nothing to say.
+    for (const [logBin, format] of [
+      [1, 'ROW'],
+      [1, 'MIXED'],
+      [0, 'STATEMENT'],
+      ['0', 'STATEMENT'],
+      [null, null],
+    ] as const) {
+      assert.equal(binlogRefusal(logBin, format, false), null, `${logBin} ${format}`);
+    }
   });
 });
 
