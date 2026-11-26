@@ -84,7 +84,11 @@ is back, adding works again; a track that failed in a looping queue stays in it.
 ## jukecord does not start
 
 It prints every settings problem at once and exits with code 2. "the database is at schema N, newer than this jukecord
-knows" means a newer jukecord wrote it: run the newer version, or restore a backup ([below](#the-database-is-at-schema-n)).
+knows" means a newer jukecord wrote it: run the newer version, or restore a backup
+([below](#the-database-is-at-schema-n)). "settings.json is not JSON" (or "cannot be read") names the data folder's
+file of saved settings: put back the one jukecord wrote, or remove it to start on the environment and the defaults
+(its saved secrets go with it). A saved value the start refuses does not stop it: the **Settings** page shows it with
+the reason, and its default applies.
 
 ## "jukecord cannot reach its database"
 
@@ -98,10 +102,27 @@ again. The reason names the database without its user or password:
 - **the user name or password was refused**: a password with `@ : / ? # %` in it must be percent-encoded in the
   address ([the address](INSTALL.md#the-address)).
 - **has no database** or **is in LATIN1, not UTF8**: make the database as [installing](INSTALL.md#the-database) says.
-- **TLS ... failed**: `sslrootcert` in the address names the authority that signed the server's certificate, and
-  `verify-full` also wants the address's host name to be the certificate's.
+- **TLS ... failed**: `verify-full` wants the address's host name to be the certificate's. A certificate signed by an
+  authority jukecord does not trust ends with "to trust the authority that signed it, name its certificate in
+  JUKECORD_CA_FILE": put that authority in `JUKECORD_CA_FILE`
+  ([your own certificate authorities](INSTALL.md#your-own-certificate-authorities)), or name it for the database alone
+  with `sslrootcert` in the address.
 
 `./jukecord db status <address>` tries an address and says the same, without starting jukecord.
+
+## "impossible to write to binary log"
+
+"Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT = STATEMENT" comes from a MySQL or
+MariaDB that logs statements as they are: jukecord writes at `READ COMMITTED`, which such a server refuses. Set
+`binlog_format` to `ROW` (MySQL's default) or `MIXED` (MariaDB's), in the server's configuration or with
+`SET PERSIST binlog_format = 'ROW'` on MySQL, and start jukecord again: it finishes its tables where it stopped.
+
+## The database went away while jukecord ran
+
+The requests that needed it fail (the API answers 500, the log says `a request failed` with the reason), `/readyz`
+answers 503 and the panel says jukecord is not ready. jukecord keeps running and opens new connections when the
+server answers again; nothing needs restarting. A connection that the server ended while idle is only a warning in the
+log: `a connection to the database was lost while idle; a new one is opened when needed`.
 
 ## "the database is at schema N"
 
@@ -151,8 +172,11 @@ the level they give, without asking for a password:
 
 - **"takes names and passwords over an encrypted connection only"**: Active Directory with LDAP signing, and Samba,
   refuse a password sent in the clear. Use `ldaps://`, or `JUKECORD_LDAP_STARTTLS=yes`.
-- **A certificate the connection does not trust**: `JUKECORD_LDAP_CA_FILE` names the authority that signed the
-  directory's certificate.
+- **A certificate the connection does not trust** ("name its certificate in JUKECORD_CA_FILE"): put the authority that
+  signed the directory's certificate in `JUKECORD_CA_FILE`, or in `JUKECORD_LDAP_CA_FILE` for the directory alone.
+- **"Wrong name or password" for a right password**: Active Directory refused it for another reason (an expired
+  password, one to be changed first, an account turned off, expired or locked). The log says which: `a directory login
+  did not go through`, with `reason=expired` or `reason=disabled`.
 - **No groups**: the directory keeps no `memberOf` for that person (OpenLDAP keeps it with its memberof overlay):
   `JUKECORD_LDAP_GROUP_FILTER` finds the groups by a search instead. `JUKECORD_LDAP_NESTED_GROUPS` works with Active
   Directory only.
@@ -166,8 +190,8 @@ the level they give, without asking for a password:
 - **401**: the scraper shows a token that is not `JUKECORD_METRICS_TOKEN`. With the chart, the ServiceMonitor sends the
   `metricsToken` of the release's Secret, or of `metrics.existingSecret`.
 - **404**: the request came through a proxy (it carries `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`,
-  `X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address, and showed no token. Scrape jukecord from its own network, or give the scraper the token
-  ([monitoring](INSTALL.md#monitoring)).
+  `X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address, and showed no token. Scrape jukecord from its
+  own network, or give the scraper the token ([monitoring](INSTALL.md#monitoring)).
 
 ## jukecord started again by itself
 
