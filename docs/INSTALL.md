@@ -48,14 +48,14 @@ docker buildx prune --filter description~=jukecord
 To run a released image instead of building one, set it in `.env`:
 
 ```bash
-JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.3.4
+JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.4.0
 ```
 
 This checks that GitHub signed it as built by this repository's release workflow (the chart's `.tgz` from the release
 page is checked the same way):
 
 ```bash
-gh attestation verify oci://ghcr.io/kanggu12/jukecord:0.3.4 --repo kanggu12/jukecord
+gh attestation verify oci://ghcr.io/kanggu12/jukecord:0.4.0 --repo kanggu12/jukecord
 ```
 
 ### A second copy on the same machine
@@ -182,23 +182,23 @@ and yt-dlp, so nothing else is installed. It runs on Linux with glibc 2.28 or ne
 **Linux** (x64; on a Raspberry Pi 4 or 5 and other ARM machines, `x64` becomes `arm64`)
 
 ```bash
-curl -fL https://github.com/kanggu12/jukecord/releases/download/v0.3.4/jukecord-0.3.4-linux-x64.tar.gz | tar -xz
-cd jukecord-0.3.4-linux-x64 && ./jukecord start
+curl -fL https://github.com/kanggu12/jukecord/releases/download/v0.4.0/jukecord-0.4.0-linux-x64.tar.gz | tar -xz
+cd jukecord-0.4.0-linux-x64 && ./jukecord start
 ```
 
 **macOS** (Apple silicon; on Intel, `arm64` becomes `x64`)
 
 ```bash
-curl -fL https://github.com/kanggu12/jukecord/releases/download/v0.3.4/jukecord-0.3.4-macos-arm64.tar.gz | tar -xz
-cd jukecord-0.3.4-macos-arm64 && ./jukecord start
+curl -fL https://github.com/kanggu12/jukecord/releases/download/v0.4.0/jukecord-0.4.0-macos-arm64.tar.gz | tar -xz
+cd jukecord-0.4.0-macos-arm64 && ./jukecord start
 ```
 
 **Windows** (PowerShell; on Arm, `x64` becomes `arm64`)
 
 ```powershell
-iwr https://github.com/kanggu12/jukecord/releases/download/v0.3.4/jukecord-0.3.4-windows-x64.zip -OutFile jukecord-0.3.4-windows-x64.zip -UseBasicParsing
-tar -xf jukecord-0.3.4-windows-x64.zip
-cd jukecord-0.3.4-windows-x64; .\jukecord start
+iwr https://github.com/kanggu12/jukecord/releases/download/v0.4.0/jukecord-0.4.0-windows-x64.zip -OutFile jukecord-0.4.0-windows-x64.zip -UseBasicParsing
+tar -xf jukecord-0.4.0-windows-x64.zip
+cd jukecord-0.4.0-windows-x64; .\jukecord start
 ```
 
 `jukecord start` runs jukecord in that terminal until Ctrl+C. In a second terminal in the same folder, `./jukecord open`
@@ -217,7 +217,7 @@ cd jukecord-0.3.4-windows-x64; .\jukecord start
 - **Updating**: unpack the newer release beside the folder and copy `.env` into it. It finds the same data, and the
   database moves to the newer schema on the first start, as with Compose.
 - **Downloaded with a browser**, macOS keeps the programs in the folder from starting until they are let through:
-  `xattr -dr com.apple.quarantine jukecord-0.3.4-macos-arm64`. curl, as above, leaves no such mark.
+  `xattr -dr com.apple.quarantine jukecord-0.4.0-macos-arm64`. curl, as above, leaves no such mark.
 
 On macOS and Windows it runs while its terminal is open; for a machine that plays around the clock, Docker Compose
 (Docker Desktop starts with the machine) or Linux suits better.
@@ -228,7 +228,7 @@ A systemd user service keeps it running and starts it at boot. It names one path
 use (after an update, point the link at the new folder and restart the service):
 
 ```bash
-ln -sfn "$PWD/jukecord-0.3.4-linux-x64" ~/jukecord
+ln -sfn "$PWD/jukecord-0.4.0-linux-x64" ~/jukecord
 mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/jukecord.service <<'EOF'
 [Unit]
 Description=jukecord
@@ -251,25 +251,25 @@ server was.
 
 | File                                                                   | What it is                                                                                         |
 | :--------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
-| `jukecord-0.3.4-linux-x64.tar.gz`, `jukecord-0.3.4-linux-arm64.tar.gz` | jukecord for Linux on x64, and on arm64 (a Raspberry Pi 4 or 5, an ARM server)                     |
-| `jukecord-0.3.4-macos-arm64.tar.gz`, `jukecord-0.3.4-macos-x64.tar.gz` | jukecord for macOS on Apple silicon, and on Intel                                                  |
-| `jukecord-0.3.4-windows-x64.zip`, `jukecord-0.3.4-windows-arm64.zip`   | jukecord for Windows on x64, and on Arm                                                            |
-| `jukecord-0.3.4-helm-chart.tgz`                                        | the Helm chart, the same as `oci://ghcr.io/kanggu12/charts/jukecord` ([Kubernetes](KUBERNETES.md)) |
-| `jukecord-0.3.4-checksums.txt`                                         | the SHA-256 of every file above                                                                    |
+| `jukecord-0.4.0-linux-x64.tar.gz`, `jukecord-0.4.0-linux-arm64.tar.gz` | jukecord for Linux on x64, and on arm64 (a Raspberry Pi 4 or 5, an ARM server)                     |
+| `jukecord-0.4.0-macos-arm64.tar.gz`, `jukecord-0.4.0-macos-x64.tar.gz` | jukecord for macOS on Apple silicon, and on Intel                                                  |
+| `jukecord-0.4.0-windows-x64.zip`, `jukecord-0.4.0-windows-arm64.zip`   | jukecord for Windows on x64, and on Arm                                                            |
+| `jukecord-0.4.0-helm-chart.tgz`                                        | the Helm chart, the same as `oci://ghcr.io/kanggu12/charts/jukecord` ([Kubernetes](KUBERNETES.md)) |
+| `jukecord-0.4.0-checksums.txt`                                         | the SHA-256 of every file above                                                                    |
 
-The image is not a file of the release but `ghcr.io/kanggu12/jukecord:0.3.4` ([a released image](#a-released-image)).
+The image is not a file of the release but `ghcr.io/kanggu12/jukecord:0.4.0` ([a released image](#a-released-image)).
 
 ### Checking a download
 
 The checksums file has a SHA-256 for each file, and GitHub keeps a signed record of where each was built:
 
 ```bash
-sha256sum -c --ignore-missing jukecord-0.3.4-checksums.txt
-gh attestation verify jukecord-0.3.4-linux-x64.tar.gz --repo kanggu12/jukecord
+sha256sum -c --ignore-missing jukecord-0.4.0-checksums.txt
+gh attestation verify jukecord-0.4.0-linux-x64.tar.gz --repo kanggu12/jukecord
 ```
 
 On macOS `shasum -a 256 -c --ignore-missing` checks the same; on Windows, compare
-`Get-FileHash jukecord-0.3.4-windows-x64.zip` with its line. Each program is unpacked and run on its own system and
+`Get-FileHash jukecord-0.4.0-windows-x64.zip` with its line. Each program is unpacked and run on its own system and
 processor (a track played through yt-dlp and FFmpeg) before a release is published, and again from the published
 release's addresses after.
 

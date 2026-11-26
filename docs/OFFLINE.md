@@ -21,11 +21,11 @@ yt-dlp. Download it on a machine with access, check it against the release's che
 
 ```bash
 # on a machine with access
-curl -fLO https://github.com/kanggu12/jukecord/releases/download/v0.3.4/jukecord-0.3.4-linux-arm64.tar.gz
-curl -fLO https://github.com/kanggu12/jukecord/releases/download/v0.3.4/jukecord-0.3.4-checksums.txt
-sha256sum -c --ignore-missing jukecord-0.3.4-checksums.txt
+curl -fLO https://github.com/kanggu12/jukecord/releases/download/v0.4.0/jukecord-0.4.0-linux-arm64.tar.gz
+curl -fLO https://github.com/kanggu12/jukecord/releases/download/v0.4.0/jukecord-0.4.0-checksums.txt
+sha256sum -c --ignore-missing jukecord-0.4.0-checksums.txt
 # on the other machine
-tar -xzf jukecord-0.3.4-linux-arm64.tar.gz && cd jukecord-0.3.4-linux-arm64 && ./jukecord start
+tar -xzf jukecord-0.4.0-linux-arm64.tar.gz && cd jukecord-0.4.0-linux-arm64 && ./jukecord start
 ```
 
 ## Building the image without the internet
@@ -43,8 +43,8 @@ gunzip -c jukecord.tar.gz | docker load
 
 `compose.yaml` uses `jukecord:local` by default, so `./jukecord up` runs the loaded image without building.
 
-A released image works the same way: `docker pull ghcr.io/kanggu12/jukecord:0.3.4` where there is access, save and
-load it as above, and set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.3.4` in `.env`. The image is built for amd64 and
+A released image works the same way: `docker pull ghcr.io/kanggu12/jukecord:0.4.0` where there is access, save and
+load it as above, and set `JUKECORD_IMAGE=ghcr.io/kanggu12/jukecord:0.4.0` in `.env`. The image is built for amd64 and
 arm64; for a machine of the other kind, pull it with `--platform linux/arm64` (or `linux/amd64`).
 
 ## On Kubernetes without the internet
@@ -53,14 +53,14 @@ Fetch the chart and the image where there is access, and put the image in a regi
 
 ```bash
 # on a machine with access
-helm pull oci://ghcr.io/kanggu12/charts/jukecord --version 0.3.4
-docker pull ghcr.io/kanggu12/jukecord:0.3.4
-docker save ghcr.io/kanggu12/jukecord:0.3.4 | gzip > jukecord-image.tar.gz
+helm pull oci://ghcr.io/kanggu12/charts/jukecord --version 0.4.0
+docker pull ghcr.io/kanggu12/jukecord:0.4.0
+docker save ghcr.io/kanggu12/jukecord:0.4.0 | gzip > jukecord-image.tar.gz
 # inside, where the cluster's registry is
 gunzip -c jukecord-image.tar.gz | docker load
-docker tag ghcr.io/kanggu12/jukecord:0.3.4 registry.example.internal/jukecord:0.3.4
-docker push registry.example.internal/jukecord:0.3.4
-helm install jukecord ./jukecord-0.3.4.tgz -n jukecord --create-namespace \
+docker tag ghcr.io/kanggu12/jukecord:0.4.0 registry.example.internal/jukecord:0.4.0
+docker push registry.example.internal/jukecord:0.4.0
+helm install jukecord ./jukecord-0.4.0.tgz -n jukecord --create-namespace \
   --set image.repository=registry.example.internal/jukecord
 ```
 

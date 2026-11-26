@@ -6,6 +6,8 @@ All notable changes to jukecord are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
 jukecord on a database server, split into services, watched from outside, logged in to with your own accounts and set
 up from the panel: PostgreSQL and MySQL/MariaDB beside SQLite, a core and its edges over Redis or Valkey, Prometheus
 metrics with readiness by parts, logins through OpenID Connect (Keycloak and others) and LDAP or Active Directory, and
@@ -749,7 +751,8 @@ Hardened before the release, after a review of the web side, the fetching and th
 - Everything jukecord writes is readable by its own user only, and a database copied in with a looser mode is made so
   again when it is opened.
 
-[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/kanggu12/jukecord/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kanggu12/jukecord/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/kanggu12/jukecord/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/kanggu12/jukecord/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/kanggu12/jukecord/compare/v0.3.1...v0.3.2
