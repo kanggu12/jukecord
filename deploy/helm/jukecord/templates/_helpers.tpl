@@ -10,7 +10,7 @@ renders them in does not matter; after the first, nothing is missing and the res
 {{- define "jukecord.defaults" -}}
 {{- $missing := false -}}
 {{- /* The top-level groups added in 0.4; a later version adds its own here, with a test of an upgrade from this one. */}}
-{{- range list "mode" "bus" "split" "database" "auth" "metrics" -}}
+{{- range list "mode" "bus" "split" "database" "auth" "metrics" "ca" -}}
 {{- if not (hasKey $.Values .) -}}{{- $missing = true -}}{{- end -}}
 {{- end -}}
 {{- if $missing -}}
@@ -273,6 +273,62 @@ an event that names the key.
         path: url
 {{- end -}}
 
+{{/*
+The host's own certificate authorities (ca): a Secret or a ConfigMap of the user's, mounted read-only on every jukecord
+pod (the one pod, the core, every edge) as the file JUKECORD_CA_FILE names, which every TLS connection jukecord makes
+trusts besides Node's own. Certificates are no secret: readable by everyone in the pod.
+*/}}
+{{- define "jukecord.ca" -}}
+{{- if or .Values.ca.secret .Values.ca.configMap -}}true{{- end -}}
+{{- end -}}
+
+{{- define "jukecord.caDir" -}}/run/jukecord-ca{{- end -}}
+
+{{/* The setting, for the container's env (empty without ca). */}}
+{{- define "jukecord.caEnv" -}}
+{{- if include "jukecord.ca" . }}
+# The host's certificate authorities (ca), trusted by every TLS connection besides Node's own.
+- name: JUKECORD_CA_FILE
+  value: {{ include "jukecord.caDir" . }}/ca.crt
+{{- end }}
+{{- end -}}
+
+{{- define "jukecord.caMount" -}}
+{{- if include "jukecord.ca" . }}
+- name: ca
+  mountPath: {{ include "jukecord.caDir" . }}
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{/* Not optional: a Secret or ConfigMap without the key (or a misspelt name) keeps the pod from starting, with an event
+that names it. */}}
+{{- define "jukecord.caVolume" -}}
+{{- if include "jukecord.ca" . }}
+- name: ca
+  {{- if .Values.ca.secret }}
+  secret:
+    secretName: {{ .Values.ca.secret }}
+    defaultMode: 0444
+    items:
+      - key: {{ .Values.ca.key }}
+        path: ca.crt
+  {{- else }}
+  configMap:
+    name: {{ .Values.ca.configMap }}
+    defaultMode: 0444
+    items:
+      - key: {{ .Values.ca.key }}
+        path: ca.crt
+  {{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* A changed ca restarts the pods, which read it only when they start. */}}
+{{- define "jukecord.caChecksum" -}}
+checksum/ca: {{ printf "%s/%s/%s" .Values.ca.secret .Values.ca.configMap .Values.ca.key | sha256sum | trunc 16 }}
+{{- end -}}
+
 {{/* The pod's annotations for a changed database (the pod opens it only when it starts) and for a Prometheus that
 finds its targets by annotation (metrics.podAnnotations; one set in podAnnotations wins). */}}
 {{- define "jukecord.databaseChecksum" -}}
@@ -373,8 +429,11 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- if hasKey $authSets $name -}}
 {{- fail (printf "%s: %s is not set here. The logins' settings go in the chart's auth values (this one in %s); the chart gives them to the pods that log people in, and the secrets as files." $where $name (index $authSets $name)) -}}
 {{- end -}}
-{{- if and (eq $name "NODE_EXTRA_CA_CERTS") (include "jukecord.setsExtraCa" $) -}}
-{{- fail (printf "%s: NODE_EXTRA_CA_CERTS is set by the chart (from auth.ca, the identity provider's CA); leave it out, or put every certificate you need in that one bundle." $where) -}}
+{{- if eq $name "JUKECORD_LDAP_CA_FILE" -}}
+{{- fail (printf "%s: JUKECORD_LDAP_CA_FILE is not set here. A private authority goes in the chart's ca (a Secret or a ConfigMap of yours), which every connection jukecord makes trusts, the directory's included." $where) -}}
+{{- end -}}
+{{- if and (eq $name "JUKECORD_CA_FILE") (include "jukecord.ca" $) -}}
+{{- fail (printf "%s: JUKECORD_CA_FILE is set by the chart (from ca, mounted on every pod); leave it out, or put every certificate in the one bundle ca names." $where) -}}
 {{- end -}}
 {{- if hasKey $chartSets $name -}}
 {{- fail (printf "%s: %s is set by the chart (from %s); leave it out." $where $name (index $chartSets $name)) -}}
@@ -387,6 +446,9 @@ without a host or with a wildcard host, which names no single address. The Deplo
 {{- end -}}
 {{- if and .Values.discord.clientSecret (not (or .Values.discord.clientId (include "jukecord.userSets" (list . "JUKECORD_DISCORD_CLIENT_ID")))) -}}
 {{- fail "discord.clientSecret is set without discord.clientId. Logging in with Discord needs both: the application's ID (discord.clientId, quoted) and its OAuth2 secret; leave both empty for host logins only." -}}
+{{- end -}}
+{{- if and .Values.ca.secret .Values.ca.configMap -}}
+{{- fail "ca.secret and ca.configMap are both set; set the one that holds the certificates." -}}
 {{- end -}}
 {{- if and .Values.database.url .Values.database.existingSecret -}}
 {{- fail "database.url and database.existingSecret are both set; set one: the address in the values, or under the key url of a Secret of yours." -}}

@@ -27,6 +27,7 @@ spec:
         # database. And where a Prometheus that finds its targets by annotation scrapes (metrics.podAnnotations).
         checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
         {{- include "jukecord.databaseChecksum" . | nindent 8 }}
+        {{- include "jukecord.caChecksum" . | nindent 8 }}
         {{- with include "jukecord.scrapeAnnotations" . }}
         {{- . | nindent 8 }}
         {{- end }}
@@ -70,6 +71,10 @@ spec:
               value: {{ include "jukecord.secretDir" . }}/token
             {{- end }}
             {{- include "jukecord.splitEnv" . | nindent 12 }}
+            {{- /* The host's certificate authorities (ca), when they are set. */}}
+            {{- with include "jukecord.caEnv" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
           # Started: its ports answer (a first start migrates the database; a minute is plenty).
           startupProbe:
             httpGet:
@@ -112,6 +117,9 @@ spec:
             - name: database
               mountPath: {{ include "jukecord.databaseDir" . }}
               readOnly: true
+            {{- with include "jukecord.caMount" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsMetricsToken" .) }}
             - name: discord
               mountPath: {{ include "jukecord.secretDir" . }}
@@ -131,6 +139,9 @@ spec:
             sizeLimit: 1Gi
         {{- include "jukecord.splitSecrets" . | nindent 8 }}
         {{- include "jukecord.databaseVolume" . | nindent 8 }}
+        {{- with include "jukecord.caVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- if or (include "jukecord.readsToken" .) (include "jukecord.readsMetricsToken" .) }}
         # The bot's token and the metrics token as files, readable by jukecord's group only (not optional: see
         # deployment.yaml).
