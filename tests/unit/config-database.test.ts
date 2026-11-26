@@ -12,10 +12,14 @@ import { parseDatabaseAddress } from '../../src/store/address.ts';
 import { ConnectionError } from '../../src/store/network.ts';
 import { openExecutor } from '../../src/store/open.ts';
 
-// Files a test gives the settings to read, by path.
+// Files a test gives the settings to read, by path: resolved as the settings resolve the paths they are given, so
+// "/run/secrets/database" is the same file on Windows too (where it is D:\run\secrets\database).
 function files(named: Record<string, string>): ConfigFiles {
-  const known = new Map(Object.entries(named));
-  return { read: (file) => known.get(file) ?? '', readable: (file) => known.has(file) };
+  const known = new Map(Object.entries(named).map(([name, text]) => [path.resolve(name), text] as const));
+  return {
+    read: (file) => known.get(path.resolve(file)) ?? '',
+    readable: (file) => known.has(path.resolve(file)),
+  };
 }
 
 // A server on this machine that cuts every connection at once, as a database restarting does: held for the test, so

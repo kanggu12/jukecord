@@ -176,7 +176,8 @@ describe('the settings service', () => {
     const file = readSettingsFile(dataDir);
     assert.deepEqual([...file.keys()].sort(), ['JUKECORD_DISCORD_TOKEN', 'JUKECORD_PORT']);
     assert.equal(file.get('JUKECORD_PORT')?.value, '8796');
-    assert.equal(fs.statSync(path.join(dataDir, SETTINGS_FILE)).mode & 0o777, 0o600);
+    // Windows keeps no POSIX modes (every file reads 0o666); the 0600 is checked where there is one.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dataDir, SETTINGS_FILE)).mode & 0o777, 0o600);
     // No half-written file is left beside it.
     assert.deepEqual(fs.readdirSync(dataDir), [SETTINGS_FILE]);
   });

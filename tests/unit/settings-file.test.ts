@@ -35,7 +35,8 @@ describe('settings.json', () => {
     const read = readSettingsFile(dir);
     assert.deepEqual(read.get('JUKECORD_PORT'), { name: 'JUKECORD_PORT', value: '8797', revision: 2, updatedAt: 1000 });
     assert.equal(read.get('JUKECORD_HOST')?.revision, 1);
-    assert.equal(fs.statSync(path.join(dir, SETTINGS_FILE)).mode & 0o777, 0o600);
+    // Windows keeps no POSIX modes (every file reads 0o666); the 0600 is checked where there is one.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, SETTINGS_FILE)).mode & 0o777, 0o600);
     // As people read it: sorted by name, two spaces, a line at the end.
     const text = fs.readFileSync(path.join(dir, SETTINGS_FILE), 'utf8');
     assert.ok(text.indexOf('JUKECORD_HOST') < text.indexOf('JUKECORD_PORT'));

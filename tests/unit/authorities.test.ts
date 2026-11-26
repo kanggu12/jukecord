@@ -15,6 +15,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import tls from 'node:tls';
+import { pathToFileURL } from 'node:url';
 import { Client } from 'ldapts';
 import { OidcLogin } from '../../src/auth/oidc.ts';
 import type { OidcSettings } from '../../src/auth/settings.ts';
@@ -30,6 +31,11 @@ import { FakeProvider } from '../support/oidc.ts';
 import { haveOpenssl, httpsServer, type TestAuthority, testAuthority, tlsServer, verifies } from '../support/tls.ts';
 
 const openssl = haveOpenssl();
+
+// A text as a regular expression that matches it alone (a Windows path's backslashes and dots taken as they are).
+function literal(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 describe("the host's certificate authorities (JUKECORD_CA_FILE)", {
   skip: !openssl && 'openssl is not installed',
@@ -161,7 +167,11 @@ describe("the host's certificate authorities (JUKECORD_CA_FILE)", {
         return error.message;
       }
     };
-    assert.match(problems('/nowhere/ca.pem'), /JUKECORD_CA_FILE: \/nowhere\/ca\.pem cannot be read/);
+    // The path as the settings resolve it: /nowhere/ca.pem here, D:\nowhere\ca.pem on Windows.
+    assert.match(
+      problems('/nowhere/ca.pem'),
+      new RegExp(`JUKECORD_CA_FILE: ${literal(path.resolve('/nowhere/ca.pem'))} cannot be read`),
+    );
     assert.match(problems(empty), /JUKECORD_CA_FILE: .*empty\.pem has no certificate in PEM form/);
     const config = loadConfig({ JUKECORD_CA_FILE: authority.caFile }, '/srv');
     assert.equal(config.ca?.certificates.length, 1);
@@ -220,7 +230,10 @@ describe("the host's certificate authorities (JUKECORD_CA_FILE)", {
     assert.equal((await status(null)).code, 3);
     const wrong = await status('/nowhere/ca.pem');
     assert.equal(wrong.code, 2);
-    assert.match(wrong.stderr, /^jukecord: JUKECORD_CA_FILE: \/nowhere\/ca\.pem cannot be read/);
+    assert.match(
+      wrong.stderr,
+      new RegExp(`^jukecord: JUKECORD_CA_FILE: ${literal(path.resolve('/nowhere/ca.pem'))} cannot be read`),
+    );
   });
 
   it('leaves every client unable to check a server the authority signed, before it is trusted', async () => {
@@ -290,7 +303,7 @@ describe("the host's certificate authorities (JUKECORD_CA_FILE)", {
     // server of each verifies.
     const script = `
       import tls from 'node:tls';
-      import { readAuthorities, trustAuthorities } from ${JSON.stringify(path.resolve('src/authorities.ts'))};
+      import { readAuthorities, trustAuthorities } from ${JSON.stringify(pathToFileURL(path.resolve('src/authorities.ts')).href)};
       const read = readAuthorities(process.env.JUKECORD_CA_FILE, process.cwd());
       trustAuthorities(read.authorities);
       const pems = tls.getCACertificates('default');

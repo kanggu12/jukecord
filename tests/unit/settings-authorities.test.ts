@@ -100,7 +100,8 @@ describe('certificate authorities on the settings page', { skip }, () => {
   it('keeps the certificates in a file of their own, 0600, named by what is in it, and forgets the old ones', () => {
     const dataDir = fs.mkdtempSync(path.join(authority.dir, 'data-'));
     const first = keepAuthorities(dataDir, [authority.ca]);
-    assert.equal(fs.statSync(first).mode & 0o777, 0o600);
+    // Windows keeps no POSIX modes (every file reads 0o666); the 0600 is checked where there is one.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(first).mode & 0o777, 0o600);
     assert.match(path.basename(first), /^authorities-[0-9a-f]{16}\.pem$/);
     // The same certificates are the same file; others another one.
     assert.equal(keepAuthorities(dataDir, [authority.ca]), first);
@@ -125,7 +126,8 @@ describe('certificate authorities on the settings page', { skip }, () => {
       const view = imported.json().view;
       const file = view.authorities.file as string;
       assert.equal(path.dirname(file), server.dataDir);
-      assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      // Windows keeps no POSIX modes (every file reads 0o666); the 0600 is checked where there is one.
+      if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
       assert.deepEqual(
         [
           view.authorities.source,
