@@ -34,7 +34,10 @@ export interface Cache {
   delete(key: string): Promise<void>;
   /**
    * Adds `by` to a counter and gives its new value; a counter that did not exist starts at zero and expires `ttlMs`
-   * after it was made (a later increment does not move that), so a window of counting closes by itself.
+   * after it was made (a later increment does not move that), so a window of counting closes by itself. Taking back
+   * (a negative `by`) never makes a counter: from one that is not there (its window closed), nothing is taken and 0 is
+   * given. Counters are kept where values others make cannot push them out: apart from the values in memory, and on
+   * a server until their window closes (unless the server, full, pushes keys out by its own policy).
    */
   increment(key: string, ttlMs: number, by?: number): Promise<number>;
   /**

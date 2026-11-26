@@ -28,7 +28,7 @@ import {
 const api = (path: string) => `${API_PREFIX}${path}`;
 
 const CAROL = memberKey('ldap', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41');
-const DAVE = memberKey('oidc', '9b1f6c2e-0000-4000-8000-00000000000d');
+const DAVE = memberKey('oidc', '9b1f6c2e-0000-4000-8000-00000000000d', 'https://sso.example.test/realms/home');
 
 // What an ActionError's code is, or "none".
 const code = async (fn: () => Promise<unknown>) => {
@@ -45,12 +45,19 @@ describe('member keys', () => {
     assert.match(CAROL, /^ldap:[0-9a-f]{15}$/);
     assert.equal(CAROL.length, 20);
     assert.equal(memberKey('ldap', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41'), CAROL);
-    assert.notEqual(memberKey('oidc', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41'), CAROL);
+    assert.notEqual(memberKey('oidc', 'f3a9e0b2-2c1d-4a7b-9e55-0d6c1b7e8a41', 'https://sso.example.test'), CAROL);
     assert.equal(memberProvider(CAROL), 'ldap');
     assert.equal(memberProvider(DAVE), 'oidc');
     for (const other of [ALICE, 'host', 'autoplay', 'ldap:short', null]) assert.equal(memberProvider(other), null);
     assert.equal(discordUserId(CAROL), null);
     assert.equal(discordUserId(ALICE), ALICE);
+  });
+
+  it("are apart by the provider's issuer too: another provider's person of the same subject is someone else", () => {
+    const here = memberKey('oidc', 'f2a1-mina', 'https://sso.example.test/realms/home');
+    assert.match(here, /^oidc:[0-9a-f]{15}$/);
+    assert.notEqual(memberKey('oidc', 'f2a1-mina', 'https://login.other.example/'), here);
+    assert.equal(memberKey('oidc', 'f2a1-mina', 'https://sso.example.test/realms/home'), here);
   });
 });
 
@@ -154,7 +161,8 @@ describe('member sessions', () => {
   const inject = (options: InjectOptions) => server.web.app.inject(options);
 
   before(async () => {
-    server = await testServer({ found: { one: [exampleTrack('m1')] } });
+    // Every way in set up: a member's login, and a linked one, come in only through ways that are.
+    server = await testServer({ found: { one: [exampleTrack('m1')] }, logins: true });
     // A member is known by what their provider said at their last login.
     await server.store.users.upsert({ id: CAROL, name: 'Carol', avatar: null });
   });
@@ -259,12 +267,31 @@ describe('member sessions', () => {
     assert.equal((await logs(controller)).statusCode, 403);
     const admin = await memberLogin('admin');
     assert.equal((await logs(admin)).statusCode, 200);
-    const link = await inject({
+  });
+
+  it("makes login links for the host only: an admin member's would outlive the member", async () => {
+    const admin = await memberLogin('admin');
+    // A host's link would be a host's session, and a token that never expires; a friend's, thirty days.
+    for (const scope of ['admin', 'control', 'read']) {
+      const link = await inject({
+        method: 'POST',
+        url: api(`/login-links?scope=${scope}`),
+        headers: { cookie: admin.cookie, [CSRF_HEADER]: admin.csrf },
+      });
+      assert.equal(link.statusCode, 403, scope);
+      assert.equal(link.json().error.message, 'only the host can make login links');
+    }
+    // An OIDC login that is a Discord user, at the admin level: the same.
+    const linked =
+      (await server.auth.startSession({ kind: 'user', userId: ALICE, level: 'admin' })).split(';')[0] ?? '';
+    const caller = await server.auth.identify({ cookie: linked });
+    const theirs = await inject({
       method: 'POST',
-      url: api('/login-links?scope=read'),
-      headers: { cookie: admin.cookie, [CSRF_HEADER]: admin.csrf },
+      url: api('/login-links'),
+      headers: { cookie: linked, [CSRF_HEADER]: caller?.csrf ?? '' },
     });
-    assert.equal(link.statusCode, 200);
+    assert.equal(theirs.statusCode, 403);
+    assert.equal((await inject({ method: 'POST', url: api('/login-links'), headers: asHost })).statusCode, 200);
   });
 
   it("shows what a member adds by their name, and keeps their likes their own, not the host's", async () => {

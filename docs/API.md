@@ -239,6 +239,8 @@ playlist) so a program does not need to ask again.
 
 | Operation | Request | Needs | CLI | Discord |
 | :-- | :-- | :-- | :-- | :-- |
+| `sessions` Every panel login that has not ended, the most recently seen first (the guests of listening links apart: they end with their link) | `GET /api/v1/sessions` | the host | `jukecord session list` |  |
+| `session-end` End a panel login: its browser is logged out at once | `DELETE /api/v1/sessions/{id}` | the host | `jukecord session end` |  |
 | `logs` The newest log records, oldest first | `GET /api/v1/logs` | the host | `jukecord logs` |  |
 | `login-link` Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
 | `backup` Write a copy of the database to the backups folder of the data directory | `POST /api/v1/backups` | the host | `jukecord backup` |  |
@@ -367,10 +369,11 @@ has run) and whether jukecord cannot serve without it:
 ### Metrics
 
 `/metrics` answers only a scraper beside jukecord (the same machine, cluster or private network) that asks directly: a
-request that came through a reverse proxy (it carries `X-Forwarded-For` or `Forwarded`) or from a public address gets a
-404, so the version and the counts are not given to the internet. With `JUKECORD_METRICS_TOKEN` set, a request with
+request that came through a reverse proxy (it carries `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`,
+`X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address gets a 404, so the version and the counts are not
+given to the internet. With `JUKECORD_METRICS_TOKEN` set, a request with
 `Authorization: Bearer <token>` is let in from anywhere; a wrong token gets `401` with `WWW-Authenticate: Bearer`, and a
-request without one falls back to the address rule. A proxy that adds no `X-Forwarded-For` (nginx without
+request without one falls back to the address rule. A proxy that adds none of them (nginx without
 `proxy_set_header`, for one) cannot be told from a scraper beside jukecord; the examples in the installation guide answer
 404 for `/metrics` at the proxy itself.
 

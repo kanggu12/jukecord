@@ -46,6 +46,9 @@ export const PANEL_ACTIONS = [
   'tokens',
   'token-create',
   'token-revoke',
+  // Every browser logged in, and ending one (the host's, in the menu).
+  'sessions',
+  'session-end',
   'logs',
   'wrapped',
   'alerts-channel',
@@ -328,6 +331,19 @@ export interface Token {
   createdAt: number;
   usedAt: number | null;
 }
+/** A panel login as the host sees it: whose it is, how it came in, and when it was last used. */
+export interface Session {
+  id: string;
+  way: 'link' | 'discord' | 'oidc' | 'ldap';
+  kind: 'host' | 'user' | 'friend' | 'member';
+  userId: string | null;
+  name: string | null;
+  scope: 'read' | 'control' | 'admin';
+  createdAt: number;
+  seenAt: number;
+  expiresAt: number;
+  current: boolean;
+}
 /** A listening link as it is listed (its code was shown once, when it was made). */
 export interface ListenLink {
   id: number;
@@ -433,6 +449,8 @@ export const api = {
   'token-create': (name: string, scope: Token['scope']) =>
     request<{ token: string; info: Token }>('POST', '/tokens', { name, scope }),
   'token-revoke': (id: number) => request<unknown>('DELETE', `/tokens/${id}`),
+  sessions: () => request<Session[]>('GET', '/sessions'),
+  'session-end': (id: string) => request<unknown>('DELETE', `/sessions/${id}`),
   logs: (query: { level?: string; component?: string; before?: string; limit?: number }) => {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query))
@@ -506,7 +524,7 @@ export async function authMethods(): Promise<AuthMethods> {
 
 /**
  * Logs in with a directory account: where to go once in, or ApiError with the code of the refusal (wrong-password,
- * password-expired, account-disabled, no-group, too-many, directory-down, ambiguous, invalid).
+ * no-group, too-many, directory-down, ambiguous, invalid).
  */
 export async function directoryLogin(username: string, password: string, next: string): Promise<string> {
   const response = await fetch('/auth/directory', {
