@@ -33,6 +33,23 @@ async function db(
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
 
+// Makes a file immutable (chattr +i) or writable again, as root or through sudo without a password; whether it could.
+function immutable(file: string, on: boolean): boolean {
+  const flag = on ? '+i' : '-i';
+  for (const [command, args] of [
+    ['chattr', [flag, file]],
+    ['sudo', ['-n', 'chattr', flag, file]],
+  ] as const) {
+    try {
+      execFileSync(command, args, { stdio: 'ignore' });
+      return true;
+    } catch {
+      // Not allowed this way (or not there): the next way, or none.
+    }
+  }
+  return false;
+}
+
 // A SQLite file at the latest schema with a row in every table.
 async function filled(name: string): Promise<string> {
   const file = path.join(dir, name);
@@ -137,19 +154,17 @@ describe('jukecord db', () => {
     assert.equal((await db(['status', `sqlite:${backup}`])).code, 0);
     assert.deepEqual(state(), before);
     // A backup nobody may write at all, not even root (immutable): copied all the same. Where the system lets this
-    // user make a file immutable (root on a file system that has the flag).
-    try {
-      execFileSync('chattr', ['+i', backup], { stdio: 'ignore' });
-    } catch {
+    // user make a file immutable: root, or sudo without a password (CI's runners), on a file system with the flag.
+    if (!immutable(backup, true)) {
       t.diagnostic('chattr +i is not allowed here; the immutable backup is not tried');
       return;
     }
     try {
-      const immutable = await db(['copy', `sqlite:${backup}`, `sqlite:${path.join(dir, 'source-copy-2.db')}`]);
-      assert.equal(immutable.code, 0, immutable.err);
+      const copiedAgain = await db(['copy', `sqlite:${backup}`, `sqlite:${path.join(dir, 'source-copy-2.db')}`]);
+      assert.equal(copiedAgain.code, 0, copiedAgain.err);
       assert.deepEqual(state(), before);
     } finally {
-      execFileSync('chattr', ['-i', backup], { stdio: 'ignore' });
+      immutable(backup, false);
     }
   });
 
