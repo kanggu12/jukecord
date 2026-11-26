@@ -10,6 +10,10 @@ data/
 # Settings with secrets in them; .env.example is the one that is committed
 .env
 
+# The split's certificate authorities, the host's own; only the folder's README is committed
+/deploy/split/ca/*
+!/deploy/split/ca/README.md
+
 # Coverage reports from the test runner
 coverage/
 

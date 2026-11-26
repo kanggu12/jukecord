@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The Helm chart's split mode on a throwaway kind cluster, with an image built from this checkout: a core and two edges
-# over a PostgreSQL and a Valkey of their own (deploy/kind/split-services.yaml), browser-only. It installs the chart
-# with the database's and the bus's addresses in Secrets of the user's kind, and the logins set up (an identity
-# provider and a directory that are never asked, their secrets in a Secret of the user's and a private CA in a
-# ConfigMap: jukecord reads those files as it starts, so edges that start prove the mounts). It runs `helm test` (the
+# over a PostgreSQL and a Valkey of their own (deploy/kind/split-services.yaml), browser-only. Valkey speaks TLS only,
+# with a certificate an authority made for the run signed, which the chart's ca gives every pod: a core and edges that
+# start and reach the bus prove the host's authorities trusted. It installs the chart with the database's and the
+# bus's addresses in Secrets of the user's kind, and the logins set up (an identity provider and a directory that are
+# never asked, their secrets in a Secret of the user's: jukecord reads those files as it starts, so edges that start
+# prove the mounts). It runs `helm test` (the
 # panel's Service answers ready through an edge), the jukecord command in an edge, the API through the Service with a
 # token made in one edge (a database row every edge reads), checks that the logins are the edges' and not the core's,
 # that only the edges reach the core's internal port, replaces the core's pod and sees the edges ready again. The
@@ -11,7 +13,7 @@
 #
 #   deploy/kind/check-split.sh [image]        (default jukecord:dev; build it with docker build -f deploy/docker/Dockerfile)
 #
-# Used by .github/workflows/chart-e2e.yml and by hand. Needs docker, kind, kubectl and helm.
+# Used by .github/workflows/chart-e2e.yml and by hand. Needs docker, kind, kubectl, helm and openssl.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 image=${1:-jukecord:dev}
@@ -20,11 +22,13 @@ release=jukecord
 namespace=jukecord
 kubeconfig=$(mktemp)
 export KUBECONFIG=$kubeconfig
+# The run's authority and the bus's certificate, keys included: this run's alone, removed with it.
+work=$(mktemp -d)
 
 say() { printf '\n== %s\n' "$*"; }
 cleanup() {
   kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
-  rm -f "$kubeconfig" "$kubeconfig.ca.pem"
+  rm -rf "$kubeconfig" "$work"
 }
 trap cleanup EXIT
 
@@ -36,20 +40,29 @@ say "a database and a bus beside it"
 kubectl create namespace "$namespace"
 password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 kubectl -n "$namespace" create secret generic jukecord-test-database --from-literal=password="$password"
+# An authority for this run (its key goes with the run's folder), and Valkey's certificate it signed, for the name the
+# pods reach it by.
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=jukecord-kind-ca \
+  -keyout "$work/ca.key" -out "$work/ca.crt" 2>/dev/null
+openssl req -newkey rsa:2048 -nodes -subj /CN=valkey -keyout "$work/server.key" -out "$work/server.csr" 2>/dev/null
+printf 'subjectAltName=DNS:valkey,DNS:valkey.%s.svc,DNS:localhost\n' "$namespace" > "$work/server.ext"
+openssl x509 -req -in "$work/server.csr" -CA "$work/ca.crt" -CAkey "$work/ca.key" -CAcreateserial -days 1 \
+  -extfile "$work/server.ext" -out "$work/server.crt" 2>/dev/null
+kubectl -n "$namespace" create secret generic jukecord-test-bus-tls --from-file=server.crt="$work/server.crt" \
+  --from-file=server.key="$work/server.key" --from-file=ca.crt="$work/ca.crt"
+# The authority as a host keeps theirs, for the chart's ca: a ConfigMap (certificates are no secret).
+kubectl -n "$namespace" create configmap jukecord-test-ca --from-file=ca.pem="$work/ca.crt"
 kubectl -n "$namespace" apply -f deploy/kind/split-services.yaml
 kubectl -n "$namespace" rollout status deploy/postgres --timeout 180s
 kubectl -n "$namespace" rollout status deploy/valkey --timeout 180s
 # Where jukecord finds them, as a user keeps such addresses: in Secrets of their own, under the key url.
 kubectl -n "$namespace" create secret generic jukecord-database \
   --from-literal=url="postgres://jukecord:$password@postgres:5432/jukecord"
-kubectl -n "$namespace" create secret generic jukecord-bus --from-literal=url="redis://valkey:6379"
-# The logins' secrets and a private CA's certificate (made here, valid for a day), as a host keeps them.
+kubectl -n "$namespace" create secret generic jukecord-bus --from-literal=url="rediss://valkey:6379"
+# The logins' secrets, as a host keeps them.
 kubectl -n "$namespace" create secret generic jukecord-logins \
   --from-literal=oidcClientSecret="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')" \
   --from-literal=ldapBindPassword="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -out "$kubeconfig.ca.pem" -days 1 \
-  -subj /CN=jukecord-test-ca 2>/dev/null
-kubectl -n "$namespace" create configmap jukecord-test-ca --from-file=ca.pem="$kubeconfig.ca.pem"
 
 say "the chart, split"
 repository=${image%:*}
@@ -61,7 +74,7 @@ helm install "$release" deploy/helm/jukecord --namespace "$namespace" \
   --set auth.oidc.existingSecret=jukecord-logins --set 'auth.oidc.adminGroups[0]=jukecord-admins' \
   --set auth.ldap.url=ldaps://ldap.example.invalid --set 'auth.ldap.baseDn=dc=example\,dc=invalid' \
   --set 'auth.ldap.bindDn=cn=jukecord\,dc=example\,dc=invalid' --set auth.ldap.existingSecret=jukecord-logins \
-  --set 'auth.ldap.readGroups[0]=*' --set auth.ca.configMap=jukecord-test-ca --set auth.ca.key=ca.pem \
+  --set 'auth.ldap.readGroups[0]=*' --set ca.configMap=jukecord-test-ca --set ca.key=ca.pem \
   --set image.repository="$repository" --set image.tag="$tag" --set image.pullPolicy=Never \
   --set persistence.size=1Gi --wait --timeout 300s
 kubectl -n "$namespace" get pods,svc,pvc,networkpolicy
@@ -102,7 +115,11 @@ case "$methods" in
     ;;
 esac
 kubectl -n "$namespace" exec "deploy/$release-edge" -- jukecord doctor | grep -F 'sso (oidc): https://sso.example.invalid/realms/home'
-kubectl -n "$namespace" exec "deploy/$release-edge" -- jukecord doctor | grep -F 'directory certificates: JUKECORD_LDAP_CA_FILE'
+# The host's authority, every pod's: the core's settings (the doctor's) name it, and the bus is the TLS one.
+kubectl -n "$namespace" exec "deploy/$release-edge" -- jukecord doctor |
+  grep -F "certificate authorities: 1 extra authority from /run/jukecord-ca/ca.crt, besides Node's own"
+kubectl -n "$namespace" exec "deploy/$release-edge" -- jukecord doctor | grep -F 'bus: rediss://valkey:6379'
+kubectl -n "$namespace" exec "deploy/$release-edge" -- printenv JUKECORD_CA_FILE
 # The core logs nobody in: none of the logins' settings, files or certificates.
 if kubectl -n "$namespace" exec "deploy/$release-core" -- printenv JUKECORD_OIDC_ISSUER >/dev/null 2>&1; then
   echo "the core has the logins' settings" >&2

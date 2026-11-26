@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # jukecord split into services, end to end with Docker Compose (deploy/split/compose.yaml): a core, two edges, the
-# database, Valkey and Caddy, under a throwaway project name, browser-only (no Discord). It opens a login link made in
-# one edge at the other, adds a track through one edge and sees the change arrive on a live connection of the other,
-# plays the track's audio through an edge (a Range request too, and through the front), restarts the core and sees
-# the edges and their panels recover, then removes everything it started: the containers, their network and volumes,
-# the throwaway files, and the image it built.
+# database, Valkey and Caddy, under a throwaway project name, browser-only (no Discord). The bus runs over TLS, its
+# certificate signed by an authority made for the run, which the services trust only through JUKECORD_CA_FILE in the
+# split's ca folder. It opens a login link made in one edge at the other, adds a track through one edge and sees the
+# change arrive on a live connection of the other, plays the track's audio through an edge (a Range request too, and
+# through the front), restarts the core and sees the edges and their panels recover, then removes everything it
+# started: the containers, their network and volumes, the throwaway files, and the image it built.
 #
 #   tests/split/run.sh [postgres|mysql] [image]
 #
 # With an image named (jukecord:ci, say) it uses that one and leaves it; otherwise it builds jukecord-test-split:e2e
 # from this checkout. Publishes 127.0.0.1:18795-18798 while it runs (the front, both edges, the core's own port).
-# Needs docker with Compose 2.24 or newer and Node.js. Used by .github/workflows/ci.yml and by hand.
+# Needs docker with Compose 2.24 or newer, openssl and Node.js. Used by .github/workflows/ci.yml and by hand.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -35,6 +36,8 @@ JUKECORD_DB_PASSWORD=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 JUKECORD_INTERNAL_SECRET=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 JUKECORD_IMAGE=${image:-jukecord-test-split:e2e}
 JUKECORD_E2E_MEDIA=$work/media
+JUKECORD_E2E_CA=$work/ca
+JUKECORD_E2E_TLS=$work/tls
 EOF
 files=(-f deploy/split/compose.yaml)
 if [ "$database" = mysql ]; then files+=(-f deploy/split/compose.mysql.yaml); fi
@@ -66,6 +69,21 @@ chmod 0755 "$work" "$work/media"
 docker run --rm --user "$(id -u):$(id -g)" -v "$work/media:/out" --entrypoint ffmpeg "${image:-jukecord-test-split:e2e}" \
   -hide_banner -loglevel error -filter_complex "anoisesrc=d=8:c=pink:a=0.2" -ac 2 -c:a libopus -b:a 96k /out/tone.ogg
 chmod 0644 "$work/media/tone.ogg"
+
+say "a certificate authority for this run, which signed the bus's certificate: the services trust it only through JUKECORD_CA_FILE"
+mkdir -p "$work/ca" "$work/tls"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=jukecord-e2e-ca \
+  -keyout "$work/tls/ca.key" -out "$work/tls/ca.crt" 2>/dev/null
+openssl req -newkey rsa:2048 -nodes -subj /CN=valkey -keyout "$work/tls/server.key" -out "$work/tls/server.csr" 2>/dev/null
+printf 'subjectAltName=DNS:valkey,DNS:localhost,IP:127.0.0.1\n' > "$work/tls/server.ext"
+openssl x509 -req -in "$work/tls/server.csr" -CA "$work/tls/ca.crt" -CAkey "$work/tls/ca.key" -CAcreateserial \
+  -days 1 -extfile "$work/tls/server.ext" -out "$work/tls/server.crt" 2>/dev/null
+# The authority's key has done its work; the services get its certificate alone, Valkey its own key and certificate
+# (readable by its user: the folder is this run's and goes with it).
+rm -f "$work/tls/ca.key" "$work/tls/server.csr"
+cp "$work/tls/ca.crt" "$work/ca/ca.crt"
+chmod 0755 "$work/ca" "$work/tls"
+chmod 0644 "$work/ca/ca.crt" "$work/tls/ca.crt" "$work/tls/server.crt" "$work/tls/server.key"
 
 say "the split ($database), project $project"
 "${compose[@]}" up -d --wait --wait-timeout 240
