@@ -268,6 +268,7 @@ the host's own sign-in and directory without logging anyone in
 ./jukecord db status                          # the database jukecord uses: kind, version, schema, size, rows
 ./jukecord db copy sqlite:/data/jukecord.db   # every row of that file into the database jukecord uses
 ./jukecord auth methods
+./jukecord auth test-discord                  # the Discord login's application: its ID and secret, nobody logged in
 ./jukecord auth test-oidc
 ./jukecord auth test-ldap mina                # also looks a person up: their groups and level, no password
 ```

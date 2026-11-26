@@ -587,10 +587,11 @@ export function settingsPage(): HTMLElement {
     key.onclick = () => void restart();
     fill(
       bar,
-      icon('rotate-ccw', 'bar-mark'),
       h(
         'div',
         { class: 'restart-words' },
+        // The icon in its own column, on the line of the words; the names under the words.
+        icon('rotate-ccw', 'restart-mark'),
         h('b', null, words.setWaiting(pending.length)),
         h(
           'p',

@@ -145,6 +145,9 @@ The host logs in with `./jukecord open`. For everyone else:
    `http://localhost:<JUKECORD_PORT>/auth/callback`.
 3. Run `./jukecord up`.
 
+`./jukecord auth test-discord` tries the application's ID and secret at Discord and says the address it must list,
+logging nobody in (the panel's **Settings** page has the same test under **Logins**).
+
 jukecord asks Discord for the `identify` scope only; who is in which server is asked through the bot. A login page
 can offer your own identity provider or directory as well ([your own accounts](#logging-in-through-your-own-accounts)).
 

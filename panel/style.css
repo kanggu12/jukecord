@@ -5349,14 +5349,20 @@ button.lyric {
   gap: var(--s-12);
   padding: var(--s-12) var(--pad);
 }
-.restart-bar .bar-mark {
-  color: var(--pause);
-}
+/* What waits, its icon on the line of its words; the changes' names under the words, where they start (the icon's
+   column beside both). */
 .restart-words {
   flex: 1;
   min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--s-6);
+}
+.restart-mark {
+  color: var(--pause);
 }
 .restart-names {
+  grid-column: 2;
   margin: 0;
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
@@ -5452,12 +5458,9 @@ button.lyric {
   height: var(--control);
 }
 /* The seconds' word in Korean, 초, stands its ink a pixel high in a row of choices (its strokes end above the foot the
-   other syllables reach): lowered by that pixel, where the row's choices are drawn their own height (a finger's
-   row centres it already). */
-@media (pointer: fine) {
-  :root:lang(ko) .unit-seg button[data-unit="s"] {
-    padding-top: var(--s-2);
-  }
+   other syllables reach): lowered by that pixel, on a mouse's row and a finger's alike. */
+:root:lang(ko) .unit-seg button[data-unit="s"] {
+  padding-top: var(--s-2);
 }
 /* A value that cannot be changed here, or a secret's state: words, cut short when long (whole in their title). */
 .setting-value {
