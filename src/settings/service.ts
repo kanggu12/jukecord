@@ -17,7 +17,7 @@ import { ActionError } from '../app/actions.ts';
 import { readAuthorities } from '../authorities.ts';
 import type { Config, ConfigFiles, Supervisor } from '../config.ts';
 import type { Logger } from '../log.ts';
-import { ConnectionError } from '../store/network.ts';
+import { ConnectionError, DATABASE_DOWN, DATABASE_RETRY_MS } from '../store/network.ts';
 import { RevisionConflict, type SavedSetting, type SettingWrite, type Store } from '../store/store.ts';
 import { Lock } from '../util/lock.ts';
 import {
@@ -317,7 +317,8 @@ export class HostSettings {
     try {
       return mergedEnvironment(env, this.usable(await this.answered(this.layers())), rules);
     } catch (error) {
-      if (error instanceof ConnectionError) throw new ActionError('unavailable', 'the database does not answer');
+      if (error instanceof ConnectionError)
+        throw new ActionError('unavailable', DATABASE_DOWN, { retryAfterMs: DATABASE_RETRY_MS });
       throw error;
     }
   }
@@ -329,7 +330,8 @@ export class HostSettings {
       layers = await this.answered(this.layers());
     } catch (error) {
       // The database not answering is said as such (503), not as jukecord's own failure.
-      if (error instanceof ConnectionError) throw new ActionError('unavailable', 'the database does not answer');
+      if (error instanceof ConnectionError)
+        throw new ActionError('unavailable', DATABASE_DOWN, { retryAfterMs: DATABASE_RETRY_MS });
       throw error;
     }
     const services = (await this.options.services?.()) ?? [];
@@ -498,11 +500,12 @@ export class HostSettings {
    * with nothing closed) leaves its statements waiting, and the page is told it does not answer instead (503). The
    * work itself goes on.
    */
-  private answered<T>(work: Promise<T>, said = 'the database does not answer'): Promise<T> {
+  private answered<T>(work: Promise<T>, said = DATABASE_DOWN): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<never>((_resolve, reject) => {
+      // As every request that meets a database out of reach is told (src/store/network.ts): the same words and wait.
       timer = setTimeout(
-        () => reject(new ActionError('unavailable', said, { retryAfterMs: 5000 })),
+        () => reject(new ActionError('unavailable', said, { retryAfterMs: DATABASE_RETRY_MS })),
         this.options.answerMs ?? ANSWER_MS,
       );
       timer.unref();

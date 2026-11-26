@@ -349,7 +349,12 @@ describe('the settings service', () => {
     // A read while the server is silent: told so within the wait as well.
     const all = store.hostSettings.all.bind(store.hostSettings);
     store.hostSettings.all = async () => new Promise(() => {});
-    assert.equal((await refusal(settings.view())).message, 'the database does not answer');
+    const away = await refusal(settings.view());
+    // In the words and with the wait every request is told while the database is out of reach.
+    assert.deepEqual(
+      [away.code, away.message, away.retryAfterMs],
+      ['unavailable', 'the database does not answer; try again in a moment', 5000],
+    );
     store.hostSettings.all = all;
   });
 

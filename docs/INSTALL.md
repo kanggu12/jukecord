@@ -310,17 +310,18 @@ A change marked "at once" applies when it is saved; the others wait for a restar
 from the page, with `jukecord restart` or through the API stops jukecord as SIGTERM does (each server's place saved,
 the panels told) and exits with code 75, for what runs jukecord to start it again. The music stops for a few seconds.
 
-| Where jukecord runs                          | What starts it again                                                             |
-| :------------------------------------------- | :------------------------------------------------------------------------------- |
-| Docker Compose                               | Docker, by the restart policy (`compose.yaml` sets `JUKECORD_SUPERVISOR=docker`) |
-| Kubernetes                                   | the kubelet, as it does any container that ends                                  |
-| A systemd unit                               | systemd, when the unit has `Restart=on-failure` or `Restart=always`              |
-| The release's programs                       | `jukecord start`, which starts jukecord again when it ends with code 75          |
-| A terminal (`npm start`, `node src/main.ts`) | nothing: the restart is refused, saying to stop jukecord and start it again      |
+| Where jukecord runs                          | What starts it again                                                                                        |
+| :------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| Docker Compose                               | Docker, by the restart policy (`compose.yaml` sets `JUKECORD_SUPERVISOR=docker`)                            |
+| Kubernetes                                   | the kubelet, as it does any container that ends                                                             |
+| The release's programs                       | `jukecord start`, which starts jukecord again when it ends with code 75 (the unit above included)           |
+| A systemd unit that runs Node.js itself      | systemd, when the unit has `Restart=on-failure` (or `always`) and `Environment=JUKECORD_SUPERVISOR=systemd` |
+| A terminal (`npm start`, `node src/main.ts`) | nothing: the restart is refused, saying to stop jukecord and start it again                                 |
 
-jukecord tells which from where it runs. Where it cannot, `JUKECORD_SUPERVISOR` (`docker`, `kubernetes`, `systemd`,
-`launcher` or `none`) says it: a plain `docker run --restart unless-stopped`, say, takes
-`-e JUKECORD_SUPERVISOR=docker`. In a split, a restart restarts every service: the core, and each edge a few seconds
+jukecord tells Kubernetes from where it runs; `JUKECORD_SUPERVISOR` (`docker`, `kubernetes`, `systemd`, `launcher` or
+`none`) says the others, as Compose and the programs' launcher set it: a plain `docker run --restart unless-stopped`,
+say, takes `-e JUKECORD_SUPERVISOR=docker`. systemd is never guessed: every unit's process looks the same, and a unit
+without `Restart=` leaves jukecord stopped. In a split, a restart restarts every service: the core, and each edge a few seconds
 apart from the others, so the front always has an edge to send browsers to.
 
 ## The database

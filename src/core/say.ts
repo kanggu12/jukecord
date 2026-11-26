@@ -287,6 +287,7 @@ const KOREAN: readonly (readonly [string | RegExp, string])[] = [
   ['that search result has no picture', '이미지가 없는 검색 결과'],
   // The host's settings (src/settings): a change refused, the database away, a restart.
   ['the database does not answer', '데이터베이스가 응답하지 않음'],
+  ['the database does not answer; try again in a moment', '데이터베이스가 응답하지 않음: 잠시 뒤 다시 시도하세요'],
   ['the database does not answer; nothing was saved', '데이터베이스가 응답하지 않음: 아무것도 저장하지 않음'],
   [
     'the database does not answer; the change may still be saved when it does',

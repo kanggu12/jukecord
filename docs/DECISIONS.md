@@ -247,9 +247,11 @@ holds only what every service shares.
 
 A restart stops jukecord as SIGTERM does and exits with code 75, for what runs it to start it again: Docker's restart
 policy, the kubelet, systemd, or the program's launcher. 75 is `EX_TEMPFAIL`; 0 would leave a systemd unit with
-`Restart=on-failure` stopped. jukecord tells which runs it from its environment (`KUBERNETES_SERVICE_HOST`, systemd's
-`INVOCATION_ID`, `JUKECORD_SUPERVISOR` set by `compose.yaml` and the launcher). Where nothing would start it again, as
-in a terminal, the restart is refused, since it would only stop jukecord.
+`Restart=on-failure` stopped. jukecord tells which runs it from its environment: `KUBERNETES_SERVICE_HOST` in every
+pod, `JUKECORD_SUPERVISOR` set by `compose.yaml`, the launcher, or a systemd unit of the host's. Not systemd's own
+`INVOCATION_ID`: every unit's process has one, and systemd's default, `Restart=no`, would leave jukecord stopped after a
+restart it had offered. Where nothing would start it again, as in a terminal, the restart is refused, since it would
+only stop jukecord.
 
 ## A database move copies twice
 

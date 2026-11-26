@@ -322,16 +322,24 @@ The answer says what changed (`name`, `from`, `to`, never a secret's value, and 
 restart) and the whole view after it. A change that moves where a saved secret goes (a directory's address, an
 identity provider's issuer) must bring that secret again.
 
+The values carry no words. `value` is the setting as written, as its variable takes it (`5m`, `300` for seconds,
+`2GiB`); `running`, and a change's `from` and `to`, are the values in use as jukecord holds them: a duration in
+milliseconds, a size in bytes (`300000`, `2147483648`). The page and `jukecord settings` say both in the setting's unit
+("5 min", "2 GiB").
+
 - `POST /api/v1/settings/test-database`, `test-cache` and `test-bus` take `{"url", "ca"}`: they try the address without
-  saving it and say what answered (its program and version, the round trip; for a database its schema and rows). `ca`,
+  saving or changing anything (a SQLite file is only read; a database holding another program's tables is said to)
+  and say what answered (its program and version, the round trip; for a database its schema and rows). `ca`,
   certificate authorities in PEM, is trusted by that test alone, as `auth-test-oidc` and `auth-test-ldap` take it too.
+  `test-database` and the move also take a `password` apart from the address (`--password -` reads it from the
+  standard input).
 - `PUT /api/v1/settings/authorities` takes `{"pem"}`: authorities' certificates only (a key is refused), kept as a file
   of the data folder and used after a restart; `DELETE` puts them away.
-- A database move: `POST /api/v1/settings/database-move` with `{"url", "replace"}` starts the copy, which
+- A database move: `POST /api/v1/settings/database-move` with `{"url", "password", "replace"}` starts the copy, which
   `GET /api/v1/settings/database-move` follows (rows copied, the table, the total); `POST .../switch` stops jukecord,
   copies what changed since, saves the address and starts again on it; `DELETE` stops the copy and forgets the move.
 - `POST /api/v1/restart` and the switch answer `{"supervisor", "restarts"}`, and refuse with `409` where nothing would
-  start jukecord again.
+  start jukecord again, and while the other is under way (a restart asked drops no switch, a switch no restart).
 
 `GET /api/v1/sessions` lists every panel login that has not ended, the most recently seen first: its `id`, the `way`
 it logged in (`link`, `discord`, `oidc`, `ldap`), who, its scope, and when it began, was last seen and ends. A
