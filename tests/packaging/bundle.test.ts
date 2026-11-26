@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -157,6 +158,13 @@ describe('the launcher for Linux and macOS', () => {
        ytdlp: e.JUKECORD_YTDLP, port: e.JUKECORD_PORT, mode: e.NODE_ENV }));`;
   fs.writeFileSync(path.join(dir, 'lib', 'app', 'src', 'cli', 'main.js'), said('command'));
   fs.writeFileSync(path.join(dir, 'lib', 'app', 'src', 'main.js'), said('server'));
+  // The program's own runner of `start` (src/launcher.ts), as the bundle writes it: the types out, the imports .js.
+  for (const file of ['launcher.ts', 'settings/restart.ts']) {
+    const into = path.join(dir, 'lib', 'app', 'src', file.replace(/\.ts$/, '.js'));
+    fs.mkdirSync(path.dirname(into), { recursive: true });
+    const text = stripTypeScriptTypes(read(`src/${file}`)).replaceAll(/(from '\.{1,2}\/[^']+)\.ts'/g, "$1.js'");
+    fs.writeFileSync(into, text);
+  }
   const launcher = path.join(dir, 'jukecord');
   fs.writeFileSync(launcher, read('deploy/bundle/jukecord').replaceAll('@YTDLP@', YTDLP_PROGRAM['linux-x64']));
   fs.chmodSync(launcher, 0o755);
@@ -195,6 +203,92 @@ describe('the launcher for Linux and macOS', () => {
 
   it('starts the server with start', () => {
     assert.deepEqual(json(run(['start'])).kind, 'server');
+  });
+
+  it('starts jukecord again when it ends with 75, its restart, reading .env again each time', () => {
+    // A stand-in that restarts once (a marker in its data folder), then ends as the real one does after a stop.
+    const server = path.join(dir, 'lib', 'app', 'src', 'main.js');
+    const kept = fs.readFileSync(server, 'utf8');
+    const marker = path.join(root, 'restarted');
+    try {
+      fs.writeFileSync(
+        server,
+        `import fs from 'node:fs';
+         if (!fs.existsSync(${JSON.stringify(marker)})) {
+           fs.writeFileSync(${JSON.stringify(marker)}, '');
+           fs.writeFileSync(${JSON.stringify(settings)}, 'JUKECORD_PORT=9797\\n');
+           process.exit(75);
+         }
+         console.log(JSON.stringify({ kind: 'server again', port: process.env.JUKECORD_PORT }));`,
+      );
+      assert.deepEqual(json(run(['start'])), { kind: 'server again', port: '9797' });
+    } finally {
+      fs.writeFileSync(server, kept);
+      fs.rmSync(marker, { force: true });
+      fs.rmSync(settings, { force: true });
+    }
+  });
+
+  it('ends jukecord with itself on every signal that ends a program, in the background of a shell too', {
+    skip: process.platform === 'win32',
+  }, async () => {
+    // A stand-in that stops on TERM and INT as jukecord does (once, exit 0) and has no word for HUP or QUIT (their
+    // default ends it), saying its process id first.
+    const server = path.join(dir, 'lib', 'app', 'src', 'main.js');
+    const kept = fs.readFileSync(server, 'utf8');
+    fs.writeFileSync(
+      server,
+      `console.log('pid ' + process.pid);
+       let stops = 0;
+       const stop = () => { stops += 1; if (stops === 1) setTimeout(() => process.exit(0), 50); };
+       process.on('SIGTERM', stop);
+       process.on('SIGINT', stop);
+       setInterval(() => {}, 1000);`,
+    );
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      for (const [signal, background] of [
+        ['SIGTERM', false],
+        ['SIGINT', false],
+        ['SIGHUP', false],
+        ['SIGQUIT', false],
+        ['SIGINT', true],
+      ] as const) {
+        // In the background of a non-interactive shell, SIGINT is ignored from the start for what it runs (POSIX).
+        const shell = background ? `"$0" start & echo "launcher $!"; wait $!` : 'exec "$0" start';
+        const { spawn } = await import('node:child_process');
+        const child = spawn('/bin/sh', ['-c', shell, launcher], {
+          env: { PATH: process.env.PATH ?? '', HOME: home },
+          stdio: ['ignore', 'pipe', 'inherit'],
+        });
+        let out = '';
+        child.stdout.on('data', (chunk) => {
+          out += String(chunk);
+        });
+        const ended = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+        for (let tries = 0; tries < 200 && !/pid \d+/.test(out); tries += 1)
+          await new Promise((r) => setTimeout(r, 25));
+        const node = Number(/pid (\d+)/.exec(out)?.[1]);
+        const launched = background ? Number(/launcher (\d+)/.exec(out)?.[1]) : (child.pid ?? 0);
+        process.kill(launched, signal);
+        await Promise.race([ended, new Promise((r) => setTimeout(r, 5000))]);
+        for (let tries = 0; tries < 100 && alive(node); tries += 1) await new Promise((r) => setTimeout(r, 20));
+        const left = alive(node);
+        if (left) process.kill(node, 'SIGKILL');
+        if (alive(launched)) process.kill(launched, 'SIGKILL');
+        assert.equal(left, false, `${signal}${background ? ' in the background' : ''}: jukecord was left running`);
+        assert.equal(alive(launched), false, `${signal}: the launcher was left running`);
+      }
+    } finally {
+      fs.writeFileSync(server, kept);
+    }
   });
 
   it('takes the settings in .env, with the environment over them, and an empty one as unset', {
