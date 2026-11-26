@@ -181,6 +181,9 @@ jobs:
       - name: One version everywhere
         run: node scripts/check-version.ts
       - name: The chart, the workflows, the scripts, the changelog and the API document
+        # promtool is installed above: its test fails here without it rather than being skipped.
+        env:
+          JUKECORD_REQUIRE_PROMTOOL: "1"
         run: node --test "tests/packaging/**/*.test.ts"
       - name: Shell scripts (the version GitHub's runners carry, warnings and up)
         # A block, so the shell gets the line break after the backslash (a plain YAML string folds it into a space).

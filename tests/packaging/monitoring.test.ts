@@ -378,8 +378,10 @@ describe('the alert rules', () => {
   });
 
   it('pass promtool, and its tests in alerts.test.yaml', {
-    // Skipped on a machine without promtool; never in CI, which installs it (ci.yml), so the rules cannot go unchecked.
-    skip: !process.env.CI && !have('promtool', '--version') && 'promtool is not installed',
+    // Skipped where promtool is not installed (a machine of one's own, CI's test jobs, which run every test with
+    // CI=true); never in the packaging job, which installs it and says so (JUKECORD_REQUIRE_PROMTOOL, ci.yml), so the
+    // rules cannot go unchecked there.
+    skip: !process.env.JUKECORD_REQUIRE_PROMTOOL && !have('promtool', '--version') && 'promtool is not installed',
   }, () => {
     execFileSync('promtool', ['check', 'rules', 'alerts.yaml'], { cwd: 'deploy/monitoring', stdio: 'pipe' });
     execFileSync('promtool', ['test', 'rules', 'alerts.test.yaml'], { cwd: 'deploy/monitoring', stdio: 'pipe' });
