@@ -41,12 +41,16 @@ tokens instead and need no CSRF header.
 **Members** logged in through the host's identity provider or directory, and their groups gave them a level at that
 login: `admin` may do what the host may, `control` changes the music in every server, `read` looks and listens.
 `GET /api/v1/me` says `kind: "member"` and, in `member`, where they logged in (`oidc` or `ldap`) and their level. A
-member makes no API tokens; an admin member lists and revokes everyone's, as the host does.
+member's login lasts eight hours. A member makes no API tokens; an admin member lists and revokes everyone's, and
+lists and ends every login (`GET /api/v1/sessions`, `DELETE /api/v1/sessions/{id}`), as the host does. Login links and
+jukecord's own settings are the host's alone: its token, or a browser it logged in with `jukecord open`.
 
 Twenty failed logins (a wrong token, a used login link, a wrong directory password) from one address block that address
 for ten minutes, counted from the first, with `429`, for credentials that do not work: a token, a cookie or a login link
-that works still gets in from there. A directory login's failures count against the name typed as well. Logging in
-with Discord or SSO waits for the block to end, since only the provider's answer says whether it works.
+that works still gets in from there. A directory login's failures count against the name too (as directories compare
+names) and against the account it found. Each try is counted before it is made, so tries sent at once cannot pass the
+limit, and a login that works takes its try back. Logging in with Discord or SSO waits for the block to end, since only
+the provider's answer says whether it works.
 
 ### The browser's logins
 
@@ -67,9 +71,7 @@ form's answers are JSON: `{"ok": true, "next"}` with the session's cookie, or an
 | Status | Code               | Means                                                       |
 | -----: | :----------------- | :---------------------------------------------------------- |
 |    400 | `invalid`          | no name, or no password                                     |
-|    401 | `wrong-password`   | the name or the password is wrong                           |
-|    403 | `password-expired` | the password has expired, or must be changed first          |
-|    403 | `account-disabled` | the account is turned off or locked                         |
+|    401 | `wrong-password`   | the name or the password is wrong, or the directory refused a right one: an expired password, an account turned off (the log says which) |
 |    403 | `no-group`         | the account is in none of the groups jukecord lets in       |
 |    409 | `ambiguous`        | the directory has more than one account by that name        |
 |    429 | `too-many`         | too many failed logins from this address or for this name   |
@@ -105,10 +107,12 @@ Changes (`POST`, `PUT`, `PATCH`, `DELETE`) are held to ten a second per login an
 and the changes that start fetching a track at once (`skip`, `play-now`, `jump`, `remove-current`) to two a second
 with five at once; a change refused before it did anything gives its address's share back, one refused after a
 lookup (a search that found nothing) does not. Reads (`GET`) are held to thirty a second with sixty at once, per person
-(every login and token of one Discord user together), or per address without a login. A request over its rate is answered with `429` (`rate-limited`) and `Retry-After` in seconds. While jukecord has fallen behind (its event loop more than 0.2 s late over the last second), audio
-and changes are answered with `503` (`busy`) and `Retry-After`, until it has caught up. The host (its command line and
-the browsers it logged in with a link) is held to neither rate, and its changes go through while jukecord is behind;
-its audio waits like everyone's, as sending audio is the work that can wait.
+(every login and token of one Discord user together), or per address without a login. A request over its rate is
+answered with `429` (`rate-limited`) and `Retry-After` in seconds. While jukecord has fallen behind (its event loop
+more than 0.2 s late over the last second), audio and changes are answered with `503` (`busy`) and `Retry-After`,
+until it has caught up. The host (its command line and the browsers it logged in with a link) is held to neither
+rate, and its changes go through while jukecord is behind; its audio waits like everyone's, as sending audio is the
+work that can wait.
 
 `search`, which starts yt-dlp, is held to a rate of its own as well: one a second with five at once, counted as reads
 are (per person, or per address without a login), the host apart.
@@ -266,11 +270,73 @@ playlist) so a program does not need to ask again.
 
 <!-- operations:end -->
 
-`auth-test-oidc` and `auth-test-ldap` check the logins' settings and log nobody in. `{"settings": {...}}` tests values
-not saved yet, by their environment names (`JUKECORD_OIDC_ISSUER`, `JUKECORD_LDAP_URL` ...), in place of the ones in
-use; a secret left out is the one in use, and a file's setting (a `_FILE`, `JUKECORD_LDAP_CA_FILE`) is refused.
-`auth-test-ldap` also takes `"username"`, a person to look up. The answer is `ok` with each check's `name`, `status`
-(`ok`, `warn`, `fail`) and `detail`, and for a person their `groups` and the `level` they would log in at.
+`auth-test-oidc`, `auth-test-ldap` and `auth-test-discord` check the logins' settings and log nobody in.
+`{"settings": {...}}` tests values not saved yet, by their environment names (`JUKECORD_OIDC_ISSUER`,
+`JUKECORD_LDAP_URL` ...), in place of the ones in use: the host's alone, as an admin member tests the saved ones. A
+secret left out is the one in use, unless the values move where it goes (the directory's address, StartTLS or service
+account; the provider's issuer or client): the test then goes without it, the directory's stopping at the service
+account and the provider's skipping the client's secret. A file's setting (a `_FILE`, `JUKECORD_LDAP_CA_FILE`) is
+refused; `"ca"`, certificate authorities in PEM, is trusted by that test alone. `auth-test-ldap` also takes
+`"username"`, a person to look up. The answer is `ok` with each check's `name`, `status` (`ok`, `warn`, `fail`) and
+`detail`, and for a person their `groups` and the `level` they would log in at.
+
+## The host's settings
+
+The `host-settings` operations, `sessions`, `session-end` and `restart` above are the panel's **Settings** page and
+**Logins** for a program. The settings and the restart answer the host itself only (its token, or a browser it
+logged in with `jukecord open`); a member at the admin level gets `403` there.
+
+`GET /api/v1/settings` answers with every setting and the page's state:
+
+- `settings`: each setting's `name` (its environment variable), `group`, `kind`, words in English and Korean, its
+  `default` and limits, `applies` (`now` or `restart`), whether it is `secret` (then `value` is null and `set` says
+  whether it has one), its `value`, its `source` (`environment`, `saved`, `default`) with the `variable` that sets it,
+  `locked` (`environment`, `split` for what each service of a split reads from its own environment, `start` for the
+  data folder), its saved `revision`, and `pending` with the `running` value while a change waits for a restart.
+- `restart`: the settings that wait for one, the `supervisor` that would start jukecord again (`docker`, `kubernetes`,
+  `systemd`, `launcher` or `none`) and, with `none`, why a restart is refused.
+- `move`: a database move under way and the last switch that did not finish; `authorities`: the certificate
+  authorities in use; `services`: the core and each edge of a split, with their version and readiness.
+
+`PATCH /api/v1/settings` changes settings by name, all or none, each checked by the rules jukecord starts with:
+
+```json
+{ "values": { "JUKECORD_QUEUE_MAX": "2000", "JUKECORD_LOG_LEVEL": null }, "revisions": { "JUKECORD_QUEUE_MAX": 3 } }
+```
+
+`null` puts a setting back to its default (as does `DELETE /api/v1/settings/{name}?revision=3`). With `revisions`, a
+setting saved since that revision is a `409` (`conflict`), and nothing is changed. A refusal is a `400` (`invalid`)
+whose error also lists each problem with the settings it is about:
+
+```json
+{
+  "error": {
+    "code": "invalid",
+    "message": "JUKECORD_QUEUE_MAX: 0 is outside 10-100000",
+    "problems": [{ "names": ["JUKECORD_QUEUE_MAX"], "message": "JUKECORD_QUEUE_MAX: 0 is outside 10-100000" }]
+  }
+}
+```
+
+The answer says what changed (`name`, `from`, `to`, never a secret's value, and whether it `applies` now or after a
+restart) and the whole view after it. A change that moves where a saved secret goes (a directory's address, an
+identity provider's issuer) must bring that secret again.
+
+- `POST /api/v1/settings/test-database`, `test-cache` and `test-bus` take `{"url", "ca"}`: they try the address without
+  saving it and say what answered (its program and version, the round trip; for a database its schema and rows). `ca`,
+  certificate authorities in PEM, is trusted by that test alone, as `auth-test-oidc` and `auth-test-ldap` take it too.
+- `PUT /api/v1/settings/authorities` takes `{"pem"}`: authorities' certificates only (a key is refused), kept as a file
+  of the data folder and used after a restart; `DELETE` puts them away.
+- A database move: `POST /api/v1/settings/database-move` with `{"url", "replace"}` starts the copy, which
+  `GET /api/v1/settings/database-move` follows (rows copied, the table, the total); `POST .../switch` stops jukecord,
+  copies what changed since, saves the address and starts again on it; `DELETE` stops the copy and forgets the move.
+- `POST /api/v1/restart` and the switch answer `{"supervisor", "restarts"}`, and refuse with `409` where nothing would
+  start jukecord again.
+
+`GET /api/v1/sessions` lists every panel login that has not ended, the most recently seen first: its `id`, the `way`
+it logged in (`link`, `discord`, `oidc`, `ldap`), who, its scope, and when it began, was last seen and ends. A
+listening link's guests are not in it: they end with their link. `DELETE /api/v1/sessions/{id}` ends one, and its
+browser's live connection closes at once.
 
 ## Live updates
 
@@ -387,11 +453,10 @@ has run) and whether jukecord cannot serve without it:
 `/metrics` answers only a scraper beside jukecord (the same machine, cluster or private network) that asks directly: a
 request that came through a reverse proxy (it carries `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`,
 `X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address gets a 404, so the version and the counts are not
-given to the internet. With `JUKECORD_METRICS_TOKEN` set, a request with
-`Authorization: Bearer <token>` is let in from anywhere; a wrong token gets `401` with `WWW-Authenticate: Bearer`, and a
-request without one falls back to the address rule. A proxy that adds none of them (nginx without
-`proxy_set_header`, for one) cannot be told from a scraper beside jukecord; the examples in the installation guide answer
-404 for `/metrics` at the proxy itself.
+given to the internet. With `JUKECORD_METRICS_TOKEN` set, a request with `Authorization: Bearer <token>` is let in
+from anywhere; a wrong token gets `401` with `WWW-Authenticate: Bearer`, and a request without one falls back to the
+address rule. A proxy that adds none of them (nginx without `proxy_set_header`, for one) cannot be told from a scraper
+beside jukecord; the examples in the installation guide answer 404 for `/metrics` at the proxy itself.
 
 `Accept: application/openmetrics-text` gets OpenMetrics 1.0.0. Every series carries the labels Prometheus gives a
 target, and these families besides:
