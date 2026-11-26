@@ -48,10 +48,11 @@ describe('jukecord db', () => {
     const said = await db(['status', `sqlite:${file}`]);
     assert.equal(said.code, 0, said.err);
     assert.match(said.out, /^Database: SQLite \(.*status\.db\)\nServer: SQLite \d+\.\d+/);
-    assert.match(said.out, /Schema: 8, this jukecord's/);
+    assert.match(said.out, new RegExp(`Schema: ${MIGRATIONS.at(-1)?.version}, this jukecord's`));
     assert.match(said.out, /Rows: \d+ \(4 tracks, 4 plays, 5 queued, 3 playlists\)/);
     const json = JSON.parse((await db(['status', '--json', `sqlite:${file}`])).out);
-    assert.deepEqual([json.backend, json.schema, json.latestSchema, json.rows.likes], ['sqlite', 8, 8, 2]);
+    const latest = MIGRATIONS.at(-1)?.version;
+    assert.deepEqual([json.backend, json.schema, json.latestSchema, json.rows.likes], ['sqlite', latest, latest, 2]);
   });
 
   it('looks at the configured database when it names none, the data folder’s jukecord.db by default', async () => {
@@ -251,7 +252,7 @@ eachDatabase('jukecord db on a database', (database) => {
     assert.equal(into.code, 0, into.err);
     const status = await db(['status', url]);
     assert.equal(status.code, 0, status.err);
-    assert.match(status.out, /Schema: 8, this jukecord's/);
+    assert.match(status.out, new RegExp(`Schema: ${MIGRATIONS.at(-1)?.version}, this jukecord's`));
     assert.doesNotMatch(status.out, /:jukecord@/);
     const back = path.join(dir, `back-${tag}.db`);
     assert.equal((await db(['copy', url, `sqlite:${back}`])).code, 0);

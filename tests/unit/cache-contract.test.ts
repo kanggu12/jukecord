@@ -86,6 +86,20 @@ for (const { name, make } of adapters) {
       assert.equal(await c.increment('fail', 1000), 1);
     });
 
+    it('takes back from a counter, and never makes one by taking back', async () => {
+      const c = await cache();
+      // Nothing to take back from: no counter is made (one at -1 would give a window of more tries than its limit).
+      assert.equal(await c.increment('tries', 600, -1), 0);
+      assert.equal(await c.get('tries'), null);
+      assert.equal(await c.increment('tries', 600), 1);
+      assert.equal(await c.increment('tries', 600, -1), 0);
+      assert.equal(await c.get('tries'), '0');
+      // Once its window has closed, there is nothing to take back from again.
+      await settle(700);
+      assert.equal(await c.increment('tries', 600, -1), 0);
+      assert.equal(await c.get('tries'), null);
+    });
+
     it('takes a token from every bucket or from none, and says how long to wait', async () => {
       const c = await cache();
       // A token every hundred seconds: nothing comes back while the test runs, however slow the machine.

@@ -33,13 +33,50 @@ lost token cannot be shown again; revoke it and make another.
 user only), which is how `./jukecord <command>` works without logging in. The host may do everything, including the
 operations marked "the host" below, which span every server: the log, login links, backups and the self-check.
 
-**The panel** logs in with a cookie (Discord login, or a one-time link from `jukecord link`). A cookie alone changes
-nothing: every change must also carry the session's CSRF token, from `GET /api/v1/me`, in the `x-jukecord-csrf` header.
-Programs use tokens instead and need no CSRF header.
+**The panel** logs in with a cookie: from Discord, the host's identity provider (SSO), a directory account, or a
+one-time link from `jukecord link` ([the browser's logins](#the-browsers-logins)). A cookie alone changes nothing: every
+change must also carry the session's CSRF token, from `GET /api/v1/me`, in the `x-jukecord-csrf` header. Programs use
+tokens instead and need no CSRF header.
 
-Twenty failed logins (a wrong token, a used login link) from one address within ten minutes block that address for ten
-minutes with `429`, for credentials that do not work: a token, a cookie or a login link that works still gets in from
-there. Logging in with Discord waits for the block to end, since only Discord's answer says whether it works.
+**Members** logged in through the host's identity provider or directory, and their groups gave them a level at that
+login: `admin` may do what the host may, `control` changes the music in every server, `read` looks and listens.
+`GET /api/v1/me` says `kind: "member"` and, in `member`, where they logged in (`oidc` or `ldap`) and their level. A
+member makes no API tokens; an admin member lists and revokes everyone's, as the host does.
+
+Twenty failed logins (a wrong token, a used login link, a wrong directory password) from one address block that address
+for ten minutes, counted from the first, with `429`, for credentials that do not work: a token, a cookie or a login link
+that works still gets in from there. A directory login's failures count against the name typed as well. Logging in
+with Discord or SSO waits for the block to end, since only the provider's answer says whether it works.
+
+### The browser's logins
+
+These are the panel's own pages, outside `/api/v1` and the OpenAPI document:
+
+| Request                        | Does                                                                                          |
+| :----------------------------- | :-------------------------------------------------------------------------------------------- |
+| `GET /auth/login?next=/`       | to Discord, and back at `/auth/callback`                                                      |
+| `GET /auth/sso?next=/`         | to the host's identity provider (OIDC, with PKCE), and back at `/auth/sso/callback`           |
+| `POST /auth/directory`         | a directory account: `{"username", "password", "next"}` as JSON, from the panel's own pages   |
+| `GET /auth/link/{code}`        | a one-time login link from `jukecord link`                                                    |
+| `POST /auth/listen`            | a listening link's code, `{"code"}`, from the panel's own pages: a guest of that link         |
+| `POST /auth/logout`            | ends the session; `{"next"}` for a login through SSO, the provider's logout to go to          |
+
+A refused Discord or SSO login comes back to `/login?error=<code>`, which the login page puts in words. The directory
+form's answers are JSON: `{"ok": true, "next"}` with the session's cookie, or an error of the usual shape:
+
+| Status | Code               | Means                                                       |
+| -----: | :----------------- | :---------------------------------------------------------- |
+|    400 | `invalid`          | no name, or no password                                     |
+|    401 | `wrong-password`   | the name or the password is wrong                           |
+|    403 | `password-expired` | the password has expired, or must be changed first          |
+|    403 | `account-disabled` | the account is turned off or locked                         |
+|    403 | `no-group`         | the account is in none of the groups jukecord lets in       |
+|    409 | `ambiguous`        | the directory has more than one account by that name        |
+|    429 | `too-many`         | too many failed logins from this address or for this name   |
+|    503 | `directory-down`   | the directory did not answer                                |
+
+`GET /api/v1/auth/methods` says which ways are set up, and the words of their keys: `{"discord": true, "sso": {"label":
+"Log in with Home SSO"}, "directory": {"label": null}}`, with `null` for a way that is not set up.
 
 ## Errors
 
@@ -92,6 +129,10 @@ others are answered `429` at once.
 Operations on a server name it in the path: `/guilds/{guild}/...`, where `{guild}` is the Discord server's ID (turn on
 Developer Mode in Discord, then right-click the server: Copy Server ID). `GET /api/v1/guilds` lists the servers a login
 can use. Without a bot, jukecord has one queue of its own, called `local`.
+
+`GET /api/v1/status`, which anyone may ask, says the version, whether Discord is connected, the mode (`discord` or
+`browser-only`), how long jukecord has run, whether Discord login and lyrics are on, and `database`: `sqlite`,
+`postgres`, `mysql` or `mariadb`.
 
 ## Operations
 
@@ -198,6 +239,8 @@ playlist) so a program does not need to ask again.
 
 | Operation | Request | Needs | CLI | Discord |
 | :-- | :-- | :-- | :-- | :-- |
+| `sessions` Every panel login that has not ended, the most recently seen first (the guests of listening links apart: they end with their link) | `GET /api/v1/sessions` | the host | `jukecord session list` |  |
+| `session-end` End a panel login: its browser is logged out at once | `DELETE /api/v1/sessions/{id}` | the host | `jukecord session end` |  |
 | `logs` The newest log records, oldest first | `GET /api/v1/logs` | the host | `jukecord logs` |  |
 | `login-link` Make a one-time link that logs a browser in (valid for 10 minutes): as the host, or as a friend who may only look (read) or also change the music (control) | `POST /api/v1/login-links` | the host | `jukecord link` |  |
 | `backup` Write a copy of the database to the backups folder of the data directory | `POST /api/v1/backups` | the host | `jukecord backup` |  |
@@ -206,6 +249,12 @@ playlist) so a program does not need to ask again.
 | `auth-test-ldap` Test logging in with a directory account (LDAP) without logging anyone in: the connection, the service account, the base DN, and with a name the person, their groups and their level (no password) | `POST /api/v1/auth/test-ldap` | the host | `jukecord auth test-ldap` |  |
 
 <!-- operations:end -->
+
+`auth-test-oidc` and `auth-test-ldap` check the logins' settings and log nobody in. `{"settings": {...}}` tests values
+not saved yet, by their environment names (`JUKECORD_OIDC_ISSUER`, `JUKECORD_LDAP_URL` ...), in place of the ones in
+use; a secret left out is the one in use, and a file's setting (a `_FILE`, `JUKECORD_LDAP_CA_FILE`) is refused.
+`auth-test-ldap` also takes `"username"`, a person to look up. The answer is `ok` with each check's `name`, `status`
+(`ok`, `warn`, `fail`) and `detail`, and for a person their `groups` and the `level` they would log in at.
 
 ## Live updates
 
@@ -281,14 +330,72 @@ more. The panel's add field shows its results' pictures from here, so a browser 
 
 ## Health and metrics
 
-| Path       | Answers                                                                                    |
-| :--------- | :----------------------------------------------------------------------------------------- |
-| `/healthz` | `200 ok` while the process answers                                                         |
-| `/readyz`  | `200` when jukecord can serve requests, with whether Discord is connected; `503` otherwise |
-| `/metrics` | Prometheus text: players by state, queued tracks, the cache, panel connections, answers    |
+| Path       | Answers                                                                                       |
+| :--------- | :-------------------------------------------------------------------------------------------- |
+| `/healthz` | `200 ok` while the process answers                                                            |
+| `/readyz`  | `200` when jukecord can serve requests, `503` when it cannot; each part's state as JSON       |
+| `/metrics` | Prometheus's text format, or OpenMetrics when asked for it                                    |
 
-These three need no login. `/metrics` answers only a scraper beside jukecord (the same machine, cluster or local
-network): a request that came through a reverse proxy (it carries `X-Forwarded-For`) or from a public address gets a
-404, so the version and the counts are not given to the internet. A proxy that adds no `X-Forwarded-For` (nginx
-without `proxy_set_header`, for one) cannot be told from a scraper beside jukecord; the examples in the installation
-guide answer 404 for `/metrics` at the proxy itself.
+None of the three needs a login. In a split into services, the core's own port answers the three as well, and nothing
+else.
+
+### Readiness
+
+`/readyz` answers with each part jukecord checks, its state (`ok`, `down`, `connecting` or `unknown`, before anything
+has run) and whether jukecord cannot serve without it:
+
+```json
+{
+  "ready": false,
+  "discord": true,
+  "parts": {
+    "database": { "state": "down", "required": true, "kind": "postgres" },
+    "bus": { "state": "ok", "required": true, "kind": "redis" },
+    "cache": { "state": "ok", "required": true, "kind": "redis" },
+    "discord": { "state": "ok", "required": false },
+    "ffmpeg": { "state": "ok", "required": false },
+    "yt-dlp": { "state": "ok", "required": false }
+  }
+}
+```
+
+- The required parts are the database (answering, at this jukecord's schema), the bus (`in-process`, or `redis`
+  answering a ping) and the shared cache (`memory` or `redis`); an edge of a split has `core` too, its heartbeat heard
+  lately. Discord (with a bot) and the media programs are reported without deciding it.
+- `discord` is whether the bot is connected, as before the parts.
+- The answer is kept for a second, and a part that has not answered within two seconds is down. It names states and
+  kinds only, never an address or an error.
+
+### Metrics
+
+`/metrics` answers only a scraper beside jukecord (the same machine, cluster or private network) that asks directly: a
+request that came through a reverse proxy (it carries `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`,
+`X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address gets a 404, so the version and the counts are not
+given to the internet. With `JUKECORD_METRICS_TOKEN` set, a request with
+`Authorization: Bearer <token>` is let in from anywhere; a wrong token gets `401` with `WWW-Authenticate: Bearer`, and a
+request without one falls back to the address rule. A proxy that adds none of them (nginx without
+`proxy_set_header`, for one) cannot be told from a scraper beside jukecord; the examples in the installation guide answer
+404 for `/metrics` at the proxy itself.
+
+`Accept: application/openmetrics-text` gets OpenMetrics 1.0.0. Every series carries the labels Prometheus gives a
+target, and these families besides:
+
+| Families                                                                                                                   | What they count                                                                    |
+| :------------------------------------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------- |
+| `jukecord_info{version,role,database,bus,cache}`, `jukecord_ready`, `jukecord_part_up{part}`                               | what runs, and whether it can serve                                                |
+| `jukecord_players{status}`, `jukecord_queue_tracks`, `jukecord_queue_longest_tracks`, `jukecord_browser_listeners`         | the music                                                                          |
+| `jukecord_fetches_total{outcome}`, `jukecord_fetch_failures_total{reason}`, `jukecord_fetch_duration_seconds`, `jukecord_fetch_jobs` | getting tracks                                                          |
+| `jukecord_cache_bytes`, `_tracks`, `_covers`, `_limit_bytes`, `_lookups_total`, `_evictions_total`                         | the media cache                                                                    |
+| `jukecord_media_tool_runs_total{tool,task,outcome}`, `jukecord_media_tool_duration_seconds`, `jukecord_media_tools_running` | yt-dlp and FFmpeg                                                                  |
+| `jukecord_http_request_duration_seconds{method,route,class}`, `jukecord_http_responses_total{class}`                       | the HTTP answers                                                                   |
+| `jukecord_panel_connections`, `jukecord_panel_messages_total{frame}`, `jukecord_panel_sent_bytes_total`                     | the live updates                                                                   |
+| `jukecord_database_query_duration_seconds{operation}`, `_query_errors_total`, `_connections{state}`, `_waiting_queries`    | the database                                                                       |
+| `jukecord_shared_cache_lookups_total{result}`, `_errors_total`, `_entries`                                                 | the shared cache                                                                   |
+| `jukecord_logins_total{method,outcome}`                                                                                    | logins, by way (discord, link, listen, oidc, ldap)                                 |
+| `jukecord_discord_connected`, `_gateway_state{state}`, `_gateway_latency_seconds`, `_guilds`, `jukecord_voice_connections{state}` | Discord and voice                                                           |
+| `jukecord_bus_commands_total{command,outcome}`, `_command_duration_seconds`, `_commands_served_total`, `_events_total`, `jukecord_edges` | a split: an edge's commands to the core, the core's answers, the edges it hears |
+| `jukecord_disk_free_bytes`, `jukecord_disk_size_bytes`, `jukecord_event_loop_behind_seconds_total`                         | the disk under the data folder, and time spent behind                              |
+| `process_*`, `nodejs_*`                                                                                                    | the process and Node.js, with the event loop's delay over the last second          |
+
+`jukecord_event_loop_delay_seconds` is the same as `nodejs_eventloop_lag_p99_seconds`, kept under its 0.3 name until
+0.5.

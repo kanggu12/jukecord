@@ -82,13 +82,23 @@ describe('logging in with an Active Directory account', { skip }, () => {
     }
   });
 
-  it('says why Active Directory refuses a right password, and refuses the rest as a wrong one', async () => {
-    const expired = await form('old', 'Old-e2e-Passw0rd');
-    assert.equal(expired.status, 403);
-    assert.equal(((await expired.json()) as { error: { code: string } }).error.code, 'password-expired');
-    const off = await form('off', 'Off-e2e-Passw0rd');
-    assert.equal(((await off.json()) as { error: { code: string } }).error.code, 'account-disabled');
-    assert.equal((await form('dan', 'not-it')).status, 401);
+  it('answers a right password Active Directory refuses as a wrong one, and logs why', async () => {
+    const wrong = await form('dan', 'not-it');
+    assert.equal(wrong.status, 401);
+    const said = await wrong.json();
+    // Active Directory says "expired" and "turned off" only for the right password: telling them apart would tell a
+    // guesser the guess was right.
+    for (const [name, password] of [
+      ['old', 'Old-e2e-Passw0rd'],
+      ['off', 'Off-e2e-Passw0rd'],
+    ] as const) {
+      const right = await form(name, password);
+      assert.equal(right.status, 401, name);
+      assert.deepEqual(await right.json(), said, name);
+    }
+    // The reasons are in jukecord's log, for the host.
+    assert.match(jukecord.output(), /a directory login did not go through reason=expired /);
+    assert.match(jukecord.output(), /a directory login did not go through reason=disabled /);
     assert.equal((await form('sam', 'Sam-e2e-Passw0rd')).status, 403);
   });
 });

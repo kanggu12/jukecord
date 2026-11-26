@@ -19,7 +19,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hostLike, type MemberPrincipal, type Principal, type Provider } from '../app/access.ts';
-import type { LdapLogin } from '../auth/ldap.ts';
+import { directoryName, type LdapLogin } from '../auth/ldap.ts';
 import type { OidcLogin } from '../auth/oidc.ts';
 import type { MemberLevel } from '../auth/settings.ts';
 import type { Cache } from '../cache/cache.ts';
@@ -48,8 +48,11 @@ export const SESSION_COOKIE = 'jukecord_session';
 const STATE_COOKIE = 'jukecord_oauth';
 /** The header the panel sends its CSRF token in. */
 export const CSRF_HEADER = 'x-jukecord-csrf';
-// A panel login lasts thirty days; logging out, or the host revoking, ends it sooner.
+// A panel login lasts thirty days; logging out, or the host ending it, ends it sooner.
 const SESSION_MS = 30 * 86_400_000;
+// A login through the host's provider or directory lasts a working day: its level is what the groups said at the
+// login, and a new login (cheap while the provider's own session lasts) reads them afresh.
+export const MEMBER_SESSION_MS = 8 * 3_600_000;
 // A login link must be used within ten minutes, and only once.
 const LINK_MS = 10 * 60_000;
 // The prefix of API tokens; the logger masks anything that looks like one.
@@ -168,13 +171,21 @@ export function addressFailures(address: string | undefined): string {
 }
 
 /**
- * The key a name's failed logins at the directory form are counted under: the provider and the name as the directory
- * compares it (LDAP and Active Directory match user names regardless of case), so "Alice" and "alice" are one count.
+ * The key a name's failed logins at the directory form are counted under: the provider and the name as directories
+ * compare names (src/auth/ldap.ts, directoryName), so "Alice", "ALICE" and a fullwidth "ａｌｉｃｅ" are one count.
  * At most its first 256 characters, the longest name the form takes: a key never grows with what is sent (a request
  * may carry 64 KiB), so names made up by the thousand cost the cache little each.
  */
 export function nameFailures(provider: string, name: string): string {
-  return `name:${provider}:${[...name.trim().normalize('NFC').toLowerCase()].slice(0, 256).join('')}`;
+  return `name:${provider}:${[...directoryName(name)].slice(0, 256).join('')}`;
+}
+
+/**
+ * The key the failed logins of an account the directory found are counted under, by its lasting ID: every name that
+ * finds it (its uid, its mail, a spelling the directory takes for it) counts as one.
+ */
+export function entryFailures(provider: string, subject: string): string {
+  return `entry:${provider}:${createHash('sha256').update(subject).digest('hex').slice(0, 32)}`;
 }
 
 /**
@@ -205,12 +216,81 @@ export class LoginLimiter {
   }
 
   /**
-   * Counts one failure for each key, and says whether any of them was blocked already before this one: the try after
-   * the twentieth failure is the first one refused, as before.
+   * Counts a try against every key before it is made, for a try that asks another side (a directory, a provider,
+   * Discord): tries sent at the same moment are each counted before any is answered, so no more than the limit get
+   * through, however many come at once. False when a key has failed too often (the try is refused, and nothing stays
+   * counted for it). A try let through stays counted, as a failure, unless it is forgiven.
+   */
+  async enter(keys: readonly string[]): Promise<boolean> {
+    // A key blocked already costs no write: a flood of refused tries counts nothing and makes no counter.
+    if (await this.blocked(keys)) return false;
+    const counts = await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs)));
+    if (counts.every((count) => count <= this.limit)) return true;
+    // Others counted at the same moment took the last places: this one is not made, and not counted.
+    await this.forgive(keys);
+    return false;
+  }
+
+  /**
+   * Takes back the count of a try (see enter) that was no failure: a person let in, or the other side's trouble rather
+   * than a guess. A count whose window has closed is gone, and stays so.
+   */
+  async forgive(keys: readonly string[]): Promise<void> {
+    await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs, -1)));
+  }
+
+  /**
+   * Counts one failure for each key, after the try (one jukecord answers itself, a token or a link), and says whether
+   * any of them was blocked already before this one: the try after the twentieth failure is the first one refused.
    */
   async fail(keys: readonly string[]): Promise<boolean> {
     const counts = await Promise.all(keys.map((key) => this.cache.increment(`auth:fail:${key}`, this.windowMs)));
     return counts.some((count) => count > this.limit);
+  }
+}
+
+/** An SSO login waiting for the proof that its person is the Discord user its provider names (Auth.startLinkProof). */
+export interface LinkProof {
+  /** The SSO login's member key (the provider's issuer and its subject). */
+  readonly memberId: string;
+  /** Its name as the provider gave it, for the member it logs in as when the proof does not go through. */
+  readonly name: string;
+  /** The Discord user its provider names. */
+  readonly discordId: string;
+  /** The level its groups gave. */
+  readonly level: MemberLevel;
+  /** Where the person wanted to go. */
+  readonly next: string;
+}
+
+/** A panel login as the host sees it in the list of logins (see Auth.listSessions). */
+export interface SessionInfo {
+  /** The first 16 hex digits of its hash: enough to tell logins apart, never the secret of its cookie. */
+  readonly id: string;
+  readonly way: 'link' | 'discord' | 'oidc' | 'ldap';
+  readonly kind: 'host' | 'user' | 'friend' | 'member';
+  readonly userId: string | null;
+  readonly name: string | null;
+  readonly scope: TokenScope;
+  readonly createdAt: number;
+  readonly seenAt: number;
+  readonly expiresAt: number;
+  /** Whether it is the login of the caller. */
+  readonly current: boolean;
+}
+
+// How many hex digits of a login's hash make its ID in the API.
+const SESSION_ID_DIGITS = 16;
+
+/** Why a login with Discord did not go through: no login of this browser under way, or Discord's refusal. */
+export class DiscordLoginError extends Error {
+  override name = 'DiscordLoginError';
+  /** expired: the state is no login of this browser (late, used, or another browser's); failed: Discord refused. */
+  readonly code: 'expired' | 'failed';
+
+  constructor(code: DiscordLoginError['code'], message: string) {
+    super(message);
+    this.code = code;
   }
 }
 
@@ -297,24 +377,23 @@ export class Auth {
 
   /**
    * The login a member's provider vouched for, at the level their groups reach: as themselves (by their key, under the
-   * name the provider gave), or, when the provider names their Discord user and a bot is there to ask, as that Discord
-   * user with the level on top. Null when their groups reach no level: they are refused.
+   * name the provider gave), or as the Discord user `linked` names, with the level on top: one the login was proven to
+   * be (see linkedUser). Null when their groups reach no level: they are refused.
    */
   async admit(
     provider: Provider,
-    person: { readonly subject: string; readonly name: string; readonly discordId?: string | null },
+    person: { readonly subject: string; readonly name: string; readonly issuer?: string | null },
     level: MemberLevel | null,
-    discord: boolean,
+    linked: string | null = null,
   ): Promise<MemberPrincipal | null> {
     if (level === null) return null;
     const users = this.options.store.users;
-    if (person.discordId && discord) {
+    if (linked !== null) {
       // Named here only when jukecord has not met them yet: Discord's own name and picture win once the bot has.
-      if (!(await users.get(person.discordId)))
-        await users.upsert({ id: person.discordId, name: person.name, avatar: null });
-      return { kind: 'user', userId: person.discordId, level };
+      if (!(await users.get(linked))) await users.upsert({ id: linked, name: person.name, avatar: null });
+      return { kind: 'user', userId: linked, level };
     }
-    const memberId = memberKey(provider, person.subject);
+    const memberId = memberKey(provider, person.subject, person.issuer ?? null);
     // Their name as the provider gave it at this login, and the time of the login: all that is kept of them.
     await users.upsert({ id: memberId, name: person.name, avatar: null });
     return { kind: 'member', memberId, provider, level };
@@ -379,6 +458,8 @@ export class Auth {
     const principal = principalOf(session);
     // A row that names nobody it could be (a member without a key of theirs) logs nobody in.
     if (!principal) return null;
+    // Nor does a member's login through a way that is no longer set up: the host turned it off, or moved to another.
+    if (!this.wayIsOn(principal)) return null;
     // What the login may call: a friend's view or control, a member's level, and for everyone else all their login
     // may (an OIDC login that is a Discord user too: its level only adds to its Discord rights, in Access).
     const scope =
@@ -421,6 +502,14 @@ export class Auth {
     }
   }
 
+  // Whether the way a login came in by is set up here: a member's provider or directory, and for an SSO login linked
+  // to a Discord user, SSO and Discord login both (the link was proven through Discord's). Other logins need none.
+  private wayIsOn(principal: Principal): boolean {
+    if (principal.kind === 'member') return principal.provider === 'oidc' ? this.oidc !== null : this.ldap !== null;
+    if (principal.kind === 'user' && principal.level) return this.oidc !== null && this.discordLogin;
+    return true;
+  }
+
   /** Whether a caller's login still exists: a session not logged out or expired, a token not revoked, a guest whose
    * link was not revoked and has not expired. */
   async stillValid(caller: Caller): Promise<boolean> {
@@ -435,6 +524,9 @@ export class Auth {
   /** Starts a panel login and returns the Set-Cookie value. A guest's comes from useListenLink instead. */
   async startSession(principal: MemberPrincipal): Promise<string> {
     const secret = newSecret();
+    // A member's login, and an SSO login linked to a Discord user, last hours; every other one thirty days.
+    const member = principal.kind === 'member' || (principal.kind === 'user' && principal.level !== undefined);
+    const lasts = member ? MEMBER_SESSION_MS : SESSION_MS;
     await this.options.store.sessions.create({
       idHash: hashSecret(secret),
       // An OIDC login that is a Discord user is a row of its own kind, so its level comes back with it.
@@ -449,11 +541,60 @@ export class Auth {
           : principal.kind === 'member' || principal.kind === 'user'
             ? (principal.level ?? 'admin')
             : 'admin',
-      expiresAt: this.now() + SESSION_MS,
+      expiresAt: this.now() + lasts,
     });
     // Old logins are cleared now and then; the start of a new one is a natural moment.
     await this.options.store.sessions.prune();
-    return cookie(SESSION_COOKIE, secret, { maxAgeSeconds: SESSION_MS / 1000, secure: this.secure });
+    return cookie(SESSION_COOKIE, secret, { maxAgeSeconds: lasts / 1000, secure: this.secure });
+  }
+
+  /**
+   * Every panel login that has not expired, the most recently seen first, with the name of whom it is (the guests of
+   * listening links apart: they end with their link). For the host, who may end any of them (endSessions).
+   */
+  async listSessions(caller: Caller): Promise<SessionInfo[]> {
+    const { store } = this.options;
+    const rows = await store.sessions.list();
+    const people = await store.users.many(rows.flatMap((row) => (row.userId === null ? [] : [row.userId])));
+    return rows.map((row) => {
+      const principal = principalOf(row);
+      const userId =
+        principal?.kind === 'user' ? principal.userId : principal?.kind === 'member' ? principal.memberId : null;
+      return {
+        id: row.idHash.slice(0, SESSION_ID_DIGITS),
+        // A host's and a friend's login came from a login link; a linked one through the provider.
+        way:
+          principal?.kind === 'member'
+            ? principal.provider
+            : principal?.kind === 'user'
+              ? principal.level
+                ? 'oidc'
+                : 'discord'
+              : 'link',
+        kind:
+          principal?.kind === 'member' || principal?.kind === 'friend' || principal?.kind === 'user'
+            ? principal.kind
+            : 'host',
+        userId,
+        name: userId === null ? null : (people.get(userId)?.name ?? null),
+        scope: row.scope,
+        createdAt: row.createdAt,
+        seenAt: row.seenAt,
+        expiresAt: row.expiresAt,
+        current: row.idHash === caller.sessionHash,
+      };
+    });
+  }
+
+  /**
+   * Ends the panel logins of this ID (see listSessions), whoever's they are: the hashes of those ended, so their live
+   * connections can be ended too; none for an ID of no login.
+   */
+  async endSessions(id: string): Promise<string[]> {
+    if (!new RegExp(`^[0-9a-f]{${SESSION_ID_DIGITS}}$`).test(id)) return [];
+    const rows = await this.options.store.sessions.withPrefix(id);
+    for (const row of rows) await this.options.store.sessions.remove(row.idHash);
+    return rows.map((row) => row.idHash);
   }
 
   /** Ends the caller's session (if it is one) and returns the Set-Cookie value that removes the cookie. */
@@ -534,8 +675,72 @@ export class Auth {
     }, inTurn);
   }
 
+  /**
+   * Whether an SSO login is linked to the Discord user its provider names, and to which: the claim alone links nobody
+   * (a person may be able to set it on their own account). Only with Discord login set up, and a bot to ask about the
+   * user, and only to the Discord user the login was proven to be once, by logging in with Discord as them (see
+   * startLinkProof): that user when the claim names them, 'unproven' when it names someone not proven (the person is
+   * sent to Discord to prove it), and null when nothing links.
+   */
+  async linkedUser(memberId: string, claimed: string | null, botThere: boolean): Promise<string | 'unproven' | null> {
+    if (claimed === null || !this.discordLogin || !botThere) return null;
+    return (await this.options.store.memberLinks.get(memberId)) === claimed ? claimed : 'unproven';
+  }
+
+  /**
+   * Sends an SSO login to Discord to prove that its person is the Discord user the provider names: the login waits on
+   * the cache, by the hash of the Discord login's state, for ten minutes; Discord's answer finishes it (see
+   * finishLinkProof). Where to send the browser, and the cookie that ties the way back to it.
+   */
+  async startLinkProof(proof: LinkProof): Promise<{ location: string; cookie: string }> {
+    const started = this.oauthStart(proof.next);
+    await this.options.cache.set(`auth:link-proof:${hashSecret(started.state)}`, JSON.stringify(proof), LINK_MS);
+    return { location: started.location, cookie: started.cookie };
+  }
+
+  /**
+   * The SSO login waiting for its proof in this browser, taken (it is used once): what Discord's answer finishes, or
+   * what a person who turned back at Discord logs in as. Null when none waits.
+   */
+  async takeLinkProof(cookieHeader: string | undefined): Promise<LinkProof | null> {
+    const state = (parseCookies(cookieHeader).get(STATE_COOKIE) ?? '').split('.')[0] ?? '';
+    if (state === '') return null;
+    const saved = await this.options.cache.take(`auth:link-proof:${hashSecret(state)}`);
+    if (saved === null) return null;
+    const proof = JSON.parse(saved) as Partial<LinkProof>;
+    // Only a proof of this version's shape: anything else in the cache links nobody.
+    if (
+      typeof proof.memberId !== 'string' ||
+      memberProvider(proof.memberId) !== 'oidc' ||
+      typeof proof.name !== 'string' ||
+      typeof proof.discordId !== 'string' ||
+      discordUserId(proof.discordId) === null ||
+      (proof.level !== 'admin' && proof.level !== 'control' && proof.level !== 'read') ||
+      typeof proof.next !== 'string'
+    )
+      return null;
+    return proof as LinkProof;
+  }
+
+  /**
+   * Finishes an SSO login that went to Discord for its proof: linked to the Discord user the provider named, and the
+   * pair remembered, when the person who logged in at Discord is that user; the member they are otherwise (someone
+   * else's ID in their claim links nothing), as when they turned back there (`person` null).
+   */
+  async finishLinkProof(proof: LinkProof, person: Person | null): Promise<MemberPrincipal> {
+    const { store } = this.options;
+    if (person !== null && person.id === proof.discordId) {
+      await store.memberLinks.set(proof.memberId, person.id);
+      // Discord's own name and picture, as a Discord login keeps them.
+      await store.users.upsert(person);
+      return { kind: 'user', userId: person.id, level: proof.level };
+    }
+    await store.users.upsert({ id: proof.memberId, name: proof.name, avatar: null });
+    return { kind: 'member', memberId: proof.memberId, provider: 'oidc', level: proof.level };
+  }
+
   /** Where to send a browser to log in with Discord, and the cookie that ties the way back to this browser. */
-  oauthStart(next: string): { location: string; cookie: string } {
+  oauthStart(next: string): { location: string; cookie: string; state: string } {
     const oauth = this.options.oauth;
     if (!oauth) throw new Error('logging in with Discord is not set up');
     const state = newSecret();
@@ -552,7 +757,7 @@ export class Auth {
     const location = `${oauth.authorize ?? 'https://discord.com/oauth2/authorize'}?${params}`;
     // The state and where to go afterwards travel together in a short-lived cookie.
     const value = `${state}.${Buffer.from(safeNext(next)).toString('base64url')}`;
-    return { location, cookie: cookie(STATE_COOKIE, value, { maxAgeSeconds: 600, secure: this.secure }) };
+    return { location, cookie: cookie(STATE_COOKIE, value, { maxAgeSeconds: 600, secure: this.secure }), state };
   }
 
   /**
@@ -572,7 +777,7 @@ export class Auth {
     // The state proves this browser started the login: a link from someone else cannot log this browser into their
     // account (login CSRF).
     if (!expected || expected.length !== state.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(state))) {
-      throw new Error('the login did not start in this browser, or took longer than 10 minutes');
+      throw new DiscordLoginError('expired', 'the login did not start in this browser, or took longer than 10 minutes');
     }
     const next = safeNext(encodedNext ? Buffer.from(encodedNext, 'base64url').toString() : '/');
     const api = oauth.api ?? 'https://discord.com/api/v10';
@@ -673,11 +878,14 @@ export class Auth {
 
 /**
  * A member's key in jukecord's data, from where they logged in and who the provider says they are: `oidc:` or `ldap:`
- * and 15 hex digits of SHA-256 over both. Twenty characters, never a Discord ID (digits only), "host" or "autoplay",
- * the same at every login, and the subject itself is not kept.
+ * and 15 hex digits of SHA-256 over the way, the provider's issuer (an identity provider's subjects are its own: the
+ * same `sub` at another provider is someone else) and the subject. Twenty characters, never a Discord ID (digits
+ * only), "host" or "autoplay", the same at every login, and the subject itself is not kept. A directory has no issuer:
+ * its entries' IDs (entryUUID, objectGUID) are its own already.
  */
-export function memberKey(provider: Provider, subject: string): string {
-  return `${provider}:${createHash('sha256').update(`${provider}\n${subject}`).digest('hex').slice(0, 15)}`;
+export function memberKey(provider: Provider, subject: string, issuer: string | null = null): string {
+  const what = issuer === null ? `${provider}\n${subject}` : `${provider}\n${issuer}\n${subject}`;
+  return `${provider}:${createHash('sha256').update(what).digest('hex').slice(0, 15)}`;
 }
 
 /** The provider of a member's key; null for anything that is not one. */

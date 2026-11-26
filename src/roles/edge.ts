@@ -19,7 +19,7 @@
  * an edge that hears no core has nothing to serve, so a front that asks /readyz sends it no browsers.
  */
 import type { Principal } from '../app/access.ts';
-import type { DoctorReport } from '../app/doctor.ts';
+import { type DoctorReport, discordLinkCheck } from '../app/doctor.ts';
 import { cachePart, databasePart, Health } from '../app/health.ts';
 import type { LoginChecks } from '../auth/check.ts';
 import { type AuthSettings, describeAuth } from '../auth/settings.ts';
@@ -309,7 +309,15 @@ export async function startEdge(options: EdgeOptions): Promise<Edge> {
         const report = await client.call<DoctorReport>('core.doctor', [options.auth.discordLogin]);
         if (!settings.loginSettings) return report;
         const theirs = Object.entries(report.settings).filter(([key]) => !/^(sso|directory) /.test(key));
-        return { ...report, settings: { ...Object.fromEntries(theirs), ...describeAuth(settings.loginSettings) } };
+        // What this edge's login settings say of an SSO login's link to a Discord user, in place of the core's.
+        const link = discordLinkCheck(settings.loginSettings, options.auth.discordLogin);
+        const checks = [...report.checks.filter((check) => check.name !== 'sso discord link'), ...(link ? [link] : [])];
+        return {
+          ...report,
+          ok: checks.every((check) => check.status !== 'fail'),
+          checks,
+          settings: { ...Object.fromEntries(theirs), ...describeAuth(settings.loginSettings) },
+        };
       },
       host,
       ...(settings.loginSettings ? { loginSettings: settings.loginSettings } : {}),

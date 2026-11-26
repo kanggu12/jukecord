@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { LdapLogin } from '../../src/auth/ldap.ts';
+import { OidcLogin } from '../../src/auth/oidc.ts';
 import { MemoryCache } from '../../src/cache/memory.ts';
 import { createLogger } from '../../src/log.ts';
 import { MetricsRegistry } from '../../src/metrics/registry.ts';
@@ -14,6 +16,7 @@ import {
   ensureHostToken,
   hashSecret,
   LoginLimiter,
+  memberKey,
   nameFailures,
   parseCookies,
   SESSION_COOKIE,
@@ -24,29 +27,77 @@ import { ALICE, HOST_TOKEN } from '../support/web.ts';
 
 const log = createLogger({ level: 'error', sinks: [] });
 
-async function setup(options: { fetch?: typeof fetch; now?: () => number } = {}) {
+// Logging in with Discord, set up as a host sets it up (the tests never reach Discord).
+const OAUTH = {
+  clientId: '108876543210987654',
+  clientSecret: 'oauth-secret',
+  redirectUri: 'http://localhost:8795/auth/callback',
+  api: 'https://discord.test/api',
+  authorize: 'https://discord.test/oauth2/authorize',
+};
+
+// The ways in through the host's provider and directory, as objects only: no test here logs in through them.
+const ways = (cache: MemoryCache) => ({
+  oidc: new OidcLogin({
+    settings: {
+      issuer: 'https://sso.example.test/realms/home',
+      clientId: 'jukecord',
+      clientSecret: 'secret',
+      scopes: ['openid'],
+      groupsClaim: 'groups',
+      groups: { admin: [], control: [], read: ['*'] },
+      label: null,
+      discordClaim: null,
+    },
+    redirectUri: 'http://localhost:8795/auth/sso/callback',
+    afterLogout: 'http://localhost:8795/login',
+    cache,
+    log,
+  }),
+  ldap: new LdapLogin({
+    settings: {
+      url: 'ldap://ldap.example.test',
+      startTls: false,
+      ca: null,
+      bindDn: null,
+      bindPassword: null,
+      baseDn: 'dc=example,dc=org',
+      userFilter: '(uid={username})',
+      groupFilter: null,
+      groupBaseDn: null,
+      nestedGroups: false,
+      groups: { admin: [], control: [], read: ['*'] },
+      timeoutMs: 5000,
+      label: null,
+    },
+    log,
+  }),
+});
+
+async function setup(
+  options: { fetch?: typeof fetch; now?: () => number; oidc?: boolean; ldap?: boolean; discord?: boolean } = {},
+) {
   let now = Date.UTC(2026, 10, 11);
   const clock = options.now ?? (() => now);
   const store = await memoryStore(clock);
   // The cache on the same clock, so the ten minutes of a login link pass when the test says.
   const cache = new MemoryCache({ now: clock });
-  const auth = new Auth({
-    store,
-    hostToken: HOST_TOKEN,
-    secureCookies: false,
-    cache,
-    log,
-    now: clock,
-    oauth: {
-      clientId: '108876543210987654',
-      clientSecret: 'oauth-secret',
-      redirectUri: 'http://localhost:8795/auth/callback',
-      api: 'https://discord.test/api',
-      authorize: 'https://discord.test/oauth2/authorize',
-    },
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-  });
-  return { store, cache, auth, advance: (ms: number) => (now += ms) };
+  // Another jukecord on the same database, with these ways in set up (all of them unless a test says).
+  const make = (on: { oidc?: boolean; ldap?: boolean; discord?: boolean } = {}) =>
+    new Auth({
+      store,
+      hostToken: HOST_TOKEN,
+      secureCookies: false,
+      cache,
+      log,
+      now: clock,
+      oauth: on.discord === false ? null : OAUTH,
+      ...(on.oidc ? { oidc: ways(cache).oidc } : {}),
+      ...(on.ldap ? { ldap: ways(cache).ldap } : {}),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+  const auth = make(options);
+  return { store, cache, auth, make, advance: (ms: number) => (now += ms) };
 }
 
 describe('cookies', () => {
@@ -149,6 +200,72 @@ describe('Auth sessions', () => {
     assert.equal(await auth.identify({ cookie: again }), null);
   });
 
+  it("ends a member's login within eight hours, a linked one's too, while a Discord login lasts thirty days", async () => {
+    const { auth, advance } = await setup({ oidc: true, ldap: true });
+    const member = await auth.startSession({
+      kind: 'member',
+      memberId: memberKey('ldap', 'entryUUID:x'),
+      provider: 'ldap',
+      level: 'control',
+    });
+    const linked = await auth.startSession({ kind: 'user', userId: ALICE, level: 'read' });
+    const discord = await auth.startSession({ kind: 'user', userId: ALICE });
+    // The browser keeps the cookie as long as the login lasts.
+    assert.match(member, /Max-Age=28800$/);
+    assert.match(linked, /Max-Age=28800$/);
+    assert.match(discord, /Max-Age=2592000$/);
+    const cookieOf = (set: string) => set.split(';')[0] ?? '';
+    advance(8 * 3_600_000 - 1000);
+    assert.equal((await auth.identify({ cookie: cookieOf(member) }))?.principal.kind, 'member');
+    advance(2000);
+    // A new login is cheap while the provider's own session lasts; the level comes back from the groups as they are.
+    assert.equal(await auth.identify({ cookie: cookieOf(member) }), null);
+    assert.equal(await auth.identify({ cookie: cookieOf(linked) }), null);
+    assert.equal((await auth.identify({ cookie: cookieOf(discord) }))?.principal.kind, 'user');
+  });
+
+  it('lets no member in through a way that is no longer set up', async () => {
+    const { auth, make } = await setup({ oidc: true, ldap: true });
+    const cookieOf = (set: string) => set.split(';')[0] ?? '';
+    const fromLdap = cookieOf(
+      await auth.startSession({
+        kind: 'member',
+        memberId: memberKey('ldap', 'entryUUID:x'),
+        provider: 'ldap',
+        level: 'admin',
+      }),
+    );
+    const fromOidc = cookieOf(
+      await auth.startSession({
+        kind: 'member',
+        memberId: memberKey('oidc', 'sub-1', 'https://sso.example.test/realms/home'),
+        provider: 'oidc',
+        level: 'admin',
+      }),
+    );
+    const linked = cookieOf(await auth.startSession({ kind: 'user', userId: ALICE, level: 'admin' }));
+    const discord = cookieOf(await auth.startSession({ kind: 'user', userId: ALICE }));
+    const host = cookieOf(await auth.startSession({ kind: 'host' }));
+    const kinds = async (other: Auth) =>
+      Promise.all(
+        [fromLdap, fromOidc, linked, discord, host].map(
+          async (cookie) => (await other.identify({ cookie }))?.principal.kind ?? null,
+        ),
+      );
+    // The same database, read by the jukecord started again with ways turned off.
+    assert.deepEqual(await kinds(make({ oidc: true, ldap: true })), ['member', 'member', 'user', 'user', 'host']);
+    assert.deepEqual(await kinds(make({ ldap: true })), ['member', null, null, 'user', 'host']);
+    assert.deepEqual(await kinds(make({ oidc: true })), [null, 'member', 'user', 'user', 'host']);
+    // A linked login is an SSO login proven to be a Discord user: without Discord login, nothing links.
+    assert.deepEqual(await kinds(make({ oidc: true, ldap: true, discord: false })), [
+      'member',
+      'member',
+      null,
+      'user',
+      'host',
+    ]);
+  });
+
   it('turns a login link into one login within ten minutes', async () => {
     const { auth, cache, advance } = await setup();
     const first = await auth.createLink();
@@ -196,6 +313,49 @@ describe('LoginLimiter', () => {
     assert.equal(await limiter.blocked([addressFailures('10.0.0.2')]), false);
     now += 10 * 60_000 + 1;
     assert.equal(await limiter.blocked([here]), false);
+  });
+
+  it('counts a try before it is made: of tries at once at the limit, only the limit go through', async () => {
+    const limiter = new LoginLimiter(new MemoryCache(), { limit: 20 });
+    const keys = [addressFailures('10.0.0.1'), nameFailures('ldap', 'dave')];
+    // Thirty at once: each is counted before any is answered, so twenty go on and ten are refused, uncounted.
+    const entered = await Promise.all(Array.from({ length: 30 }, () => limiter.enter(keys)));
+    assert.equal(entered.filter(Boolean).length, 20);
+    assert.equal(await limiter.blocked(keys), true);
+    // A refused try left nothing counted: forgiving the twenty that went on opens the way again.
+    for (let i = 0; i < 20; i += 1) await limiter.forgive(keys);
+    assert.equal(await limiter.blocked(keys), false);
+    assert.equal(await limiter.enter(keys), true);
+    // Forgiving a count whose window is gone makes no count below nothing (no extra tries in the next window).
+    const fresh = new LoginLimiter(new MemoryCache(), { limit: 2 });
+    await fresh.forgive([addressFailures('10.0.0.9')]);
+    assert.deepEqual(await Promise.all([1, 2, 3].map(() => fresh.enter([addressFailures('10.0.0.9')]))), [
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it('counts a name as directories compare names: compatibility forms, case both ways, and spaces', () => {
+    const ada = nameFailures('ldap', 'ada');
+    // Each logged in as uid=ada on OpenLDAP: fullwidth, mathematical bold and circled letters, a soft hyphen or a
+    // zero-width space inside (both mapped to nothing by LDAP's string preparation), and spaces at the ends.
+    for (const name of [
+      'ADA',
+      'ａｄａ',
+      '\u{1d41a}\u{1d41d}\u{1d41a}',
+      'ⓐⓓⓐ',
+      'a\u00adda',
+      'a\u200bda',
+      ' ada\t',
+      'Ａda',
+    ])
+      assert.equal(nameFailures('ldap', name), ada, JSON.stringify(name));
+    // Inner spaces count as one, as a directory's insignificant-space rule has it; they are not dropped.
+    assert.equal(nameFailures('ldap', 'ada  lovelace'), nameFailures('ldap', 'Ada Lovelace'));
+    assert.notEqual(nameFailures('ldap', 'ada lovelace'), nameFailures('ldap', 'adalovelace'));
+    // Case set aside both ways: "ß" is "SS" upper-cased, so "straße" is "STRASSE".
+    assert.equal(nameFailures('ldap', 'straße'), nameFailures('ldap', 'STRASSE'));
   });
 
   it('blocks on any of its keys: an address, or a name tried from many addresses', async () => {
@@ -300,14 +460,14 @@ describe('addressKey and the limiter under a scan', () => {
     assert.equal(await limiter.blocked([addressFailures('2001:db8:1:100::1')]), false);
   });
 
-  it('keeps at most what the cache holds, forgetting the addresses that failed longest ago', async () => {
-    const limiter = new LoginLimiter(new MemoryCache({ capacity: 3 }), { limit: 2 });
+  it('keeps at most what the cache holds, a blocked address the last to go', async () => {
+    const limiter = new LoginLimiter(new MemoryCache({ capacity: 3, counters: 3 }), { limit: 2 });
     await limiter.fail([addressFailures('10.0.0.1')]);
     await limiter.fail([addressFailures('10.0.0.1')]);
     assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), true);
-    for (const address of ['10.0.0.2', '10.0.0.3', '10.0.0.4']) await limiter.fail([addressFailures(address)]);
-    // The first address was pushed out by three newer ones.
-    assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), false);
+    for (let i = 2; i < 100; i += 1) await limiter.fail([addressFailures(`10.0.0.${i}`)]);
+    // Ninety-eight single failures elsewhere pushed out one another, never the address that is blocked.
+    assert.equal(await limiter.blocked([addressFailures('10.0.0.1')]), true);
   });
 
   it('keeps one counter for an address however often it fails', async () => {

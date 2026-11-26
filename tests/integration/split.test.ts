@@ -91,7 +91,7 @@ for (const { name, make } of testBuses()) {
             groupsClaim: 'groups',
             groups: { admin: ['admins'], control: [], read: [] },
             label: null,
-            discordClaim: null,
+            discordClaim: 'discord_id',
           },
           ldap: null,
         },
@@ -315,6 +315,17 @@ for (const { name, make } of testBuses()) {
       assert.equal(settings['sso client'], 'jukecord');
       assert.equal(settings['directory (ldap)'], 'off');
       assert.equal(settings.role, 'core');
+      // What the edge's settings say of the link to a Discord user: Discord login is off on these edges.
+      const checks = (doctor.body as { checks: { name: string; status: string; detail: string }[] }).checks;
+      assert.deepEqual(
+        checks.filter((check) => check.name === 'sso discord link').map((check) => [check.status, check.detail]),
+        [
+          [
+            'warn',
+            'JUKECORD_OIDC_DISCORD_CLAIM (discord_id) links nobody: Discord login is off (JUKECORD_DISCORD_CLIENT_SECRET)',
+          ],
+        ],
+      );
       const backup = await ask(one, 'POST', '/backups');
       assert.equal(backup.status, 200);
     });

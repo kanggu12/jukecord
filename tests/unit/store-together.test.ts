@@ -162,6 +162,56 @@ eachDatabase('ListenLinkRepository and GuestSessionRepository', (db) => {
   });
 });
 
+eachDatabase('panel logins, listed and found by the start of their hash', (db) => {
+  it('lists the logins that have not expired, the last seen first, and finds one by the start of its hash', async () => {
+    const { store, advance, now } = await clocked(db);
+    const later = now() + 86_400_000;
+    const hash = (digit: string) => `${digit.repeat(16)}${'0'.repeat(48)}`;
+    await store.sessions.create({
+      idHash: hash('a'),
+      kind: 'host',
+      userId: null,
+      csrf: 'c',
+      scope: 'admin',
+      expiresAt: later,
+    });
+    advance(1000);
+    await store.sessions.create({
+      idHash: hash('b'),
+      kind: 'member',
+      userId: 'ldap:0123456789abcde',
+      csrf: 'c',
+      scope: 'read',
+      expiresAt: later,
+    });
+    advance(1000);
+    // Gone already: not listed, not found.
+    await store.sessions.create({
+      idHash: hash('c'),
+      kind: 'user',
+      userId: '300000000000000001',
+      csrf: 'c',
+      scope: 'admin',
+      expiresAt: now() + 500,
+    });
+    advance(1000);
+    assert.deepEqual(
+      (await store.sessions.list()).map((row) => row.idHash),
+      [hash('b'), hash('a')],
+    );
+    assert.deepEqual(
+      (await store.sessions.list(1)).map((row) => row.idHash),
+      [hash('b')],
+    );
+    assert.deepEqual(
+      (await store.sessions.withPrefix('bbbbbbbbbbbbbbbb')).map((row) => row.kind),
+      ['member'],
+    );
+    assert.deepEqual(await store.sessions.withPrefix('cccccccccccccccc'), []);
+    assert.deepEqual(await store.sessions.withPrefix('abababababababab'), []);
+  });
+});
+
 eachDatabase('panel logins with a scope', (db) => {
   it("keeps a friend's scope, never wider than control, and reads an unknown kind as a user", async () => {
     const { store } = await clocked(db);

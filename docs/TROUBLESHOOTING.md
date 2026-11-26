@@ -1,7 +1,7 @@
 # Troubleshooting
 
 For the host, when something does not work. Start with `./jukecord doctor` (inside a pod, `jukecord doctor`): it
-checks the data directory, the database, ffmpeg, yt-dlp, the cache, Discord and the login, and says which part fails.
+checks the data directory, the database, ffmpeg, yt-dlp, the cache, Discord and the logins, and says which part fails.
 
 ## "Sign in to confirm you're not a bot"
 
@@ -84,7 +84,90 @@ is back, adding works again; a track that failed in a looping queue stays in it.
 ## jukecord does not start
 
 It prints every settings problem at once and exits with code 2. "the database is at schema N, newer than this jukecord
-knows" means a newer jukecord wrote it: run the newer version, or restore a backup.
+knows" means a newer jukecord wrote it: run the newer version, or restore a backup ([below](#the-database-is-at-schema-n)).
+
+## "jukecord cannot reach its database"
+
+At its start jukecord waits up to a minute for a database server, saying each try and why in the log
+(`./jukecord logs -f`), then logs this line with the reason and exits 1; Docker's restart policy or Kubernetes starts it
+again. The reason names the database without its user or password:
+
+- **nothing answers at** the host and port: the server is down, or that is not its port. A database beside jukecord in
+  `compose.override.yaml` starts with `./jukecord up`.
+- **the host name ... is not known**: a typo, or a name only another network knows.
+- **the user name or password was refused**: a password with `@ : / ? # %` in it must be percent-encoded in the
+  address ([the address](INSTALL.md#the-address)).
+- **has no database** or **is in LATIN1, not UTF8**: make the database as [installing](INSTALL.md#the-database) says.
+- **TLS ... failed**: `sslrootcert` in the address names the authority that signed the server's certificate, and
+  `verify-full` also wants the address's host name to be the certificate's.
+
+`./jukecord db status <address>` tries an address and says the same, without starting jukecord.
+
+## "the database is at schema N"
+
+- **newer than this jukecord knows**: a newer jukecord moved the database on. Run the newer one, or restore the backup
+  taken before the update. In a split every service runs the same version: an older edge reports its database down.
+- **older than this jukecord's** (from `jukecord db copy` or `db status`): start this jukecord on it once, and it brings
+  the database up to date.
+- **the database already has tables jukecord did not make**: give jukecord an empty database, or on PostgreSQL a schema
+  of its own (`?schema=jukecord` in the address).
+- **the target already holds jukecord's data** (from `jukecord db copy`): `--replace` empties it first, in the same
+  transaction as the copy.
+
+## An edge answers 503, or the panel keeps reconnecting
+
+In a split an edge has nothing to serve while it hears no core, and says so on `/readyz`
+(`docker compose -f deploy/split/compose.yaml exec edge1 jukecord status`, or the edge's log):
+
+- **core** is down: the core is not running, is restarting, or listens on another bus. Its log says why
+  (`docker compose -f deploy/split/compose.yaml logs core`). A second core waits while one runs ("another core runs on
+  this bus"); it takes over when the first stops.
+- **bus** is down: the service cannot reach Redis or Valkey at `JUKECORD_BUS_URL`.
+- "the core refuses this edge: JUKECORD_INTERNAL_SECRET is not the same on both": the audio and the covers stay away
+  until the core and every edge are given the same secret.
+
+When the core comes back, the panels reconnect by themselves and the music is where it was, paused.
+
+## Logging in with SSO fails
+
+`./jukecord auth test-oidc` reads the provider's document and keys and tries the client and its secret, logging nobody
+in. The login page's message then points at the rest:
+
+- **The provider says the redirect is not valid**: its client must list `<JUKECORD_PUBLIC_URL>/auth/sso/callback`
+  exactly. Behind a reverse proxy, `JUKECORD_PUBLIC_URL` is the proxy's address.
+- **"The sign-in service did not let the login through"**: the log says the provider's own words. A wrong client secret
+  is Keycloak's `unauthorized_client`; an issuer must be written exactly as the provider names itself, a trailing slash
+  too.
+- **"Your account is in none of the groups jukecord lets in"**: the person's groups are not in the tokens, or not in the
+  claim jukecord reads. In Keycloak, the client's Group Membership mapper adds them to the ID token and the userinfo; a
+  realm role reaches the userinfo only with **Add to userinfo** on the `realm roles` mapper
+  ([Keycloak, step by step](INSTALL.md#keycloak-step-by-step)).
+- **"That login took over 10 minutes or began in another browser"**: log in again from the login page.
+
+## Logging in with a directory account fails
+
+`./jukecord auth test-ldap <name>` connects, binds as the service account, finds that person and says their groups and
+the level they give, without asking for a password:
+
+- **"takes names and passwords over an encrypted connection only"**: Active Directory with LDAP signing, and Samba,
+  refuse a password sent in the clear. Use `ldaps://`, or `JUKECORD_LDAP_STARTTLS=yes`.
+- **A certificate the connection does not trust**: `JUKECORD_LDAP_CA_FILE` names the authority that signed the
+  directory's certificate.
+- **No groups**: the directory keeps no `memberOf` for that person (OpenLDAP keeps it with its memberof overlay):
+  `JUKECORD_LDAP_GROUP_FILTER` finds the groups by a search instead. `JUKECORD_LDAP_NESTED_GROUPS` works with Active
+  Directory only.
+- **Nobody is found**: the service account may not be allowed to read people and groups, which a directory's default
+  access can hide from it.
+- **"The directory has more than one account by that name"**: the user filter is too wide; narrow it, as
+  `(&(objectClass=user)(sAMAccountName={username}))`.
+
+## /metrics answers 401 or 404
+
+- **401**: the scraper shows a token that is not `JUKECORD_METRICS_TOKEN`. With the chart, the ServiceMonitor sends the
+  `metricsToken` of the release's Secret, or of `metrics.existingSecret`.
+- **404**: the request came through a proxy (it carries `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`,
+  `X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address, and showed no token. Scrape jukecord from its own network, or give the scraper the token
+  ([monitoring](INSTALL.md#monitoring)).
 
 ## jukecord started again by itself
 

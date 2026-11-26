@@ -171,7 +171,8 @@ export function inviteDialog(): void {
   const words = t();
   const guild = state.guild;
   if (!guild) return;
-  const host = hostLike();
+  // A friend's login link is the host's own to make (jukecord makes them for the host principal only).
+  const host = state.me?.kind === 'host';
   const body = h('div', { class: 'invite' });
   showDialog(words.invite, body);
 
