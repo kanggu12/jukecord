@@ -353,16 +353,19 @@ function frame(): void {
     // The links and the account key are rebuilt only when what they show changes: a click or the focus on them
     // must survive the status and guild updates.
     const host = hostLike();
+    // jukecord's own settings, the host's alone (not a member's admin level): a page of the bar's on a wide window.
+    const owner = state.me?.kind === 'host';
     // A guest has the player alone: no pages to move between.
     nav.hidden = guestLogin;
     refill(
       nav,
-      `${route}|${state.lang}|${host}`,
+      `${route}|${state.lang}|${host}|${owner}`,
       ...(
         [
           ['/', 'player', 'music-2', words.player],
           ['/stats', 'stats', 'chart-column', words.stats],
           ...(host ? [['/logs', 'logs', 'scroll-text', words.logs]] : []),
+          ...(owner ? [['/settings', 'settings', 'settings', words.settings]] : []),
         ] as [string, Route, 'music-2', string][]
       ).map(([path, name, iconName, text]) =>
         h(

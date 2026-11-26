@@ -109,6 +109,8 @@ async function open({
   const page = await context.newPage();
   // Lyrics come from the walk itself: its server would ask LRCLIB, and the walk reaches no site.
   await madeUpLyrics(page);
+  // The menu's logins as a host's panel lists them on a busy evening (the walk's own server has its one login).
+  await madeUpLogins(page);
   if (discord) await asDiscord(page, discord === true ? {} : discord);
   // The ways in the login page shows, as a jukecord with them set up answers (the walk's own has none of them).
   if (methods) await page.route(/\/api\/v1\/auth\/methods$/, (route) => route.fulfill({ json: methods }));
@@ -336,6 +338,36 @@ const LYRIC_LINES = [
   '강물이 굽는 곳까지 천천히',
   'Lanterns on the far side of the river, waiting for the last of the boats to come home again',
 ];
+// The panel's logins, made up: this browser's own link, a Discord login, the provider's and the directory's members,
+// and a friend's link, seen from a moment ago to two days ago (every name made up).
+function walkLogins() {
+  const now = Date.now();
+  const login = (id, way, kind, name, scope, seenAgo, current = false) => ({
+    id,
+    way,
+    kind,
+    userId: name === null ? null : `${way}:${id.slice(0, 15)}`,
+    name,
+    scope,
+    createdAt: now - seenAgo - 3_600_000,
+    seenAt: now - seenAgo,
+    expiresAt: now + 8 * 3_600_000,
+    current,
+  });
+  return [
+    login('a1b2c3d4e5f60718', 'link', 'host', null, 'admin', 0, true),
+    login('0f1e2d3c4b5a6978', 'discord', 'user', 'Mina Park', 'admin', 2 * 60_000),
+    login('5e6f708192a3b4c5', 'oidc', 'member', 'Hana Seo', 'admin', 25 * 60_000),
+    login('9a8b7c6d5e4f3a2b', 'ldap', 'member', 'Joon Choi', 'control', 3 * 3_600_000),
+    login('c0ffee0123456789', 'link', 'friend', null, 'read', 2 * 86_400_000),
+  ];
+}
+async function madeUpLogins(page) {
+  await page.route(/\/api\/v1\/sessions$/, (route) =>
+    route.request().method() === 'GET' ? route.fulfill({ json: walkLogins() }) : route.continue(),
+  );
+}
+
 async function madeUpLyrics(page) {
   await page.route(/\/api\/v1\/guilds\/[^/]+\/lyrics$/, async (route) => {
     const player = await api('GET', '/guilds/local/player');
@@ -945,31 +977,8 @@ await sweep('member-menu', [[360, 780], ...FEW], async (page) => {
 // The menu's logins, as the host sees them: every browser logged in, whose it is, how it came in and when it was last
 // seen, and the key that ends it (none on this browser's own, which ends by logging out). The list a jukecord with
 // every way of logging in has: the host here, a Discord user, an SSO member, a directory member and a friend.
+// The logins (made up in every state: walkLogins), in sight.
 await sweep('menu-logins', [[360, 780], ...FEW], async (page) => {
-  const now = Date.now();
-  const login = (id, way, kind, name, scope, seenAgo, current = false) => ({
-    id,
-    way,
-    kind,
-    userId: name === null ? null : `${way}:${id.slice(0, 15)}`,
-    name,
-    scope,
-    createdAt: now - seenAgo - 3_600_000,
-    seenAt: now - seenAgo,
-    expiresAt: now + 8 * 3_600_000,
-    current,
-  });
-  await page.route(/\/api\/v1\/sessions$/, (route) =>
-    route.fulfill({
-      json: [
-        login('a1b2c3d4e5f60718', 'link', 'host', null, 'admin', 0, true),
-        login('0f1e2d3c4b5a6978', 'discord', 'user', 'Mina Park', 'admin', 2 * 60_000),
-        login('5e6f708192a3b4c5', 'oidc', 'member', 'Hana Seo', 'admin', 25 * 60_000),
-        login('9a8b7c6d5e4f3a2b', 'ldap', 'member', 'Joon Choi', 'control', 3 * 3_600_000),
-        login('c0ffee0123456789', 'link', 'friend', null, 'read', 2 * 86_400_000),
-      ],
-    }),
-  );
   await page.click('[data-act="menu"]');
   await page.waitForSelector('.sheet [data-key="login-end"]');
   const section = page.locator('.sheet .section:has([data-key="login-end"])');
@@ -1404,22 +1413,39 @@ await sweep('logs', FEW, async (page) => {
 // the database move's four pages. Nothing is restarted, moved or sent anywhere: the tests, the move and the split are
 // the walk's own answers, made up as the server would give them.
 async function settingsPage(page) {
+  // The settings' answers as the state makes them up (editView), over the server's own: its public address always
+  // a made-up one (the walk's is a local test address no host has).
+  await page.route(/\/api\/v1\/settings$/, async (route) => {
+    const method = route.request().method();
+    if (method !== 'GET' && method !== 'PATCH') return route.continue();
+    const response = await route.fetch();
+    const answer = await response.json();
+    const view = method === 'GET' ? answer : answer.view;
+    if (response.ok() && view?.settings) {
+      const address = view.settings.find((setting) => setting.name === 'JUKECORD_PUBLIC_URL');
+      if (address?.value) address.value = 'https://music.example.net';
+      for (const edit of page.viewEdits ?? []) edit(view);
+    }
+    return route.fulfill({ response, json: answer });
+  });
   await page.goto(`${BASE}/settings`);
   await page.waitForSelector('.settings-card .setting');
+}
+// A change the state makes to the settings' answer (see settingsPage), before the page opens.
+function editView(page, edit) {
+  page.viewEdits = [...(page.viewEdits ?? []), edit];
 }
 // A row's control, by its setting's name.
 const settingRow = (name) => `.setting[data-name="${name}"]`;
 // The walk's server runs with nothing to start it again (no restart policy), so it refuses a restart: the page as one
 // under Docker's restart policy shows it, made up over its answer (the walk never restarts it).
 async function underDocker(page) {
-  await page.route(/\/api\/v1\/settings$/, async (route) => {
-    if (route.request().method() !== 'GET') return route.continue();
-    const view = await (await route.fetch()).json();
+  editView(page, (view) => {
     view.restart = { ...view.restart, supervisor: 'docker', refusal: null };
-    return route.fulfill({ json: view });
   });
 }
-await sweep('settings', FEW, async (page) => {
+// The page on every size the walk has, the owner's 2560 among them (where a stretched card would be seen every day).
+await sweep('settings', SIZES, async (page) => {
   await settingsPage(page);
   // Every group of one process has its card (Services only in a split), and the page offers no move of a database
   // the environment does not set.
@@ -1427,8 +1453,16 @@ await sweep('settings', FEW, async (page) => {
     cards: document.querySelectorAll('.settings-card').length,
     locked: document.querySelectorAll('.setting .setting-state .icon').length,
     move: Boolean(document.querySelector('[data-key="move"]:not([hidden])')),
+    // The cards' widths: never squeezed (a page's padding of the window's width once left them a letter wide at
+    // 2560 px, which no other measure caught), and on a wide screen no wider than a reading width.
+    widths: [...document.querySelectorAll('.settings-card')].map((card) => card.getBoundingClientRect().width),
+    window: innerWidth,
   }));
   if (look.cards !== 9) throw new Error(`${look.cards} sections, not 9`);
+  const narrowest = Math.min(...look.widths);
+  const widest = Math.max(...look.widths);
+  if (narrowest < Math.min(320, look.window - 40)) throw new Error(`a section ${Math.round(narrowest)} px wide`);
+  if (widest > 882) throw new Error(`a section ${Math.round(widest)} px wide, past the reading width`);
   if (look.locked < 3) throw new Error(`${look.locked} locked values, not 3 or more`);
   if (!look.move) throw new Error('no key to move the database');
 });
@@ -1502,15 +1536,16 @@ await sweep('settings-test', FEW, async (page) => {
   await page.fill(`${settingRow('JUKECORD_CACHE_URL')} input`, 'redis://cache.home.example:6379');
   await page.click(`${settingRow('JUKECORD_CACHE_URL')} .key >> text=/^(Test|확인)$/`);
   await page.waitForSelector(`${settingRow('JUKECORD_CACHE_URL')} .setting-found:not([hidden])`);
+  // The provider tested is the one the form holds: its issuer and client, typed first.
+  await page.fill(`${settingRow('JUKECORD_OIDC_ISSUER')} input`, 'https://sso.home.example/realms/home');
+  await page.fill(`${settingRow('JUKECORD_OIDC_CLIENT_ID')} input`, 'jukecord');
   await page.click('[data-key="test-sso"]');
   await page.waitForSelector('#settings-sso .test-found:not([hidden]) .checks');
 });
 // A split jukecord's page, made up over the walk's own answer: the core answers, what settings.json holds comes from
 // each service's environment, and the services are a core and two edges.
 await sweep('settings-split', FEW, async (page) => {
-  await page.route(/\/api\/v1\/settings$/, async (route) => {
-    if (route.request().method() !== 'GET') return route.continue();
-    const view = await (await route.fetch()).json();
+  editView(page, (view) => {
     const now = Date.now();
     view.role = 'core';
     for (const setting of view.settings)
@@ -1520,7 +1555,6 @@ await sweep('settings-split', FEW, async (page) => {
       { role: 'edge', name: 'edge-2b8e44d0', version: '0.4.0', startedAt: now - 5_340_000, ready: true, seenAt: now },
       { role: 'edge', name: 'edge-c91f07a5', version: '0.4.0', startedAt: now - 120_000, ready: false, seenAt: now },
     ];
-    return route.fulfill({ json: view });
   });
   await settingsPage(page);
   await page.waitForSelector('#settings-services .service');
@@ -1565,11 +1599,14 @@ async function movePage(page, step) {
   await settingsPage(page);
   await page.click('[data-key="move"]');
   await page.waitForSelector('.dialog .wizard-steps');
-  if (step === 1) return;
+  // PostgreSQL chosen: the pick shows on the first page too.
   await page.click('.dialog .choice >> nth=1');
+  if (step === 1) return;
   await page.click('.dialog .dialog-keys .key.primary');
-  await page.fill('.dialog .wizard input', 'postgres://jukecord:made-up-password@database:5432/jukecord');
-  await page.click('.dialog .wizard .control-row .key');
+  // The address without its password, the password in its own field (made up).
+  await page.fill('.dialog .wizard input[type="text"]', 'postgres://jukecord@database:5432/jukecord');
+  await page.fill('.dialog .wizard input[type="password"]', 'made-up-password');
+  await page.click('.dialog .wizard-fields .key');
   await page.waitForSelector('.dialog .wizard-found .test-verdict');
   if (step === 2) return;
   await page.click('.dialog .dialog-keys .key.primary');
@@ -1577,6 +1614,7 @@ async function movePage(page, step) {
   if (step === 3) return;
   phase = 'copied';
   await page.waitForSelector('.dialog .dialog-keys .key.primary:not(:disabled)');
+  if (step === 3.5) return;
   await page.click('.dialog .dialog-keys .key.primary');
   await page.waitForSelector('.dialog .wizard-text');
 }
@@ -1584,41 +1622,44 @@ for (const [step, name] of [
   [1, 'kind'],
   [2, 'address'],
   [3, 'copy'],
+  [3.5, 'copied'],
   [4, 'switch'],
 ])
   await sweep(`settings-move-${name}`, FEW, (page) => movePage(page, step));
-// The copy stopped: back at the address, the toast said in the dialog (its shade covers the bar).
+// The copy stopped: said plainly on the copy's page, with the key to copy again.
 await sweep('settings-move-stopped', FEW, async (page) => {
   await movePage(page, 3);
-  await page.click('.dialog .wizard-tools .key');
-  await page.waitForSelector('.dialog .dialog-notes .toast');
+  // While the copy runs its key is the only one; stopped, Copy again is the page's own key.
+  await page.locator('.dialog .dialog-keys .key', { hasText: /Stop copying|복사 멈추기/ }).click();
+  await page.locator('.dialog .dialog-keys .key.primary', { hasText: /Copy again|다시 복사/ }).waitFor();
 });
 // The host's certificate authorities: none yet (the place to add them), saved from the page, set by the environment
 // (made up over the walk's answer) and a paste refused for the key in it. The two certificates were made for the walk
-// with made-up names, their keys thrown away at once; they are public by nature, and trust nothing real.
+// with made-up names, a root and an issuing authority it signed, their keys thrown away at once; they are public by
+// nature, and trust nothing real.
 const WALK_AUTHORITIES = `-----BEGIN CERTIFICATE-----
-MIIBwjCCAWegAwIBAgIUN4NzcD4dUHi6FQuWbm2PClzQhYEwCgYIKoZIzj0EAwIw
-NjEdMBsGA1UEAwwURXhhbXBsZSBIb21lIFJvb3QgQ0ExFTATBgNVBAoMDEV4YW1w
-bGUgSG9tZTAeFw0yNjExMjYwMzQzNTlaFw0zNjExMjMwMzQzNTlaMDYxHTAbBgNV
-BAMMFEV4YW1wbGUgSG9tZSBSb290IENBMRUwEwYDVQQKDAxFeGFtcGxlIEhvbWUw
-WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARJeSr0fw3aFZr3fC2JhpTUB44cCymf
-ngGhUaWjoh23oBOkUm8vn8PPikbxmq1Q5p5TC7adTRXJ0AahKAKkYqGko1MwUTAd
-BgNVHQ4EFgQUdBWxgiSLofnCHsNpY58CQEtFCZgwHwYDVR0jBBgwFoAUdBWxgiSL
-ofnCHsNpY58CQEtFCZgwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNJADBG
-AiEA/tGf7aGKUvRYCIoFzS1v5Fu8buNHF7JiodCNgIseRVICIQD7c1MNGXrXgOKZ
-k/6zmOAqy4nxWeHts9HSRaB5NWf56g==
+MIIB0TCCAXegAwIBAgIURX9j7BTn+b0J5Tq/7whquInvPQUwCgYIKoZIzj0EAwIw
+NjEVMBMGA1UECgwMRXhhbXBsZSBIb21lMR0wGwYDVQQDDBRFeGFtcGxlIEhvbWUg
+Um9vdCBDQTAeFw0yNjExMjYwNTI1MTJaFw0zNjExMjMwNTI1MTJaMDYxFTATBgNV
+BAoMDEV4YW1wbGUgSG9tZTEdMBsGA1UEAwwURXhhbXBsZSBIb21lIFJvb3QgQ0Ew
+WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATxXaSQbx+TiOxymHZI6QKXJHbFRkJf
+q9pUSBmeXOQm1jgHPUZAnfGZATIFq694HHFFGKj2duUsev67FVJO7Hi4o2MwYTAd
+BgNVHQ4EFgQUZnYsVcI0OCBkA4B5gFZcxUFaOFYwHwYDVR0jBBgwFoAUZnYsVcI0
+OCBkA4B5gFZcxUFaOFYwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYw
+CgYIKoZIzj0EAwIDSAAwRQIhAJ97iwvDnklqsJ4SLrJD2+LgqtF12U+maSjh8ysq
+xgdyAiAbUTC5jRL6ttQwWpljao9virk/CPDygAB/V9OQRpKRdg==
 -----END CERTIFICATE-----
 -----BEGIN CERTIFICATE-----
-MIIBxDCCAWmgAwIBAgIUObQcBWszfskrmlwrj9RL6lOK/nswCgYIKoZIzj0EAwIw
-NzEfMB0GA1UEAwwWRXhhbXBsZSBMYWIgSXNzdWluZyBDQTEUMBIGA1UECgwLRXhh
-bXBsZSBMYWIwHhcNMjYxMTI2MDM0MzU5WhcNMzYxMTIzMDM0MzU5WjA3MR8wHQYD
-VQQDDBZFeGFtcGxlIExhYiBJc3N1aW5nIENBMRQwEgYDVQQKDAtFeGFtcGxlIExh
-YjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJajD0yjqDAuvXYQBH7ET7W276j8
-uAEaxkOZdMPHq73Dy7ikZpuxQYx0mWeQPTX70gYou80gAsXYIfBPoiACgPKjUzBR
-MB0GA1UdDgQWBBRRu81INf6y/sRFwFh5igvzNZTCljAfBgNVHSMEGDAWgBRRu81I
-Nf6y/sRFwFh5igvzNZTCljAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0kA
-MEYCIQCph/GPJUAH4ZOvApM0k21gLeoIBBhR5E2NQZrSWquQbAIhAPk5zFwsTGXZ
-5AlhI9Ca0Oo3Q6/ftlE47zwxxF5dVhbH
+MIIB1jCCAX2gAwIBAgIUePrmM9LNqW7Kun5//TDv5H3XH4gwCgYIKoZIzj0EAwIw
+NjEVMBMGA1UECgwMRXhhbXBsZSBIb21lMR0wGwYDVQQDDBRFeGFtcGxlIEhvbWUg
+Um9vdCBDQTAeFw0yNjExMjYwNTI1MTJaFw0zMTExMjUwNTI1MTJaMDkxFTATBgNV
+BAoMDEV4YW1wbGUgSG9tZTEgMB4GA1UEAwwXRXhhbXBsZSBIb21lIElzc3Vpbmcg
+Q0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQUOzOBqPDHrKAT9EG7MaJICwlM
+N3nQxmCKdsg52EpwvaPauiXEx/mTljqnSiA6YvLLZFmiymz02UozBGP6oPywo2Yw
+ZDASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQU
+yZlrFMIqHw3rZN3wdUwAAKuWZDMwHwYDVR0jBBgwFoAUZnYsVcI0OCBkA4B5gFZc
+xUFaOFYwCgYIKoZIzj0EAwIDRwAwRAIgATlBG8zPdiJEc0G3VObaE2HWq1Lv4ozJ
+MQeU20tUejICIGP4gbNKRXQEoMGD0u6mgwmBkNvjdxEqrmdcB+BKVKsc
 -----END CERTIFICATE-----
 `;
 // The page, the authorities' section in sight.
@@ -1636,9 +1677,7 @@ if (!ONLY || ONLY.has('settings-ca-saved')) {
   await api('DELETE', '/settings/authorities');
 }
 await sweep('settings-ca-environment', FEW, async (page) => {
-  await page.route(/\/api\/v1\/settings$/, async (route) => {
-    if (route.request().method() !== 'GET') return route.continue();
-    const view = await (await route.fetch()).json();
+  editView(page, (view) => {
     const file = '/run/jukecord-ca/ca.crt';
     const setting = view.settings.find((entry) => entry.name === 'JUKECORD_CA_FILE');
     Object.assign(setting, { source: 'environment', variable: setting.name, locked: 'environment', editable: false });
@@ -1675,7 +1714,6 @@ await sweep('settings-ca-environment', FEW, async (page) => {
       inUse: 2,
       revision: 0,
     };
-    return route.fulfill({ json: view });
   });
   await authoritiesPage(page);
   await page.waitForSelector('#settings-authorities .cert');
@@ -1683,8 +1721,14 @@ await sweep('settings-ca-environment', FEW, async (page) => {
 await sweep('settings-ca-refused', FEW, async (page) => {
   page.expectedErrors = [/status of 400/];
   await authoritiesPage(page);
-  // A private key pasted with the certificates (made up: its lines alone): refused, said under the place it came from.
-  await page.fill('#ca-paste', `${WALK_AUTHORITIES}-----BEGIN PRIVATE KEY-----\nMADEUP\n-----END PRIVATE KEY-----\n`);
+  // A private key pasted with the certificates (made up: lines that look like one and are none): refused, said under
+  // the place it came from.
+  const key = [
+    'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgW2Fsa2luZy1vbi1z',
+    'dW5zaGluZS1tYWRlLXVwLWtleaFEA0IABGFyZS15b3UtcmVhZGluZy10aGlzLWtl',
+    'eS1pdC1pcy1ub25lLWF0LWFsbC1vbmx5LWEtd2Fsay1zdGFuZC1pbi1mb3ItYS1r',
+  ].join('\n');
+  await page.fill('#ca-paste', `${WALK_AUTHORITIES}-----BEGIN PRIVATE KEY-----\n${key}\n-----END PRIVATE KEY-----\n`);
   await page.click('[data-key="ca-save"]');
   await page.waitForSelector('.ca-add .setting-problem:not([hidden])');
 });

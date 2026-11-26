@@ -124,9 +124,12 @@ COPY panel ./panel
 # The files outside panel/ that the panel's code imports: the refusals and failures in a person's language, which the
 # bot and the panel share, the reasons they translate, the voice channel's sound presets, which the panel applies to
 # its own playing along, and Wrapped's facts and the rounding of lengths, which the panel, the bot and the command line
-# say alike. Each lands where it is in the checkout, so the panel's ../../../src/core imports resolve here as they do
-# there (tests/packaging checks that every such import is copied).
+# say alike; and a setting's value in words in its unit (a size, a duration), which the settings page and the command
+# line say alike, with the units it reads. Each lands where it is in the checkout, so the panel's ../../../src imports
+# resolve here as they do there (tests/packaging checks that every such import is copied).
 COPY src/core/say.ts src/core/reasons.ts src/core/sound.ts src/core/facts.ts src/core/lengths.ts ./src/core/
+COPY src/settings/words.ts ./src/settings/
+COPY src/util/units.ts ./src/util/
 RUN echo "jukecord: the panel" \
  && node scripts/build-panel.ts
 

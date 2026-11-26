@@ -69,12 +69,13 @@ search words. A link pasted anywhere on the page, or dropped on it, is added too
 
 - **Invite** (in the voice card and the menu) makes a listening link for guests and, for the host, a login link for
   a friend, each with a QR code ([friends and guests](#friends-and-guests)).
-- **The menu** (your name, top right) has the theme, language, motion, API tokens and keyboard shortcuts, and for
-  people who can manage the server, its settings. The host's menu also has **Settings**, every setting of jukecord
-  itself ([settings](#settings)), and **Logins**: every panel login that has not ended, the most recently seen first,
-  each with **End**, which logs that browser out at once (a member at the admin level sees **Logins** too). A
-  member's name says how they logged in: **SSO login** or **Directory account**.
+- **The menu** (your name, top right) has the theme, language, motion, API tokens and keyboard shortcuts, and for people
+  who can manage the server, its settings. The host's menu also has **Logins**: every panel login that has not ended,
+  the most recently seen first, each with **End**, which logs that browser out at once (a member at the admin level sees
+  **Logins** too). A member's name says how they logged in: **SSO login** or **Directory account**.
 - **Log** (the host only) is jukecord's log, filtered by level and part.
+- **Settings** (the host itself only) is every setting of jukecord ([the settings page](#the-settings-page)): a page
+  of the bar on a wide window, of the menu's pages on a narrow one.
 - **As an app**: where the browser offers it (Chrome's or Edge's install button, Safari's **Add to Home Screen**), the
   panel installs and opens in its own window, also when jukecord cannot be reached, saying so. On Android it is then
   among the apps a video can be shared to, and the shared address opens a page that queues it.
@@ -304,32 +305,37 @@ than a line: [the database](INSTALL.md#the-database),
 
 ### The settings page
 
-**Settings**, in the menu of the host itself (a login link from `jukecord open`, or the host's token), shows every
-setting of jukecord, one section to a group: Server and network, Discord, Logins, Database, Cache and bus, Certificate
-authorities, Media and limits, Backups, and Logging and monitoring. A member at the admin level does not see it.
+**Settings**, a page of the host itself (a login link from `jukecord open`, or the host's token), shows every setting
+of jukecord, one section to a group: Server and network, Discord, Logins, Database, Cache and bus, Certificate
+authorities, Media and limits, Backups, and Logging and monitoring. A member at the admin level does not see it. The
+index beside the sections marks the one being read; on a narrow window, keys under the title go to each section.
 
 - **Each row** is a setting: its name, what it does, and a line that says where its value comes from (the default, a
-  saved value, or the environment, with the variable's name), its limits, and whether a change applies at once or
-  after a restart. A value the environment sets is locked, with its variable; so are the data folder and the
-  **Services** group's settings, which only the start can set.
+  saved value, or the environment, with the variable's name), its limits in its unit, and whether a change applies at
+  once or after a restart; a saved change that waits for one says so, with the value in use until then. A value the
+  environment sets is locked, with its variable; so are the data folder and the **Services** group's settings, which
+  only the start can set.
 - **Secrets** show as set or not set, never as their value, with **Change** and **Remove**.
 - **Saving**: a section shows **Undo** and **Save** while it holds a change. **Save** lists what changes and when each
   applies, then saves that section alone, all of it or none. A value the start would refuse is refused at its row,
-  with the reason; a setting someone changed meanwhile is refused too, and the page shows the new values.
+  by the setting's name, with the reason, and the first such row comes into sight; a setting someone changed
+  meanwhile is refused too, and the page shows the new values.
 - **Logins** has three parts, Discord login, SSO (OIDC) and Directory (LDAP, Active Directory), each with **Test**,
   which logs nobody in. **Cache and bus** tries an address before it is saved.
-- **The restart bar**: while a saved change waits for a restart, a bar under the title says how many do and what
-  starts jukecord again (Docker, Kubernetes, systemd or the program's launcher), with **Restart**; each row that waits
-  says so. jukecord stops as it does on SIGTERM, the music stops for a few seconds, and the page waits for jukecord and
+- **The restart bar**: while a saved change waits for a restart, a bar under the title says how many do and what starts
+  jukecord again (Docker, Kubernetes, systemd or the program's launcher), with **Restart**, and a key to each row that
+  waits. jukecord stops as it does on SIGTERM, the music stops for a few seconds, and the page waits for jukecord and
   comes back with it. Where nothing would start jukecord again, the bar says so and offers no restart.
 - **The database**: its row names the database in use, and **Move to another database** opens a dialog of four
-  steps. **Kind**: SQLite, PostgreSQL, or MySQL and MariaDB. **Address**: tested before going on; a database that
-  already holds jukecord's data is emptied first only when asked. **Copy**: every row, while jukecord plays on, with
-  the copy's progress, which can be stopped. **Switch**: jukecord stops, copies what changed since, saves the new
-  address and starts again on it; the old database stays as it was.
-- **Certificate authorities**: the file every TLS connection trusts besides Node.js's own, where it comes from, and each
-  certificate in it (who it is, who signed it, until when). A PEM pasted or picked there is checked, kept as a file of
-  the data folder (0600) and applied at the next restart; **Remove** puts it away. The page's tests trust what is
+  steps. **Kind**: SQLite, PostgreSQL, or MySQL and MariaDB (the kind in use marked). **Address**: a server's
+  password in a field of its own, tested before going on; a database that already holds jukecord's data is emptied
+  first only when asked, and one holding another program's tables is refused. **Copy**: every row, while jukecord
+  plays on, with the copy's progress, which can be stopped and started again. **Switch**: jukecord stops, copies
+  what changed since, saves the new address and starts again on it, the music pausing meanwhile; the old database
+  stays as it was.
+- **Certificate authorities**: the file every TLS connection trusts besides the built-in ones, where it comes from, and
+  each certificate in it (who it is, who signed it, until when). A PEM pasted or picked there is checked, kept as a file
+  of the data folder (0600) and applied at the next restart; **Remove** puts it away. The page's tests trust what is
   pasted before it is saved.
 - **Services**, in a split only: the core and each edge, with its version, how long it has run and whether it is
   ready. What each service reads from its own environment (the addresses, the port, the secrets) is locked there.

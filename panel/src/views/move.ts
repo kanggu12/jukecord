@@ -3,11 +3,12 @@ import { fill, h, icon } from '../dom.ts';
 import { t } from '../state.ts';
 import { foundText, messageOf, pagedDialog, problem, toast } from '../ui/layers.ts';
 
-// The kinds of database a move can go to, each with the address it is written as.
+// The kinds of database a move can go to, each with the address it is written as (the password in a field of its own)
+// and the word its description starts with (describeAddress: "SQLite (...)", "PostgreSQL (...)", "MariaDB (...)").
 const KINDS = [
-  { kind: 'sqlite', example: 'sqlite:jukecord-new.db' },
-  { kind: 'postgres', example: 'postgres://jukecord:password@database:5432/jukecord' },
-  { kind: 'mysql', example: 'mysql://jukecord:password@database:3306/jukecord' },
+  { kind: 'sqlite', example: 'sqlite:jukecord-new.db', said: /^SQLite\b/ },
+  { kind: 'postgres', example: 'postgres://jukecord@database:5432/jukecord', said: /^PostgreSQL\b/ },
+  { kind: 'mysql', example: 'mysql://jukecord@database:3306/jukecord', said: /^(MySQL|MariaDB)\b/ },
 ] as const;
 type Kind = (typeof KINDS)[number]['kind'];
 
@@ -49,11 +50,18 @@ export function moveWizard(
   // copy's state as last read, and whether the dialog is gone (its polling stops then).
   let kind: Kind | null = null;
   let address = '';
-  let tested: { url: string; result: DatabaseTest } | null = null;
+  let password = '';
+  let tested: { url: string; password: string; result: DatabaseTest } | null = null;
   let replace = false;
   let move: MoveState | null = view.move.state;
   let stopped = false;
-  const current = foundText(view.settings.find((setting) => setting.name === 'JUKECORD_DATABASE_URL')?.shown ?? '');
+  // A copy stopped from here: its page says so, with a key to copy again.
+  let stoppedCopy = false;
+  const shown = view.settings.find((setting) => setting.name === 'JUKECORD_DATABASE_URL')?.shown ?? '';
+  const current = foundText(shown);
+  // The kind of the database in use: SQLite's file is not moved into another (the data folder's is the only one a
+  // move offers); a server of the same kind is another server, which can be.
+  const inUse = KINDS.find((option) => option.said.test(shown))?.kind ?? null;
   const who = words.supervisors[view.restart.supervisor] ?? view.restart.supervisor;
 
   // A page: its step's place among the four, its own content, and its keys (Back first, the step's key last).
@@ -91,6 +99,7 @@ export function moveWizard(
           : option.kind === 'postgres'
             ? [words.movePostgres, words.movePostgresHint]
             : [words.moveMysql, words.moveMysqlHint];
+      const used = option.kind === inUse;
       const choice = h(
         'button',
         { class: 'choice', type: 'button', role: 'radio', 'aria-checked': String(kind === option.kind) },
@@ -99,10 +108,16 @@ export function moveWizard(
           'span',
           { class: 'grow' },
           h('span', { class: 'choice-name' }, name),
-          h('span', { class: 'choice-hint' }, hint),
+          // The kind in use says so in its words, before what it is.
+          h('span', { class: 'choice-hint' }, used ? `${words.moveInUse}\u00a0· ${hint}` : hint),
         ),
         icon('check', 'check'),
       );
+      // The data folder's SQLite file is the one in use: no other SQLite file to move to.
+      if (used && option.kind === 'sqlite') {
+        choice.disabled = true;
+        choice.setAttribute('aria-disabled', 'true');
+      }
       choice.onclick = () => {
         // Another kind: the address typed for the last one is not this one's.
         if (kind !== option.kind) {
@@ -118,7 +133,8 @@ export function moveWizard(
     show(1, [h('p', { class: 'wizard-note wizard-from faint' }, words.moveFrom(current)), list], null, next);
   };
 
-  // Step 2: its address, tried before going on.
+  // Step 2: its address, and a server's password in a field of its own (never in the address that is shown), tried
+  // before going on.
   const enterAddress = () => {
     const example = KINDS.find((option) => option.kind === kind)?.example ?? '';
     const input = h('input', {
@@ -129,16 +145,25 @@ export function moveWizard(
       placeholder: example,
       'aria-label': words.moveAddress,
     });
+    const secret = h('input', {
+      type: 'password',
+      autocomplete: 'off',
+      value: password,
+      placeholder: words.movePassword,
+      'aria-label': words.movePassword,
+    });
     const test = h('button', { class: 'key', type: 'button' }, words.setTest);
     const found = h('div', { class: 'wizard-found', 'aria-live': 'polite' });
     const next = h('button', { class: 'key primary', type: 'button' }, words.wizardNext);
+    // The address and password tried last are the ones in the fields.
+    const same = () => tested !== null && tested.url === input.value.trim() && tested.password === secret.value;
     // On only for the address that was tried and found usable, a database with data only once emptying is chosen.
     const ready = () => {
-      const usable = tested !== null && tested.url === input.value.trim() && tested.result.ok;
+      const usable = same() && Boolean(tested?.result.ok);
       next.disabled = !usable || ((tested?.result.rows ?? 0) > 0 && !replace);
     };
     const drawFound = () => {
-      if (!tested || tested.url !== input.value.trim()) {
+      if (!tested || !same()) {
         fill(found, h('p', { class: 'wizard-note faint' }, words.moveTestFirst));
         return;
       }
@@ -203,19 +228,27 @@ export function moveWizard(
       drawFound();
       ready();
     };
-    input.onkeydown = (event) => {
-      // Enter tries the address (the dialog's own Next stays a key to press).
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      test.click();
+    secret.oninput = () => {
+      password = secret.value;
+      drawFound();
+      ready();
     };
+    for (const field of [input, secret]) {
+      field.onkeydown = (event) => {
+        // Enter tries the address (the dialog's own Next stays a key to press).
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        test.click();
+      };
+    }
     test.onclick = async () => {
       const url = input.value.trim();
       if (!url) return;
       test.disabled = true;
       fill(test, icon('loader-circle', 'spin'), words.setTesting);
       try {
-        tested = { url, result: await api['settings-test-database'](url, ca()) };
+        const given = secret.value;
+        tested = { url, password: given, result: await api['settings-test-database'](url, ca(), given || undefined) };
         replace = false;
       } catch (error) {
         tested = null;
@@ -232,9 +265,19 @@ export function moveWizard(
       ready();
     };
     next.onclick = () => void startCopy();
+    // A SQLite file has no password: the field is a server's only.
     show(
       2,
-      [h('div', { class: 'control-row' }, h('label', { class: 'field' }, input), test), found],
+      [
+        h(
+          'div',
+          { class: 'wizard-fields' },
+          h('label', { class: 'field' }, input),
+          kind === 'sqlite' ? null : h('label', { class: 'field' }, secret),
+          test,
+        ),
+        found,
+      ],
       () => chooseKind(),
       next,
     );
@@ -246,11 +289,16 @@ export function moveWizard(
   // Step 3: the copy, started here or under way already.
   const startCopy = async () => {
     try {
-      move = await api['database-move'](tested?.url ?? address.trim(), replace);
+      move = await api['database-move'](
+        tested?.url ?? address.trim(),
+        replace,
+        (tested?.password ?? password) || undefined,
+      );
     } catch (error) {
       problem(error);
       return;
     }
+    stoppedCopy = false;
     copying();
   };
   const copying = () => {
@@ -264,32 +312,60 @@ export function moveWizard(
     const fillBar = h('div', { class: 'copy-meter-fill' });
     meter.append(fillBar);
     const line = h('p', { class: 'wizard-note wizard-progress' });
+    // The keys by the copy's state: Stop alone while it runs; Back with Next once it is done, with Copy again once it
+    // failed or was stopped.
     const next = h('button', { class: 'key primary', type: 'button' }, words.wizardNext);
     next.onclick = () => switching();
-    const stop = h('button', { class: 'key', type: 'button' }, words.moveStop);
+    const again = h('button', { class: 'key primary', type: 'button' }, words.moveCopyAgain);
+    again.onclick = () => void startCopy();
+    const stop = h('button', { class: 'key', type: 'button' }, icon('circle-stop'), words.moveStop);
+    const cancel = h('button', { class: 'key', type: 'button' }, words.cancel);
+    cancel.onclick = () => close();
+    const backKey = h('button', { class: 'key', type: 'button' }, words.wizardBack);
+    backKey.onclick = () => enterAddress();
     const stopCopy = async () => {
+      stop.disabled = true;
       try {
         await api['database-move-cancel']();
-        toast(words.moveStopped);
       } catch (error) {
+        stop.disabled = false;
         problem(error);
+        return;
       }
+      // Said on the page itself, plainly, with the key to copy again.
       move = null;
-      enterAddress();
+      stoppedCopy = true;
+      drawState();
     };
     stop.onclick = () => void stopCopy();
+    // The keys put in place when the copy's state changes, not at every reading of it (a key drawn anew under the
+    // pointer twice a second could not be pressed).
+    let keysOf = '';
+    const setKeys = (state: string, ...list: HTMLButtonElement[]) => {
+      if (keysOf === state) return;
+      keysOf = state;
+      fill(keys, ...list);
+    };
     const drawState = () => {
       const now = move;
       const share = now && now.total > 0 ? Math.min(100, Math.round((now.rows / now.total) * 100)) : 0;
       meter.setAttribute('aria-valuenow', String(now?.phase === 'copied' ? 100 : share));
       fillBar.style.width = `${now?.phase === 'copied' ? 100 : share}%`;
+      if (stoppedCopy) {
+        fill(line, icon('circle-stop'), h('span', null, words.moveStopped));
+        line.className = 'wizard-note wizard-progress';
+        setKeys('stopped', cancel, backKey, again);
+        return;
+      }
       if (!now) return;
       if (now.phase === 'failed') {
         fill(line, icon('circle-alert'), h('span', null, words.moveFailed(foundText(now.error ?? ''))));
         line.className = 'wizard-note wizard-progress tone-bad';
+        setKeys('failed', cancel, backKey, again);
       } else if (now.phase === 'copied') {
         fill(line, icon('check'), h('span', null, words.moveCopied(now.rows, ((now.ms ?? 0) / 1000).toFixed(1))));
         line.className = 'wizard-note wizard-progress';
+        setKeys('copied', cancel, backKey, next);
       } else {
         fill(
           line,
@@ -301,32 +377,29 @@ export function moveWizard(
           ),
         );
         line.className = 'wizard-note wizard-progress';
+        setKeys('copying', stop);
       }
-      next.disabled = now.phase !== 'copied';
-      stop.hidden = now.phase !== 'copying';
     };
     show(
       3,
       [
-        h('p', { class: 'wizard-note faint' }, foundText(move?.where ?? '')),
+        h('p', { class: 'wizard-note wizard-where faint' }, foundText(move?.where ?? tested?.result.where ?? '')),
         meter,
         line,
-        h('div', { class: 'wizard-tools' }, stop),
       ],
-      () => {
-        // Back from a copy under way stops it first; from a finished or failed one, it goes back as it is.
-        if (move?.phase === 'copying') void stopCopy();
-        else enterAddress();
-      },
-      next,
+      () => enterAddress(),
+      null,
     );
     drawState();
     // The copy's state read again every half second while it runs and the dialog is open.
     const poll = async () => {
-      while (!stopped && move?.phase === 'copying' && content.isConnected) {
+      while (!stopped && !stoppedCopy && move?.phase === 'copying' && content.isConnected) {
         await new Promise((resolve) => setTimeout(resolve, 500));
         try {
-          move = (await api['database-move-status']()).state;
+          const read = (await api['database-move-status']()).state;
+          // Stopped from here meanwhile: what was read before the stop is no news.
+          if (stoppedCopy) break;
+          move = read;
         } catch {
           // Missed once: read again at the next turn.
         }
@@ -361,9 +434,17 @@ export function moveWizard(
       else toast(t().setStillDown, 'bad', 'circle-alert');
       close();
     };
+    // From where to where, and what the copy holds; then what the switch does (the music pauses meanwhile).
+    const copied = move?.rows ?? 0;
     show(
       4,
       [
+        h(
+          'p',
+          { class: 'wizard-note wizard-route' },
+          h('span', { class: 'route' }, words.moveFromTo(current, foundText(move?.where ?? ''))),
+          h('span', { class: 'faint' }, words.moveRowsCopied(copied)),
+        ),
         h('p', { class: 'wizard-note wizard-text' }, words.moveSwitchText(who)),
         ...(refused
           ? [h('p', { class: 'test-verdict tone-bad' }, icon('circle-alert'), h('span', null, words.moveNoRestart))]

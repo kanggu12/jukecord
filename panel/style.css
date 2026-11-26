@@ -5332,6 +5332,39 @@ button.lyric {
   color: var(--ink-2);
   font-weight: 500;
 }
+/* The section in sight, as the index says it: its entry on the selected pane, with no line round it. */
+.settings-index .index-link[aria-current] {
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+/* The sections as keys under the title where the index has no room: wrapped, and scrolling with the page; each row's
+   keys share its whole width, so every row ends where the cards do. */
+.settings-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-6);
+}
+.settings-jump .jump-key {
+  flex: 1 1 auto;
+}
+@media (min-width: 1100px) {
+  .settings-jump {
+    display: none;
+  }
+}
+/* On a wide screen the cards stop at a reading width: the title, the bar and the index with the cards one column of
+   that width in the middle of the page's own (the page keeps its padding, which is of the window's width). */
+.settings-page > :is(.page-head, .settings-jump, .restart-bar, .settings-layout) {
+  width: 100%;
+  max-width: calc(200px + var(--gap) + 880px);
+  margin-inline: auto;
+}
+@media (max-width: 1099px) {
+  .settings-page > :is(.page-head, .settings-jump, .restart-bar, .settings-layout) {
+    max-width: 880px;
+  }
+}
 .settings-cards {
   display: flex;
   flex-direction: column;
@@ -5369,6 +5402,65 @@ button.lyric {
   margin: 0;
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
+}
+/* The restart bar's waiting settings: small keys under its words, each bringing its row into sight. */
+.restart-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-6);
+  margin-top: var(--s-4);
+}
+/* A key of words in a line (under a test's finding, to the authorities' place). */
+.text-key {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .text-key:hover {
+    color: var(--ink);
+    text-decoration-color: currentColor;
+  }
+}
+/* The link services: chips, each on or off by its fill alone: on in the brand's soft blue and a choice's weight, off
+   with no fill in quiet ink, a neutral line round it to show it is a key (no coloured line round either). */
+.seg.chips {
+  padding: 0;
+  gap: var(--s-6);
+  background: none;
+  box-shadow: none;
+}
+.seg.chips button {
+  border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink-3);
+}
+.seg.chips button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 600;
+}
+/* The reverse proxy: its choice, and the field for a number or addresses under it. */
+.control-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-8);
+  min-width: 0;
+  flex: 1;
+}
+.control-stack > .field {
+  align-self: stretch;
+}
+.control-stack > .field[hidden] {
+  display: none;
 }
 /* A setting: what it is beside its control, a rule between it and the next. Its name stands on the control's line,
    centred on it; what it is and its state under the name, small. */
@@ -5423,6 +5515,16 @@ button.lyric {
 }
 .setting-found[hidden] {
   display: none;
+}
+/* Every row says where its value comes from: a row at its default in the quietest ink a line may have, a saved one a
+   step louder, a row changed here in words of the ink of what it is; a row with a problem has its field's face in
+   the problem's soft tone (no coloured edge). */
+.setting[data-look="saved"] .setting-state {
+  color: var(--ink-2);
+}
+.setting[data-look="changed"] .setting-state {
+  color: var(--ink);
+  font-weight: 500;
 }
 /* A control and the keys beside it (a field and its Test, a secret's state and Change), at the row's end. */
 .control-row {
@@ -5489,6 +5591,9 @@ button.lyric {
   .control-row {
     justify-content: flex-start;
   }
+  .control-stack {
+    align-items: flex-start;
+  }
 }
 /* A section's foot: how many changes it holds, and its keys at the end. */
 .settings-foot {
@@ -5532,6 +5637,10 @@ button.lyric {
 .part-tools > .field {
   width: 200px;
   flex: none;
+}
+/* A row with a problem: its field's own box (the input is see-through inside it) in the problem's soft tone, whole. */
+.setting[data-problem] .setting-control .field {
+  background: color-mix(in srgb, var(--bad) var(--soft), var(--sunk));
 }
 /* What a test found: its verdict, then a line per check, at the card's inset. */
 .test-found {
@@ -5588,29 +5697,30 @@ button.lyric {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The summary before a save: each setting, what it becomes, and when. */
+/* The summary before a save: each setting's name on its line, what it was and becomes and when under it, close. */
 .change-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--s-8);
-}
-.change-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  align-items: baseline;
   gap: var(--s-12);
 }
+.change-list li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+}
 .change-name {
-  font-weight: 500;
+  font-weight: 600;
 }
 .change-to {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 /* The move's dialog of pages: where it stands (the four steps, the one shown marked), then the page's own parts. */
 .wizard {
@@ -5643,8 +5753,49 @@ button.lyric {
   font-weight: 600;
   border-top-color: var(--accent);
 }
+/* A kind the move cannot go to (the data folder's SQLite file, in use): there, said so, and plainly not to choose,
+   as a key that is off. */
+.wizard .choice:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .wizard-note {
   margin: 0;
+  /* Lines of a sentence broken where they read well, no word alone on the last one. */
+  text-wrap: pretty;
+}
+/* Where a database is, and what the switch does: a few lines of one width (their last words never alone under a long
+   line, which a sentence's own breaks left at a phone's width). */
+.wizard-note:is(.wizard-where, .wizard-from, .wizard-text) {
+  text-wrap: balance;
+}
+/* The address and the password, each a field, and the key that tries them; on a narrow dialog one under another. */
+.wizard-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: var(--s-8);
+  align-items: center;
+}
+.wizard-fields:not(:has(input[type="password"])) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+@media (max-width: 560px) {
+  .wizard-fields {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .wizard-fields > .field:first-child {
+    grid-column: 1 / -1;
+  }
+}
+/* The switch's route: from where to where in the ink of words, how much the copy holds under it. */
+.wizard-route {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.wizard-route .route {
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .wizard-found {
   display: flex;

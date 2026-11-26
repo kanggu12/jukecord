@@ -671,8 +671,13 @@ export const api = {
   'host-settings-change': (values: Record<string, string | null>, revisions: Record<string, number>) =>
     request<SettingsChanged>('PATCH', '/settings', { values, revisions }),
   // Each test of an address may take the authorities the page has not saved yet (`ca`, a PEM).
-  'settings-test-database': (url: string, ca?: string) =>
-    request<DatabaseTest>('POST', '/settings/test-database', { url, ...(ca ? { ca } : {}) }),
+  // The database's password apart from its address, when it is given so (it goes into the address on the server).
+  'settings-test-database': (url: string, ca?: string, password?: string) =>
+    request<DatabaseTest>('POST', '/settings/test-database', {
+      url,
+      ...(ca ? { ca } : {}),
+      ...(password ? { password } : {}),
+    }),
   'settings-test-cache': (url: string, ca?: string) =>
     request<ServerTest>('POST', '/settings/test-cache', { url, ...(ca ? { ca } : {}) }),
   'settings-test-bus': (url: string, ca?: string) =>
@@ -687,8 +692,8 @@ export const api = {
       ...(username ? { username } : {}),
       ...(ca ? { ca } : {}),
     }),
-  'database-move': (url: string, replace: boolean) =>
-    request<MoveState>('POST', '/settings/database-move', { url, replace }),
+  'database-move': (url: string, replace: boolean, password?: string) =>
+    request<MoveState>('POST', '/settings/database-move', { url, replace, ...(password ? { password } : {}) }),
   'database-move-status': () =>
     request<{ state: MoveState | null; lastFailure: MoveFailure | null }>('GET', '/settings/database-move'),
   'database-move-switch': () =>

@@ -9,7 +9,7 @@
  * under the bar too, so the bar and its toasts stay readable over them. The system's Back closes the layer on top.
  */
 
-import { sayError, together } from '../../../src/core/say.ts';
+import { sayError, translate } from '../../../src/core/say.ts';
 import { ApiError } from '../api.ts';
 import { h, icon } from '../dom.ts';
 import type { IconName } from '../icons.ts';
@@ -101,8 +101,9 @@ export function messageOf(error: unknown): string {
  * capital would change).
  */
 export function foundText(text: string): string {
-  const said = sayError(text, state.lang);
-  return state.lang === 'ko' && said !== together(text) ? said : text;
+  // The table's line for it in the panel's language, else the words as they came: never a sentence's capital (an
+  // address at the start stays "https://...").
+  return translate(text, state.lang);
 }
 
 // The open layers (the sheet and dialogs over it), newest last. Escape closes the newest only, and Tab stays inside it:
