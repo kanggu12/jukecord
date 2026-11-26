@@ -430,7 +430,8 @@ export function settingsPage(): HTMLElement {
         parts.push(words.setDefaultIs(setting.default));
       else if (setting.source === 'saved' && setting.defaultNote) parts.push(say(setting.defaultNote));
     }
-    parts.push(setting.applies === 'now' ? words.setNow : words.setAfterRestart);
+    // When it applies, unless it waits for a restart already (said first, below).
+    if (!setting.pending) parts.push(setting.applies === 'now' ? words.setNow : words.setAfterRestart);
     // Waiting for a restart: the value in use until then (a secret's never).
     if (setting.pending) {
       tone = 'tone-pause';
@@ -562,10 +563,10 @@ export function settingsPage(): HTMLElement {
           : authorities.source === 'saved'
             ? words.setSaved
             : words.setDefault,
+      // Waiting for a restart, with how many are in use until then; else when a change applies.
       ...(authorities.pending
         ? [words.setWaits, ...(authorities.inUse > 0 ? [words.caInUse(authorities.inUse)] : [])]
-        : []),
-      words.setAfterRestart,
+        : [words.setAfterRestart]),
     ];
     fill(
       state,
