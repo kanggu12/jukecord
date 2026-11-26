@@ -141,6 +141,8 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
   // How many transactions hold a connection now, and who waits for them all to end (close()).
   private holding = 0;
   private readonly whenFree: (() => void)[] = [];
+  // The lines of the turns' keys in this process (see transaction()), each with how many are in it.
+  private readonly lines = new Map<string, { readonly lock: Lock; people: number }>();
 
   protected constructor(address: ServerAddress, server: DatabaseServer, options: ExecutorOptions) {
     this.address = address;
@@ -201,16 +203,41 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     // Inside a transaction still open: a savepoint of it.
     const parent = this.current.getStore();
     if (parent?.open) return this.savepoint(parent, fn);
-    for (let attempt = 1; ; attempt += 1) {
-      const outcome = await this.attempt(fn, options);
-      if (outcome.ok) return outcome.value;
-      // Refused for another transaction's sake: run again from the start, after a pause, a few times.
-      if (outcome.again && attempt < ATTEMPTS) {
-        await pause(backoff(attempt));
-        continue;
+    // Those of one turn's key in this process wait in line here, holding no connection of the pool, and only the one
+    // at the front waits on the database (for another jukecord's transaction of that key): a crowd at one listening
+    // link held every connection, waiting, and another server's statements waited half a second for one.
+    const inLine = options.turn === undefined || options.snapshot ? null : await this.line(options.turn);
+    try {
+      for (let attempt = 1; ; attempt += 1) {
+        const outcome = await this.attempt(fn, options);
+        if (outcome.ok) return outcome.value;
+        // Refused for another transaction's sake: run again from the start, after a pause, a few times.
+        if (outcome.again && attempt < ATTEMPTS) {
+          await pause(backoff(attempt));
+          continue;
+        }
+        throw outcome.error;
       }
-      throw outcome.error;
+    } finally {
+      inLine?.();
     }
+  }
+
+  // A place in this process's line for a turn's key (see transaction()); the line is let go when nobody is in it.
+  private async line(key: string): Promise<() => void> {
+    let line = this.lines.get(key);
+    if (line === undefined) {
+      line = { lock: new Lock(), people: 0 };
+      this.lines.set(key, line);
+    }
+    const mine = line;
+    mine.people += 1;
+    const release = await mine.lock.acquire();
+    return () => {
+      release();
+      mine.people -= 1;
+      if (mine.people === 0 && this.lines.get(key) === mine) this.lines.delete(key);
+    };
   }
 
   async close(): Promise<void> {

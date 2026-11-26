@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { it } from 'node:test';
 import { openExecutor } from '../../src/store/open.ts';
-import type { ExecutorReport } from '../../src/store/sql.ts';
+import type { ConnectionUse, ExecutorReport } from '../../src/store/sql.ts';
 import { Store } from '../../src/store/store.ts';
 import { eachDatabase, type TestDatabase } from '../support/databases.ts';
 
@@ -25,16 +25,22 @@ const LIKES_MAX = 1000;
 
 // A store on the test's database with a pool of ten, as jukecord runs one, whose transactions that failed (refused
 // and run again, or failed for good) are counted.
-async function countedStore(db: TestDatabase): Promise<{ store: Store; failedTries: () => number }> {
+async function countedStore(
+  db: TestDatabase,
+): Promise<{ store: Store; failedTries: () => number; busy: () => number }> {
   let failed = 0;
+  // How many connections of the pool are lent out now, as the executor reports it for the metrics.
+  let use: () => ConnectionUse = () => ({ busy: 0, idle: 0, waiting: 0 });
   const report: ExecutorReport = {
     query: (kind, _seconds, didFail) => {
       if (kind === 'transaction' && didFail) failed += 1;
     },
-    connections: () => {},
+    connections: (read) => {
+      use = read;
+    },
   };
   const store = await Store.open(await openExecutor(await db.address(), { waitMs: 0, pool: 10, idleMs: 1000, report }));
-  return { store, failedTries: () => failed };
+  return { store, failedTries: () => failed, busy: () => use().busy };
 }
 
 // Fifty tracks every server queues from.
@@ -163,7 +169,7 @@ eachDatabase('many at once', (db) => {
   });
 
   it('lets fifty browsers at once into a listening link of forty places: forty in, ten told it is full', async () => {
-    const { store } = await countedStore(db);
+    const { store, busy } = await countedStore(db);
     try {
       const code = randomBytes(16).toString('hex');
       await store.listenLinks.create({
@@ -173,7 +179,17 @@ eachDatabase('many at once', (db) => {
         lastsMs: 3_600_000,
         maxGuests: 40,
       });
-      const outcomes = await Promise.allSettled(Array.from({ length: 50 }, () => join(store, hash(code))));
+      // How many connections the crowd holds at once, looked at every few milliseconds: one, since those waiting for
+      // the link's turn wait in this process's line, not on a connection of the pool (all ten were held waiting, and
+      // another server's statements waited for one).
+      let most = 0;
+      const watch = setInterval(() => {
+        most = Math.max(most, busy());
+      }, 2);
+      const outcomes = await Promise.allSettled(Array.from({ length: 50 }, () => join(store, hash(code)))).finally(() =>
+        clearInterval(watch),
+      );
+      assert.ok(most <= 1, `${most} connections held at once`);
       const said = outcomes.map((outcome) =>
         outcome.status === 'fulfilled' ? outcome.value : `failed: ${String(outcome.reason)}`,
       );
