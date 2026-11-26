@@ -66,9 +66,13 @@ return 0`,
   sha: null,
 };
 
-// Adds to a counter; a counter just made (no expiry yet) gets its window, a later increment does not move it.
+// Adds to a counter; a counter just made (no expiry yet) gets its window, a later increment does not move it. Taking
+// back (a negative step) from a counter that is not there makes none: 0.
 const INCREMENT: Script = {
-  text: `local value = redis.call(ARGV[3], KEYS[1], ARGV[1])
+  text: `if tonumber(ARGV[1]) < 0 and redis.call('EXISTS', KEYS[1]) == 0 then
+  return '0'
+end
+local value = redis.call(ARGV[3], KEYS[1], ARGV[1])
 if redis.call('PTTL', KEYS[1]) < 0 then
   redis.call('PEXPIRE', KEYS[1], ARGV[2])
 end

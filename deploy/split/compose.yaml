@@ -104,10 +104,12 @@ services:
 
   # The bus and the shared cache: what the services say to each other, and the rates the edges count together. Nothing
   # in it outlives a restart that matters (the database has it all), so it keeps nothing on disk, and its memory is
-  # bounded: past it, the least recently used of the cache goes.
+  # bounded: past it, the least often used of the cache goes. Least often, not least recently: a flood of keys each
+  # used once leaves first, while a count that keeps being added to (the failed logins of a name under attack, an
+  # address's rate) and the core's lease, renewed every few seconds, stay.
   valkey:
     image: valkey/valkey:8-alpine@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc
-    command: [valkey-server, --save, "", --appendonly, "no", --maxmemory, 256mb, --maxmemory-policy, allkeys-lru]
+    command: [valkey-server, --save, "", --appendonly, "no", --maxmemory, 256mb, --maxmemory-policy, allkeys-lfu]
     healthcheck:
       test: [CMD, valkey-cli, ping]
       interval: 5s

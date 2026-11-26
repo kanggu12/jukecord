@@ -23,6 +23,20 @@ export interface Migration {
   readonly mysql?: string;
 }
 
+// The words of each server's statements, written before the migrations: those after the baseline use them too.
+// PostgreSQL's text columns compare and sort byte by byte (the "C" collation), as SQLite's do, whatever the
+// database's own collation is: a name, an ID or a source orders the same on both.
+const PG_TEXT = 'TEXT COLLATE "C"';
+
+// MySQL's and MariaDB's tables: InnoDB, every text in utf8mb4 (any character, emoji included) with the utf8mb4_bin
+// collation, so text compares and sorts by its characters' numbers as SQLite's does (case and accents matter).
+const MYSQL_TABLE = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin';
+
+// A word jukecord writes (an ID, a hash, a kind) that keys and indexes may hold: 255 characters, 1020 bytes in
+// utf8mb4, well within InnoDB's 3072 bytes for a key of two of them. Text people write (titles, names, addresses) is
+// TEXT, which a key cannot hold whole; the lyrics are MEDIUMTEXT (64,000 characters of four bytes each).
+const MY_WORD = 'VARCHAR(255)';
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -276,6 +290,34 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 9,
+    sql: `
+      -- The Discord user an SSO login was proven to be, once, by logging in with Discord as them: by the member's key
+      -- (the provider's issuer and its subject, hashed: the subject itself is not kept). A provider's claim links an
+      -- SSO login to a Discord user only when it names the one proven.
+      CREATE TABLE member_links (
+        member_id  TEXT    PRIMARY KEY,
+        discord_id TEXT    NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `,
+    postgres: `
+      CREATE TABLE member_links (
+        member_id  ${PG_TEXT} PRIMARY KEY,
+        discord_id ${PG_TEXT} NOT NULL,
+        created_at BIGINT NOT NULL
+      );
+    `,
+    mysql: `
+      CREATE TABLE IF NOT EXISTS member_links (
+        member_id  ${MY_WORD} NOT NULL,
+        discord_id ${MY_WORD} NOT NULL,
+        created_at BIGINT NOT NULL,
+        PRIMARY KEY (member_id)
+      ) ${MYSQL_TABLE};
+    `,
+  },
+  {
+    version: 10,
     // The host's settings saved from the panel, the API or the CLI, kept with the data so every service of a split
     // jukecord reads the same (src/settings): a row per setting by its environment name. A value of NULL is a setting
     // put back to its default; the row stays, with its revision, so a change made from a page that read an older
@@ -291,8 +333,8 @@ export const MIGRATIONS: readonly Migration[] = [
     `,
     postgres: `
       CREATE TABLE host_settings (
-        name       TEXT COLLATE "C" PRIMARY KEY,
-        value      TEXT COLLATE "C",
+        name       ${PG_TEXT} PRIMARY KEY,
+        value      ${PG_TEXT},
         revision   BIGINT NOT NULL,
         updated_at BIGINT NOT NULL
       );
@@ -300,22 +342,18 @@ export const MIGRATIONS: readonly Migration[] = [
     // MySQL commits a CREATE TABLE by itself: IF NOT EXISTS lets a migration stopped after it run again.
     mysql: `
       CREATE TABLE IF NOT EXISTS host_settings (
-        name       VARCHAR(255) NOT NULL,
+        name       ${MY_WORD} NOT NULL,
         value      TEXT,
         revision   BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (name)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+      ) ${MYSQL_TABLE};
     `,
   },
 ];
 
 /** The version the servers' baseline makes at once: schema 8, the last released before PostgreSQL and MySQL. */
 export const SERVER_BASELINE_VERSION = 8;
-
-// PostgreSQL's text columns compare and sort byte by byte (the "C" collation), as SQLite's do, whatever the
-// database's own collation is: a name, an ID or a source orders the same on both.
-const PG_TEXT = 'TEXT COLLATE "C"';
 
 /**
  * PostgreSQL's baseline: schema 8 of SQLite's migrations in one step. Every whole number is a BIGINT (SQLite's
@@ -492,15 +530,6 @@ export const POSTGRES_BASELINE = `
   CREATE INDEX likes_by_owner ON likes(owner, created_at DESC);
   CREATE INDEX likes_by_track ON likes(track_id);
 `;
-
-// MySQL's and MariaDB's tables: InnoDB, every text in utf8mb4 (any character, emoji included) with the utf8mb4_bin
-// collation, so text compares and sorts by its characters' numbers as SQLite's does (case and accents matter).
-const MYSQL_TABLE = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin';
-
-// A word jukecord writes (an ID, a hash, a kind) that keys and indexes may hold: 255 characters, 1020 bytes in
-// utf8mb4, well within InnoDB's 3072 bytes for a key of two of them. Text people write (titles, names, addresses) is
-// TEXT, which a key cannot hold whole; the lyrics are MEDIUMTEXT (64,000 characters of four bytes each).
-const MY_WORD = 'VARCHAR(255)';
 
 /**
  * MySQL's and MariaDB's baseline: schema 8 in one step, as PostgreSQL's. Each table is made only when it is not there
@@ -830,6 +859,7 @@ export const TABLES: readonly Table[] = [
     key: ['id_hash'],
   },
   { name: 'likes', columns: ['owner', 'track_id', 'created_at'], key: ['owner', 'track_id'] },
+  { name: 'member_links', columns: ['member_id', 'discord_id', 'created_at'], key: ['member_id'] },
   // The host's saved settings: copied with the data, so a move to another database keeps them.
   { name: 'host_settings', columns: ['name', 'value', 'revision', 'updated_at'], key: ['name'] },
 ];

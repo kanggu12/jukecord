@@ -9,12 +9,14 @@ import { createLogger } from '../../src/log.ts';
 import { MediaCache } from '../../src/media/cache.ts';
 import type { Ffmpeg } from '../../src/media/ffmpeg.ts';
 import type { YtDlp } from '../../src/media/ytdlp.ts';
-import { VERSION_TABLE } from '../../src/store/schema.ts';
+import { MIGRATIONS, VERSION_TABLE } from '../../src/store/schema.ts';
 import type { Store } from '../../src/store/store.ts';
-import { LATEST_SCHEMA } from '../../src/store/store.ts';
 import { eachDatabase } from '../support/databases.ts';
 import { memoryStore } from '../support/store.ts';
 import { FakeDirectory } from '../support/web.ts';
+
+// The schema this jukecord brings a database to.
+const LATEST = MIGRATIONS.at(-1)?.version ?? 0;
 
 function setup(options: {
   opus?: boolean;
@@ -27,6 +29,8 @@ function setup(options: {
   failure?: { at: number; reason: string };
   /** The database to check (an in-memory SQLite one when none is given). */
   store?: Store;
+  /** Whether people may log in with Discord. */
+  discordLogin?: boolean;
 }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-doctor-'));
   const config = loadConfig(
@@ -55,12 +59,40 @@ function setup(options: {
         ffmpeg,
         discordReady: () => options.ready ?? true,
         directory: () => directory,
-        discordLogin: false,
+        discordLogin: options.discordLogin ?? false,
         latestYtDlp: async () => (options.latest === undefined ? '2026.10.26' : options.latest),
         backupFailure: () => options.failure ?? null,
       }),
   };
 }
+
+describe('the doctor on the link of an SSO login to a Discord user', () => {
+  const SSO = {
+    JUKECORD_OIDC_ISSUER: 'https://sso.example.com/realms/home',
+    JUKECORD_OIDC_CLIENT_ID: 'jukecord',
+    JUKECORD_OIDC_CLIENT_SECRET: 'secret',
+    JUKECORD_OIDC_READ_GROUPS: '*',
+  };
+  const linkCheck = async (env: Record<string, string>, discordLogin: boolean) => {
+    const { dir, run } = setup({ env: { ...SSO, ...env }, discordLogin });
+    try {
+      return (await run()).checks.find((check) => check.name === 'sso discord link') ?? null;
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('says the claim links nobody without Discord login, and with it that it must be an attribute people cannot change', async () => {
+    assert.equal(await linkCheck({}, true), null);
+    const off = await linkCheck({ JUKECORD_OIDC_DISCORD_CLAIM: 'discord_id' }, false);
+    assert.equal(off?.status, 'warn');
+    assert.match(off?.detail ?? '', /links nobody: Discord login is off/);
+    const on = await linkCheck({ JUKECORD_OIDC_DISCORD_CLAIM: 'discord_id' }, true);
+    assert.equal(on?.status, 'ok');
+    assert.match(on?.detail ?? '', /logs in with Discord as them/);
+    assert.match(on?.detail ?? '', /discord_id must be an attribute people cannot change on their own account/);
+  });
+});
 
 describe('runDoctor', () => {
   it('passes a healthy setup and shows the settings without secrets', async () => {
@@ -222,11 +254,11 @@ eachDatabase('the doctor on a database', (db) => {
       const check = (await run()).checks.find((entry) => entry.name === 'database');
       assert.equal(check?.status, 'ok', check?.detail);
       // SQLite's says its file, as before; a server's its version, its size and the time of a round trip.
-      if (db.kind === 'sqlite') assert.match(check?.detail ?? '', new RegExp(`^schema ${LATEST_SCHEMA}, `));
+      if (db.kind === 'sqlite') assert.match(check?.detail ?? '', new RegExp(`^schema ${LATEST}, `));
       else
         assert.match(
           check?.detail ?? '',
-          new RegExp(`^(PostgreSQL|MySQL|MariaDB) [\\d.]+, schema ${LATEST_SCHEMA}, .* ms there and back$`),
+          new RegExp(`^(PostgreSQL|MySQL|MariaDB) [\\d.]+, schema ${LATEST}, .* ms there and back$`),
         );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -238,14 +270,14 @@ eachDatabase('the doctor on a database', (db) => {
     const { dir, run } = setup({ store });
     try {
       // A newer jukecord beside this one brought the database to the schema after this one's.
-      if (db.kind === 'sqlite') await store.sql.exec(`PRAGMA user_version = ${LATEST_SCHEMA + 1}`);
-      else await store.sql.run(`UPDATE ${VERSION_TABLE} SET version = ${LATEST_SCHEMA + 1}`);
+      if (db.kind === 'sqlite') await store.sql.exec(`PRAGMA user_version = ${LATEST + 1}`);
+      else await store.sql.run(`UPDATE ${VERSION_TABLE} SET version = ${LATEST + 1}`);
       const moved = (await run()).checks.find((entry) => entry.name === 'database');
       assert.deepEqual(
         [moved?.status, moved?.detail],
         [
           'fail',
-          `the database is at schema ${LATEST_SCHEMA + 1}, this jukecord at ${LATEST_SCHEMA} (run the jukecord that wrote it)`,
+          `the database is at schema ${LATEST + 1}, this jukecord at ${LATEST} (run the jukecord that wrote it)`,
         ],
       );
       await store.close();

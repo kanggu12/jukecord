@@ -40,6 +40,21 @@ function problemsAsChecks(problems: readonly string[]): Check[] {
   return problems.map((problem) => ({ name: 'settings', status: 'fail', detail: problem }));
 }
 
+/**
+ * The secrets in use and the settings that say where each goes: a test that brings another value for one of those
+ * settings, and not the secret too, is not sent the secret in use (it goes only where it goes now). The directory's
+ * address, its encryption, its certificates and the account the password belongs to; the provider and the client.
+ */
+const SECRET_GOES: Readonly<Record<string, readonly string[]>> = {
+  JUKECORD_LDAP_BIND_PASSWORD: [
+    'JUKECORD_LDAP_URL',
+    'JUKECORD_LDAP_STARTTLS',
+    'JUKECORD_LDAP_CA_FILE',
+    'JUKECORD_LDAP_BIND_DN',
+  ],
+  JUKECORD_OIDC_CLIENT_SECRET: ['JUKECORD_OIDC_ISSUER', 'JUKECORD_OIDC_CLIENT_ID'],
+};
+
 export class LoginChecks {
   private readonly options: LoginChecksOptions;
 
@@ -49,13 +64,21 @@ export class LoginChecks {
 
   /**
    * The login settings with some values in place of the ones in use, by their environment names. A value given for a
-   * setting that has a `_FILE` twin replaces the file too; a name that is no login setting is a problem.
+   * setting that has a `_FILE` twin replaces the file too; a name that is no login setting is a problem. A secret in
+   * use whose destination a value changes (see SECRET_GOES), and that is not given too, is left out: `withheld` names
+   * it, and the test says to give it rather than send it anywhere new.
    */
   settingsWith(
     values: Readonly<Record<string, string>> = {},
     base: NodeJS.ProcessEnv = typeof this.options.env === 'function' ? {} : this.options.env,
-  ): { settings: AuthSettings; problems: string[] } {
-    const env: NodeJS.ProcessEnv = { ...base };
+  ): {
+    settings: AuthSettings;
+    problems: string[];
+    withheld: string[];
+  } {
+    // In use: as jukecord started, or as the settings read now (the saved values under the environment).
+    const live = base;
+    const env: NodeJS.ProcessEnv = { ...live };
     const unknown: string[] = [];
     for (const [name, value] of Object.entries(values)) {
       // Files are the host's to name in the environment: a test brings values, never a path to read.
@@ -66,8 +89,24 @@ export class LoginChecks {
       env[name] = value;
       delete env[`${name}_FILE`];
     }
+    // A value that differs from the one in use (spaces at the ends aside, as the settings read them).
+    const changed = (name: string) =>
+      Object.hasOwn(values, name) && (values[name] ?? '').trim() !== (live[name] ?? '').trim();
+    const withheld: string[] = [];
+    for (const [secret, destinations] of Object.entries(SECRET_GOES)) {
+      if (Object.hasOwn(values, secret) || !destinations.some(changed)) continue;
+      // Neither the value nor the file of the secret in use goes along.
+      delete env[secret];
+      delete env[`${secret}_FILE`];
+      withheld.push(secret);
+    }
     const read = readAuthSettings(env, this.options.cwd, this.options.files ?? diskFiles);
-    return { settings: read.settings, problems: [...unknown, ...read.problems] };
+    // The problems of a secret left out are not the person's (the account without its password): the test says why.
+    const problems = read.problems.filter(
+      (problem) =>
+        !(withheld.includes('JUKECORD_LDAP_BIND_PASSWORD') && problem.includes('JUKECORD_LDAP_BIND_PASSWORD')),
+    );
+    return { settings: read.settings, problems: [...unknown, ...problems], withheld };
   }
 
   // The environment the settings are read from now: as jukecord started, or as the settings say now.
@@ -78,7 +117,7 @@ export class LoginChecks {
 
   /** Tests logging in through the identity provider: its document, its keys, the client and its secret. */
   async oidc(values: Readonly<Record<string, string>> = {}): Promise<TestAnswer> {
-    const { settings, problems } = this.settingsWith(values, await this.environment());
+    const { settings, problems, withheld } = this.settingsWith(values, await this.environment());
     if (problems.length > 0) return { ok: false, checks: problemsAsChecks(problems) };
     if (!settings.oidc) {
       return {
@@ -95,7 +134,8 @@ export class LoginChecks {
       log: this.options.log,
       ...(this.options.fetch ? { fetch: this.options.fetch } : {}),
     });
-    const checks = await login.test();
+    // Without the secret in use (another issuer or client): its document and keys, and the client not tried.
+    const checks = await login.test({ secretWithheld: withheld.includes('JUKECORD_OIDC_CLIENT_SECRET') });
     return { ok: checks.every((check) => check.status !== 'fail'), checks };
   }
 
@@ -107,8 +147,24 @@ export class LoginChecks {
     username?: string,
     values: Readonly<Record<string, string>> = {},
   ): Promise<TestAnswer & { groups: string[] | null; level: MemberLevel | null }> {
-    const { settings, problems } = this.settingsWith(values, await this.environment());
+    const { settings, problems, withheld } = this.settingsWith(values, await this.environment());
     if (problems.length > 0) return { ok: false, checks: problemsAsChecks(problems), groups: null, level: null };
+    // Another directory, connection or account without the password typed again: nothing is tried, nothing is sent.
+    if (withheld.includes('JUKECORD_LDAP_BIND_PASSWORD')) {
+      return {
+        ok: false,
+        checks: [
+          {
+            name: 'service account',
+            status: 'fail',
+            detail:
+              'give JUKECORD_LDAP_BIND_PASSWORD to test another directory, connection or account: the password in use goes only where it goes now',
+          },
+        ],
+        groups: null,
+        level: null,
+      };
+    }
     const ldap = settings.ldap;
     if (!ldap) {
       return {

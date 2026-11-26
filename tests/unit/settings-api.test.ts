@@ -48,7 +48,8 @@ describe('the host’s settings in the API', () => {
   });
 
   it('keeps them from a member at the admin level: the host itself only, its token or its own session', async () => {
-    const server = await testServer({ hostSettings: {} });
+    // Every way in set up, so a member's login is let in at all (one through a way that is off is refused before).
+    const server = await testServer({ hostSettings: {}, logins: true });
     try {
       // A member whose groups give the admin level may do what the host may elsewhere, but not this.
       const setCookie = await server.auth.startSession({
@@ -114,8 +115,9 @@ describe('the host’s settings in the API', () => {
       assert.equal(moved.status, 400);
       const problems = (moved.json.error as { problems: { names: string[] }[] }).problems;
       assert.deepEqual(problems[0]?.names, ['JUKECORD_LDAP_BIND_PASSWORD', 'JUKECORD_LDAP_URL']);
-      // The same with another service account, and with StartTLS turned off on a plain address.
+      // The same with another service account, and with other certificates to check the directory against.
       assert.equal((await change({ JUKECORD_LDAP_BIND_DN: 'cn=other,dc=example,dc=org' })).status, 400);
+      assert.equal((await change({ JUKECORD_LDAP_CA_FILE: '/etc/ssl/other-ca.pem' })).status, 400);
       // Typed again (or put away): taken.
       assert.equal(
         (

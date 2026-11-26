@@ -12,9 +12,9 @@ import { describe, it } from 'node:test';
 import { listBackups, makeBackup } from '../../src/app/backups.ts';
 import { copyStore } from '../../src/store/copy.ts';
 import { openStore } from '../../src/store/open.ts';
-import { VERSION_TABLE } from '../../src/store/schema.ts';
+import { MIGRATIONS, VERSION_TABLE } from '../../src/store/schema.ts';
 import type { SqlExecutor } from '../../src/store/sql.ts';
-import { LATEST_SCHEMA, Store } from '../../src/store/store.ts';
+import { Store } from '../../src/store/store.ts';
 import { eachDatabase, TEST_DATABASES } from '../support/databases.ts';
 import { everyRow, fill, LONG_SOURCE } from '../support/fill.ts';
 import { addTracks } from '../support/store.ts';
@@ -185,9 +185,10 @@ eachDatabase('a copy into a database', (db) => {
       else await sql.run(`UPDATE ${VERSION_TABLE} SET version = ?`, [version]);
       return sql;
     };
+    const latest = MIGRATIONS.at(-1)?.version ?? 0;
     await assert.rejects(
-      async () => Store.open(await at(7), { migrate: false }),
-      new RegExp(`older than this jukecord's \\(${LATEST_SCHEMA}\\); start this jukecord on it`),
+      async () => Store.open(await at(latest - 1), { migrate: false }),
+      new RegExp(`older than this jukecord's \\(${latest}\\); start this jukecord on it`),
     );
     await assert.rejects(async () => Store.open(await at(999), { migrate: false }), /newer than this jukecord knows/);
   });

@@ -717,11 +717,12 @@ export class HostSettings {
 }
 
 // The secrets that go to a place other settings name: the directory's service password goes to its address, over its
-// StartTLS, as its service account; the identity provider's client secret to its issuer, as its client.
+// StartTLS, to the server its certificates prove, as its service account; the identity provider's client secret to
+// its issuer, as its client. The same as the login tests hold them to (src/auth/check.ts, SECRET_GOES).
 const DESTINATIONS: readonly { readonly secret: string; readonly to: readonly string[] }[] = [
   {
     secret: 'JUKECORD_LDAP_BIND_PASSWORD',
-    to: ['JUKECORD_LDAP_URL', 'JUKECORD_LDAP_STARTTLS', 'JUKECORD_LDAP_BIND_DN'],
+    to: ['JUKECORD_LDAP_URL', 'JUKECORD_LDAP_STARTTLS', 'JUKECORD_LDAP_CA_FILE', 'JUKECORD_LDAP_BIND_DN'],
   },
   { secret: 'JUKECORD_OIDC_CLIENT_SECRET', to: ['JUKECORD_OIDC_ISSUER', 'JUKECORD_OIDC_CLIENT_ID'] },
 ];

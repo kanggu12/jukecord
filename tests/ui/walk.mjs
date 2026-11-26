@@ -942,6 +942,45 @@ await sweep('member-menu', [[360, 780], ...FEW], async (page) => {
   if (!(await page.locator('.sheet').textContent())?.match(/SSO/)) throw new Error('the menu does not say SSO');
   if (await page.locator('[data-key="token-create"]').count()) throw new Error('a member is offered to make tokens');
 });
+// The menu's logins, as the host sees them: every browser logged in, whose it is, how it came in and when it was last
+// seen, and the key that ends it (none on this browser's own, which ends by logging out). The list a jukecord with
+// every way of logging in has: the host here, a Discord user, an SSO member, a directory member and a friend.
+await sweep('menu-logins', [[360, 780], ...FEW], async (page) => {
+  const now = Date.now();
+  const login = (id, way, kind, name, scope, seenAgo, current = false) => ({
+    id,
+    way,
+    kind,
+    userId: name === null ? null : `${way}:${id.slice(0, 15)}`,
+    name,
+    scope,
+    createdAt: now - seenAgo - 3_600_000,
+    seenAt: now - seenAgo,
+    expiresAt: now + 8 * 3_600_000,
+    current,
+  });
+  await page.route(/\/api\/v1\/sessions$/, (route) =>
+    route.fulfill({
+      json: [
+        login('a1b2c3d4e5f60718', 'link', 'host', null, 'admin', 0, true),
+        login('0f1e2d3c4b5a6978', 'discord', 'user', 'Mina Park', 'admin', 2 * 60_000),
+        login('5e6f708192a3b4c5', 'oidc', 'member', 'Hana Seo', 'admin', 25 * 60_000),
+        login('9a8b7c6d5e4f3a2b', 'ldap', 'member', 'Joon Choi', 'control', 3 * 3_600_000),
+        login('c0ffee0123456789', 'link', 'friend', null, 'read', 2 * 86_400_000),
+      ],
+    }),
+  );
+  await page.click('[data-act="menu"]');
+  await page.waitForSelector('.sheet [data-key="login-end"]');
+  const section = page.locator('.sheet .section:has([data-key="login-end"])');
+  await section.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await page.waitForTimeout(400);
+  const rows = await section.locator('.line').count();
+  if (rows !== 5) throw new Error(`${rows} logins listed of 5`);
+  if ((await section.locator('[data-key="login-end"]').count()) !== 4) throw new Error('not four logins to end');
+  if (await section.locator('.line[data-id="a1b2c3d4e5f60718"] [data-key="login-end"]').count())
+    throw new Error("this browser's own login is offered to be ended");
+});
 // A queue tool: its own key on a wide card, the list behind the tools key on a narrow one (phones).
 async function tool(page, act) {
   // The tools are drawn once the queue's state has come (none before it: nothing is known to act on). Asked at once,

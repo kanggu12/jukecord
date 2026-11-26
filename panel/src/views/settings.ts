@@ -35,7 +35,7 @@ const say = (words: BothWords): string => words[state.lang];
 const SECRET_WAYS: readonly { secret: string; to: readonly string[] }[] = [
   {
     secret: 'JUKECORD_LDAP_BIND_PASSWORD',
-    to: ['JUKECORD_LDAP_URL', 'JUKECORD_LDAP_STARTTLS', 'JUKECORD_LDAP_BIND_DN'],
+    to: ['JUKECORD_LDAP_URL', 'JUKECORD_LDAP_STARTTLS', 'JUKECORD_LDAP_CA_FILE', 'JUKECORD_LDAP_BIND_DN'],
   },
   { secret: 'JUKECORD_OIDC_CLIENT_SECRET', to: ['JUKECORD_OIDC_ISSUER', 'JUKECORD_OIDC_CLIENT_ID'] },
 ];

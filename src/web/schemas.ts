@@ -391,6 +391,24 @@ export const TokenSchema = Type.Object(
   { title: 'Token' },
 );
 
+export const SessionSchema = Type.Object(
+  {
+    id: Type.String({ description: "The login's ID: the start of the hash of its cookie, never the cookie itself" }),
+    way: Type.Union([Type.Literal('link'), Type.Literal('discord'), Type.Literal('oidc'), Type.Literal('ldap')], {
+      description: 'How it logged in: a login link, Discord, the identity provider (SSO), or the directory',
+    }),
+    kind: Type.Union([Type.Literal('host'), Type.Literal('user'), Type.Literal('friend'), Type.Literal('member')]),
+    userId: Nullable(Type.String({ description: "The Discord user's ID, or the member's key" })),
+    name: Nullable(Type.String()),
+    scope: ScopeSchema,
+    createdAt: Type.Integer(),
+    seenAt: Type.Integer(),
+    expiresAt: Type.Integer(),
+    current: Type.Boolean({ description: 'Whether it is the login that asks' }),
+  },
+  { title: 'Session' },
+);
+
 export const TokenCreatedSchema = Type.Object(
   {
     token: Type.String({ description: 'The secret: shown this once, stored only as a hash' }),

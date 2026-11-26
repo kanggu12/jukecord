@@ -3936,6 +3936,11 @@ kbd {
     width: auto;
   }
 }
+/* The menu's lists of two-line rows (the API tokens, the logins): 8 px apart, so one row's second line does not sit on
+   the next row's name. */
+.section .line[data-id] + .line[data-id] {
+  margin-top: var(--s-8);
+}
 /* The server's settings in the menu: one line each, apart. The limit's row of choices goes under its words when the
    sheet is too narrow for both (a phone). */
 .section.settings .line + .line {

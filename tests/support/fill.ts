@@ -1,7 +1,8 @@
 /**
  * A database with rows in every table of the schema, of the kinds that go wrong between databases: emoji and other
  * four-byte characters, names that differ only by case or accent, a source longer than an index entry takes, nulls,
- * a real number, the order voice channels were first kept in, a liked track, a guest of a listening link. For the
+ * a real number, the order voice channels were first kept in, a liked track, a guest of a listening link, an SSO
+ * login's proven Discord user. For the
  * copy's tests (every row must come through) and the backups of a server database.
  */
 import { AUTOPLAY } from '../../src/core/types.ts';
@@ -95,6 +96,7 @@ export async function fill(store: Store): Promise<void> {
   await store.guests.create({ idHash: 'd'.repeat(64), linkId: link.id, csrf: 'csrf-guest', expiresAt: link.expiresAt });
   await store.likes.add(ALICE, four);
   await store.likes.add('host', one);
+  await store.memberLinks.set('oidc:0123456789abcde', ALICE);
 }
 
 /**

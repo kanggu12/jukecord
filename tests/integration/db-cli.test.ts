@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, describe, it } from 'node:test';
 import { run } from '../../src/cli/main.ts';
 import { MIGRATIONS } from '../../src/store/schema.ts';
-import { LATEST_SCHEMA, Store } from '../../src/store/store.ts';
+import { Store } from '../../src/store/store.ts';
 import { eachDatabase } from '../support/databases.ts';
 import { everyRow, fill } from '../support/fill.ts';
 
@@ -46,13 +46,11 @@ describe('jukecord db', () => {
     const said = await db(['status', `sqlite:${file}`]);
     assert.equal(said.code, 0, said.err);
     assert.match(said.out, /^Database: SQLite \(.*status\.db\)\nServer: SQLite \d+\.\d+/);
-    assert.match(said.out, new RegExp(`Schema: ${LATEST_SCHEMA}, this jukecord's`));
+    assert.match(said.out, new RegExp(`Schema: ${MIGRATIONS.at(-1)?.version}, this jukecord's`));
     assert.match(said.out, /Rows: \d+ \(4 tracks, 4 plays, 5 queued, 3 playlists\)/);
     const json = JSON.parse((await db(['status', '--json', `sqlite:${file}`])).out);
-    assert.deepEqual(
-      [json.backend, json.schema, json.latestSchema, json.rows.likes],
-      ['sqlite', LATEST_SCHEMA, LATEST_SCHEMA, 2],
-    );
+    const latest = MIGRATIONS.at(-1)?.version;
+    assert.deepEqual([json.backend, json.schema, json.latestSchema, json.rows.likes], ['sqlite', latest, latest, 2]);
   });
 
   it('looks at the configured database when it names none, the data folder’s jukecord.db by default', async () => {
@@ -153,7 +151,7 @@ eachDatabase('jukecord db on a database', (database) => {
     assert.equal(into.code, 0, into.err);
     const status = await db(['status', url]);
     assert.equal(status.code, 0, status.err);
-    assert.match(status.out, new RegExp(`Schema: ${LATEST_SCHEMA}, this jukecord's`));
+    assert.match(status.out, new RegExp(`Schema: ${MIGRATIONS.at(-1)?.version}, this jukecord's`));
     assert.doesNotMatch(status.out, /:jukecord@/);
     const back = path.join(dir, `back-${tag}.db`);
     assert.equal((await db(['copy', url, `sqlite:${back}`])).code, 0);

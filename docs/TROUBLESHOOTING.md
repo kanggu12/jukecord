@@ -165,8 +165,8 @@ the level they give, without asking for a password:
 
 - **401**: the scraper shows a token that is not `JUKECORD_METRICS_TOKEN`. With the chart, the ServiceMonitor sends the
   `metricsToken` of the release's Secret, or of `metrics.existingSecret`.
-- **404**: the request came through a proxy (it carries `X-Forwarded-For` or `Forwarded`) or from a public address, and
-  showed no token. Scrape jukecord from its own network, or give the scraper the token
+- **404**: the request came through a proxy (it carries `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `Via`,
+  `X-Forwarded-Host` or `X-Forwarded-Proto`) or from a public address, and showed no token. Scrape jukecord from its own network, or give the scraper the token
   ([monitoring](INSTALL.md#monitoring)).
 
 ## jukecord started again by itself

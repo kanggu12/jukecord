@@ -42,6 +42,7 @@ import {
   ScopeSchema,
   SearchSchema,
   ServerTestSchema,
+  SessionSchema,
   SettingStateSchema,
   SettingsChangedSchema,
   SettingsSchema,
@@ -65,6 +66,8 @@ export const ACCOUNT_OPERATIONS = [
   'tokens',
   'token-create',
   'token-revoke',
+  'sessions',
+  'session-end',
   'logs',
   'login-link',
   'backup',
@@ -504,6 +507,26 @@ export const API = {
   }),
 
   // The host.
+  sessions: op({
+    method: 'GET',
+    path: '/sessions',
+    summary:
+      'Every panel login that has not ended, the most recently seen first (the guests of listening links apart: they end with their link)',
+    tag: 'host',
+    access: 'host',
+    response: Type.Array(SessionSchema),
+  }),
+  'session-end': op({
+    method: 'DELETE',
+    path: '/sessions/{id}',
+    summary: 'End a panel login: its browser is logged out at once',
+    tag: 'host',
+    access: 'host',
+    params: Type.Object({
+      id: Type.String({ pattern: '^[0-9a-f]{16}$', description: "A login's ID, from the list of logins" }),
+    }),
+    response: OkSchema,
+  }),
   logs: op({
     method: 'GET',
     path: '/logs',

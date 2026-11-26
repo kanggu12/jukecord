@@ -905,6 +905,44 @@ export const COMMANDS: Readonly<Record<OperationName, Command>> = {
     request: (words) => ({ params: { id: number(words.args[0], 'the token ID') } }),
     show: showOk,
   },
+  sessions: {
+    name: 'session list',
+    usage: '',
+    summary: 'Every panel login that has not ended',
+    request: () => ({}),
+    show: (answer) => {
+      const sessions = answer as {
+        id: string;
+        way: string;
+        kind: string;
+        name: string | null;
+        scope: string;
+        seenAt: number;
+        expiresAt: number;
+        current: boolean;
+      }[];
+      if (sessions.length === 0) return 'No logins';
+      const whose = (session: (typeof sessions)[number]) =>
+        session.kind === 'host' ? 'the host' : session.kind === 'friend' ? 'a friend' : (session.name ?? 'someone');
+      return sessions
+        .map(
+          (session) =>
+            `${session.id}  ${whose(session)} (${session.way}, ${session.scope}), seen ${new Date(session.seenAt).toLocaleString()}, ends ${new Date(session.expiresAt).toLocaleString()}${session.current ? ' (this one)' : ''}`,
+        )
+        .join('\n');
+    },
+  },
+  'session-end': {
+    name: 'session end',
+    usage: '<login ID>',
+    summary: 'End a panel login (its browser is logged out)',
+    request: (words) => {
+      const id = words.args[0] ?? '';
+      if (!/^[0-9a-f]{16}$/.test(id)) throw new UsageError('say the login ID, from jukecord session list');
+      return { params: { id } };
+    },
+    show: showOk,
+  },
   logs: {
     name: 'logs',
     usage: '[--limit 100] [--level warn] [--component discord]',

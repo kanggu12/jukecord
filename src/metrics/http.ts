@@ -2,8 +2,9 @@
  * Who may read `/metrics`, and in which format it is written for them.
  *
  * The metrics need no login, so by default only a scraper beside jukecord reads them: one on this machine or its
- * private network, asking directly (a request that came through a reverse proxy carries X-Forwarded-For or Forwarded,
- * and is refused like one from a public address). A Prometheus elsewhere (another network, behind a proxy, a service
+ * private network, asking directly (a request that came through a reverse proxy carries one of the headers proxies add,
+ * X-Forwarded-For, Forwarded, X-Real-IP, Via, X-Forwarded-Host or X-Forwarded-Proto, and is refused like one from a
+ * public address). A Prometheus elsewhere (another network, behind a proxy, a service
  * mesh's sidecar that adds forwarding headers) shows the metrics token instead (JUKECORD_METRICS_TOKEN), as
  * `Authorization: Bearer <token>`. Without a token set, the rule is the address rule alone, as before the token.
  *
@@ -33,6 +34,9 @@ function digest(text: string): Buffer {
 }
 
 /** The rule for `/metrics`, with the token it accepts (or none). */
+// The headers a proxy adds to what it passes on, as Node gives them (in lower case).
+const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-real-ip', 'via', 'x-forwarded-host', 'x-forwarded-proto'];
+
 export class MetricsGate {
   // The token's digest, made once for each token; null when no token is set (the address rule alone). Changed while
   // jukecord runs when the settings say so (JUKECORD_METRICS_TOKEN applies at once).
@@ -63,8 +67,10 @@ export class MetricsGate {
         return timingSafeEqual(digest(shown), this.token) ? 'allowed' : 'wrong-token';
       }
     }
-    // The address rule: asked directly from this machine or a private network, and not through a proxy.
-    const forwarded = headers['x-forwarded-for'] !== undefined || headers.forwarded !== undefined;
+    // The address rule: asked directly from this machine or a private network, and not through a proxy. A proxy on
+    // this machine is a private peer whatever its clients are, so any header a proxy adds says the request came
+    // through one: nginx may add X-Real-IP alone, others only Via or the X-Forwarded- headers of host and scheme.
+    const forwarded = PROXY_HEADERS.some((name) => headers[name] !== undefined);
     return forwarded || !isPrivateAddress(peer) ? 'hidden' : 'allowed';
   }
 }
