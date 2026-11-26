@@ -22,6 +22,7 @@ import {
   describeAddress,
   parseDatabaseAddress,
   sameDatabase,
+  withoutPassword,
 } from '../store/address.ts';
 import { copyStore } from '../store/copy.ts';
 import { ConnectionError } from '../store/network.ts';
@@ -115,22 +116,41 @@ export async function runDatabaseCommand(
       failed('refused', error.message);
       return 1;
     }
-    throw error;
+    // Anything else (a SQLite file that is no database or cannot be read or written, a disk that filled up, a server
+    // that refused a statement): its reason on one line, not a stack, and 1.
+    failed('failed', error instanceof Error ? error.message : String(error));
+    return 1;
   }
+}
+
+// An error met while working on one database, said with the database it is about (a SQLite error does not name its
+// file); a refusal or an unreachable database names its own already.
+function about(what: string, error: unknown): unknown {
+  if (error instanceof Usage || error instanceof ConnectionError || error instanceof StoreError) return error;
+  return new Error(`${what}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
 }
 
 // An address as a word of a message: a server's without its password, a SQLite path as it is.
 function quoted(text: string): string {
-  return `"${text.replace(/\/\/([^:@/]*):[^@/]*@/, '//$1:…@')}"`;
+  return `"${withoutPassword(text)}"`;
 }
 
 // The status of one database (see the module comment).
 async function status(address: DatabaseAddress, json: boolean): Promise<string> {
-  // A SQLite file that is not there is not made by looking at it.
+  // A SQLite file that is not there is not made by looking at it, and one that is, is only read (its mode, its journal
+  // and its bytes stay as they are).
   if (address.kind === 'sqlite' && !fs.existsSync(address.file)) {
     throw new StoreError(`there is no database at ${address.file}`);
   }
-  const sql = await openExecutor(address, { waitMs: WAIT_MS, pool: 1 });
+  // What goes wrong said with the database it is about (a SQLite file that is no database says only that).
+  return described(address, json).catch((error: unknown) => {
+    throw about(describeAddress(address), error);
+  });
+}
+
+// The status of one database that is there, in words or as JSON.
+async function described(address: DatabaseAddress, json: boolean): Promise<string> {
+  const sql = await openExecutor(address, { waitMs: WAIT_MS, pool: 1, readOnly: true });
   try {
     const health = await healthOf(sql);
     const schema = health.schema ?? (await schemaVersionOf(sql));
@@ -195,11 +215,30 @@ async function copy(from: DatabaseAddress, to: DatabaseAddress, replace: boolean
   const options = { waitMs: WAIT_MS, pool: 2 };
   // The source as it is: at this jukecord's schema, or (a SQLite file of an older jukecord, an old backup) a copy of
   // it brought up to date beside the data, so the file itself is not changed.
-  const { store: source, done } = await openSource(from, options, dataDir);
+  const { store: source, done } = await openSource(from, options, dataDir).catch((error: unknown) => {
+    throw about(`the source, ${describeAddress(from)}`, error);
+  });
+  // A SQLite target this copy makes is removed again when the copy fails, with its log files: no half-made database
+  // is left behind (one that was there is left as it was, since the copy is one transaction).
+  const made = to.kind === 'sqlite' && !fs.existsSync(to.file) ? to.file : null;
+  const unmake = () => {
+    if (made !== null)
+      for (const part of ['', '-wal', '-shm', '-journal']) fs.rmSync(`${made}${part}`, { force: true });
+  };
   try {
-    const target = await Store.open(await openExecutor(to, options));
+    let target: Store;
     try {
-      const report = await copyStore(source, target, { replace });
+      target = await Store.open(await openExecutor(to, options));
+    } catch (error) {
+      unmake();
+      throw about(`the target, ${describeAddress(to)}`, error);
+    }
+    try {
+      const report = await copyStore(source, target, { replace }).catch(async (error: unknown) => {
+        await target.close();
+        unmake();
+        throw about(`copying into ${describeAddress(to)}`, error);
+      });
       if (json) {
         return JSON.stringify(
           {
@@ -228,15 +267,16 @@ async function copy(from: DatabaseAddress, to: DatabaseAddress, replace: boolean
   }
 }
 
-// The store a copy reads: the source opened as it is (without migrating it), or, for a SQLite file at an older
-// schema, a copy of the file brought up to date in the data folder (or the system's temporary folder when the data
-// folder cannot be written), removed after.
+// The store a copy reads: the source opened as it is (without migrating it; a SQLite file only read, so its mode, its
+// journal and its bytes stay as they are, and a backup kept read-only is copied all the same), or, for a SQLite file
+// at an older schema, a copy of the file brought up to date in the data folder (or the system's temporary folder when
+// the data folder cannot be written), removed after.
 async function openSource(
   from: DatabaseAddress,
   options: { waitMs: number; pool: number },
   dataDir: string,
 ): Promise<{ store: Store; done: () => Promise<void> }> {
-  const sql = await openExecutor(from, options);
+  const sql = await openExecutor(from, { ...options, readOnly: true });
   const version = await schemaVersionOf(sql).catch(async (error: unknown) => {
     await sql.close();
     throw error;

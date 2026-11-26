@@ -20,6 +20,8 @@
  * - the order rows of a table without an id were first kept in: SQLite's rowid, a `seq` column on the servers.
  * - a reserved word as a column name (`repeat`): quoted with double quotes, which MySQL reads as a name too because
  *   the executor sets ANSI_QUOTES (and PIPES_AS_CONCAT, so || joins text there as well).
+ * - an UPDATE of one server's rows by an index: MySQL and MariaDB are told the index (FORCE INDEX), since reading the
+ *   whole table instead waits on other servers' rows; the others never need telling.
  *
  * Time arithmetic stays out of SQL: the repositories cut timestamps into whole days and hours with the division
  * above and say the dates in TypeScript, so every database counts days the same way.
@@ -74,6 +76,13 @@ export interface SqlDialect {
   upsert(spec: Upsert): string;
   /** An INSERT that does nothing when the row's key is taken (see ignoresDuplicates for MySQL). */
   insertOrIgnore(table: string, columns: readonly string[]): string;
+  /**
+   * A table an UPDATE reads through one of its indexes, said where the database would not always take it: MySQL and
+   * MariaDB may read a small table whole instead (MariaDB 11 often does), and an UPDATE that reads every row waits
+   * for the rows other transactions hold, other servers' rows among them, which deadlocks two servers' changes at
+   * READ COMMITTED. SQLite and PostgreSQL wait only for the rows a statement changes.
+   */
+  throughIndex(table: string, index: string): string;
 }
 
 // Column names that are reserved words in one of the databases (MySQL and MariaDB reserve REPEAT).
@@ -132,6 +141,7 @@ export const SQLITE: SqlDialect = {
   upsert: onConflict,
   insertOrIgnore: (table, columns) =>
     `INSERT OR IGNORE INTO ${table} (${columns.map(column).join(', ')}) VALUES (${placeholders(columns.length)})`,
+  throughIndex: (table) => table,
 };
 
 /**
@@ -164,6 +174,7 @@ export const POSTGRES: SqlDialect = {
   upsert: onConflict,
   insertOrIgnore: (table, columns) =>
     `INSERT INTO ${table} (${columns.map(column).join(', ')}) VALUES (${placeholders(columns.length)}) ON CONFLICT DO NOTHING`,
+  throughIndex: (table) => table,
 };
 
 /**
@@ -202,6 +213,8 @@ export function mysqlDialect(mariadb: boolean): SqlDialect {
     },
     insertOrIgnore: (table, columns) =>
       `INSERT INTO ${table} (${columns.map(column).join(', ')}) VALUES (${placeholders(columns.length)})`,
+    // An index hint, which UPDATE takes in both (a single-table DELETE takes none).
+    throughIndex: (table, index) => `${table} FORCE INDEX (${index})`,
   };
 }
 

@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -84,7 +85,7 @@ describe("the chart's certificate authorities", { skip: !have('helm') && 'helm i
     }
   });
 
-  it('restart the pods when ca changes', () => {
+  it('restart the pods when ca changes, the checksum salted as the others are', () => {
     const checksum = (rendered: string, name: string) =>
       /checksum\/ca: (\w+)/.exec(object(rendered, 'Deployment', name))?.[1];
     const before = checksum(render('--set', 'ca.configMap=corp-ca'), 't-jukecord');
@@ -97,6 +98,17 @@ describe("the chart's certificate authorities", { skip: !have('helm') && 'helm i
     // The same on both parts of a split.
     const split = render(...SPLIT, '--set', 'ca.configMap=corp-ca');
     assert.equal(checksum(split, 't-jukecord-core'), checksum(split, 't-jukecord-edge'));
+    // Salted as every checksum of the chart (jukecord.saltedSum): after the values' salt, or without one and without a
+    // cluster after the release's own, never the bare hash of what it covers.
+    const sum = (text: string) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+    const covered = '/corp-ca/ca.crt';
+    assert.equal(
+      checksum(render('--set', 'ca.configMap=corp-ca', '--set', 'checksumSalt=a-salt-of-yours'), 't-jukecord'),
+      sum(`a-salt-of-yours\n${covered}`),
+    );
+    const named = crypto.createHash('sha256').update('jukecord/default/t').digest('hex');
+    assert.equal(before, sum(`${named}\n${covered}`));
+    assert.notEqual(before, sum(covered));
   });
 
   it('refuse a Secret and a ConfigMap at once, JUKECORD_CA_FILE beside ca, and the directory its own file', () => {

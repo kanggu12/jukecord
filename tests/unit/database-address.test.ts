@@ -11,6 +11,7 @@ import {
   parseDatabaseAddress,
   type ServerAddress,
   sameDatabase,
+  withoutPassword,
 } from '../../src/store/address.ts';
 
 const DATA = path.resolve('/srv/jukecord-data');
@@ -136,5 +137,21 @@ describe('an address in words', () => {
     assert.equal(same('mysql://a@db/j', 'postgres://a@db/j'), false);
     assert.equal(same('sqlite:', `sqlite:${path.join(DATA, 'jukecord.db')}`), true);
     assert.equal(same('sqlite:', 'postgres://a@db/j'), false);
+  });
+
+  it('repeats an address as it was typed without its password, whatever characters the password holds', () => {
+    // Percent-encoded, and not: with / (base64), ? # and @ in it, where the address is not read as one at all.
+    assert.equal(withoutPassword('postgres://music:secret@db/j'), 'postgres://music:…@db/j');
+    assert.equal(withoutPassword('postgres://music:pa/ss=@db:5432/j'), 'postgres://music:…@db:5432/j');
+    assert.equal(
+      withoutPassword('mysql://music:p?a#s@db/j?ssl-mode=REQUIRED'),
+      'mysql://music:…@db/j?ssl-mode=REQUIRED',
+    );
+    assert.equal(withoutPassword('mysql://music:p@ss@db/j'), 'mysql://music:…@db/j');
+    assert.equal(withoutPassword('postgres://music:pa%2Fss@db/j'), 'postgres://music:…@db/j');
+    // No password to leave out: a user alone, no user, a port's colon after the host, a SQLite path.
+    assert.equal(withoutPassword('postgres://music@db:5432/j'), 'postgres://music@db:5432/j');
+    assert.equal(withoutPassword('postgres://db:5432/j'), 'postgres://db:5432/j');
+    assert.equal(withoutPassword('sqlite:/srv/a:b@c.db'), 'sqlite:/srv/a:b@c.db');
   });
 });

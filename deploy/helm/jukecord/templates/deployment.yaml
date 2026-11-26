@@ -23,10 +23,11 @@ spec:
       labels:
         {{- include "jukecord.podLabels" . | nindent 8 }}
       annotations:
-        # A changed token or secret in the values restarts the pod, which reads them only when it starts.
-        checksum/secret: {{ printf "%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        # A changed token or secret in the values restarts the pod, which reads them only when it starts (each hash
+        # salted: see jukecord.checksumSalt).
+        checksum/secret: {{ include "jukecord.saltedSum" (list . (printf "%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.metrics.token .Values.metrics.existingSecret)) }}
         # And a changed database, which it opens only when it starts, and changed logins (auth).
-        checksum/database: {{ printf "%s/%s" .Values.database.url .Values.database.existingSecret | sha256sum | trunc 16 }}
+        {{- include "jukecord.databaseChecksum" . | nindent 8 }}
         {{- include "jukecord.authChecksum" . | nindent 8 }}
         {{- include "jukecord.caChecksum" . | nindent 8 }}
         {{- /* Where a Prometheus that finds its targets by annotation scrapes; one set in podAnnotations wins. */}}

@@ -25,7 +25,7 @@ spec:
       annotations:
         # A changed secret in the values restarts the pod, which reads them only when it starts; so does a changed
         # database. And where a Prometheus that finds its targets by annotation scrapes (metrics.podAnnotations).
-        checksum/secret: {{ printf "%s/%s/%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret | sha256sum | trunc 16 }}
+        checksum/secret: {{ include "jukecord.saltedSum" (list . (printf "%s/%s/%s/%s/%s/%s/%s" .Values.discord.token .Values.discord.clientSecret .Values.discord.existingSecret .Values.bus.url .Values.split.existingSecret .Values.metrics.token .Values.metrics.existingSecret)) }}
         {{- include "jukecord.databaseChecksum" . | nindent 8 }}
         {{- include "jukecord.caChecksum" . | nindent 8 }}
         {{- with include "jukecord.scrapeAnnotations" . }}

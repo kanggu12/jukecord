@@ -638,10 +638,12 @@ export class Auth {
    * Lets a browser in as a guest with a listening link's code: a session of its own (in the guests' table) that ends
    * with the link, while the link has room for one more. A browser logged in already keeps its login (a guest of
    * another link moves to this one); a code that does not work, or a full link, lets nobody in. One transaction from
-   * the look at the link to the new session, so nothing comes in between.
+   * the look at the link to the new session, in the link's own turn on the database (see TransactionOptions.turn), so
+   * nothing comes in between: a crowd at once comes in one at a time, up to the last place.
    */
   useListenLink(code: string, current: Caller | null): Promise<ListenLinkUse> {
     const store = this.options.store;
+    const inTurn = { turn: `listen:${hashSecret(code)}` };
     return store.transaction(async (): Promise<ListenLinkUse> => {
       const link = await store.listenLinks.byHash(hashSecret(code));
       if (!link) return { kind: 'invalid' };
@@ -670,7 +672,7 @@ export class Auth {
         linkId: link.id,
         guildId: link.guildId,
       };
-    });
+    }, inTurn);
   }
 
   /**

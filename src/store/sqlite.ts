@@ -23,6 +23,7 @@ import {
   type ExecutorOptions,
   type ExecutorReport,
   type RunResult,
+  refuseNul,
   type SqlExecutor,
   type SqlRow,
   type SqlValue,
@@ -43,6 +44,28 @@ interface Transaction {
 // How many prepared statements are kept: the repositories have a hundred or so texts (the settings' few variants
 // among them), so this keeps them all and still bounds a text made up at random.
 const STATEMENTS_KEPT = 500;
+
+/** What a SQLite file is opened with. */
+export interface SqliteOptions extends ExecutorOptions {
+  /** Only to read it, leaving the file as it is (see SqliteExecutor.open). */
+  readonly readOnly?: boolean;
+}
+
+/**
+ * Makes a new, empty file that only this user may read and write, unless one is there already: a database jukecord
+ * makes (its own, a copy's target, a backup) holds logins and tokens. SQLite takes an empty file for a new database,
+ * and VACUUM INTO writes into one. A file that cannot be made here is left to SQLite, which says why. Says whether
+ * it made the file.
+ */
+export function createPrivate(file: string): boolean {
+  try {
+    fs.closeSync(fs.openSync(file, 'wx', 0o600));
+    return true;
+  } catch {
+    // There already (its mode is the opener's to tighten), or not makeable: SQLite's own error says which.
+    return false;
+  }
+}
 
 // The outcome of synchronous work as a promise: its value, or its error as a rejection, never a throw at the call.
 function settled<T>(work: () => T): Promise<T> {
@@ -87,18 +110,34 @@ export class SqliteExecutor implements SqlExecutor {
     this.server = { product: 'SQLite', version: typeof version === 'string' ? version : 'unknown' };
   }
 
-  /** Opens (creating if needed) a database file, with the settings jukecord runs it with. */
-  static open(file: string, options: ExecutorOptions = {}): SqliteExecutor {
+  /**
+   * Opens (creating if needed) a database file, with the settings jukecord runs it with; or, with `readOnly`, a file
+   * only to read it (a copy's source, a look at a backup), which is left exactly as it is: not made when missing, its
+   * mode and its journal untouched, nothing written.
+   */
+  static open(file: string, options: SqliteOptions = {}): SqliteExecutor {
+    if (options.readOnly === true) {
+      // Read only, from the first byte: SQLite refuses any write, and a file that cannot be written (a backup kept
+      // read-only, an immutable one) opens all the same.
+      return new SqliteExecutor(
+        new DatabaseSync(file, { readOnly: true, enableForeignKeyConstraints: true, timeout: 5000 }),
+        file,
+        options,
+      );
+    }
     // The data directory may be new; SQLite does not create parent folders.
     if (file !== ':memory:') {
       fs.mkdirSync(path.dirname(file), { recursive: true });
+      // A new database is this user's alone from its first byte, whatever the umask (the jukecord command runs with
+      // the one of its shell), and so are its log files, which SQLite makes with the database's mode.
+      createPrivate(file);
       // A database copied in from elsewhere (a restore, a move between machines) keeps the mode it was copied with;
-      // it is made this user's alone again, with its log files, which SQLite creates with the database's mode.
+      // it is made this user's alone again, with its log files.
       for (const part of [file, `${file}-wal`, `${file}-shm`]) {
         try {
           fs.chmodSync(part, 0o600);
         } catch {
-          // Not there yet (a new database), or not this user's to change: nothing to tighten.
+          // Not there yet, or not this user's to change: nothing to tighten.
         }
       }
     }
@@ -124,16 +163,24 @@ export class SqliteExecutor implements SqlExecutor {
   }
 
   all(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
-    // The driver's rows are plain objects of its own value types, every one of which is an SqlValue.
-    return this.use(sql, () => this.prepared(sql).all(...params) as SqlRow[]);
+    // The driver's rows are plain objects of its own value types, every one of which is an SqlValue. A text value
+    // with a NUL in it is refused first, as on every database (see refuseNul).
+    return this.use(sql, () => {
+      refuseNul(params);
+      return this.prepared(sql).all(...params) as SqlRow[];
+    });
   }
 
   get(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow | undefined> {
-    return this.use(sql, () => this.prepared(sql).get(...params) as SqlRow | undefined);
+    return this.use(sql, () => {
+      refuseNul(params);
+      return this.prepared(sql).get(...params) as SqlRow | undefined;
+    });
   }
 
   run(sql: string, params: readonly SqlValue[] = []): Promise<RunResult> {
     return this.use(sql, () => {
+      refuseNul(params);
       const result = this.prepared(sql).run(...params);
       // Counts and row IDs come as bigint past 2^53, which jukecord never reaches; plain numbers for the store.
       return { changes: Number(result.changes), lastId: Number(result.lastInsertRowid) };
@@ -302,7 +349,15 @@ export class SqliteExecutor implements SqlExecutor {
    * it: VACUUM cannot run inside one.
    */
   async vacuumInto(target: string): Promise<void> {
-    await this.run('VACUUM INTO ?', [target]);
+    // The copy this user's alone from its first byte (VACUUM INTO would make it with the umask's mode), and not left
+    // behind empty when the copy fails.
+    const made = createPrivate(target);
+    try {
+      await this.run('VACUUM INTO ?', [target]);
+    } catch (error) {
+      if (made) fs.rmSync(target, { force: true });
+      throw error;
+    }
   }
 
   /**
@@ -314,7 +369,12 @@ export class SqliteExecutor implements SqlExecutor {
    */
   vacuumIntoAside(target: string): Promise<void> {
     if (this.file === ':memory:') return Promise.reject(new StoreError('an in-memory database has no file to copy'));
-    return vacuumInto(this.file, target);
+    // The copy this user's alone from its first byte, and not left behind empty when it fails, as vacuumInto()'s.
+    const made = createPrivate(target);
+    return vacuumInto(this.file, target).catch((error: unknown) => {
+      if (made) fs.rmSync(target, { force: true });
+      throw error;
+    });
   }
 
   // Whether the code running now is inside a transaction (or savepoint) of this connection that is still open.

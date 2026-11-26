@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -796,6 +797,89 @@ describe('the Helm chart', () => {
       const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-chart-')), 'database.yaml');
       fs.writeFileSync(file, `${given}\n---\n${existing}`);
       execFileSync('kubeconform', ['-strict', '-summary', '-kubernetes-version', '1.31.0', file], { stdio: 'pipe' });
+    }
+  });
+
+  it('hashes the secrets the pods restart by only after a salt no pod shows, kept in a Secret or given', {
+    skip: !have('helm') && 'helm is not installed',
+  }, () => {
+    const render = (...values: string[]) =>
+      execFileSync('helm', ['template', 't', 'deploy/helm/jukecord', ...values], { encoding: 'utf8' });
+    // A checksum annotation's value as the chart makes it: the first 16 hex digits of a SHA-256.
+    const sum = (text: string) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+    const annotation = (rendered: string, name: string) =>
+      [...rendered.matchAll(new RegExp(`checksum/${name}: ([0-9a-f]{16})`, 'g'))].map((found) => found[1]);
+    const url = 'postgres://music:weak@db.music.svc:5432/jukecord';
+    const secrets = ['--set', `database.url=${url}`, '--set', 'discord.token=a-token'];
+    // What each annotation hashes (the values joined as the templates join them).
+    const database = `${url}/`;
+    const single = 'a-token////';
+    // Without a cluster and without a salt in the values (helm template, Argo CD): nowhere to keep a salt, so none is
+    // made at random and no Secret for one is drawn. The salt comes from the release's namespace and name, the same at
+    // every render: rendering again changes nothing, so a tool that renders on every sync restarts nothing.
+    const made = render(...secrets);
+    assert.doesNotMatch(made, /t-jukecord-checksum-salt/);
+    assert.equal(render(...secrets), made);
+    const named = crypto.createHash('sha256').update('jukecord/default/t').digest('hex');
+    assert.deepEqual(annotation(made, 'database'), [sum(`${named}\n${database}`)]);
+    assert.deepEqual(annotation(made, 'secret'), [sum(`${named}\n${single}`)]);
+    // No annotation is a bare hash of what it covers (what a reader of pods could test a guessed password against).
+    for (const value of [...annotation(made, 'database'), ...annotation(made, 'secret')]) {
+      assert.ok(![sum(database), sum(single)].includes(value ?? ''));
+    }
+    // A salt in the values (for a tool that renders without the cluster): no Secret for it, the same render twice,
+    // and a changed secret still changes its annotation.
+    const given = render(...secrets, '--set', 'checksumSalt=a-salt-of-yours');
+    assert.doesNotMatch(given, /t-jukecord-checksum-salt/);
+    assert.deepEqual(annotation(given, 'database'), [sum(`a-salt-of-yours\n${database}`)]);
+    assert.equal(render(...secrets, '--set', 'checksumSalt=a-salt-of-yours'), given);
+    const changed = render(
+      ...secrets,
+      '--set',
+      'checksumSalt=a-salt-of-yours',
+      '--set',
+      'database.url=postgres://u:p@db/j',
+    );
+    assert.notDeepEqual(annotation(changed, 'database'), annotation(given, 'database'));
+    // Split mode: the core and the edges hashed after the same salt.
+    const split = render('--set', 'mode=split', '--set', `database.url=${url}`, '--set', 'bus.url=redis://valkey:6379');
+    assert.deepEqual(annotation(split, 'database'), [sum(`${named}\n${database}`), sum(`${named}\n${database}`)]);
+    // Against a cluster (helm install and upgrade, Flux): a copy of the chart whose lookups answer as a cluster would
+    // (helm template has none), first with no salt kept yet, then with one kept.
+    const listing = 'lookup "v1" "Secret" .Release.Namespace ""';
+    const keptSalt = 'lookup "v1" "Secret" .Release.Namespace (include "jukecord.checksumSaltName" .)';
+    const asCluster = (kept: string | null) => {
+      const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'jukecord-salt-'));
+      fs.cpSync('deploy/helm/jukecord', copy, { recursive: true });
+      const helpers = path.join(copy, 'templates', '_helpers.tpl');
+      const text = fs.readFileSync(helpers, 'utf8');
+      assert.ok(text.includes(listing) && text.includes(keptSalt), 'the cluster is asked for its Secrets and the salt');
+      const answer = kept === null ? '(dict)' : `(dict "data" (dict "salt" "${Buffer.from(kept).toString('base64')}"))`;
+      fs.writeFileSync(
+        helpers,
+        text.replace(listing, '(dict "kind" "SecretList" "items" (list))').replace(keptSalt, answer),
+      );
+      return copy;
+    };
+    const fresh = asCluster(null);
+    const upgraded = asCluster('the-kept-salt-0123456789abcdef0123456789');
+    try {
+      // The first install: a new random salt, kept in the chart's Secret from now on, the annotations hashed after it.
+      const first = execFileSync('helm', ['template', 't', fresh, ...secrets], { encoding: 'utf8' });
+      const stored = /name: t-jukecord-checksum-salt\n[\s\S]*?\n {2}salt: "([^"]+)"/.exec(first)?.[1];
+      assert.ok(stored, 'the salt is kept in a Secret');
+      const salt = Buffer.from(stored, 'base64').toString('utf8');
+      assert.equal(salt.length, 40);
+      assert.notEqual(salt, named);
+      assert.deepEqual(annotation(first, 'database'), [sum(`${salt}\n${database}`)]);
+      // An upgrade, the Secret there: its salt used and kept, so the same values give the same pods.
+      const again = execFileSync('helm', ['template', 't', upgraded, ...secrets], { encoding: 'utf8' });
+      assert.deepEqual(annotation(again, 'database'), [sum(`the-kept-salt-0123456789abcdef0123456789\n${database}`)]);
+      assert.match(again, /name: t-jukecord-checksum-salt\n/);
+      assert.equal(execFileSync('helm', ['template', 't', upgraded, ...secrets], { encoding: 'utf8' }), again);
+    } finally {
+      fs.rmSync(fresh, { recursive: true, force: true });
+      fs.rmSync(upgraded, { recursive: true, force: true });
     }
   });
 });

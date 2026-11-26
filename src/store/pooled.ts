@@ -6,11 +6,23 @@
  *
  * A transaction holds one connection of the pool from its BEGIN to its COMMIT; the code inside finds it through
  * AsyncLocalStorage, as on SQLite, and every statement it runs (however deep) runs on that connection. Statements
- * from outside run at once on another connection and see what was there before the transaction. Transactions run at
- * the serializable level, the one that gives what SQLite gives (one writer at a time): when two would have seen each
- * other halfway (two likes at once at the limit, two guests at once for a link's last place), the database refuses
- * one of them (a serialization failure on PostgreSQL, a deadlock on MySQL), and it is run again from its start, a few
- * times. That is why a transaction's function does database work only: run twice, it must do the same twice.
+ * from outside run at once on another connection and see what was there before the transaction.
+ *
+ * A transaction runs at the serializable level unless it says what keeps its writers in order: the level that gives
+ * what SQLite gives (one writer at a time) to whatever it reads and writes. When two would have seen each other
+ * halfway, the database refuses one of them (a serialization failure on PostgreSQL, a deadlock on MySQL), and it is
+ * run again from its start, a few times. That is why a transaction's function does database work only: run twice, it
+ * must do the same twice.
+ *
+ * The serializable level also refuses transactions that never touched each other's rows: PostgreSQL tracks what a
+ * transaction read by index pages and whole tables (a small table is read whole), MariaDB locks the gaps between rows
+ * it read, so ten servers' queues at once, each in its own lane, used up the tries, and fifty browsers at once at one
+ * listening link used up some of theirs. So jukecord's own transactions say what orders them (TransactionOptions):
+ * - work whose writers take turns already (a server's lane) or that no check of its own hangs on (a row written and
+ *   read back) runs at READ COMMITTED (latest), which refuses nothing: two of those only wait for a row both write;
+ * - a check and the write that hangs on it (a login's likes at their limit, a link's last guest place) takes a turn
+ *   on its key (turn): a lock of the database's own, which those of the same key wait for in line, at READ COMMITTED.
+ * Statements outside a transaction run at READ COMMITTED too, each whole on its own.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Lock } from '../util/lock.ts';
@@ -22,6 +34,7 @@ import {
   type ExecutorOptions,
   type ExecutorReport,
   type RunResult,
+  refuseNul,
   type SqlExecutor,
   type SqlRow,
   type SqlValue,
@@ -36,6 +49,11 @@ export interface PoolOptions extends ExecutorOptions {
   readonly pool?: number;
   /** How long one statement may run before the server ends it (30 s by default). */
   readonly statementTimeoutMs?: number;
+  /**
+   * How long jukecord waits for a statement's answer before it gives the connection up (PostgreSQL's: the statement's
+   * own limit and 10 s more by default, for an answer that never comes over a connection lost without a word).
+   */
+  readonly answerTimeoutMs?: number;
   /** How long an unused connection stays open (30 s by default; tests that open many pools close them sooner). */
   readonly idleMs?: number;
 }
@@ -56,6 +74,23 @@ export interface Answer {
   readonly changes: number;
   readonly lastId: number | null;
 }
+
+/** A statement with its values. */
+export interface Statement {
+  readonly sql: string;
+  readonly params: readonly SqlValue[];
+}
+
+/** How a transaction takes and gives back its turn on a key (see PooledExecutor.turn). */
+export interface Turn {
+  readonly take: Statement;
+  /** Whether the answer to `take` says the turn was had (MySQL's named lock says 0 when it waited in vain). */
+  taken(answer: Answer): boolean;
+  readonly give: Statement | null;
+}
+
+/** How long a transaction waits for its turn before it fails (as long as a wait for a row). */
+export const TURN_WAIT_MS = LOCK_TIMEOUT_MS;
 
 // How many times a transaction (or a statement outside one) the database refused halfway is run in all.
 const ATTEMPTS = 6;
@@ -106,6 +141,8 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
   // How many transactions hold a connection now, and who waits for them all to end (close()).
   private holding = 0;
   private readonly whenFree: (() => void)[] = [];
+  // The lines of the turns' keys in this process (see transaction()), each with how many are in it.
+  private readonly lines = new Map<string, { readonly lock: Lock; people: number }>();
 
   protected constructor(address: ServerAddress, server: DatabaseServer, options: ExecutorOptions) {
     this.address = address;
@@ -128,6 +165,12 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
    * statement sees the latest committed rows (see TransactionOptions).
    */
   protected abstract begin(mode: 'serializable' | 'snapshot' | 'latest'): readonly string[];
+  /**
+   * How a transaction takes its turn on a key (TransactionOptions.turn): the statement run right after it begins,
+   * whether its answer says the turn was had, and the statement that gives the turn back once the transaction has
+   * ended (none where the turn ends with the transaction itself).
+   */
+  protected abstract turn(key: string): Turn;
   /** Whether the database refused a statement for another transaction's sake, so that running it again may work. */
   protected abstract refused(error: unknown): boolean;
   /** Whether an error means the connection itself is gone (cut, timed out, closed by the server). */
@@ -160,16 +203,41 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     // Inside a transaction still open: a savepoint of it.
     const parent = this.current.getStore();
     if (parent?.open) return this.savepoint(parent, fn);
-    for (let attempt = 1; ; attempt += 1) {
-      const outcome = await this.attempt(fn, options);
-      if (outcome.ok) return outcome.value;
-      // Refused for another transaction's sake: run again from the start, after a pause, a few times.
-      if (outcome.again && attempt < ATTEMPTS) {
-        await pause(backoff(attempt));
-        continue;
+    // Those of one turn's key in this process wait in line here, holding no connection of the pool, and only the one
+    // at the front waits on the database (for another jukecord's transaction of that key): a crowd at one listening
+    // link held every connection, waiting, and another server's statements waited half a second for one.
+    const inLine = options.turn === undefined || options.snapshot ? null : await this.line(options.turn);
+    try {
+      for (let attempt = 1; ; attempt += 1) {
+        const outcome = await this.attempt(fn, options);
+        if (outcome.ok) return outcome.value;
+        // Refused for another transaction's sake: run again from the start, after a pause, a few times.
+        if (outcome.again && attempt < ATTEMPTS) {
+          await pause(backoff(attempt));
+          continue;
+        }
+        throw outcome.error;
       }
-      throw outcome.error;
+    } finally {
+      inLine?.();
     }
+  }
+
+  // A place in this process's line for a turn's key (see transaction()); the line is let go when nobody is in it.
+  private async line(key: string): Promise<() => void> {
+    let line = this.lines.get(key);
+    if (line === undefined) {
+      line = { lock: new Lock(), people: 0 };
+      this.lines.set(key, line);
+    }
+    const mine = line;
+    mine.people += 1;
+    const release = await mine.lock.acquire();
+    return () => {
+      release();
+      mine.people -= 1;
+      if (mine.people === 0 && this.lines.get(key) === mine) this.lines.delete(key);
+    };
   }
 
   async close(): Promise<void> {
@@ -215,10 +283,21 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
     }
     const root: Root<C> = { connection, doomed: null, broken: false };
     const transaction: Transaction<C> = { depth: 1, open: true, savepoints: new Lock(), root };
+    // The turn this transaction takes on a key, if it asks for one (a snapshot only reads, and takes none).
+    const turn = options.turn === undefined || options.snapshot ? null : this.turn(options.turn);
+    let turnHeld = false;
     this.holding += 1;
     try {
-      const mode = options.snapshot ? 'snapshot' : options.latest ? 'latest' : 'serializable';
-      for (const statement of this.begin(mode)) await this.on(root, statement, undefined);
+      // A transaction that takes a turn is at READ COMMITTED: the turn keeps its check true (see TransactionOptions).
+      const mode = options.snapshot ? 'snapshot' : options.latest || turn !== null ? 'latest' : 'serializable';
+      for (const statement of this.begin(mode)) await this.on(root, statement, undefined, true);
+      if (turn !== null) {
+        // In line behind every transaction of the same key, on the database: one at a time, whichever jukecord.
+        if (!turn.taken(await this.on(root, turn.take.sql, turn.take.params, true))) {
+          throw new Error(`waited ${TURN_WAIT_MS / 1000} s in vain for the turn of "${options.turn}"`);
+        }
+        turnHeld = true;
+      }
       let value: T;
       try {
         value = await this.current.run(transaction, fn);
@@ -246,10 +325,20 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
       }
       return { ok: true, value };
     } catch (error) {
-      // BEGIN itself failed (the connection lost on the way).
+      // BEGIN itself failed (the connection lost on the way), or the turn was not had: nothing to undo but the BEGIN.
+      await this.rollback(root);
       return { ok: false, error, again: root.doomed !== null };
     } finally {
       transaction.open = false;
+      // The turn given back once the transaction has ended (MySQL's named lock outlives it), on its own connection; a
+      // connection that cannot is closed, which gives it back too.
+      if (turnHeld && turn?.give && !root.broken) {
+        try {
+          await this.execute(connection, turn.give.sql, turn.give.params);
+        } catch {
+          root.broken = true;
+        }
+      }
       this.release(connection, root.broken);
       this.holding -= 1;
       if (this.holding === 0) for (const resolve of this.whenFree.splice(0)) resolve();
@@ -314,6 +403,8 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
   // Runs one statement: on the transaction's connection inside one, otherwise on any connection of the pool, run
   // again when the database refused it for another transaction's sake (nothing of a refused statement happened).
   private async statement(sql: string, params: readonly SqlValue[] | undefined): Promise<Answer> {
+    // A text value with a NUL in it is refused before anything is sent, as on every database (see refuseNul).
+    if (params !== undefined) refuseNul(params);
     const transaction = this.current.getStore();
     if (transaction?.open) return this.on(transaction.root, sql, params);
     if (this.closing || this.closed) throw closedError();
@@ -337,13 +428,13 @@ export abstract class PooledExecutor<C> implements SqlExecutor {
 
   // Runs one statement on a transaction's connection, noting a refusal (the transaction is run again) or a lost
   // connection (nothing more runs on it).
-  private async on(root: Root<C>, sql: string, params: readonly SqlValue[] | undefined): Promise<Answer> {
+  private async on(root: Root<C>, sql: string, params: readonly SqlValue[] | undefined, own = false): Promise<Answer> {
     if (root.doomed) throw root.doomed;
     if (root.broken) throw new ConnectionError('the connection of this transaction was lost', false);
     if (this.closed && sql !== 'ROLLBACK') throw closedError();
-    // A statement of the transaction's own (BEGIN, SAVEPOINT, COMMIT) is part of the transaction's report, not one of
-    // its own.
-    const kind = statementKind(sql);
+    // A statement of the transaction's own (BEGIN and what sets its level up, its turn, SAVEPOINT, COMMIT) is part of
+    // the transaction's report, not one of its own.
+    const kind = own ? 'transaction' : statementKind(sql);
     const asked = performance.now();
     try {
       const answer = await this.execute(root.connection, sql, params);
